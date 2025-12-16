@@ -37,7 +37,7 @@ on:
 
 jobs:
   version:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     outputs:
       version_current: ${{ steps.versions.outputs.version_current }}
       version_next: ${{ steps.versions.outputs.version_next }}
