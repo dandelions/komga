@@ -379,6 +379,12 @@ export default Vue.extend({
           class: 'black--text',
         },
         {
+          text: this.$t('enums.epubreader.appearances.green').toString(),
+          value: 'readium-green-on',
+          color: '#c7edcc',
+          class: 'black--text',
+        },
+        {
           text: this.$t('enums.epubreader.appearances.night').toString(),
           value: 'readium-night-on',
           color: 'black',
