@@ -1,0 +1,37 @@
+name: Build Komga
+
+on:
+  push:
+    branches:
+      - main  # 触发条件，可以根据需要修改
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Set up JDK
+      uses: actions/setup-java@v2
+      with:
+        java-version: '21'  # 根据 Komga 的要求选择合适的 Java 版本
+
+    - name: Build with Gradle
+      run: ./gradlew build  # 如果使用的是 Gradle 构建工具
+
+    - name: Archive JAR
+      run: |
+        mkdir -p output
+        cp build/libs/*.jar output/  # 根据实际路径调整
+      # 你可以根据需要调整输出路径和文件名
+
+    - name: Upload JAR
+      uses: actions/upload-artifact@v2
+      with:
+        name: komga-jar
+        path: output/*.jar
