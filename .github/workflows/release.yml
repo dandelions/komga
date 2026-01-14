@@ -28,7 +28,7 @@ on:
         type: boolean
       docker_release:
         description: 'Push Docker images'
-        default: true
+        default: false
         type: boolean
       msstore_release:
         description: 'Release to the MS Store'
