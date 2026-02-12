@@ -88,3 +88,4 @@ jobs:
             --publishImage \
             -PdockerUsername=${{ github.actor }} \
             -PdockerPassword=${{ secrets.GITHUB_TOKEN }}
+            -Pbuilder=paketobuildpacks/builder-jammy-full
