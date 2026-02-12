@@ -1,4 +1,4 @@
-name: Build and Push with Dockerfile
+name: general_docker_build-Build and Push with Dockerfile
 
 on:
   push:
