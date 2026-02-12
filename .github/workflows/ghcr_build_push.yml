@@ -61,7 +61,8 @@ jobs:
           IMAGE_ID=$(echo $IMAGE_ID | tr '[A-Z]' '[a-z]')
           
           # 此时编译好的前端文件已被包含在 resources 中
-          ./gradlew :komga:bootBuildImage \
+          
+          ./gradlew :komga:clean :komga:processResources :komga:bootBuildImage \
             --imageName=$IMAGE_ID:latest \
             --publishImage \
             -PdockerUsername=${{ github.actor }} \
