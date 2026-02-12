@@ -24,6 +24,8 @@ jobs:
           node-version: '20' # 根据你前端项目需要的版本调整
           cache: 'npm'
           # cache-dependency-path: '**/package-lock.json' # 如果 package.json 不在根目录需指定
+          # 关键：告诉 Action 在哪里找 package-lock.json
+          cache-dependency-path: 'komga-webui/package-lock.json'
 
       # 2. 编译前端
       - name: Build Frontend
