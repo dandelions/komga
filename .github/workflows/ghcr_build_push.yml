@@ -61,11 +61,12 @@ jobs:
           IMAGE_ID=ghcr.io/${{ github.repository_owner }}/komga_refactor
           IMAGE_ID=$(echo $IMAGE_ID | tr '[A-Z]' '[a-z]')
           
-          # 验证当前 Java 版本是否为 21
-          java -version
+          # 手动同步一次，确保在 bootBuildImage 运行前文件已就绪
+          mkdir -p komga/src/main/resources/static/
+          cp -r komga-webui/dist/* komga/src/main/resources/static/
           
           # 使用 --no-daemon 避免 Java 版本冲突，先 clean 再构建
-          ./gradlew :komga:clean :komga:bootBuildImage \
+          ./gradlew :komga:bootBuildImage \
             --no-daemon \
             --imageName=$IMAGE_ID:latest \
             --publishImage \
