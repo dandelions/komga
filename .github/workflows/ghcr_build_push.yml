@@ -17,40 +17,57 @@ jobs:
         with:
           fetch-depth: 0
 
-      # 1. 设置 Node.js 环境
+      # 1. 设置 Java 环境（放在最前面，确保 Gradle 插件可用）
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      # 2. 设置 Node.js 环境
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20' # 根据你前端项目需要的版本调整
+          node-version: '20'
           cache: 'npm'
-          # cache-dependency-path: '**/package-lock.json' # 如果 package.json 不在根目录需指定
-          # 关键：告诉 Action 在哪里找 package-lock.json
           cache-dependency-path: 'komga-webui/package-lock.json'
 
-      # 2. 编译前端
+      # 3. 编译前端并同步到 Spring Boot
       - name: Build Frontend
         run: |
           cd komga-webui 
           npm install
           npm run build
-          # 关键修改：直接清空并放入 resources/public 或 static
-          # 建议使用 public 目录，优先级较高
-          rm -rf ../komga/src/main/resources/public/*
-          mkdir -p ../komga/src/main/resources/public/
-          cp -r dist/* ../komga/src/main/resources/public/
+          # 确保目标目录存在并清空旧文件
+          mkdir -p ../komga/src/main/resources/static/
+          rm -rf ../komga/src/main/resources/static/*
+          # 将打包后的 dist 目录内容拷贝到 static
+          cp -r dist/* ../komga/src/main/resources/static/
+          # 验证文件是否存在（方便在日志中调试）
+          ls -R ../komga/src/main/resources/static/
 
-      # 3. 构建镜像
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # 4. 构建镜像并推送到 GHCR
       - name: Build and Push Image
-        env:
-          JAVA_HOME: ${{ env.JAVA_HOME_21_X64 }} # 使用 actions/setup-java 设置的变量
         run: |
+          # 将镜像名转为小写以符合 Docker 规范
           IMAGE_ID=ghcr.io/${{ github.repository_owner }}/komga_refactor
           IMAGE_ID=$(echo $IMAGE_ID | tr '[A-Z]' '[a-z]')
           
-          # 使用 ./gradlew 时确保它调用的是 Java 21
+          # 验证当前 Java 版本是否为 21
+          java -version
+          
+          # 使用 --no-daemon 避免 Java 版本冲突，先 clean 再构建
           ./gradlew :komga:clean :komga:bootBuildImage \
+            --no-daemon \
             --imageName=$IMAGE_ID:latest \
             --publishImage \
             -PdockerUsername=${{ github.actor }} \
-            -PdockerPassword=${{ secrets.GITHUB_TOKEN }} \
-            -Dorg.gradle.java.home=$JAVA_HOME
+            -PdockerPassword=${{ secrets.GITHUB_TOKEN }}
