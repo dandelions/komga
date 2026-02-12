@@ -1,4 +1,4 @@
-name: Build General and Push to GHCR
+name: ghcr_build_push-Build General and Push to GHCR
 
 on:
   push:
