@@ -33,19 +33,32 @@ jobs:
           cache: 'npm'
           cache-dependency-path: 'komga-webui/package-lock.json'
 
-      # 3. 编译前端并同步到 Spring Boot
+      # 3. 编译前端并同步到 Spring Boot (修复路径)
       - name: Build Frontend
         run: |
           cd komga-webui 
           npm install
           npm run build
-          # 确保目标目录存在并清空旧文件
-          mkdir -p ../komga/src/main/resources/static/
-          rm -rf ../komga/src/main/resources/static/*
-          # 将打包后的 dist 目录内容拷贝到 static
-          cp -r dist/* ../komga/src/main/resources/static/
-          # 验证文件是否存在（方便在日志中调试）
-          ls -R ../komga/src/main/resources/static/
+          
+          # 定义后端资源路径
+          BACKEND_RES="../komga/src/main/resources"
+          
+          # 清理并创建目录
+          mkdir -p $BACKEND_RES/static/
+          mkdir -p $BACKEND_RES/templates/
+          rm -rf $BACKEND_RES/static/*
+          rm -rf $BACKEND_RES/templates/*
+          
+          # 核心操作：
+          # 1. 将 index.html 拷贝到 templates 目录供 Thymeleaf 解析
+          cp dist/index.html $BACKEND_RES/templates/
+          
+          # 2. 将所有文件（包括 index.html）拷贝到 static 目录供静态访问
+          cp -r dist/* $BACKEND_RES/static/
+          
+          # 调试：查看目录结构确认
+          ls -R $BACKEND_RES/templates/
+          ls -R $BACKEND_RES/static/
 
       - name: Login to GHCR
         uses: docker/login-action@v3
@@ -60,6 +73,9 @@ jobs:
           # 将镜像名转为小写以符合 Docker 规范
           IMAGE_ID=ghcr.io/${{ github.repository_owner }}/komga_refactor
           IMAGE_ID=$(echo $IMAGE_ID | tr '[A-Z]' '[a-z]')
+
+           # 先 clean，确保环境干净
+          ./gradlew :komga:clean
           
           # 手动同步一次，确保在 bootBuildImage 运行前文件已就绪
           mkdir -p komga/src/main/resources/static/
