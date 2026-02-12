@@ -37,6 +37,9 @@ jobs:
           # 将产物复制到 Spring Boot 的静态资源目录
           # 如果你的构建脚本已经配置好了输出路径，这一步可以省略
           # cp -r dist/* ../komga/src/main/resources/static/
+          # 确保产物被复制到 Java 主模块的静态资源目录下，以便被 bootBuildImage 打包
+          mkdir -p ../komga/src/main/resources/static/
+          cp -r dist/* ../komga/src/main/resources/static/
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
