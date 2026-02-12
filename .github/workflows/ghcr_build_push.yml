@@ -41,14 +41,16 @@ jobs:
 
       # 3. 构建镜像
       - name: Build and Push Image
+        env:
+          JAVA_HOME: ${{ env.JAVA_HOME_21_X64 }} # 使用 actions/setup-java 设置的变量
         run: |
           IMAGE_ID=ghcr.io/${{ github.repository_owner }}/komga_refactor
           IMAGE_ID=$(echo $IMAGE_ID | tr '[A-Z]' '[a-z]')
           
-          # 重点：必须先执行 clean 确保没有旧的缓存干扰
-          # 然后再执行 bootBuildImage
+          # 使用 ./gradlew 时确保它调用的是 Java 21
           ./gradlew :komga:clean :komga:bootBuildImage \
             --imageName=$IMAGE_ID:latest \
             --publishImage \
             -PdockerUsername=${{ github.actor }} \
-            -PdockerPassword=${{ secrets.GITHUB_TOKEN }}
+            -PdockerPassword=${{ secrets.GITHUB_TOKEN }} \
+            -Dorg.gradle.java.home=$JAVA_HOME
