@@ -36,7 +36,7 @@ jobs:
           push: true
           # 自动转小写并打上 latest 标签
           tags: |
-            ghcr.io/${{ github.repository_owner }}/komga_refactor:latest
+            ghcr.io/${{ github.repository_owner }}/komga_refactor_g:latest
           # 使用 GitHub 内部缓存，极大提升后续编译速度
           cache-from: type=gha
           cache-to: type=gha,mode=max
