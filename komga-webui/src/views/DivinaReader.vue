@@ -130,12 +130,17 @@
         :scale="continuousScale"
         :sidePadding="sidePadding"
         :page-margin="pageMargin"
+
+        :rotation="pageRotation"
+        :brightness="brightness"
+        :contrast="contrast"
+
         @menu="toggleToolbars()"
         @jump-previous="jumpToPrevious()"
         @jump-next="jumpToNext()"
       ></continuous-reader>
 
-      <paged-reader
+      <paged-reader      
         v-else
         :pages="pages"
         :page.sync="page"
@@ -144,6 +149,11 @@
         :scale="scale"
         :animations="animations"
         :swipe="swipe"
+
+        :rotation="pageRotation"
+        :brightness="brightness"
+        :contrast="contrast"
+
         @menu="toggleToolbars()"
         @jump-previous="jumpToPrevious()"
         @jump-next="jumpToNext()"
@@ -181,6 +191,22 @@
                 v-model="readingDirection"
                 :label="$t('bookreader.settings.reading_mode')"
               />
+            </v-list-item>
+
+            <!-- 插入到 <v-list-item> 循环中 -->
+            <v-list-item>
+              <v-list-item-content><v-list-item-title>页面旋转</v-list-item-title></v-list-item-content>
+              <v-list-item-action>
+                <v-btn-toggle v-model="pageRotation" mandatory dense color="primary">
+                  <v-btn :value="0" small>竖屏</v-btn>
+                  <v-btn :value="90" small>横屏</v-btn>
+                </v-btn-toggle>
+              </v-list-item-action>
+            </v-list-item>
+
+            <v-list-item>
+              <v-list-item-content><v-list-item-title>亮度</v-list-item-title></v-list-item-content>
+              <v-slider v-model="brightness" min="30" max="180" thumb-label dense hide-details></v-slider>
             </v-list-item>
 
             <v-list-item>
@@ -396,6 +422,9 @@ export default Vue.extend({
         continuousScale: ContinuousScaleType.WIDTH,
         sidePadding: 0,
         pageMargin: 0,
+        pageRotation: 0,
+        brightness: 100,    // 亮度 (百分比)
+        contrast: 100,      // 对比度 (百分比)
         readingDirection: ReadingDirection.LEFT_TO_RIGHT,
         backgroundColor: 'black',
       },
@@ -508,6 +537,29 @@ export default Vue.extend({
     },
   },
   computed: {
+    imageStyle (): any {
+      const style: any = {}
+      style.filter = `brightness(${this.brightness || 100}%) contrast(${this.contrast || 100}%)`
+      const isRotated = this.pageRotation !== 0
+
+      if (isRotated) {
+        style.transform = `rotate(${this.pageRotation}deg)`
+        style.transformOrigin = 'center center'
+      }
+
+      if (this.scaleMode === 'width') {
+        style.width = isRotated ? '100vh' : '100vw'
+        style.height = 'auto'
+      } else if (this.scaleMode === 'height') {
+        style.height = isRotated ? '100vw' : '100vh'
+        style.width = 'auto'
+      } else if (this.scaleMode === 'fit') {
+        style.maxWidth = isRotated ? '100vh' : '100vw'
+        style.maxHeight = isRotated ? '100vw' : '100vh'
+        style.objectFit = 'contain'
+      }
+      return style
+    },
     continuousReader(): boolean {
       return this.readingDirection === ReadingDirection.WEBTOON
     },
@@ -663,6 +715,7 @@ export default Vue.extend({
         else screenfull.isEnabled && screenfull.exit()
       },
     },
+    
   },
   methods: {
     enterFullscreen() {

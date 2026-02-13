@@ -10,7 +10,7 @@
            :height="calcHeight(page)"
            :width="calcWidth(page)"
            :id="`page${page.number}`"
-           :style="`margin: ${i === 0 ? 0 : pageMargin}px auto;`"
+           :style="imageStyles(i)"
            v-intersect="onIntersect"
       />
     </div>
@@ -76,6 +76,9 @@ export default Vue.extend({
       type: Number,
       required: true,
     },
+    rotation: { type: Number, default: 0 },
+    brightness: { type: Number, default: 100 },
+    contrast: { type: Number, default: 100 },
   },
   watch: {
     pages: {
@@ -88,9 +91,15 @@ export default Vue.extend({
     page: {
       handler(val) {
         if (val != this.currentPage) {
-          this.$vuetify.goTo(`#page${val}`, {
-            duration: 0,
-          })
+          // 如果开启了旋转模式，强制执行 window.scrollTo(0, 0) 实现置顶
+          if (this.rotation !== 0) {
+            window.scrollTo(0, 0)
+          } else {
+            // 原有逻辑：非旋转模式下跳转到具体页码 ID
+            this.$vuetify.goTo(`#page${val}`, {
+              duration: 0,
+            })
+          }
         }
       },
       immediate: false,
@@ -192,6 +201,34 @@ export default Vue.extend({
         this.$vuetify.goTo(this.offsetTop + step, this.goToOptions)
       } else {
         this.$emit('jump-next')
+      }
+    },
+    // 新增：图片旋转、滤镜及缩放适配
+    imageStyle (): object {
+      // 返回一个函数，方便在 v-for 中传入 index
+      return (index: number) => {
+        const isRotated = this.rotation !== 0
+        const style: any = {
+          filter: `brightness(${this.brightness}%) contrast(${this.contrast}%)`,
+          // 合并原有的 margin 逻辑
+          margin: `${index === 0 ? 0 : this.pageMargin}px auto`,
+          display: 'block',
+          transition: 'transform 0.2s, filter 0.2s'
+        }
+
+        if (isRotated) {
+          style.transform = `rotate(${this.rotation}deg)`
+          style.transformOrigin = 'center center'
+          // 旋转后，逻辑上的宽度受限于视口高度，防止横屏模式下图片宽得离谱
+          style.maxWidth = '100vh' 
+          //如果你发现旋转后图片比例不对
+          style.height = 'auto !important'
+          style.width = 'auto !important'
+        } else {
+          style.maxWidth = '100%'
+        }
+
+        return style
       }
     },
   },

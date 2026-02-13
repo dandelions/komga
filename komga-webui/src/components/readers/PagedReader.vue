@@ -121,6 +121,9 @@ export default Vue.extend({
       type: String as () => ScaleType,
       required: true,
     },
+    rotation: { type: Number, default: 0 },
+    brightness: { type: Number, default: 100 },
+    contrast: { type: Number, default: 100 },
   },
   watch: {
     pages: {
@@ -196,6 +199,26 @@ export default Vue.extend({
     },
     isDoublePages(): boolean {
       return this.pageLayout === PagedReaderLayout.DOUBLE_PAGES || this.pageLayout === PagedReaderLayout.DOUBLE_NO_COVER
+    },
+    imageStyle (): any {
+      const isRotated = this.rotation !== 0
+      const style: any = {
+        filter: `brightness(${this.brightness}%) contrast(${this.contrast}%)`,
+        pointerEvents: 'none', // 允许点击穿透，确保能翻页
+        transition: 'transform 0.2s, filter 0.2s'
+      }
+
+      if (isRotated) {
+        style.transform = `rotate(${this.rotation}deg)`
+        style.transformOrigin = 'center center'
+        style.maxWidth = '100vh'
+        style.maxHeight = '100vw'
+        style.objectFit = 'contain !important'
+      } else {
+        style.maxWidth = '100vw'
+        style.maxHeight = '100vh'
+      }
+      return style
     },
   },
   methods: {
