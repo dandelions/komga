@@ -98,7 +98,7 @@ export default Vue.extend({
             // 原有逻辑：非旋转模式下跳转到具体页码 ID
             this.$vuetify.goTo(`#page${val}`, {
               duration: 0,
-            })
+            },)
           }
         }
       },
@@ -213,7 +213,7 @@ export default Vue.extend({
           // 合并原有的 margin 逻辑
           margin: `${index === 0 ? 0 : this.pageMargin}px auto`,
           display: 'block',
-          transition: 'transform 0.2s, filter 0.2s'
+          transition: 'transform 0.2s, filter 0.2s',
         }
 
         if (isRotated) {

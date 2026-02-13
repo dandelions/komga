@@ -205,7 +205,7 @@ export default Vue.extend({
       const style: any = {
         filter: `brightness(${this.brightness}%) contrast(${this.contrast}%)`,
         pointerEvents: 'none', // 允许点击穿透，确保能翻页
-        transition: 'transform 0.2s, filter 0.2s'
+        transition: 'transform 0.2s, filter 0.2s',
       }
 
       if (isRotated) {
