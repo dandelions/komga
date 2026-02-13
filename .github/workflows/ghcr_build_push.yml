@@ -73,7 +73,6 @@ jobs:
         with:
           context: .
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ghcr.io/${{ github.repository }}:latest          
           # 如果项目中没有现成 Dockerfile，可以通过 build-args 或直接在代码仓库创建
           file: ./Dockerfile 
