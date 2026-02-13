@@ -1,91 +1,61 @@
-name: Build and Push to GHCR
+name: Build and Push Komga-like Image
 
 on:
   push:
-    branches: [ master ]
+    branches: [ "master", "main" ]
+  workflow_dispatch:
 
-permissions:
-  contents: read
-  packages: write
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # 1. 设置 Java 环境（放在最前面，确保 Gradle 插件可用）
-      - name: Set up JDK 21
+      # --- 参照 Komga 的环境准备 ---
+      - name: Setup Java 21
         uses: actions/setup-java@v4
         with:
-          java-version: '21'
+          java-version: 21
           distribution: 'temurin'
-          cache: 'gradle'
 
-      # 2. 设置 Node.js 环境
-      - name: Set up Node.js
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: 'komga-webui/package-lock.json'
+          node-version: '20' # 根据项目需求调整
 
-      # 3. 编译前端并同步到 Spring Boot (修复路径)
-      - name: Build Frontend
-        run: |
-          cd komga-webui 
-          npm install
-          npm run build
-          
-          # 定义后端资源路径
-          BACKEND_RES="../komga/src/main/resources"
-          
-          # 清理并创建目录
-          mkdir -p $BACKEND_RES/static/
-          mkdir -p $BACKEND_RES/templates/
-          rm -rf $BACKEND_RES/static/*
-          rm -rf $BACKEND_RES/templates/*
-          
-          # 核心操作：
-          # 1. 将 index.html 拷贝到 templates 目录供 Thymeleaf 解析
-          cp dist/index.html $BACKEND_RES/templates/
-          
-          # 2. 将所有文件（包括 index.html）拷贝到 static 目录供静态访问
-          cp -r dist/* $BACKEND_RES/static/
-          
-          # 调试：查看目录结构确认
-          ls -R $BACKEND_RES/templates/
-          ls -R $BACKEND_RES/static/
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
 
-      - name: Login to GHCR
+      # --- 参照 Komga 的核心编译步骤 ---
+      - name: Build with Gradle
+        run: ./gradlew :komga:prepareThymeLeaf :komga:bootJar :komga-tray:jar
+        env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
+
+      # --- Docker 构建与推送 ---
+      - name: Log into GHCR
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
+          registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 4. 构建镜像并推送到 GHCR
-      - name: Build and Push Image
-        run: |
-          # 将镜像名转为小写以符合 Docker 规范
-          IMAGE_ID=ghcr.io/${{ github.repository_owner }}/komga_refactor
-          IMAGE_ID=$(echo $IMAGE_ID | tr '[A-Z]' '[a-z]')
-
-           # 先 clean，确保环境干净
-          ./gradlew :komga:clean
-          
-          # 手动同步一次，确保在 bootBuildImage 运行前文件已就绪
-          mkdir -p komga/src/main/resources/static/
-          cp -r komga-webui/dist/* komga/src/main/resources/static/
-          
-          # 使用 --no-daemon 避免 Java 版本冲突，先 clean 再构建
-          ./gradlew :komga:bootBuildImage \
-            --no-daemon \
-            --imageName=$IMAGE_ID:latest \
-            --publishImage \
-            -PdockerUsername=${{ github.actor }} \
-            -PdockerPassword=${{ secrets.GITHUB_TOKEN }}
-            -Pbuilder=paketobuildpacks/builder-jammy-full
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          # 关键：将 Gradle 编译出的 jar 包路径作为参数传给 Dockerfile (可选)
+          build-args: |
+            JAR_FILE=komga/build/libs/*.jar 
