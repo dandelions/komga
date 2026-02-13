@@ -1020,4 +1020,13 @@ export default Vue.extend({
 .hidden {
   display: none !important;
 }
+/*修复移动端视口不正常的BUG */
+#iframe-wrapper {
+  /* 使用 dvh (Dynamic Viewport Height) 自动适配移动端浏览器工具栏 */
+  height: 100vh !important;
+  height: 100dvh !important; 
+  width: 100%;
+  overflow: hidden;
+  position: relative;
+}
 </style>
