@@ -98,7 +98,7 @@ export default Vue.extend({
             // 原有逻辑：非旋转模式下跳转到具体页码 ID
             this.$vuetify.goTo(`#page${val}`, {
               duration: 0,
-            },)
+            })
           }
         }
       },
