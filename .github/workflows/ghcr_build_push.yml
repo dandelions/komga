@@ -36,11 +36,19 @@ jobs:
           cache: 'npm'
           cache-dependency-path: 'komga-webui/package-lock.json'
 
-      # 2. 编译项目 (参考开发文档步骤)
+      # 2. 编译项目 (关键修复)
+      - name: Build WebUI and Package JAR
+        run: |
+          # 核心步骤：编译前端并拷贝到 resources 目录
+          ./gradlew prepareThymeLeaf
+          # 编译后端 JAR，跳过测试以加快速度
+          ./gradlew build -x test
+
+      # 3. 编译项目 (参考开发文档步骤)
       - name: Build with Gradle
         run: ./gradlew build -x test
 
-      # 3. 准备 Docker 构建环境
+      # 4. 准备 Docker 构建环境
       - name: Log in to the Container registry
         uses: docker/login-action@v3
         with:
@@ -58,7 +66,7 @@ jobs:
             type=semver,pattern={{version}}
             type=sha
 
-      # 4. 构建并推送镜像
+      # 5. 构建并推送镜像
       # 注意：此步骤假设您的 Dockerfile 基础镜像是 ubuntu 并安装了 shell 工具
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
