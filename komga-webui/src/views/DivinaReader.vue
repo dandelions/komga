@@ -540,21 +540,28 @@ export default Vue.extend({
     imageStyle (): any {
       const isRotated = this.pageRotation !== 0
       return {
-        // 下发滤镜变量
+        // 1. 基础滤镜变量
         '--brightness': `${this.brightness}%`,
         '--contrast': `${this.contrast}%`,
-        // 下发旋转角度
+        '--img-filter': `brightness(${this.brightness}%) contrast(${this.contrast}%)`,
+        
+        // 2. 旋转角度
         '--rotation': `${this.pageRotation}deg`,
-        // 核心需求 2：旋转后，视觉上的宽度要撑满视口高度，所以物理宽度设为 100vh
-        // 同时物理高度设为 auto，配合 overflow-y: auto 实现上下滑动
+        
+        // 3. 核心修复：尺寸适配
+        // 物理宽度设为 100vh 确保旋转后视觉宽度占满屏幕
         '--img-width': isRotated ? '100vh' : 'auto',
+        // 物理高度设为 auto 允许图片按比例展开，从而产生滚动条
         '--img-height': isRotated ? 'auto' : '100vh',
         '--img-max-width': isRotated ? 'none' : '100vw',
         '--img-max-height': isRotated ? 'none' : '100vh',
-        // 控制容器是否允许滚动
+        
+        // 4. 容器滚动控制
         '--container-overflow': isRotated ? 'auto' : 'hidden',
-        // 补偿旋转后的位移，确保图片不会缩在视口中心之外
-        '--img-margin': isRotated ? '15vh auto' : '0 auto',
+        
+        // 5. 关键修复：外边距补偿
+        // 增加到 40vh 确保长图旋转后，其顶部和底部都能被滚动触及，不被截断
+        '--img-margin': isRotated ? '40vh auto' : '0 auto',
       }
     },
     continuousReader(): boolean {
@@ -1033,16 +1040,19 @@ export default Vue.extend({
     
     /* 响应 imageStyle 计算出的物理尺寸 */
     width: var(--img-width, auto) !important;
-    height: var(--img-height, 100%) !important;
-    max-width: none !important;
-    max-height: none !important;
     
-    /* 旋转后的外边距补偿，防止首尾内容无法滚到底 */
+    /* 关键修正：确保在旋转模式下，height: auto 能生效而不会被 100% 压死 */
+    height: var(--img-height, auto) !important; 
+    
+    /* 必须强制取消最大高度限制，否则滚动条不会出现 */
+    max-width: var(--img-max-width, none) !important;
+    max-height: var(--img-max-height, none) !important;
+    
+    /* 旋转后的外边距补偿 */
     margin: var(--img-margin, 0 auto) !important;
-    display: block;
-    transition: transform 0.2s ease;
     
-    /* 允许拖动图片进行滚动 */
+    display: block !important; /* 确保 block 属性，否则 margin auto 不居中且无法撑开高度 */
+    transition: transform 0.2s ease;
     pointer-events: auto !important;
   }
 }
