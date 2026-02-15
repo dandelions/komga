@@ -540,28 +540,27 @@ export default Vue.extend({
     imageStyle (): any {
       const isRotated = this.pageRotation !== 0
       return {
-        // 1. 基础滤镜变量
         '--brightness': `${this.brightness}%`,
         '--contrast': `${this.contrast}%`,
         '--img-filter': `brightness(${this.brightness}%) contrast(${this.contrast}%)`,
-        
-        // 2. 旋转角度
         '--rotation': `${this.pageRotation}deg`,
         
-        // 3. 核心修复：尺寸适配
-        // 物理宽度设为 100vh 确保旋转后视觉宽度占满屏幕
-        '--img-width': isRotated ? '100vh' : 'auto',
-        // 物理高度设为 auto 允许图片按比例展开，从而产生滚动条
-        '--img-height': isRotated ? 'auto' : '100vh',
-        '--img-max-width': isRotated ? 'none' : '100vw',
-        '--img-max-height': isRotated ? 'none' : '100vh',
+        // --- 核心修改：左右拖动逻辑 ---
+        // 旋转 90 度后，视觉上的“高”对应物理上的“宽”
+        // 1. 物理高度 (Height) 设为 100vw，确保旋转后视觉宽度撑满屏幕
+        '--img-height': isRotated ? '100vw' : '100vh', 
+        // 2. 物理宽度 (Width) 设为 auto，让长图在水平方向展开
+        '--img-width': isRotated ? 'auto' : '100vw',
         
-        // 4. 容器滚动控制
-        '--container-overflow': isRotated ? 'auto' : 'hidden',
+        '--img-max-width': 'none',
+        '--img-max-height': 'none',
         
-        // 5. 关键修复：外边距补偿
-        // 增加到 40vh 确保长图旋转后，其顶部和底部都能被滚动触及，不被截断
-        '--img-margin': isRotated ? '40vh auto' : '0 auto',
+        // 3. 容器滚动方向切换为横向 (X轴)
+        '--container-overflow-x': isRotated ? 'auto' : 'hidden',
+        '--container-overflow-y': 'hidden',
+        
+        // 4. 边距补偿：从上下 (vh) 改为左右 (vw)
+        '--img-margin': isRotated ? '0 50vw' : '0 auto',
       }
     },
     continuousReader(): boolean {
@@ -1005,61 +1004,62 @@ export default Vue.extend({
 </style>
 
 <style lang="scss">
-/* 1. 基础阅读器环境优化 */
-.html-reader::-webkit-scrollbar {
-  display: none;
-}
-.html-reader {
-  scrollbar-width: none;
-  overscroll-behavior: none;
-}
+/* 1. 基础阅读器环境优化保持不变 */
+.html-reader::-webkit-scrollbar { display: none; }
+.html-reader { scrollbar-width: none; overscroll-behavior: none; }
 
-/* 2. 核心：强制开启垂直滚动条，实现“手动移动展示内容” */
-/* 注意：我们将样式直接作用于 Vuetify 的渲染结构 */
+/* 2. 核心：由垂直滚动改为水平滚动 */
 .reader-container {
-  /* 确保父容器本身不滚动，由内部条目滚动 */
   overflow: hidden !important; 
   height: 100vh !important;
+  width: 100vw !important;
 
-  /* 穿透修改：当旋转时，强制轮播条目允许溢出滚动 */
+  /* 穿透修改：开启横向溢出 */
   .v-window__container,
   .v-carousel__item,
   .v-carousel__item > .full-height {
-    /* 这里的变量由 imageStyle 中的 style['--container-overflow'] 提供 */
-    overflow-y: var(--container-overflow, hidden) !important;
-    overflow-x: hidden !important;
-    display: block !important; /* 必须改为 block，否则 flex 会居中截断长图 */
-    -webkit-overflow-scrolling: touch; /* 优化移动端滚动体验 */
+    /* 关键：切换为 X 轴滚动 */
+    overflow-x: var(--container-overflow-x, hidden) !important;
+    overflow-y: var(--container-overflow-y, hidden) !important;
+    
+    /* 必须改为 flex 并禁止换行，否则长图无法在水平方向伸展 */
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: flex-start !important; 
+    
+    white-space: nowrap !important;
+    -webkit-overflow-scrolling: touch;
   }
 
-  /* 3. 穿透修改图片：实现 100vh 宽度及旋转 */
+  /* 3. 穿透修改图片：实现横向长卷效果 */
   img, .img-fit-all {
     filter: var(--img-filter, none) !important;
     transform: var(--img-transform, none) !important;
     transform-origin: center center !important;
     
-    /* 响应 imageStyle 计算出的物理尺寸 */
+    /* 响应变量：旋转后 width 应为 auto (让图片变宽), height 为 100vw (视觉宽度) */
     width: var(--img-width, auto) !important;
+    height: var(--img-height, 100vh) !important; 
     
-    /* 关键修正：确保在旋转模式下，height: auto 能生效而不会被 100% 压死 */
-    height: var(--img-height, auto) !important; 
+    max-width: none !important;
+    max-height: none !important;
     
-    /* 必须强制取消最大高度限制，否则滚动条不会出现 */
-    max-width: var(--img-max-width, none) !important;
-    max-height: var(--img-max-height, none) !important;
-    
-    /* 旋转后的外边距补偿 */
+    /* 旋转后的横向外边距补偿 (margin: 0 50vw) */
     margin: var(--img-margin, 0 auto) !important;
     
-    display: block !important; /* 确保 block 属性，否则 margin auto 不居中且无法撑开高度 */
+    /* 核心：防止图片被 flex 容器压缩，确保产生横向滚动条 */
+    flex-shrink: 0 !important;
+    display: block !important;
+    
     transition: transform 0.2s ease;
     pointer-events: auto !important;
   }
 }
 
-/* 4. 滚动条美化（可选） */
+/* 4. 滚动条美化调整为横向 */
 .v-carousel__item::-webkit-scrollbar {
-  width: 4px;
+  height: 4px; /* 横向滚动条高度 */
 }
 .v-carousel__item::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.2);
