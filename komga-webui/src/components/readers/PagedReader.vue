@@ -25,7 +25,7 @@
                        :transition="animations ? undefined : false"
                        :reverse-transition="animations ? undefined : false"
       >
-        <div class="full-height d-flex flex-column justify-center">
+        <div :class="`full-height d-flex flex-column ${pageContainerClass}`">
           <div :class="`d-flex flex-row${flipDirection ? '-reverse' : ''} justify-center px-0 mx-0`">
             <img v-for="(page, j) in spread"
                  :alt="`Page ${page.number}`"
@@ -131,6 +131,7 @@ export default Vue.extend({
     },
     carouselPage(val, old) {
       this.$debug('[watch:carouselPage', `old:${old}`, `new:${val}`)
+      if (val !== old) this.scrollToPageTop()
       if (this.carouselPage >= 0 && this.carouselPage < this.spreads.length && this.spreads.length > 0) {
         const currentSpread = this.spreads[this.carouselPage]
         const currentPage = currentSpread.length == 2 && currentSpread[1].mediaType ? currentSpread[1] : currentSpread[0]
@@ -144,6 +145,7 @@ export default Vue.extend({
       const spreadIndex = this.toSpreadIndex(val)
       this.$debug('[watch:page]', `toSpreadIndex:${spreadIndex}`)
       this.carouselPage = spreadIndex
+      this.scrollToPageTop()
     },
     pageLayout: {
       handler(val) {
@@ -197,6 +199,12 @@ export default Vue.extend({
     isDoublePages(): boolean {
       return this.pageLayout === PagedReaderLayout.DOUBLE_PAGES || this.pageLayout === PagedReaderLayout.DOUBLE_NO_COVER
     },
+    pageContainerClass(): string {
+      return this.topAlignedPage ? 'justify-start' : 'justify-center'
+    },
+    topAlignedPage(): boolean {
+      return [ScaleType.ORIGINAL, ScaleType.WIDTH, ScaleType.WIDTH_SHRINK_ONLY].includes(this.scale)
+    },
   },
   methods: {
     keyPressed(e: KeyboardEvent) {
@@ -243,7 +251,7 @@ export default Vue.extend({
     prev() {
       if (this.canPrev) {
         this.carouselPage--
-        window.scrollTo(0, 0)
+        this.scrollToPageTop()
       } else {
         this.$emit('jump-previous')
       }
@@ -251,10 +259,29 @@ export default Vue.extend({
     next() {
       if (this.canNext) {
         this.carouselPage++
-        window.scrollTo(0, 0)
+        this.scrollToPageTop()
       } else {
         this.$emit('jump-next')
       }
+    },
+    scrollToPageTop() {
+      const scrollTop = () => {
+        const scrollingElement = document.scrollingElement || document.documentElement
+        window.scrollTo({top: 0, left: 0, behavior: 'auto'})
+        scrollingElement.scrollTop = 0
+        scrollingElement.scrollLeft = 0
+        document.documentElement.scrollTop = 0
+        document.documentElement.scrollLeft = 0
+        document.body.scrollTop = 0
+        document.body.scrollLeft = 0
+      }
+
+      scrollTop()
+      this.$nextTick(() => {
+        scrollTop()
+        window.requestAnimationFrame(scrollTop)
+        window.setTimeout(scrollTop, 100)
+      })
     },
     toSpreadIndex(i: number): number {
       this.$debug('[toSpreadIndex]', `i:${i}`, `isDoublePages:${this.isDoublePages}`)
