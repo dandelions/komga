@@ -216,18 +216,37 @@
           :page="currentPage"
           :target-width="reflowTargetWidth"
           :options="reflowOptions"
+          :cached-items="cachedReflowItems(currentPage)"
+          :cache-key="reflowCacheKey"
           @text-scale-change="setReflowTextScale"
+          @column-count-change="setReflowColumnCount"
+          @crop-mode-change="setReflowCropMode"
+          @reflowed="cacheReflowPage"
+        />
+        <reflowed-page
+          v-if="nextReflowPage"
+          class="reflow-prefetch"
+          :page="nextReflowPage"
+          :target-width="reflowTargetWidth"
+          :options="reflowOptions"
+          :cached-items="cachedReflowItems(nextReflowPage)"
+          :cache-key="reflowCacheKey"
+          preload
+          @reflowed="cacheReflowPage"
         />
 
         <div
+          v-if="!reflowCropMode"
           @click="reflowPreviousPage"
           class="reflow-click-top"
         />
         <div
+          v-if="!reflowCropMode"
           @click="reflowNextPage"
           class="reflow-click-bottom"
         />
         <div
+          v-if="!reflowCropMode"
           @click="toggleToolbars()"
           class="reflow-click-center"
         />
@@ -406,6 +425,13 @@
               <template v-if="reflowMode">
                 <v-list-item>
                   <settings-switch v-model="reflowSettings.autoCropBorder" label="Auto crop borders"/>
+                </v-list-item>
+                <v-list-item>
+                  <settings-select
+                    :items="reflowColumnCounts"
+                    v-model="reflowSettings.columnCount"
+                    label="Columns"
+                  />
                 </v-list-item>
                 <v-list-item>
                   <v-slider
@@ -637,9 +663,12 @@ export default Vue.extend({
       showHelp: false,
       landscapeDisplay: false,
       reflowMode: false,
+      reflowCropMode: false,
+      reflowCache: {} as Record<string, any[]>,
       reflowSettings: {
         autoCropBorder: true,
         textScale: 75,
+        columnCount: 1,
         threshold: 185,
         columnGap: 15,
         wordGap: 3,
@@ -683,6 +712,10 @@ export default Vue.extend({
         text: this.$i18n.t(x),
         value: x,
       })),
+      reflowColumnCounts: [
+        {text: '1', value: 1},
+        {text: '2', value: 2},
+      ],
       paddingPercentages: Object.values(PaddingPercentage).map(x => ({
         text: x === 0 ? this.$i18n.t('bookreader.settings.side_padding_none').toString() : `${x}%`,
         value: x,
@@ -819,6 +852,10 @@ export default Vue.extend({
     currentPage(): PageDtoWithUrl {
       return this.pages[this.page - 1]
     },
+    nextReflowPage(): PageDtoWithUrl | undefined {
+      if (!this.reflowMode || this.continuousReader || this.page >= this.pagesCount) return undefined
+      return this.pages[this.page]
+    },
     isPdf(): boolean {
       return this.book.media?.mediaType === 'application/pdf'
     },
@@ -833,6 +870,21 @@ export default Vue.extend({
     },
     reflowOptions(): object {
       return this.reflowSettings
+    },
+    reflowCacheKey(): string {
+      return JSON.stringify({
+        width: this.reflowTargetWidth,
+        autoCropBorder: this.reflowSettings.autoCropBorder,
+        textScale: this.reflowSettings.textScale,
+        columnCount: this.reflowSettings.columnCount,
+        threshold: this.reflowSettings.threshold,
+        columnGap: this.reflowSettings.columnGap,
+        wordGap: this.reflowSettings.wordGap,
+        marginTop: this.reflowSettings.marginTop,
+        marginRight: this.reflowSettings.marginRight,
+        marginBottom: this.reflowSettings.marginBottom,
+        marginLeft: this.reflowSettings.marginLeft,
+      })
     },
 
     animations: {
@@ -1220,10 +1272,37 @@ export default Vue.extend({
     },
     toggleReflowMode() {
       this.reflowMode = !this.reflowMode
+      this.reflowCropMode = false
       if (!this.reflowMode) this.$nextTick(() => this.scrollToPageEdge('top'))
     },
     setReflowTextScale(textScale: number) {
       this.reflowSettings.textScale = textScale
+    },
+    setReflowColumnCount(columnCount: number) {
+      this.reflowSettings.columnCount = columnCount === 2 ? 2 : 1
+    },
+    setReflowCropMode(cropMode: boolean) {
+      this.reflowCropMode = cropMode
+    },
+    cachedReflowItems(page: PageDtoWithUrl | undefined): any[] | undefined {
+      if (!page || this.reflowCropMode) return undefined
+      return this.reflowCache[this.reflowCacheEntryKey(page.number, this.reflowCacheKey)]
+    },
+    cacheReflowPage(payload: {pageNumber: number, cacheKey: string, items: any[]}) {
+      if (payload.cacheKey !== this.reflowCacheKey) return
+      this.$set(this.reflowCache, this.reflowCacheEntryKey(payload.pageNumber, payload.cacheKey), payload.items)
+      this.pruneReflowCache()
+    },
+    reflowCacheEntryKey(pageNumber: number, cacheKey: string): string {
+      return `${pageNumber}|${cacheKey}`
+    },
+    pruneReflowCache() {
+      Object.keys(this.reflowCache).forEach(key => {
+        const separator = key.indexOf('|')
+        const pageNumber = Number(key.substring(0, separator))
+        const cacheKey = key.substring(separator + 1)
+        if (cacheKey !== this.reflowCacheKey || Math.abs(pageNumber - this.page) > 2) this.$delete(this.reflowCache, key)
+      })
     },
     reflowPreviousPage() {
       if (this.page > 1) {
@@ -1379,13 +1458,23 @@ export default Vue.extend({
   min-height: 100%;
 }
 
+.reflow-prefetch {
+  position: fixed;
+  width: 1px;
+  height: 1px;
+  left: -10000px;
+  top: -10000px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
 .reflow-click-top {
   position: fixed;
   top: 0;
   left: 0;
   height: 25vh;
   width: 100%;
-  z-index: 1;
+  z-index: 3;
 }
 
 .reflow-click-bottom {
@@ -1394,7 +1483,7 @@ export default Vue.extend({
   left: 0;
   height: 25vh;
   width: 100%;
-  z-index: 1;
+  z-index: 3;
 }
 
 .reflow-click-center {
@@ -1403,7 +1492,7 @@ export default Vue.extend({
   left: 0;
   height: 50vh;
   width: 100%;
-  z-index: 1;
+  z-index: 3;
 }
 </style>
 <style>

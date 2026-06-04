@@ -1,6 +1,6 @@
 <template>
   <div class="reflowed-page">
-    <div class="reflow-controls" @click.stop>
+    <div v-if="!preload" class="reflow-controls" @click.stop>
       <label class="reflow-font-control">
         <span>Text size</span>
         <input
@@ -12,6 +12,13 @@
           @input="setTextScale"
         />
         <span class="reflow-font-value">{{ textScalePercent }}%</span>
+      </label>
+      <label class="reflow-column-control">
+        <span>Columns</span>
+        <select :value="columnCount" @change="setColumnCount">
+          <option value="1">1</option>
+          <option value="2">2</option>
+        </select>
       </label>
       <div class="reflow-action-controls">
         <button type="button" class="reflow-control" @click="toggleCropMode">
@@ -29,7 +36,7 @@
     </div>
 
     <div
-      v-if="cropMode"
+      v-if="!preload && cropMode"
       class="crop-panel"
       @click.stop
     >
@@ -95,6 +102,7 @@ import {PageDtoWithUrl} from '@/types/komga-books'
 type ReflowOptions = {
   autoCropBorder: boolean,
   textScale: number,
+  columnCount: number,
   threshold: number,
   columnGap: number,
   wordGap: number,
@@ -151,6 +159,12 @@ type WordLine = {
   words: WordBlock[],
 }
 
+type ReflowCachePayload = {
+  pageNumber: number,
+  cacheKey: string,
+  items: ReflowItem[],
+}
+
 const THRESHOLD = 185
 const COLUMN_GAP = 15
 const WORD_GAP = 3
@@ -174,6 +188,18 @@ export default Vue.extend({
       type: Object as () => ReflowOptions,
       required: true,
     },
+    cachedItems: {
+      type: Array as () => ReflowItem[] | undefined,
+      default: undefined,
+    },
+    cacheKey: {
+      type: String,
+      default: '',
+    },
+    preload: {
+      type: Boolean,
+      default: false,
+    },
   },
   data: () => {
     return {
@@ -194,6 +220,9 @@ export default Vue.extend({
   computed: {
     textScalePercent(): number {
       return this.clampNumber(this.options.textScale, 40, 140, WORD_SCALE * 100)
+    },
+    columnCount(): number {
+      return this.normalizedColumnCount()
     },
     activeRoi(): Roi | undefined {
       return this.draftRoi || this.cropRoi
@@ -222,6 +251,17 @@ export default Vue.extend({
       },
       deep: true,
     },
+    targetWidth() {
+      this.reflow()
+    },
+    cacheKey() {
+      this.reflow()
+    },
+    cachedItems: {
+      handler() {
+        this.reflow()
+      },
+    },
   },
   destroyed() {
     this.revokeObjectUrl()
@@ -236,6 +276,12 @@ export default Vue.extend({
       this.reflowItems = []
 
       try {
+        if (Array.isArray(this.cachedItems) && !this.cropRoi) {
+          this.revokeObjectUrl()
+          this.reflowItems = this.cachedItems
+          return
+        }
+
         const image = await this.loadPageImage(this.page.url)
         if (requestId !== this.requestId) return
         this.imageSize = {w: image.naturalWidth, h: image.naturalHeight}
@@ -249,12 +295,27 @@ export default Vue.extend({
         const lines = this.detectWordLines(imageData, canvas.width, canvas.height)
         if (requestId !== this.requestId) return
         this.reflowItems = this.renderReflowItems(canvas, lines)
+        if (!this.cropRoi) this.$emit('reflowed', {
+          pageNumber: this.page.number,
+          cacheKey: this.cacheKey,
+          items: this.reflowItems,
+        } as ReflowCachePayload)
       } catch (e) {
         if (requestId !== this.requestId) return
         this.error = true
         this.errorMessage = e instanceof Error ? e.message : String(e)
       } finally {
         if (requestId === this.requestId) this.loading = false
+      }
+    },
+    async ensureCropImage() {
+      if (this.objectUrl && this.imageSize.w && this.imageSize.h) return
+      this.loading = true
+      try {
+        const image = await this.loadPageImage(this.page.url)
+        this.imageSize = {w: image.naturalWidth, h: image.naturalHeight}
+      } finally {
+        this.loading = false
       }
     },
     async loadPageImage(url: string): Promise<HTMLImageElement> {
@@ -406,7 +467,12 @@ export default Vue.extend({
       if (Number.isNaN(numberValue)) return fallback
       return Math.max(min, Math.min(max, numberValue))
     },
+    normalizedColumnCount(): number {
+      return this.clampNumber(this.options.columnCount, 1, 2, 1) >= 2 ? 2 : 1
+    },
     detectColumns(isInk: (x: number, y: number) => boolean, width: number, height: number, roi: Roi): Column[] {
+      if (this.normalizedColumnCount() === 1) return [{start: roi.x, end: roi.x + roi.w}]
+
       const colInk = new Array(width).fill(0)
       for (let x = roi.x; x < roi.x + roi.w; x++) {
         for (let y = roi.y; y < roi.y + roi.h; y++) {
@@ -414,20 +480,61 @@ export default Vue.extend({
         }
       }
 
-      const columns = [] as Column[]
-      let inColumn = false
-      let columnStart = roi.x
-      for (let x = roi.x; x < roi.x + roi.w; x++) {
-        if (!inColumn && colInk[x] > 1) {
-          inColumn = true
-          columnStart = x
-        } else if (inColumn && colInk[x] <= 1 && this.realColumnGap(colInk, x, roi.x + roi.w)) {
-          inColumn = false
-          if (x - columnStart > 5) columns.push({start: columnStart, end: x})
+      const split = this.detectColumnSplit(colInk, roi)
+      const columns = [
+        this.trimColumn(isInk, {start: roi.x, end: split}, roi),
+        this.trimColumn(isInk, {start: split, end: roi.x + roi.w}, roi),
+      ].filter(column => column.end - column.start >= 8)
+
+      return columns.length > 0 ? columns : [{start: roi.x, end: roi.x + roi.w}]
+    },
+    detectColumnSplit(colInk: number[], roi: Roi): number {
+      const center = roi.x + Math.floor(roi.w / 2)
+      const searchRadius = Math.max(1, Math.floor(roi.w * 0.18))
+      const searchStart = Math.max(roi.x + 8, center - searchRadius)
+      const searchEnd = Math.min(roi.x + roi.w - 8, center + searchRadius)
+      const windowRadius = Math.max(2, Math.floor(this.clampNumber(this.options.columnGap, 5, 80, COLUMN_GAP) / 2))
+      let bestSplit = center
+      let bestScore = Number.MAX_SAFE_INTEGER
+
+      for (let x = searchStart; x <= searchEnd; x++) {
+        let score = 0
+        for (let xx = Math.max(roi.x, x - windowRadius); xx <= Math.min(roi.x + roi.w - 1, x + windowRadius); xx++) {
+          score += colInk[xx]
+        }
+        if (score < bestScore || (score === bestScore && Math.abs(x - center) < Math.abs(bestSplit - center))) {
+          bestScore = score
+          bestSplit = x
         }
       }
-      if (inColumn) columns.push({start: columnStart, end: roi.x + roi.w})
-      return columns.length > 0 ? columns : [{start: roi.x, end: roi.x + roi.w}]
+
+      return bestSplit
+    },
+    trimColumn(isInk: (x: number, y: number) => boolean, column: Column, roi: Roi): Column {
+      let start = column.start
+      let end = column.end
+
+      for (let x = column.start; x < column.end; x++) {
+        if (this.columnHasInk(isInk, x, roi)) {
+          start = x
+          break
+        }
+      }
+
+      for (let x = column.end - 1; x >= column.start; x--) {
+        if (this.columnHasInk(isInk, x, roi)) {
+          end = x + 1
+          break
+        }
+      }
+
+      return {start, end}
+    },
+    columnHasInk(isInk: (x: number, y: number) => boolean, x: number, roi: Roi): boolean {
+      for (let y = roi.y; y < roi.y + roi.h; y++) {
+        if (isInk(x, y)) return true
+      }
+      return false
     },
     realColumnGap(colInk: number[], start: number, end: number): boolean {
       const columnGap = this.clampNumber(this.options.columnGap, 5, 80, COLUMN_GAP)
@@ -614,16 +721,23 @@ export default Vue.extend({
       const target = event.target as HTMLInputElement
       this.$emit('text-scale-change', this.clampNumber(Number(target.value), 40, 140, WORD_SCALE * 100))
     },
-    toggleCropMode() {
+    setColumnCount(event: Event) {
+      const target = event.target as HTMLSelectElement
+      this.$emit('column-count-change', this.clampNumber(Number(target.value), 1, 2, 1) >= 2 ? 2 : 1)
+    },
+    async toggleCropMode() {
       this.cropMode = !this.cropMode
       this.draftRoi = undefined
       this.drawingCrop = false
+      this.$emit('crop-mode-change', this.cropMode)
+      if (this.cropMode) await this.ensureCropImage()
     },
     resetCrop() {
       this.cropRoi = undefined
       this.draftRoi = undefined
       this.drawingCrop = false
       this.cropMode = false
+      this.$emit('crop-mode-change', false)
       this.reflow()
     },
     startCrop(event: PointerEvent) {
@@ -648,6 +762,7 @@ export default Vue.extend({
       if (roi.w > MIN_CROP_SIZE && roi.h > MIN_CROP_SIZE) {
         this.cropRoi = roi
         this.cropMode = false
+        this.$emit('crop-mode-change', false)
         this.reflow()
       }
       event.preventDefault()
@@ -776,6 +891,26 @@ export default Vue.extend({
 .reflow-font-control input {
   flex: 1;
   min-width: 120px;
+}
+
+.reflow-column-control {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #212121;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.reflow-column-control select {
+  min-width: 56px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #212121;
+  padding: 5px 8px;
+  font-size: 13px;
 }
 
 .reflow-font-value {
