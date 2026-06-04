@@ -994,11 +994,11 @@ export default Vue.extend({
   position: fixed;
   top: 50%;
   left: 50%;
-  width: 100vw;
-  height: 100vh;
+  width: 100vh;
+  height: 100vw;
   transform: translate(-50%, -50%) rotate(90deg);
   transform-origin: center center;
-  overflow: hidden;
+  overflow: visible;
 }
 </style>
 <style>

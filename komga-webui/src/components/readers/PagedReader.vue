@@ -1,5 +1,6 @@
 <template>
   <div
+    class="paged-reader full-height"
     v-touch="{
                left: () => {if(swipe) {turnRight()}},
                right: () => {if(swipe) {turnLeft()}},
@@ -267,6 +268,12 @@ export default Vue.extend({
     scrollToPageTop() {
       const scrollTop = () => {
         const scrollingElement = document.scrollingElement || document.documentElement
+        const reader = this.$el as HTMLElement
+        const scrollableElements = [
+          reader,
+          ...Array.from(reader.querySelectorAll('.v-carousel, .v-window, .v-window__container, .v-window-item')),
+        ] as HTMLElement[]
+
         window.scrollTo({top: 0, left: 0, behavior: 'auto'})
         scrollingElement.scrollTop = 0
         scrollingElement.scrollLeft = 0
@@ -274,6 +281,10 @@ export default Vue.extend({
         document.documentElement.scrollLeft = 0
         document.body.scrollTop = 0
         document.body.scrollLeft = 0
+        scrollableElements.forEach(x => {
+          x.scrollTop = 0
+          x.scrollLeft = 0
+        })
       }
 
       scrollTop()
@@ -306,6 +317,11 @@ export default Vue.extend({
 <style scoped>
 .full-height {
   height: 100%;
+}
+
+.paged-reader {
+  position: relative;
+  width: 100%;
 }
 
 .left-quarter {
@@ -359,24 +375,24 @@ export default Vue.extend({
 }
 
 .img-fit-width {
-  width: 100vw;
-  min-height: 100vh;
+  width: 100%;
+  min-height: 100%;
   align-self: flex-start;
 }
 
 .img-double-fit-width {
-  width: 50vw;
-  min-height: 100vh;
+  width: 50%;
+  min-height: 100%;
   align-self: flex-start;
 }
 
 .img-fit-width-shrink-only {
-  max-width: 100vw;
+  max-width: 100%;
   align-self: flex-start;
 }
 
 .img-double-fit-width-shrink-only {
-  max-width: 50vw;
+  max-width: 50%;
   align-self: flex-start;
 }
 
@@ -386,18 +402,18 @@ export default Vue.extend({
 }
 
 .img-fit-height {
-  min-height: 100vh;
-  height: 100vh;
+  min-height: 100%;
+  height: 100%;
 }
 
 .img-fit-screen {
-  width: 100vw;
-  height: 100vh;
+  width: 100%;
+  height: 100%;
 }
 
 .img-double-fit-screen {
-  max-width: 50vw;
-  height: 100vh;
+  max-width: 50%;
+  height: 100%;
 }
 
 .pre-render {
