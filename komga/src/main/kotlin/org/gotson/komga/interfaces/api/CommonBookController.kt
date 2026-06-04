@@ -106,10 +106,12 @@ class CommonBookController(
     bookId: String,
     webPubGenerator: WebPubGenerator,
   ) = bookDtoRepository.findByIdOrNull(bookId, principal.user.id)?.let { bookDto ->
+    val book = bookRepository.findByIdOrNull(bookId) ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
     if (bookDto.media.mediaProfile != MediaProfile.PDF.name) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Book media type '${bookDto.media.mediaType}' not compatible with requested profile")
     contentRestrictionChecker.checkContentRestriction(principal.user, bookDto)
     webPubGenerator.toManifestPdf(
       bookDto,
+      book,
       mediaRepository.findById(bookDto.id),
       seriesMetadataRepository.findById(bookDto.seriesId),
     )

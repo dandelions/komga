@@ -222,6 +222,16 @@
                     {{ $t('common.download') }}
                   </v-btn>
                 </v-col>
+
+                <v-col cols="auto" v-if="isPdf">
+                  <v-btn :title="$t('browse_book.pdf_toc')"
+                         small
+                         :disabled="!canRead || pdfTocLoading"
+                         @click="togglePdfToc">
+                    <v-icon left small>mdi-table-of-contents</v-icon>
+                    {{ $t('browse_book.pdf_toc') }}
+                  </v-btn>
+                </v-col>
               </v-row>
 
               <v-row v-if="book.metadata.summary">
@@ -268,6 +278,16 @@
               {{ $t('common.download') }}
             </v-btn>
           </v-col>
+
+          <v-col cols="auto" v-if="isPdf">
+            <v-btn :title="$t('browse_book.pdf_toc')"
+                   small
+                   :disabled="!canRead || pdfTocLoading"
+                   @click="togglePdfToc">
+              <v-icon left small>mdi-table-of-contents</v-icon>
+              {{ $t('browse_book.pdf_toc') }}
+            </v-btn>
+          </v-col>
         </v-row>
 
         <v-row v-if="book.metadata.summary">
@@ -276,6 +296,31 @@
           </v-col>
         </v-row>
       </template>
+
+      <v-expand-transition>
+        <v-row v-if="showPdfToc && isPdf">
+          <v-col cols="12" md="8" lg="6">
+            <v-progress-linear
+              v-if="pdfTocLoading"
+              indeterminate
+              color="primary"
+            />
+            <toc-list
+              v-else-if="pdfTocFlattened.length > 0"
+              :toc="pdfTocFlattened"
+              @goto="goToPdfTocEntry"
+            />
+            <v-alert
+              v-else
+              type="info"
+              text
+              dense
+            >
+              {{ $t('$vuetify.noDataText') }}
+            </v-alert>
+          </v-col>
+        </v-row>
+      </v-expand-transition>
 
       <v-row v-for="role in displayedRoles"
              :key="role"
@@ -471,10 +516,13 @@ import {BookSseDto, LibrarySseDto, ReadListSseDto, ReadProgressSseDto} from '@/t
 import {RawLocation} from 'vue-router/types/router'
 import {ReadListDto} from '@/types/komga-readlists'
 import {BookSearch, SearchConditionSeriesId, SearchConditionTag, SearchOperatorIs} from '@/types/komga-search'
+import TocList from '@/components/TocList.vue'
+import {TocEntry} from '@/types/epub'
+import {flattenToc} from '@/functions/toc'
 
 export default Vue.extend({
   name: 'BrowseBook',
-  components: {ReadMore, ToolbarSticky, ItemCard, BookActionsMenu, ReadListsExpansionPanels, VueHorizontal, RtlIcon},
+  components: {ReadMore, ToolbarSticky, ItemCard, BookActionsMenu, ReadListsExpansionPanels, VueHorizontal, RtlIcon, TocList},
   data: () => {
     return {
       MediaStatus,
@@ -488,6 +536,10 @@ export default Vue.extend({
       siblingNext: {} as BookDto,
       readLists: [] as ReadListDto[],
       readMore: false,
+      showPdfToc: false,
+      pdfTocLoading: false,
+      pdfTocLoaded: false,
+      pdfToc: [] as TocEntry[],
     }
   },
   async created() {
@@ -520,6 +572,10 @@ export default Vue.extend({
   async beforeRouteUpdate(to, from, next) {
     if (to.params.bookId !== from.params.bookId) {
       this.readMore = false
+      this.showPdfToc = false
+      this.pdfTocLoading = false
+      this.pdfTocLoaded = false
+      this.pdfToc = []
       this.loadBook(to.params.bookId)
     }
 
@@ -528,6 +584,12 @@ export default Vue.extend({
   computed: {
     readRouteName(): string {
       return getBookReadRouteFromMedia(this.book.media)
+    },
+    isPdf(): boolean {
+      return this.book.media?.mediaType === 'application/pdf'
+    },
+    pdfTocFlattened(): TocEntry[] {
+      return flattenToc(this.pdfToc, 1)
     },
     isAdmin(): boolean {
       return this.$store.getters.meAdmin
@@ -690,6 +752,38 @@ export default Vue.extend({
     },
     editBook() {
       this.$store.dispatch('dialogUpdateBooks', this.book)
+    },
+    async togglePdfToc() {
+      this.showPdfToc = !this.showPdfToc
+      if (this.showPdfToc && !this.pdfTocLoaded) {
+        await this.loadPdfToc()
+      }
+    },
+    async loadPdfToc() {
+      this.pdfTocLoading = true
+      try {
+        const manifest = await this.$komgaBooks.getBookWebPubManifestPdf(this.bookId)
+        this.pdfToc = manifest.toc || []
+        this.pdfTocLoaded = true
+      } finally {
+        this.pdfTocLoading = false
+      }
+    },
+    goToPdfTocEntry(tocEntry: TocEntry) {
+      const page = this.getPageFromPdfTocEntry(tocEntry)
+      if (!page) return
+
+      this.$router.push({
+        name: this.readRouteName,
+        params: {bookId: this.bookId},
+        query: {page: page.toString(), context: this.context.origin, contextId: this.context.id},
+      })
+    },
+    getPageFromPdfTocEntry(tocEntry: TocEntry): number | undefined {
+      if (!tocEntry.href) return undefined
+
+      const match = new URL(tocEntry.href, window.location.origin).pathname.match(/\/pages\/(\d+)(?:\/raw)?$/)
+      return match ? Number(match[1]) : undefined
     },
     removeFromReadList(readListId: string) {
       const rl = this.readLists.find(x => x.id == readListId)

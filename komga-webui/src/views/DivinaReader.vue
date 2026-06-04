@@ -21,7 +21,7 @@
           >
             <v-icon>mdi-arrow-left</v-icon>
           </v-btn>
-          <v-toolbar-title> {{ bookTitle }}</v-toolbar-title>
+          <v-toolbar-title class="reader-toolbar-title text-truncate">{{ bookTitle }}</v-toolbar-title>
           <v-spacer></v-spacer>
 
           <v-tooltip bottom v-if="incognito">
@@ -47,6 +47,7 @@
           </v-btn>
 
           <v-btn
+            v-if="$vuetify.breakpoint.mdAndUp"
             icon
             :disabled="continuousReader"
             :title="landscapeDisplay ? 'Portrait' : 'Landscape'"
@@ -56,6 +57,7 @@
           </v-btn>
 
           <v-btn
+            v-if="$vuetify.breakpoint.mdAndUp"
             icon
             :disabled="continuousReader"
             title="Reflow"
@@ -65,18 +67,30 @@
           </v-btn>
 
           <v-btn
+            v-if="$vuetify.breakpoint.mdAndUp"
             icon
             @click="showHelp = !showHelp">
             <v-icon>mdi-help-circle</v-icon>
           </v-btn>
 
           <v-btn
+            v-if="$vuetify.breakpoint.mdAndUp"
             icon
             @click="showExplorer = !showExplorer"
           >
             <v-icon>mdi-view-grid</v-icon>
           </v-btn>
           <v-btn
+            v-if="isPdf && $vuetify.breakpoint.mdAndUp"
+            icon
+            :title="$t('browse_book.pdf_toc')"
+            :disabled="pdfTocLoading"
+            @click="togglePdfToc"
+          >
+            <v-icon>mdi-table-of-contents</v-icon>
+          </v-btn>
+          <v-btn
+            v-if="$vuetify.breakpoint.mdAndUp"
             icon
             @click="showSettings = !showSettings"
           >
@@ -90,6 +104,45 @@
               </v-btn>
             </template>
             <v-list>
+              <template v-if="$vuetify.breakpoint.smAndDown">
+                <v-list-item :disabled="continuousReader" @click="toggleLandscapeDisplay">
+                  <v-list-item-icon>
+                    <v-icon>{{ landscapeDisplay ? 'mdi-phone-rotate-portrait' : 'mdi-phone-rotate-landscape' }}</v-icon>
+                  </v-list-item-icon>
+                  <v-list-item-title>{{ landscapeDisplay ? 'Portrait' : 'Landscape' }}</v-list-item-title>
+                </v-list-item>
+                <v-list-item :disabled="continuousReader" @click="toggleReflowMode">
+                  <v-list-item-icon>
+                    <v-icon>{{ reflowMode ? 'mdi-file-document' : 'mdi-file-document-outline' }}</v-icon>
+                  </v-list-item-icon>
+                  <v-list-item-title>Reflow</v-list-item-title>
+                </v-list-item>
+                <v-list-item @click="showHelp = !showHelp">
+                  <v-list-item-icon>
+                    <v-icon>mdi-help-circle</v-icon>
+                  </v-list-item-icon>
+                  <v-list-item-title>{{ $t('bookreader.help') }}</v-list-item-title>
+                </v-list-item>
+                <v-list-item @click="showExplorer = !showExplorer">
+                  <v-list-item-icon>
+                    <v-icon>mdi-view-grid</v-icon>
+                  </v-list-item-icon>
+                  <v-list-item-title>{{ $t('common.pages') }}</v-list-item-title>
+                </v-list-item>
+                <v-list-item v-if="isPdf" :disabled="pdfTocLoading" @click="togglePdfToc">
+                  <v-list-item-icon>
+                    <v-icon>mdi-table-of-contents</v-icon>
+                  </v-list-item-icon>
+                  <v-list-item-title>{{ $t('browse_book.pdf_toc') }}</v-list-item-title>
+                </v-list-item>
+                <v-list-item @click="showSettings = !showSettings">
+                  <v-list-item-icon>
+                    <v-icon>mdi-cog</v-icon>
+                  </v-list-item-icon>
+                  <v-list-item-title>{{ $t('bookreader.reader_settings') }}</v-list-item-title>
+                </v-list-item>
+                <v-divider/>
+              </template>
               <v-list-item @click="downloadCurrentPage">
                 <v-list-item-title>{{ $t('bookreader.download_current_page') }}</v-list-item-title>
               </v-list-item>
@@ -213,6 +266,45 @@
       @go="goTo"
       :pagesCount="pagesCount"
     ></thumbnail-explorer-dialog>
+
+    <v-bottom-sheet
+      v-model="showPdfToc"
+      :close-on-content-click="false"
+      max-width="500"
+      @keydown.esc.stop=""
+      scrollable
+    >
+      <v-card>
+        <v-toolbar dark color="primary">
+          <v-btn icon dark @click="showPdfToc = false">
+            <v-icon>mdi-close</v-icon>
+          </v-btn>
+          <v-toolbar-title>{{ $t('browse_book.pdf_toc') }}</v-toolbar-title>
+        </v-toolbar>
+
+        <v-card-text class="pa-0">
+          <v-progress-linear
+            v-if="pdfTocLoading"
+            indeterminate
+            color="primary"
+          />
+          <toc-list
+            v-else-if="pdfTocFlattened.length > 0"
+            :toc="pdfTocFlattened"
+            @goto="goToPdfTocEntry"
+          />
+          <v-alert
+            v-else
+            type="info"
+            text
+            dense
+            class="ma-4"
+          >
+            {{ $t('$vuetify.noDataText') }}
+          </v-alert>
+        </v-card-text>
+      </v-card>
+    </v-bottom-sheet>
 
     <v-bottom-sheet
       v-model="showSettings"
@@ -478,6 +570,7 @@ import {Location} from 'vue-router'
 import PagedReader from '@/components/readers/PagedReader.vue'
 import ContinuousReader from '@/components/readers/ContinuousReader.vue'
 import ReflowedPage from '@/components/readers/ReflowedPage.vue'
+import TocList from '@/components/TocList.vue'
 import {ContinuousScaleType, MarginValues, PaddingPercentage, PagedReaderLayout, ScaleType} from '@/types/enum-reader'
 import {
   shortcutsLTR,
@@ -495,6 +588,8 @@ import jsFileDownloader from 'js-file-downloader'
 import screenfull from 'screenfull'
 import {ItemTypes} from '@/types/items'
 import {getBookReadRouteFromMedia} from '@/functions/book-format'
+import {TocEntry} from '@/types/epub'
+import {flattenToc} from '@/functions/toc'
 
 export default Vue.extend({
   name: 'DivinaReader',
@@ -502,6 +597,7 @@ export default Vue.extend({
     ContinuousReader,
     PagedReader,
     ReflowedPage,
+    TocList,
     SettingsSwitch,
     SettingsSelect,
     ThumbnailExplorerDialog,
@@ -531,6 +627,10 @@ export default Vue.extend({
       supportedMediaTypes: ['image/jpeg', 'image/png', 'image/gif'],
       convertTo: 'jpeg',
       showExplorer: false,
+      showPdfToc: false,
+      pdfTocLoading: false,
+      pdfTocLoaded: false,
+      pdfToc: [] as TocEntry[],
       showToolbars: false,
       showSettings: false,
       showHelp: false,
@@ -718,6 +818,12 @@ export default Vue.extend({
     currentPage(): PageDtoWithUrl {
       return this.pages[this.page - 1]
     },
+    isPdf(): boolean {
+      return this.book.media?.mediaType === 'application/pdf'
+    },
+    pdfTocFlattened(): TocEntry[] {
+      return flattenToc(this.pdfToc, 1)
+    },
     nightDisplay(): boolean {
       return this.backgroundColor === 'black'
     },
@@ -883,6 +989,10 @@ export default Vue.extend({
       this.$debug('[setup]', `bookId:${bookId}`, `page:${page}`)
       this.book = await this.$komgaBooks.getBook(bookId)
       this.series = await this.$komgaSeries.getOneSeries(this.book.seriesId)
+      this.showPdfToc = false
+      this.pdfTocLoading = false
+      this.pdfTocLoaded = false
+      this.pdfToc = []
 
       // parse query params to get context and contextId
       if (this.$route.query.contextId && this.$route.query.context
@@ -1069,6 +1179,35 @@ export default Vue.extend({
     toggleExplorer() {
       this.showExplorer = !this.showExplorer
     },
+    async togglePdfToc() {
+      this.showPdfToc = !this.showPdfToc
+      if (this.showPdfToc && !this.pdfTocLoaded) {
+        await this.loadPdfToc()
+      }
+    },
+    async loadPdfToc() {
+      this.pdfTocLoading = true
+      try {
+        const manifest = await this.$komgaBooks.getBookWebPubManifestPdf(this.bookId)
+        this.pdfToc = manifest.toc || []
+        this.pdfTocLoaded = true
+      } finally {
+        this.pdfTocLoading = false
+      }
+    },
+    goToPdfTocEntry(tocEntry: TocEntry) {
+      const page = this.getPageFromPdfTocEntry(tocEntry)
+      if (!page) return
+
+      this.showPdfToc = false
+      this.goTo(page)
+    },
+    getPageFromPdfTocEntry(tocEntry: TocEntry): number | undefined {
+      if (!tocEntry.href) return undefined
+
+      const match = new URL(tocEntry.href, window.location.origin).pathname.match(/\/pages\/(\d+)(?:\/raw)?$/)
+      return match ? Number(match[1]) : undefined
+    },
     toggleSettings() {
       this.showSettings = !this.showSettings
     },
@@ -1144,6 +1283,10 @@ export default Vue.extend({
         this.showExplorer = false
         return
       }
+      if (this.showPdfToc) {
+        this.showPdfToc = false
+        return
+      }
       if (this.showSettings) {
         this.showSettings = false
         return
@@ -1208,6 +1351,10 @@ export default Vue.extend({
 
 .full-width {
   width: 100%;
+}
+
+.reader-toolbar-title {
+  min-width: 0;
 }
 
 .reader-landscape-shell {

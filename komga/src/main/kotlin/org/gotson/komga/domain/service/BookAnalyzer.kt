@@ -25,6 +25,7 @@ import org.gotson.komga.infrastructure.mediacontainer.divina.DivinaExtractor
 import org.gotson.komga.infrastructure.mediacontainer.epub.EpubExtractor
 import org.gotson.komga.infrastructure.mediacontainer.epub.epub
 import org.gotson.komga.infrastructure.mediacontainer.pdf.PdfExtractor
+import org.gotson.komga.infrastructure.mediacontainer.pdf.PdfTocEntry
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
@@ -420,4 +421,12 @@ class BookAnalyzer(
       )
     }
   }
+
+  fun getPdfToc(book: Book): List<PdfTocEntry> =
+    try {
+      pdfExtractor.getToc(book.path)
+    } catch (e: Exception) {
+      logger.error(e) { "Error while getting PDF TOC" }
+      emptyList()
+    }
 }

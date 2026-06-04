@@ -1,5 +1,6 @@
 import {Context} from '@/types/context'
 import {CopyMode} from '@/types/enum-books'
+import {TocEntry} from '@/types/epub'
 
 export interface BookDto {
   id: string,
@@ -128,6 +129,10 @@ export interface ReadProgressUpdateDto {
 export interface BookFormat {
   type: string,
   color: string
+}
+
+export interface WebPubManifestDto {
+  toc?: TocEntry[]
 }
 
 export interface BookImportBatchDto {

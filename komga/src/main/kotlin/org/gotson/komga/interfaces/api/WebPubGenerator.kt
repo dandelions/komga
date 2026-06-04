@@ -1,5 +1,6 @@
 package org.gotson.komga.interfaces.api
 
+import org.gotson.komga.domain.model.Book
 import org.gotson.komga.domain.model.BookPage
 import org.gotson.komga.domain.model.EpubTocEntry
 import org.gotson.komga.domain.model.Media
@@ -12,6 +13,7 @@ import org.gotson.komga.domain.persistence.MediaRepository
 import org.gotson.komga.domain.service.BookAnalyzer
 import org.gotson.komga.infrastructure.image.ImageConverter
 import org.gotson.komga.infrastructure.image.ImageType
+import org.gotson.komga.infrastructure.mediacontainer.pdf.PdfTocEntry
 import org.gotson.komga.interfaces.api.dto.MEDIATYPE_DIVINA_JSON
 import org.gotson.komga.interfaces.api.dto.MEDIATYPE_DIVINA_JSON_VALUE
 import org.gotson.komga.interfaces.api.dto.MEDIATYPE_WEBPUB_JSON
@@ -121,6 +123,7 @@ class WebPubGenerator(
 
   fun toManifestPdf(
     bookDto: BookDto,
+    book: Book,
     media: Media,
     seriesMetadata: SeriesMetadata,
   ): WPPublicationDto {
@@ -137,6 +140,7 @@ class WebPubGenerator(
             )
           },
         resources = buildThumbnailLinkDtos(bookDto.id),
+        toc = bookAnalyzer.getPdfToc(book).map { entry -> entry.toWPLinkDto(uriBuilder.cloneBuilder(), bookDto.id) },
       )
     }
   }
@@ -208,6 +212,17 @@ class WebPubGenerator(
           uriBuilder.cloneBuilder().path(h).toUriString() + if (fragment.isNotEmpty()) "#$fragment" else ""
         },
       children = children.map { it.toWPLinkDto(uriBuilder) },
+    )
+
+  private fun PdfTocEntry.toWPLinkDto(
+    uriBuilder: UriComponentsBuilder,
+    bookId: String,
+  ): WPLinkDto =
+    WPLinkDto(
+      title = title,
+      href = pageNumber?.let { uriBuilder.cloneBuilder().path("books/$bookId/pages/$it/raw").toUriString() },
+      type = pageNumber?.let { KomgaMediaType.PDF.type },
+      children = children.map { it.toWPLinkDto(uriBuilder, bookId) },
     )
 
   protected fun toWPMetadataDto(bookDto: BookDto) =

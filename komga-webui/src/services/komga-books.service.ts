@@ -7,6 +7,7 @@ import {
   BookThumbnailDto,
   PageDto,
   ReadProgressUpdateDto,
+  WebPubManifestDto,
 } from '@/types/komga-books'
 import {ReadListDto} from '@/types/komga-readlists'
 import {R2Progression} from '@/types/readium'
@@ -113,6 +114,18 @@ export default class KomgaBooksService {
       return (await this.http.get(`${API_BOOKS}/${bookId}/pages`)).data
     } catch (e) {
       let msg = 'An error occurred while trying to retrieve book pages'
+      if (e.response.data.message) {
+        msg += `: ${e.response.data.message}`
+      }
+      throw new Error(msg)
+    }
+  }
+
+  async getBookWebPubManifestPdf(bookId: string): Promise<WebPubManifestDto> {
+    try {
+      return (await this.http.get(`${API_BOOKS}/${bookId}/manifest/pdf`)).data
+    } catch (e) {
+      let msg = 'An error occurred while trying to retrieve PDF manifest'
       if (e.response.data.message) {
         msg += `: ${e.response.data.message}`
       }
