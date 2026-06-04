@@ -312,6 +312,38 @@
               </v-list-item>
               <template v-if="reflowMode">
                 <v-list-item>
+                  <settings-switch v-model="reflowSettings.autoCropBorder" label="Auto crop borders"/>
+                </v-list-item>
+                <v-list-item>
+                  <v-slider
+                    v-model="reflowSettings.threshold"
+                    label="Threshold"
+                    min="50"
+                    max="230"
+                    thumb-label
+                  />
+                </v-list-item>
+                <v-list-item>
+                  <v-slider
+                    v-model="reflowSettings.columnGap"
+                    label="Col Gap"
+                    min="5"
+                    max="80"
+                    thumb-label
+                    suffix="px"
+                  />
+                </v-list-item>
+                <v-list-item>
+                  <v-slider
+                    v-model="reflowSettings.wordGap"
+                    label="Word Gap"
+                    min="1"
+                    max="30"
+                    thumb-label
+                    suffix="px"
+                  />
+                </v-list-item>
+                <v-list-item>
                   <v-slider
                     v-model="reflowSettings.marginTop"
                     label="Top crop"
@@ -495,6 +527,10 @@ export default Vue.extend({
       landscapeDisplay: false,
       reflowMode: false,
       reflowSettings: {
+        autoCropBorder: true,
+        threshold: 185,
+        columnGap: 15,
+        wordGap: 3,
         marginTop: 0,
         marginRight: 0,
         marginBottom: 0,

@@ -1,6 +1,48 @@
 <template>
   <div class="reflowed-page">
-    <div v-if="loading" class="reflow-status">Reflowing...</div>
+    <div class="reflow-controls" @click.stop>
+      <button type="button" class="reflow-control" @click="toggleCropMode">
+        {{ cropMode ? 'Done' : 'Select area' }}
+      </button>
+      <button
+        type="button"
+        class="reflow-control"
+        :disabled="!cropRoi && !cropMode"
+        @click="resetCrop"
+      >
+        Reset area
+      </button>
+    </div>
+
+    <div
+      v-if="cropMode"
+      class="crop-panel"
+      @click.stop
+    >
+      <div
+        class="crop-stage"
+        @pointerdown.stop="startCrop"
+        @pointermove.stop="moveCrop"
+        @pointerup.stop="finishCrop"
+        @pointercancel.stop="cancelDraftCrop"
+      >
+        <img
+          v-if="objectUrl"
+          ref="cropImage"
+          :src="objectUrl"
+          class="crop-image"
+          alt=""
+          draggable="false"
+          @dragstart.prevent
+        />
+        <div
+          v-if="activeRoi"
+          class="crop-rect"
+          :style="cropRectStyle"
+        />
+      </div>
+    </div>
+    <div v-else-if="loading" class="reflow-status">Reflowing...</div>
     <div v-else-if="error" class="reflow-status">Unable to reflow this page</div>
     <div v-else class="reflow-wrapper">
       <div v-if="wordBlocks.length === 0" class="reflow-status">No text blocks detected</div>
@@ -21,6 +63,10 @@ import Vue from 'vue'
 import {PageDtoWithUrl} from '@/types/komga-books'
 
 type ReflowOptions = {
+  autoCropBorder: boolean,
+  threshold: number,
+  columnGap: number,
+  wordGap: number,
   marginTop: number,
   marginRight: number,
   marginBottom: number,
@@ -61,6 +107,7 @@ const COLUMN_GAP = 15
 const WORD_GAP = 3
 const BLOCK_PADDING = 1
 const WORD_SCALE = 1
+const MIN_CROP_SIZE = 15
 
 export default Vue.extend({
   name: 'ReflowedPage',
@@ -85,7 +132,28 @@ export default Vue.extend({
       wordBlocks: [] as RenderedWordBlock[],
       objectUrl: '',
       requestId: 0,
+      imageSize: {w: 0, h: 0},
+      cropMode: false,
+      drawingCrop: false,
+      cropStart: {x: 0, y: 0},
+      cropRoi: undefined as Roi | undefined,
+      draftRoi: undefined as Roi | undefined,
     }
+  },
+  computed: {
+    activeRoi(): Roi | undefined {
+      return this.draftRoi || this.cropRoi
+    },
+    cropRectStyle(): object {
+      const roi = this.activeRoi
+      if (!roi || !this.imageSize.w || !this.imageSize.h) return {}
+      return {
+        left: `${roi.x / this.imageSize.w * 100}%`,
+        top: `${roi.y / this.imageSize.h * 100}%`,
+        width: `${roi.w / this.imageSize.w * 100}%`,
+        height: `${roi.h / this.imageSize.h * 100}%`,
+      }
+    },
   },
   watch: {
     page: {
@@ -115,6 +183,7 @@ export default Vue.extend({
       try {
         const image = await this.loadPageImage(this.page.url)
         if (requestId !== this.requestId) return
+        this.imageSize = {w: image.naturalWidth, h: image.naturalHeight}
         const canvas = document.createElement('canvas')
         canvas.width = image.naturalWidth
         canvas.height = image.naturalHeight
@@ -151,11 +220,12 @@ export default Vue.extend({
     },
     detectWordBlocks(imageData: ImageData, width: number, height: number): WordBlock[] {
       const pixels = imageData.data
+      const threshold = this.clampNumber(this.options.threshold, 50, 230, THRESHOLD)
       const isInk = (x: number, y: number): boolean => {
         if (x < 0 || x >= width || y < 0 || y >= height) return false
         const index = (y * width + x) * 4
         const luma = 0.299 * pixels[index] + 0.587 * pixels[index + 1] + 0.114 * pixels[index + 2]
-        return luma < THRESHOLD
+        return luma < threshold
       }
 
       const roi = this.detectRoi(isInk, width, height)
@@ -172,9 +242,12 @@ export default Vue.extend({
       return blocks
     },
     detectRoi(isInk: (x: number, y: number) => boolean, width: number, height: number): Roi {
+      if (this.cropRoi) return this.clampRoi(this.cropRoi, width, height)
+
       let roi = this.manualRoi(width, height)
       const manualCrop = this.options.marginTop || this.options.marginRight || this.options.marginBottom || this.options.marginLeft
       if (manualCrop) return roi
+      if (this.options.autoCropBorder === false) return roi
 
       const rowInkDensity = new Array(height).fill(0)
       for (let y = 0; y < height; y++) {
@@ -236,6 +309,13 @@ export default Vue.extend({
       if (roi.w <= 10 || roi.h <= 10) roi = {x: 0, y: 0, w: width, h: height}
       return roi
     },
+    clampRoi(roi: Roi, width: number, height: number): Roi {
+      const x = this.clampNumber(Math.floor(roi.x), 0, width - 1, 0)
+      const y = this.clampNumber(Math.floor(roi.y), 0, height - 1, 0)
+      const right = this.clampNumber(Math.ceil(roi.x + roi.w), x + 1, width, width)
+      const bottom = this.clampNumber(Math.ceil(roi.y + roi.h), y + 1, height, height)
+      return {x, y, w: right - x, h: bottom - y}
+    },
     manualRoi(width: number, height: number): Roi {
       const left = Math.floor(width * this.clampPercent(this.options.marginLeft) / 100)
       const right = Math.ceil(width * (1 - this.clampPercent(this.options.marginRight) / 100))
@@ -250,6 +330,11 @@ export default Vue.extend({
     },
     clampPercent(value: number): number {
       return Math.max(0, Math.min(45, value || 0))
+    },
+    clampNumber(value: number, min: number, max: number, fallback: number): number {
+      const numberValue = Number(value)
+      if (Number.isNaN(numberValue)) return fallback
+      return Math.max(min, Math.min(max, numberValue))
     },
     detectColumns(isInk: (x: number, y: number) => boolean, width: number, height: number, roi: Roi): Column[] {
       const colInk = new Array(width).fill(0)
@@ -275,7 +360,8 @@ export default Vue.extend({
       return columns.length > 0 ? columns : [{start: roi.x, end: roi.x + roi.w}]
     },
     realColumnGap(colInk: number[], start: number, end: number): boolean {
-      for (let x = start; x < Math.min(start + COLUMN_GAP, end); x++) {
+      const columnGap = this.clampNumber(this.options.columnGap, 5, 80, COLUMN_GAP)
+      for (let x = start; x < Math.min(start + columnGap, end); x++) {
         if (colInk[x] > 1) return false
       }
       return true
@@ -335,7 +421,8 @@ export default Vue.extend({
       return words
     },
     realWordGap(wordInk: number[], start: number, end: number, gapInkTolerance: number): boolean {
-      for (let x = start; x < Math.min(start + WORD_GAP, end); x++) {
+      const wordGap = this.clampNumber(this.options.wordGap, 1, 30, WORD_GAP)
+      for (let x = start; x < Math.min(start + wordGap, end); x++) {
         if (wordInk[x] > gapInkTolerance) return false
       }
       return true
@@ -393,6 +480,67 @@ export default Vue.extend({
 
       return rendered
     },
+    toggleCropMode() {
+      this.cropMode = !this.cropMode
+      this.draftRoi = undefined
+      this.drawingCrop = false
+    },
+    resetCrop() {
+      this.cropRoi = undefined
+      this.draftRoi = undefined
+      this.drawingCrop = false
+      this.cropMode = false
+      this.reflow()
+    },
+    startCrop(event: PointerEvent) {
+      if (!this.cropMode || !this.imageSize.w || !this.imageSize.h) return
+      const target = event.currentTarget as HTMLElement
+      target.setPointerCapture(event.pointerId)
+      this.drawingCrop = true
+      this.cropStart = this.cropPoint(event)
+      this.draftRoi = {x: this.cropStart.x, y: this.cropStart.y, w: 1, h: 1}
+      event.preventDefault()
+    },
+    moveCrop(event: PointerEvent) {
+      if (!this.drawingCrop) return
+      this.draftRoi = this.normalizedRoi(this.cropStart, this.cropPoint(event))
+      event.preventDefault()
+    },
+    finishCrop(event: PointerEvent) {
+      if (!this.drawingCrop) return
+      this.drawingCrop = false
+      const roi = this.normalizedRoi(this.cropStart, this.cropPoint(event))
+      this.draftRoi = undefined
+      if (roi.w > MIN_CROP_SIZE && roi.h > MIN_CROP_SIZE) {
+        this.cropRoi = roi
+        this.cropMode = false
+        this.reflow()
+      }
+      event.preventDefault()
+    },
+    cancelDraftCrop() {
+      this.drawingCrop = false
+      this.draftRoi = undefined
+    },
+    cropPoint(event: PointerEvent): {x: number, y: number} {
+      const image = this.$refs.cropImage as HTMLImageElement | undefined
+      const rect = image?.getBoundingClientRect()
+      if (!rect || !this.imageSize.w || !this.imageSize.h) return {x: 0, y: 0}
+      return {
+        x: this.clampNumber((event.clientX - rect.left) * this.imageSize.w / (rect.width || 1), 0, this.imageSize.w, 0),
+        y: this.clampNumber((event.clientY - rect.top) * this.imageSize.h / (rect.height || 1), 0, this.imageSize.h, 0),
+      }
+    },
+    normalizedRoi(start: {x: number, y: number}, end: {x: number, y: number}): Roi {
+      const x = Math.min(start.x, end.x)
+      const y = Math.min(start.y, end.y)
+      return {
+        x,
+        y,
+        w: Math.abs(end.x - start.x),
+        h: Math.abs(end.y - start.y),
+      }
+    },
   },
 })
 </script>
@@ -401,6 +549,8 @@ export default Vue.extend({
 .reflowed-page {
   width: 100%;
   min-height: 100%;
+  position: relative;
+  z-index: 2;
 }
 
 .reflow-wrapper {
@@ -430,5 +580,61 @@ export default Vue.extend({
   height: auto;
   max-width: 100%;
   object-fit: contain;
+}
+
+.reflow-controls {
+  position: sticky;
+  top: 8px;
+  z-index: 4;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px;
+  pointer-events: auto;
+}
+
+.reflow-control {
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #212121;
+  padding: 6px 10px;
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.reflow-control:disabled {
+  color: #9e9e9e;
+}
+
+.crop-panel {
+  min-height: 100vh;
+  padding: 8px;
+  box-sizing: border-box;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+.crop-stage {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  touch-action: none;
+  user-select: none;
+}
+
+.crop-image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.crop-rect {
+  position: absolute;
+  border: 2px dashed #f97316;
+  background: rgba(249, 115, 22, 0.12);
+  box-sizing: border-box;
+  pointer-events: none;
 }
 </style>
