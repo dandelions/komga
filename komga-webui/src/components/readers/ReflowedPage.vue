@@ -1,17 +1,31 @@
 <template>
   <div class="reflowed-page">
     <div class="reflow-controls" @click.stop>
-      <button type="button" class="reflow-control" @click="toggleCropMode">
-        {{ cropMode ? 'Done' : 'Select area' }}
-      </button>
-      <button
-        type="button"
-        class="reflow-control"
-        :disabled="!cropRoi && !cropMode"
-        @click="resetCrop"
-      >
-        Reset area
-      </button>
+      <label class="reflow-font-control">
+        <span>Text size</span>
+        <input
+          type="range"
+          min="40"
+          max="140"
+          step="5"
+          :value="textScalePercent"
+          @input="setTextScale"
+        />
+        <span class="reflow-font-value">{{ textScalePercent }}%</span>
+      </label>
+      <div class="reflow-action-controls">
+        <button type="button" class="reflow-control" @click="toggleCropMode">
+          {{ cropMode ? 'Done' : 'Select area' }}
+        </button>
+        <button
+          type="button"
+          class="reflow-control"
+          :disabled="!cropRoi && !cropMode"
+          @click="resetCrop"
+        >
+          Reset area
+        </button>
+      </div>
     </div>
 
     <div
@@ -146,6 +160,9 @@ export default Vue.extend({
     }
   },
   computed: {
+    textScalePercent(): number {
+      return this.clampNumber(this.options.textScale, 40, 140, WORD_SCALE * 100)
+    },
     activeRoi(): Roi | undefined {
       return this.draftRoi || this.cropRoi
     },
@@ -499,7 +516,11 @@ export default Vue.extend({
       return rendered
     },
     textScale(): number {
-      return this.clampNumber(this.options.textScale, 40, 140, WORD_SCALE * 100) / 100
+      return this.textScalePercent / 100
+    },
+    setTextScale(event: Event) {
+      const target = event.target as HTMLInputElement
+      this.$emit('text-scale-change', this.clampNumber(Number(target.value), 40, 140, WORD_SCALE * 100))
     },
     toggleCropMode() {
       this.cropMode = !this.cropMode
@@ -615,13 +636,48 @@ export default Vue.extend({
 
 .reflow-controls {
   position: sticky;
-  top: 8px;
+  top: 0;
   z-index: 4;
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  box-sizing: border-box;
+  background: rgba(248, 250, 252, 0.94);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.12);
+  pointer-events: auto;
+}
+
+.reflow-action-controls {
+  display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
-  padding: 8px;
-  pointer-events: auto;
+}
+
+.reflow-font-control {
+  flex: 1 1 240px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #212121;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.reflow-font-control input {
+  flex: 1;
+  min-width: 120px;
+}
+
+.reflow-font-value {
+  min-width: 44px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .reflow-control {

@@ -216,6 +216,7 @@
           :page="currentPage"
           :target-width="reflowTargetWidth"
           :options="reflowOptions"
+          @text-scale-change="setReflowTextScale"
         />
 
         <div
@@ -1220,6 +1221,9 @@ export default Vue.extend({
     toggleReflowMode() {
       this.reflowMode = !this.reflowMode
       if (!this.reflowMode) this.$nextTick(() => this.scrollToPageEdge('top'))
+    },
+    setReflowTextScale(textScale: number) {
+      this.reflowSettings.textScale = textScale
     },
     reflowPreviousPage() {
       if (this.page > 1) {
