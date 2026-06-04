@@ -33,7 +33,6 @@
                  :src="page.url"
                  :class="imgClass(spread)"
                  class="img-fit-all"
-                 :style="imageStyle" 
             />
           </div>
         </div>
@@ -122,9 +121,6 @@ export default Vue.extend({
       type: String as () => ScaleType,
       required: true,
     },
-    rotation: { type: Number, default: 0 },
-    brightness: { type: Number, default: 100 },
-    contrast: { type: Number, default: 100 },
   },
   watch: {
     pages: {
@@ -200,20 +196,6 @@ export default Vue.extend({
     },
     isDoublePages(): boolean {
       return this.pageLayout === PagedReaderLayout.DOUBLE_PAGES || this.pageLayout === PagedReaderLayout.DOUBLE_NO_COVER
-    },
-    imageStyle (): any {
-      const isRotated = this.rotation !== 0
-      return {
-        filter: `brightness(${this.brightness || 100}%) contrast(${this.contrast || 100}%)`,
-        transform: isRotated ? `rotate(${this.rotation}deg)` : 'none',
-        transformOrigin: 'center center',
-        // 关键：在 PagedReader 的轮播容器中，旋转 90 度后
-        // 逻辑宽度受限于视口高度 (vh)，逻辑高度受限于视口宽度 (vw)
-        maxWidth: isRotated ? '100vh' : '100vw',
-        maxHeight: isRotated ? '100vw' : '100vh',
-        pointerEvents: 'none', // 穿透点击，确保能触发父层的左右翻页热区
-        transition: 'transform 0.2s, filter 0.2s',
-      }
     },
   },
   methods: {
@@ -396,17 +378,5 @@ export default Vue.extend({
   position: fixed;
   right: -1000vw;
   top: -1000vh;
-}
-
-/* 确保轮播条目容器允许旋转后的内容溢出或居中显示 */
-.full-height.d-flex {
-  overflow: visible !important;
-}
-
-.img-fit-all {
-  /* 确保图片缩放模式不会破坏旋转效果 */
-  object-fit: contain !important;
-  display: block;
-  margin: auto;
 }
 </style>
