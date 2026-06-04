@@ -2,14 +2,17 @@
   <div class="reflowed-page">
     <div v-if="loading" class="reflow-status">Reflowing...</div>
     <div v-else-if="error" class="reflow-status">Unable to reflow this page</div>
-    <canvas
-      v-for="(segment, i) in renderedSegments"
-      :key="`segment-${i}`"
-      ref="segmentCanvases"
-      class="reflowed-segment"
-      :width="segment.width"
-      :height="segment.height"
-    />
+    <div v-else class="reflow-wrapper">
+      <div v-if="wordBlocks.length === 0" class="reflow-status">No text blocks detected</div>
+      <img
+        v-for="(block, i) in wordBlocks"
+        :key="`word-${i}`"
+        :src="block.src"
+        class="word-block"
+        :style="`height: ${block.height}px`"
+        alt=""
+      />
+    </div>
   </div>
 </template>
 
@@ -24,29 +27,38 @@ type ReflowOptions = {
   marginLeft: number,
 }
 
-type Segment = {
-  sx: number,
-  sy: number,
-  sw: number,
-  sh: number,
+type Roi = {
+  x: number,
+  y: number,
+  w: number,
+  h: number,
 }
 
-type RenderedSegment = Segment & {
-  width: number,
+type Column = {
+  start: number,
+  end: number,
+}
+
+type Line = {
+  start: number,
+  end: number,
+}
+
+type WordBlock = {
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+}
+
+type RenderedWordBlock = WordBlock & {
+  src: string,
   height: number,
 }
 
-type Rect = {
-  left: number,
-  top: number,
-  right: number,
-  bottom: number,
-}
-
-const ANALYSIS_WIDTH = 900
-const INK_THRESHOLD = 28
-const DENSITY_THRESHOLD = 0.002
-const GAP_DENSITY_THRESHOLD = 0.001
+const THRESHOLD = 185
+const COLUMN_GAP = 15
+const WORD_SCALE = 1
 
 export default Vue.extend({
   name: 'ReflowedPage',
@@ -68,9 +80,9 @@ export default Vue.extend({
     return {
       loading: false,
       error: false,
-      image: undefined as HTMLImageElement | undefined,
-      renderedSegments: [] as RenderedSegment[],
-      reflowRequestId: 0,
+      wordBlocks: [] as RenderedWordBlock[],
+      objectUrl: '',
+      requestId: 0,
     }
   },
   watch: {
@@ -80,9 +92,6 @@ export default Vue.extend({
       },
       immediate: true,
     },
-    targetWidth() {
-      this.renderSegments()
-    },
     options: {
       handler() {
         this.reflow()
@@ -90,250 +99,262 @@ export default Vue.extend({
       deep: true,
     },
   },
+  destroyed() {
+    this.revokeObjectUrl()
+  },
   methods: {
     async reflow() {
-      const reflowRequestId = this.reflowRequestId + 1
-      this.reflowRequestId = reflowRequestId
+      const requestId = this.requestId + 1
+      this.requestId = requestId
       this.loading = true
       this.error = false
-      this.renderedSegments = []
+      this.wordBlocks = []
 
       try {
-        const image = await this.loadImage(this.page.url)
-        if (reflowRequestId !== this.reflowRequestId) return
-        this.image = image
-        const segments = this.detectSegments(image)
-        if (reflowRequestId !== this.reflowRequestId) return
-        this.renderSegments(segments)
+        const image = await this.loadPageImage(this.page.url)
+        if (requestId !== this.requestId) return
+        const canvas = document.createElement('canvas')
+        canvas.width = image.naturalWidth
+        canvas.height = image.naturalHeight
+        const context = canvas.getContext('2d')
+        if (!context) throw new Error('Canvas is unavailable')
+        context.drawImage(image, 0, 0)
+        const imageData = context.getImageData(0, 0, canvas.width, canvas.height)
+        const blocks = this.detectWordBlocks(imageData, canvas.width, canvas.height)
+        if (requestId !== this.requestId) return
+        this.wordBlocks = this.renderWordBlocks(canvas, blocks)
       } catch (e) {
-        if (reflowRequestId !== this.reflowRequestId) return
+        if (requestId !== this.requestId) return
         this.error = true
       } finally {
-        if (reflowRequestId === this.reflowRequestId) this.loading = false
+        if (requestId === this.requestId) this.loading = false
       }
     },
-    loadImage(url: string): Promise<HTMLImageElement> {
+    async loadPageImage(url: string): Promise<HTMLImageElement> {
+      this.revokeObjectUrl()
+      const response = await fetch(url, {credentials: 'include'})
+      if (!response.ok) throw new Error(`Unable to load page: ${response.status}`)
+      const blob = await response.blob()
+      this.objectUrl = URL.createObjectURL(blob)
       return new Promise((resolve, reject) => {
         const image = new Image()
         image.onload = () => resolve(image)
         image.onerror = reject
-        image.src = url
+        image.src = this.objectUrl
       })
     },
-    detectSegments(image: HTMLImageElement): Segment[] {
-      const scale = Math.min(1, ANALYSIS_WIDTH / image.naturalWidth)
-      const width = Math.max(1, Math.floor(image.naturalWidth * scale))
-      const height = Math.max(1, Math.floor(image.naturalHeight * scale))
-      const canvas = document.createElement('canvas')
-      canvas.width = width
-      canvas.height = height
-      const context = canvas.getContext('2d')
-      if (!context) return [this.fullPageSegment(image)]
-
-      context.drawImage(image, 0, 0, width, height)
-      const data = context.getImageData(0, 0, width, height).data
-      const background = this.estimateBackground(data, width, height)
-      const manualRect = this.manualRect(width, height)
-      const contentRect = this.contentRect(data, width, height, background, manualRect)
-      const columns = this.detectColumns(data, width, height, background, contentRect)
-      const segments = columns.flatMap(column => this.detectBands(data, width, height, background, column))
-
-      if (segments.length === 0) return [this.rectToSegment(contentRect, scale)]
-      return segments.map(segment => this.rectToSegment(segment, scale))
+    revokeObjectUrl() {
+      if (this.objectUrl) URL.revokeObjectURL(this.objectUrl)
+      this.objectUrl = ''
     },
-    fullPageSegment(image: HTMLImageElement): Segment {
-      return {sx: 0, sy: 0, sw: image.naturalWidth, sh: image.naturalHeight}
+    detectWordBlocks(imageData: ImageData, width: number, height: number): WordBlock[] {
+      const pixels = imageData.data
+      const isInk = (x: number, y: number): boolean => {
+        if (x < 0 || x >= width || y < 0 || y >= height) return false
+        const index = (y * width + x) * 4
+        const luma = 0.299 * pixels[index] + 0.587 * pixels[index + 1] + 0.114 * pixels[index + 2]
+        return luma < THRESHOLD
+      }
+
+      const roi = this.detectRoi(isInk, width, height)
+      const columns = this.detectColumns(isInk, width, height, roi)
+      const blocks = [] as WordBlock[]
+
+      columns.forEach(column => {
+        const columnWidth = column.end - column.start
+        if (columnWidth < 8) return
+        const lines = this.detectLines(isInk, column, roi)
+        lines.forEach(line => blocks.push(...this.detectWords(isInk, column, line)))
+      })
+
+      return blocks
     },
-    manualRect(width: number, height: number): Rect {
+    detectRoi(isInk: (x: number, y: number) => boolean, width: number, height: number): Roi {
+      let roi = this.manualRoi(width, height)
+      const manualCrop = this.options.marginTop || this.options.marginRight || this.options.marginBottom || this.options.marginLeft
+      if (manualCrop) return roi
+
+      const rowInkDensity = new Array(height).fill(0)
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          if (isInk(x, y)) rowInkDensity[y]++
+        }
+      }
+
+      const topLimit = Math.floor(height * 0.15)
+      let bestTopSplit = 0
+      let whiteRows = 0
+      let maxTopGap = 0
+      for (let y = 5; y < topLimit; y++) {
+        if (rowInkDensity[y] <= 1) {
+          whiteRows++
+          if (whiteRows > maxTopGap) {
+            maxTopGap = whiteRows
+            bestTopSplit = y
+          }
+        } else {
+          whiteRows = 0
+        }
+      }
+      if (bestTopSplit > 10 && maxTopGap > 4) roi.y = bestTopSplit + 2
+
+      const bottomLimit = Math.floor(height * 0.85)
+      let bestBottomSplit = height
+      whiteRows = 0
+      let maxBottomGap = 0
+      for (let y = height - 6; y > bottomLimit; y--) {
+        if (rowInkDensity[y] <= 1) {
+          whiteRows++
+          if (whiteRows > maxBottomGap) {
+            maxBottomGap = whiteRows
+            bestBottomSplit = y - whiteRows
+          }
+        } else {
+          whiteRows = 0
+        }
+      }
+      if (bestBottomSplit < height - 10 && maxBottomGap > 4) roi.h = bestBottomSplit - roi.y - 2
+
+      const sideLimit = Math.floor(width * 0.06)
+      for (let x = 0; x < sideLimit; x++) {
+        let ink = 0
+        for (let y = roi.y; y < roi.y + roi.h; y++) {
+          if (isInk(x, y)) ink++
+        }
+        if (ink > 0) roi.x = x + 1
+      }
+      for (let x = width - 1; x > width - sideLimit; x--) {
+        let ink = 0
+        for (let y = roi.y; y < roi.y + roi.h; y++) {
+          if (isInk(x, y)) ink++
+        }
+        if (ink > 0) roi.w = x - roi.x
+      }
+
+      if (roi.w <= 10 || roi.h <= 10) roi = {x: 0, y: 0, w: width, h: height}
+      return roi
+    },
+    manualRoi(width: number, height: number): Roi {
       const left = Math.floor(width * this.clampPercent(this.options.marginLeft) / 100)
       const right = Math.ceil(width * (1 - this.clampPercent(this.options.marginRight) / 100))
       const top = Math.floor(height * this.clampPercent(this.options.marginTop) / 100)
       const bottom = Math.ceil(height * (1 - this.clampPercent(this.options.marginBottom) / 100))
       return {
-        left: Math.min(left, width - 1),
-        top: Math.min(top, height - 1),
-        right: Math.max(right, left + 1),
-        bottom: Math.max(bottom, top + 1),
+        x: Math.min(left, width - 1),
+        y: Math.min(top, height - 1),
+        w: Math.max(1, right - left),
+        h: Math.max(1, bottom - top),
       }
     },
     clampPercent(value: number): number {
       return Math.max(0, Math.min(45, value || 0))
     },
-    contentRect(data: Uint8ClampedArray, width: number, height: number, background: number, rect: Rect): Rect {
-      const columnDensity = this.columnDensity(data, width, background, rect)
-      const rowDensity = this.rowDensity(data, width, background, rect)
-      let left = this.firstAbove(columnDensity, DENSITY_THRESHOLD, rect.left)
-      let right = this.lastAbove(columnDensity, DENSITY_THRESHOLD, rect.left) + 1
-      let top = this.firstAbove(rowDensity, DENSITY_THRESHOLD, rect.top)
-      let bottom = this.lastAbove(rowDensity, DENSITY_THRESHOLD, rect.top) + 1
-
-      if (left < 0 || right <= left || top < 0 || bottom <= top) return rect
-
-      const autoRect = this.trimDecorativeEdges({left, top, right, bottom}, columnDensity, rect.left)
-      left = autoRect.left
-      right = autoRect.right
-      return {left, top, right, bottom}
-    },
-    trimDecorativeEdges(rect: Rect, densities: number[], offset: number): Rect {
-      const width = rect.right - rect.left
-      const maxDecorationWidth = Math.floor(width * 0.12)
-      const minGapWidth = Math.max(6, Math.floor(width * 0.025))
-      const leftGap = this.firstGap(densities, rect.left - offset, rect.right - offset, minGapWidth)
-      const rightGap = this.lastGap(densities, rect.left - offset, rect.right - offset, minGapWidth)
-
-      if (leftGap > 0 && leftGap - (rect.left - offset) < maxDecorationWidth) rect.left = leftGap + offset
-      if (rightGap > 0 && (rect.right - offset) - rightGap < maxDecorationWidth) rect.right = rightGap + offset
-      return rect
-    },
-    detectColumns(data: Uint8ClampedArray, width: number, height: number, background: number, rect: Rect): Rect[] {
-      const densities = this.columnDensity(data, width, background, rect)
-      const minGapWidth = Math.max(12, Math.floor((rect.right - rect.left) * 0.04))
-      const gaps = this.gaps(densities, minGapWidth)
-      if (gaps.length === 0) return [rect]
-
-      const columns = [] as Rect[]
-      let start = rect.left
-      gaps.forEach(gap => {
-        const end = rect.left + gap.start
-        if (end - start > (rect.right - rect.left) * 0.22) columns.push({...rect, left: start, right: end})
-        start = rect.left + gap.end
-      })
-      if (rect.right - start > (rect.right - rect.left) * 0.22) columns.push({...rect, left: start, right: rect.right})
-
-      return columns.length > 1 && columns.length <= 3 ? columns : [rect]
-    },
-    detectBands(data: Uint8ClampedArray, width: number, height: number, background: number, rect: Rect): Rect[] {
-      const densities = this.rowDensity(data, width, background, rect)
-      const minGapWidth = Math.max(8, Math.floor((rect.bottom - rect.top) * 0.01))
-      const gaps = this.gaps(densities, minGapWidth)
-      if (gaps.length === 0) return [rect]
-
-      const bands = [] as Rect[]
-      let start = rect.top
-      gaps.forEach(gap => {
-        const end = rect.top + gap.start
-        if (end - start > 8) bands.push({...rect, top: start, bottom: end})
-        start = rect.top + gap.end
-      })
-      if (rect.bottom - start > 8) bands.push({...rect, top: start, bottom: rect.bottom})
-      return bands
-    },
-    renderSegments(segments?: Segment[]) {
-      const sourceSegments = segments || this.renderedSegments
-      const width = Math.max(1, Math.floor(this.targetWidth))
-      this.renderedSegments = sourceSegments.map(segment => ({
-        ...segment,
-        width,
-        height: Math.max(1, Math.round(segment.sh / segment.sw * width)),
-      }))
-      this.$nextTick(this.drawSegments)
-    },
-    drawSegments() {
-      if (!this.image) return
-      const canvases = this.$refs.segmentCanvases as HTMLCanvasElement[] | HTMLCanvasElement | undefined
-      const canvasList = Array.isArray(canvases) ? canvases : canvases ? [canvases] : []
-      canvasList.forEach((canvas, i) => {
-        const segment = this.renderedSegments[i]
-        if (!segment) return
-        const context = canvas.getContext('2d')
-        if (!context) return
-        context.clearRect(0, 0, segment.width, segment.height)
-        context.drawImage(
-          this.image!,
-          segment.sx,
-          segment.sy,
-          segment.sw,
-          segment.sh,
-          0,
-          0,
-          segment.width,
-          segment.height,
-        )
-      })
-    },
-    rectToSegment(rect: Rect, scale: number): Segment {
-      return {
-        sx: Math.max(0, Math.floor(rect.left / scale)),
-        sy: Math.max(0, Math.floor(rect.top / scale)),
-        sw: Math.max(1, Math.ceil((rect.right - rect.left) / scale)),
-        sh: Math.max(1, Math.ceil((rect.bottom - rect.top) / scale)),
-      }
-    },
-    estimateBackground(data: Uint8ClampedArray, width: number, height: number): number {
-      const samples = [] as number[]
-      const sampleSize = Math.max(2, Math.floor(Math.min(width, height) * 0.03))
-      for (let y = 0; y < height; y += Math.max(1, sampleSize - 1)) {
-        for (let x = 0; x < width; x += Math.max(1, sampleSize - 1)) {
-          if (x < sampleSize || y < sampleSize || x >= width - sampleSize || y >= height - sampleSize) {
-            samples.push(this.lumaAt(data, width, x, y))
-          }
+    detectColumns(isInk: (x: number, y: number) => boolean, width: number, height: number, roi: Roi): Column[] {
+      const colInk = new Array(width).fill(0)
+      for (let x = roi.x; x < roi.x + roi.w; x++) {
+        for (let y = roi.y; y < roi.y + roi.h; y++) {
+          if (isInk(x, y)) colInk[x]++
         }
       }
-      samples.sort((a, b) => a - b)
-      return samples[Math.floor(samples.length / 2)] || 255
-    },
-    isInk(data: Uint8ClampedArray, width: number, x: number, y: number, background: number): boolean {
-      return Math.abs(this.lumaAt(data, width, x, y) - background) > INK_THRESHOLD
-    },
-    lumaAt(data: Uint8ClampedArray, width: number, x: number, y: number): number {
-      const index = (y * width + x) * 4
-      return data[index] * 0.299 + data[index + 1] * 0.587 + data[index + 2] * 0.114
-    },
-    columnDensity(data: Uint8ClampedArray, width: number, background: number, rect: Rect): number[] {
-      const densities = [] as number[]
-      const height = rect.bottom - rect.top
-      for (let x = rect.left; x < rect.right; x++) {
-        let ink = 0
-        for (let y = rect.top; y < rect.bottom; y++) {
-          if (this.isInk(data, width, x, y, background)) ink++
+
+      const columns = [] as Column[]
+      let inColumn = false
+      let columnStart = roi.x
+      for (let x = roi.x; x < roi.x + roi.w; x++) {
+        if (!inColumn && colInk[x] > 1) {
+          inColumn = true
+          columnStart = x
+        } else if (inColumn && colInk[x] <= 1 && this.realColumnGap(colInk, x, roi.x + roi.w)) {
+          inColumn = false
+          if (x - columnStart > 5) columns.push({start: columnStart, end: x})
         }
-        densities.push(ink / height)
       }
-      return densities
+      if (inColumn) columns.push({start: columnStart, end: roi.x + roi.w})
+      return columns.length > 0 ? columns : [{start: roi.x, end: roi.x + roi.w}]
     },
-    rowDensity(data: Uint8ClampedArray, width: number, background: number, rect: Rect): number[] {
-      const densities = [] as number[]
-      const rowWidth = rect.right - rect.left
-      for (let y = rect.top; y < rect.bottom; y++) {
-        let ink = 0
-        for (let x = rect.left; x < rect.right; x++) {
-          if (this.isInk(data, width, x, y, background)) ink++
+    realColumnGap(colInk: number[], start: number, end: number): boolean {
+      for (let x = start; x < Math.min(start + COLUMN_GAP, end); x++) {
+        if (colInk[x] > 1) return false
+      }
+      return true
+    },
+    detectLines(isInk: (x: number, y: number) => boolean, column: Column, roi: Roi): Line[] {
+      const rowInk = new Array(roi.y + roi.h).fill(0)
+      for (let y = roi.y; y < roi.y + roi.h; y++) {
+        for (let x = column.start; x < column.end; x++) {
+          if (isInk(x, y)) rowInk[y]++
         }
-        densities.push(ink / rowWidth)
       }
-      return densities
-    },
-    firstAbove(values: number[], threshold: number, offset: number): number {
-      const index = values.findIndex(x => x > threshold)
-      return index < 0 ? -1 : index + offset
-    },
-    lastAbove(values: number[], threshold: number, offset: number): number {
-      for (let i = values.length - 1; i >= 0; i--) {
-        if (values[i] > threshold) return i + offset
-      }
-      return -1
-    },
-    gaps(values: number[], minWidth: number): { start: number, end: number }[] {
-      const gaps = [] as { start: number, end: number }[]
-      let start = -1
-      values.forEach((density, i) => {
-        if (density < GAP_DENSITY_THRESHOLD && start < 0) start = i
-        if ((density >= GAP_DENSITY_THRESHOLD || i === values.length - 1) && start >= 0) {
-          const end = density >= GAP_DENSITY_THRESHOLD ? i : i + 1
-          if (end - start >= minWidth) gaps.push({start, end})
-          start = -1
+
+      const lines = [] as Line[]
+      let inLine = false
+      let lineStart = roi.y
+      for (let y = roi.y; y < roi.y + roi.h; y++) {
+        if (!inLine && rowInk[y] > 1) {
+          inLine = true
+          lineStart = y
+        } else if (inLine && rowInk[y] <= 1) {
+          inLine = false
+          if (y - lineStart > 3) lines.push({start: lineStart, end: y})
         }
+      }
+      if (inLine) lines.push({start: lineStart, end: roi.y + roi.h})
+      return lines
+    },
+    detectWords(isInk: (x: number, y: number) => boolean, column: Column, line: Line): WordBlock[] {
+      const columnWidth = column.end - column.start
+      const lineHeight = line.end - line.start
+      const wordInk = new Array(columnWidth).fill(0)
+      for (let sx = 0; sx < columnWidth; sx++) {
+        const x = column.start + sx
+        for (let y = line.start; y < line.end; y++) {
+          if (isInk(x, y)) wordInk[sx]++
+        }
+      }
+
+      const words = [] as WordBlock[]
+      let inWord = false
+      let wordStart = 0
+      for (let sx = 0; sx < columnWidth; sx++) {
+        if (!inWord && wordInk[sx] > 0) {
+          inWord = true
+          wordStart = sx
+        } else if (inWord && wordInk[sx] === 0 && this.realWordGap(wordInk, sx, columnWidth)) {
+          inWord = false
+          if (sx - wordStart > 1) words.push({x: column.start + wordStart, y: line.start, w: sx - wordStart, h: lineHeight})
+        }
+      }
+      if (inWord) words.push({x: column.start + wordStart, y: line.start, w: columnWidth - wordStart, h: lineHeight})
+      return words
+    },
+    realWordGap(wordInk: number[], start: number, end: number): boolean {
+      for (let x = start; x < Math.min(start + 2, end); x++) {
+        if (wordInk[x] > 0) return false
+      }
+      return true
+    },
+    renderWordBlocks(sourceCanvas: HTMLCanvasElement, blocks: WordBlock[]): RenderedWordBlock[] {
+      const sourceContext = sourceCanvas.getContext('2d')
+      if (!sourceContext) return []
+      const rendered = [] as RenderedWordBlock[]
+      const sliceCanvas = document.createElement('canvas')
+      const sliceContext = sliceCanvas.getContext('2d')
+      if (!sliceContext) return []
+
+      blocks.forEach(block => {
+        if (block.w < 2 || block.h < 2) return
+        sliceCanvas.width = block.w
+        sliceCanvas.height = block.h
+        sliceContext.clearRect(0, 0, block.w, block.h)
+        sliceContext.drawImage(sourceCanvas, block.x, block.y, block.w, block.h, 0, 0, block.w, block.h)
+        rendered.push({
+          ...block,
+          src: sliceCanvas.toDataURL('image/png'),
+          height: block.h * WORD_SCALE,
+        })
       })
-      return gaps
-    },
-    firstGap(values: number[], start: number, end: number, minWidth: number): number {
-      const gap = this.gaps(values.slice(start, end), minWidth)[0]
-      return gap ? gap.end + start : -1
-    },
-    lastGap(values: number[], start: number, end: number, minWidth: number): number {
-      const gaps = this.gaps(values.slice(start, end), minWidth)
-      const gap = gaps[gaps.length - 1]
-      return gap ? gap.start + start : -1
+
+      return rendered
     },
   },
 })
@@ -342,6 +363,20 @@ export default Vue.extend({
 <style scoped>
 .reflowed-page {
   width: 100%;
+  min-height: 100%;
+}
+
+.reflow-wrapper {
+  width: 100%;
+  min-height: 100vh;
+  padding: 16px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  align-content: flex-start;
+  gap: 4px 2px;
 }
 
 .reflow-status {
@@ -350,12 +385,13 @@ export default Vue.extend({
   align-items: center;
   justify-content: center;
   color: #9e9e9e;
+  width: 100%;
 }
 
-.reflowed-segment {
-  display: block;
-  width: 100%;
+.word-block {
+  display: inline-block;
   height: auto;
-  margin: 0 auto 12px;
+  max-width: 100%;
+  object-fit: contain;
 }
 </style>
