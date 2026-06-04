@@ -57,6 +57,15 @@
 
           <v-btn
             icon
+            :disabled="continuousReader"
+            title="Reflow"
+            @click="reflowMode = !reflowMode"
+          >
+            <v-icon>{{ reflowMode ? 'mdi-file-document' : 'mdi-file-document-outline' }}</v-icon>
+          </v-btn>
+
+          <v-btn
+            icon
             @click="showHelp = !showHelp">
             <v-icon>mdi-help-circle</v-icon>
           </v-btn>
@@ -146,8 +155,32 @@
       class="full-height reader-frame"
       :class="{'reader-frame-landscape': landscapeDisplay && !continuousReader}"
     >
+      <div
+        v-if="reflowMode && !continuousReader"
+        class="reflow-reader"
+      >
+        <reflowed-page
+          :page="currentPage"
+          :target-width="reflowTargetWidth"
+          :options="reflowOptions"
+        />
+
+        <div
+          @click="reflowPreviousPage"
+          class="reflow-click-top"
+        />
+        <div
+          @click="reflowNextPage"
+          class="reflow-click-bottom"
+        />
+        <div
+          @click="toggleToolbars()"
+          class="reflow-click-center"
+        />
+      </div>
+
       <continuous-reader
-        v-if="continuousReader"
+        v-else-if="continuousReader"
         :pages="pages"
         :page.sync="page"
         :animations="animations"
@@ -272,6 +305,53 @@
                   :label="$t('bookreader.settings.page_layout')"
                 />
               </v-list-item>
+
+              <v-subheader class="font-weight-black text-h6">Reflow</v-subheader>
+              <v-list-item>
+                <settings-switch v-model="reflowMode" label="Reflow page"/>
+              </v-list-item>
+              <template v-if="reflowMode">
+                <v-list-item>
+                  <v-slider
+                    v-model="reflowSettings.marginTop"
+                    label="Top crop"
+                    min="0"
+                    max="45"
+                    thumb-label
+                    suffix="%"
+                  />
+                </v-list-item>
+                <v-list-item>
+                  <v-slider
+                    v-model="reflowSettings.marginRight"
+                    label="Right crop"
+                    min="0"
+                    max="45"
+                    thumb-label
+                    suffix="%"
+                  />
+                </v-list-item>
+                <v-list-item>
+                  <v-slider
+                    v-model="reflowSettings.marginBottom"
+                    label="Bottom crop"
+                    min="0"
+                    max="45"
+                    thumb-label
+                    suffix="%"
+                  />
+                </v-list-item>
+                <v-list-item>
+                  <v-slider
+                    v-model="reflowSettings.marginLeft"
+                    label="Left crop"
+                    min="0"
+                    max="45"
+                    thumb-label
+                    suffix="%"
+                  />
+                </v-list-item>
+              </template>
             </template>
 
 
@@ -355,6 +435,7 @@ import Vue from 'vue'
 import {Location} from 'vue-router'
 import PagedReader from '@/components/readers/PagedReader.vue'
 import ContinuousReader from '@/components/readers/ContinuousReader.vue'
+import ReflowedPage from '@/components/readers/ReflowedPage.vue'
 import {ContinuousScaleType, MarginValues, PaddingPercentage, PagedReaderLayout, ScaleType} from '@/types/enum-reader'
 import {
   shortcutsLTR,
@@ -378,6 +459,7 @@ export default Vue.extend({
   components: {
     ContinuousReader,
     PagedReader,
+    ReflowedPage,
     SettingsSwitch,
     SettingsSelect,
     ThumbnailExplorerDialog,
@@ -411,6 +493,13 @@ export default Vue.extend({
       showSettings: false,
       showHelp: false,
       landscapeDisplay: false,
+      reflowMode: false,
+      reflowSettings: {
+        marginTop: 0,
+        marginRight: 0,
+        marginBottom: 0,
+        marginLeft: 0,
+      },
       goToPage: 1,
       settings: {
         pageLayout: PagedReaderLayout.SINGLE_PAGE,
@@ -585,6 +674,12 @@ export default Vue.extend({
     nightDisplay(): boolean {
       return this.backgroundColor === 'black'
     },
+    reflowTargetWidth(): number {
+      return this.$vuetify.breakpoint.width
+    },
+    reflowOptions(): object {
+      return this.reflowSettings
+    },
 
     animations: {
       get: function (): boolean {
@@ -713,7 +808,29 @@ export default Vue.extend({
     },
     keyPressed(e: KeyboardEvent) {
       if (e.ctrlKey || e.altKey || e.shiftKey || e.metaKey) return
+      if (this.reflowMode && !this.continuousReader && this.keyPressedReflow(e)) return
       this.shortcuts[e.key]?.execute(this)
+    },
+    keyPressedReflow(e: KeyboardEvent): boolean {
+      switch (e.key) {
+        case ' ':
+        case 'PageDown':
+        case 'ArrowDown':
+          this.reflowNextPage()
+          return true
+        case 'PageUp':
+        case 'ArrowUp':
+          this.reflowPreviousPage()
+          return true
+        case 'ArrowLeft':
+          this.readingDirection === ReadingDirection.RIGHT_TO_LEFT ? this.reflowNextPage() : this.reflowPreviousPage()
+          return true
+        case 'ArrowRight':
+          this.readingDirection === ReadingDirection.RIGHT_TO_LEFT ? this.reflowPreviousPage() : this.reflowNextPage()
+          return true
+        default:
+          return false
+      }
     },
     async setup(bookId: string, page?: number) {
       this.$debug('[setup]', `bookId:${bookId}`, `page:${page}`)
@@ -914,6 +1031,37 @@ export default Vue.extend({
     toggleNightDisplay() {
       this.backgroundColor = this.nightDisplay ? 'white' : 'black'
     },
+    reflowPreviousPage() {
+      if (this.page > 1) {
+        this.goTo(this.page - 1)
+        this.scrollToPageEdge('bottom')
+      } else {
+        this.jumpToPrevious()
+      }
+    },
+    reflowNextPage() {
+      if (this.page < this.pagesCount) {
+        this.goTo(this.page + 1)
+        this.scrollToPageEdge('top')
+      } else {
+        this.jumpToNext()
+      }
+    },
+    scrollToPageEdge(position: 'top' | 'bottom') {
+      const scroll = () => {
+        const scrollingElement = document.scrollingElement || document.documentElement
+        const top = position === 'bottom' ? scrollingElement.scrollHeight : 0
+        window.scrollTo({top, left: 0, behavior: 'auto'})
+        scrollingElement.scrollTop = top
+        document.documentElement.scrollTop = position === 'bottom' ? document.documentElement.scrollHeight : 0
+        document.body.scrollTop = position === 'bottom' ? document.body.scrollHeight : 0
+      }
+      this.$nextTick(() => {
+        scroll()
+        window.requestAnimationFrame(scroll)
+        window.setTimeout(scroll, 100)
+      })
+    },
     async toggleLandscapeDisplay() {
       const landscapeDisplay = !this.landscapeDisplay
       if (landscapeDisplay) {
@@ -1023,6 +1171,38 @@ export default Vue.extend({
 .reader-frame-landscape {
   overflow: visible;
 }
+
+.reflow-reader {
+  width: 100%;
+  min-height: 100%;
+}
+
+.reflow-click-top {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 25vh;
+  width: 100%;
+  z-index: 1;
+}
+
+.reflow-click-bottom {
+  position: fixed;
+  top: 75vh;
+  left: 0;
+  height: 25vh;
+  width: 100%;
+  z-index: 1;
+}
+
+.reflow-click-center {
+  position: fixed;
+  top: 25vh;
+  left: 0;
+  height: 50vh;
+  width: 100%;
+  z-index: 1;
+}
 </style>
 <style>
 .html-reader::-webkit-scrollbar {
@@ -1034,7 +1214,8 @@ export default Vue.extend({
   overscroll-behavior: none;
 }
 
-.reader-night-mode .reader-frame img {
+.reader-night-mode .reader-frame img,
+.reader-night-mode .reader-frame canvas {
   filter: invert(1) hue-rotate(180deg) brightness(0.92);
 }
 </style>
