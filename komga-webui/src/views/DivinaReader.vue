@@ -1,6 +1,10 @@
 <template>
-  <v-container class="ma-0 pa-0 full-height" fluid v-if="pages.length > 0"
-               :style="`width: 100%; background-color: ${backgroundColor}`"
+  <v-container
+    class="ma-0 pa-0 full-height reader-shell"
+    :class="{'reader-night-mode': nightDisplay, 'reader-landscape-shell': landscapeDisplay && !continuousReader}"
+    fluid
+    v-if="pages.length > 0"
+    :style="`width: 100%; background-color: ${backgroundColor}`"
   >
     <div>
       <v-slide-y-transition>
@@ -32,6 +36,23 @@
             :disabled="!screenfull.isEnabled"
             @click="screenfull.isFullscreen ? screenfull.exit() : enterFullscreen()">
             <v-icon>{{ fullscreenIcon }}</v-icon>
+          </v-btn>
+
+          <v-btn
+            icon
+            :title="nightDisplay ? $t('theme.light').toString() : $t('theme.dark').toString()"
+            @click="toggleNightDisplay"
+          >
+            <v-icon>{{ nightDisplay ? 'mdi-white-balance-sunny' : 'mdi-weather-night' }}</v-icon>
+          </v-btn>
+
+          <v-btn
+            icon
+            :disabled="continuousReader"
+            :title="landscapeDisplay ? 'Portrait' : 'Landscape'"
+            @click="toggleLandscapeDisplay"
+          >
+            <v-icon>{{ landscapeDisplay ? 'mdi-phone-rotate-portrait' : 'mdi-phone-rotate-landscape' }}</v-icon>
           </v-btn>
 
           <v-btn
@@ -121,7 +142,10 @@
       </v-slide-y-reverse-transition>
     </div>
 
-    <div class="full-height">
+    <div
+      class="full-height reader-frame"
+      :class="{'reader-frame-landscape': landscapeDisplay && !continuousReader}"
+    >
       <continuous-reader
         v-if="continuousReader"
         :pages="pages"
@@ -386,6 +410,7 @@ export default Vue.extend({
       showToolbars: false,
       showSettings: false,
       showHelp: false,
+      landscapeDisplay: false,
       goToPage: 1,
       settings: {
         pageLayout: PagedReaderLayout.SINGLE_PAGE,
@@ -555,6 +580,9 @@ export default Vue.extend({
     },
     currentPage(): PageDtoWithUrl {
       return this.pages[this.page - 1]
+    },
+    nightDisplay(): boolean {
+      return this.backgroundColor === 'black'
     },
 
     animations: {
@@ -875,6 +903,13 @@ export default Vue.extend({
     toggleHelp() {
       this.showHelp = !this.showHelp
     },
+    toggleNightDisplay() {
+      this.backgroundColor = this.nightDisplay ? 'white' : 'black'
+    },
+    toggleLandscapeDisplay() {
+      this.landscapeDisplay = !this.landscapeDisplay
+      window.scrollTo(0, 0)
+    },
     closeDialog() {
       if (this.showExplorer) {
         this.showExplorer = false
@@ -945,6 +980,26 @@ export default Vue.extend({
 .full-width {
   width: 100%;
 }
+
+.reader-landscape-shell {
+  overflow: hidden;
+}
+
+.reader-frame {
+  position: relative;
+  width: 100%;
+}
+
+.reader-frame-landscape {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  width: 100vw;
+  height: 100vh;
+  transform: translate(-50%, -50%) rotate(90deg);
+  transform-origin: center center;
+  overflow: hidden;
+}
 </style>
 <style>
 .html-reader::-webkit-scrollbar {
@@ -954,5 +1009,9 @@ export default Vue.extend({
 .html-reader {
   scrollbar-width: none;
   overscroll-behavior: none;
+}
+
+.reader-night-mode .reader-frame img {
+  filter: invert(1) hue-rotate(180deg) brightness(0.92);
 }
 </style>
