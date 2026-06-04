@@ -149,6 +149,7 @@ type LineBreakItem = {
 type LineIndentItem = {
   type: 'indent',
   width: number,
+  sourceWidth: number,
 }
 
 type ReflowItem = RenderedWordBlock | LineBreakItem | LineIndentItem
@@ -207,6 +208,7 @@ export default Vue.extend({
       error: false,
       errorMessage: '',
       reflowItems: [] as ReflowItem[],
+      lastDetectionKey: '',
       objectUrl: '',
       requestId: 0,
       imageSize: {w: 0, h: 0},
@@ -270,18 +272,29 @@ export default Vue.extend({
     async reflow() {
       const requestId = this.requestId + 1
       this.requestId = requestId
-      this.loading = true
       this.error = false
       this.errorMessage = ''
+      const detectionKey = this.reflowDetectionKey()
+
+      if (Array.isArray(this.cachedItems) && !this.cropRoi) {
+        this.revokeObjectUrl()
+        this.reflowItems = this.cachedItems
+        this.lastDetectionKey = detectionKey
+        this.loading = false
+        return
+      }
+
+      if (this.lastDetectionKey === detectionKey && this.reflowItems.length > 0 && !this.cropRoi) {
+        this.rescaleReflowItems()
+        this.emitReflowed()
+        this.loading = false
+        return
+      }
+
+      this.loading = true
       this.reflowItems = []
 
       try {
-        if (Array.isArray(this.cachedItems) && !this.cropRoi) {
-          this.revokeObjectUrl()
-          this.reflowItems = this.cachedItems
-          return
-        }
-
         const image = await this.loadPageImage(this.page.url)
         if (requestId !== this.requestId) return
         this.imageSize = {w: image.naturalWidth, h: image.naturalHeight}
@@ -295,11 +308,8 @@ export default Vue.extend({
         const lines = this.detectWordLines(imageData, canvas.width, canvas.height)
         if (requestId !== this.requestId) return
         this.reflowItems = this.renderReflowItems(canvas, lines)
-        if (!this.cropRoi) this.$emit('reflowed', {
-          pageNumber: this.page.number,
-          cacheKey: this.cacheKey,
-          items: this.reflowItems,
-        } as ReflowCachePayload)
+        this.lastDetectionKey = detectionKey
+        this.emitReflowed()
       } catch (e) {
         if (requestId !== this.requestId) return
         this.error = true
@@ -307,6 +317,37 @@ export default Vue.extend({
       } finally {
         if (requestId === this.requestId) this.loading = false
       }
+    },
+    reflowDetectionKey(): string {
+      return JSON.stringify({
+        page: this.page.number,
+        url: this.page.url,
+        autoCropBorder: this.options.autoCropBorder,
+        columnCount: this.options.columnCount,
+        threshold: this.options.threshold,
+        columnGap: this.options.columnGap,
+        wordGap: this.options.wordGap,
+        marginTop: this.options.marginTop,
+        marginRight: this.options.marginRight,
+        marginBottom: this.options.marginBottom,
+        marginLeft: this.options.marginLeft,
+        cropRoi: this.cropRoi,
+      })
+    },
+    emitReflowed() {
+      if (this.cropRoi) return
+      this.$emit('reflowed', {
+        pageNumber: this.page.number,
+        cacheKey: this.cacheKey,
+        items: this.reflowItems,
+      } as ReflowCachePayload)
+    },
+    rescaleReflowItems() {
+      this.reflowItems = this.reflowItems.map(item => {
+        if (item.type === 'word') return {...item, height: item.h * this.textScale()}
+        if (item.type === 'indent') return {...item, width: this.scaledIndentWidth(item.sourceWidth || item.width / this.textScale())}
+        return item
+      })
     },
     async ensureCropImage() {
       if (this.objectUrl && this.imageSize.w && this.imageSize.h) return
@@ -665,9 +706,9 @@ export default Vue.extend({
 
       lines.forEach((line, index) => {
         const startParagraph = this.isParagraphStart(line, lines[index - 1])
-        const indent = startParagraph ? this.renderedLineIndent(line) : 0
+        const indent = startParagraph ? this.lineIndentSourceWidth(line) : 0
         if (startParagraph && rendered.length > 0) rendered.push({type: 'break'})
-        if (indent > 0) rendered.push({type: 'indent', width: indent})
+        if (indent > 0) rendered.push({type: 'indent', sourceWidth: indent, width: this.scaledIndentWidth(indent)})
 
         line.words.forEach(block => {
           if (block.w < 2 || block.h < 2) return
@@ -705,14 +746,17 @@ export default Vue.extend({
       if (!firstWord) return 0
       return Math.max(0, firstWord.x - line.column.start)
     },
-    renderedLineIndent(line: WordLine): number {
+    lineIndentSourceWidth(line: WordLine): number {
       const firstWord = line.words[0]
       if (!firstWord) return 0
       const rawIndent = this.rawLineIndent(line)
       const indentThreshold = Math.max(MIN_INDENT, firstWord.h * 0.3)
       if (rawIndent < indentThreshold) return 0
+      return rawIndent
+    },
+    scaledIndentWidth(sourceWidth: number): number {
       const maxIndent = Math.max(0, (this.targetWidth - 32) * 0.45)
-      return Math.min(maxIndent, rawIndent * this.textScale())
+      return Math.min(maxIndent, sourceWidth * this.textScale())
     },
     textScale(): number {
       return this.textScalePercent / 100
@@ -726,11 +770,22 @@ export default Vue.extend({
       this.$emit('column-count-change', this.clampNumber(Number(target.value), 1, 2, 1) >= 2 ? 2 : 1)
     },
     async toggleCropMode() {
-      this.cropMode = !this.cropMode
       this.draftRoi = undefined
       this.drawingCrop = false
-      this.$emit('crop-mode-change', this.cropMode)
-      if (this.cropMode) await this.ensureCropImage()
+      if (this.cropMode) {
+        this.cropMode = false
+        this.$emit('crop-mode-change', false)
+        return
+      }
+
+      try {
+        await this.ensureCropImage()
+        this.cropMode = true
+        this.$emit('crop-mode-change', true)
+      } catch (e) {
+        this.error = true
+        this.errorMessage = e instanceof Error ? e.message : String(e)
+      }
     },
     resetCrop() {
       this.cropRoi = undefined
@@ -945,11 +1000,14 @@ export default Vue.extend({
   position: relative;
   display: inline-block;
   max-width: 100%;
+  cursor: crosshair;
   touch-action: none;
   user-select: none;
 }
 
 .crop-image {
+  position: relative;
+  z-index: 1;
   display: block;
   max-width: 100%;
   height: auto;
@@ -960,6 +1018,7 @@ export default Vue.extend({
   border: 2px dashed #f97316;
   background: rgba(249, 115, 22, 0.12);
   box-sizing: border-box;
+  z-index: 2;
   pointer-events: none;
 }
 </style>

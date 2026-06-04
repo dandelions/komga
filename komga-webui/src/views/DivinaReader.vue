@@ -224,12 +224,12 @@
           @reflowed="cacheReflowPage"
         />
         <reflowed-page
-          v-if="nextReflowPage"
+          v-if="prefetchReflowPage"
           class="reflow-prefetch"
-          :page="nextReflowPage"
+          :page="prefetchReflowPage"
           :target-width="reflowTargetWidth"
           :options="reflowOptions"
-          :cached-items="cachedReflowItems(nextReflowPage)"
+          :cached-items="cachedReflowItems(prefetchReflowPage)"
           :cache-key="reflowCacheKey"
           preload
           @reflowed="cacheReflowPage"
@@ -665,6 +665,8 @@ export default Vue.extend({
       reflowMode: false,
       reflowCropMode: false,
       reflowCache: {} as Record<string, any[]>,
+      reflowPrefetchPage: 0,
+      reflowPrefetchTimer: undefined as number | undefined,
       reflowSettings: {
         autoCropBorder: true,
         textScale: 75,
@@ -766,6 +768,7 @@ export default Vue.extend({
   },
   destroyed() {
     document.documentElement.classList.remove('html-reader')
+    this.clearReflowPrefetch()
 
     this.unlockOrientation()
     this.$vuetify.rtl = (this.$t('common.locale_rtl') === 'true')
@@ -798,9 +801,16 @@ export default Vue.extend({
           this.markProgress(val)
           this.goToPage = val
           this.updateRoute()
+          this.clearReflowPrefetch()
+          this.$nextTick(() => {
+            if (this.reflowMode && this.cachedReflowItems(this.currentPage)) this.scheduleNextReflowPrefetch()
+          })
         }
       },
       immediate: true,
+    },
+    reflowCacheKey() {
+      this.clearReflowPrefetch()
     },
   },
   computed: {
@@ -855,6 +865,10 @@ export default Vue.extend({
     nextReflowPage(): PageDtoWithUrl | undefined {
       if (!this.reflowMode || this.continuousReader || this.page >= this.pagesCount) return undefined
       return this.pages[this.page]
+    },
+    prefetchReflowPage(): PageDtoWithUrl | undefined {
+      if (this.reflowPrefetchPage <= 0) return undefined
+      return this.pages[this.reflowPrefetchPage - 1]
     },
     isPdf(): boolean {
       return this.book.media?.mediaType === 'application/pdf'
@@ -1273,6 +1287,7 @@ export default Vue.extend({
     toggleReflowMode() {
       this.reflowMode = !this.reflowMode
       this.reflowCropMode = false
+      this.clearReflowPrefetch()
       if (!this.reflowMode) this.$nextTick(() => this.scrollToPageEdge('top'))
     },
     setReflowTextScale(textScale: number) {
@@ -1283,6 +1298,7 @@ export default Vue.extend({
     },
     setReflowCropMode(cropMode: boolean) {
       this.reflowCropMode = cropMode
+      if (cropMode) this.clearReflowPrefetch()
     },
     cachedReflowItems(page: PageDtoWithUrl | undefined): any[] | undefined {
       if (!page || this.reflowCropMode) return undefined
@@ -1292,6 +1308,7 @@ export default Vue.extend({
       if (payload.cacheKey !== this.reflowCacheKey) return
       this.$set(this.reflowCache, this.reflowCacheEntryKey(payload.pageNumber, payload.cacheKey), payload.items)
       this.pruneReflowCache()
+      if (payload.pageNumber === this.page) this.scheduleNextReflowPrefetch()
     },
     reflowCacheEntryKey(pageNumber: number, cacheKey: string): string {
       return `${pageNumber}|${cacheKey}`
@@ -1303,6 +1320,21 @@ export default Vue.extend({
         const cacheKey = key.substring(separator + 1)
         if (cacheKey !== this.reflowCacheKey || Math.abs(pageNumber - this.page) > 2) this.$delete(this.reflowCache, key)
       })
+    },
+    clearReflowPrefetch() {
+      if (this.reflowPrefetchTimer !== undefined) {
+        window.clearTimeout(this.reflowPrefetchTimer)
+        this.reflowPrefetchTimer = undefined
+      }
+      this.reflowPrefetchPage = 0
+    },
+    scheduleNextReflowPrefetch() {
+      this.clearReflowPrefetch()
+      if (!this.nextReflowPage || this.reflowCropMode) return
+      this.reflowPrefetchTimer = window.setTimeout(() => {
+        this.reflowPrefetchTimer = undefined
+        if (this.nextReflowPage && !this.reflowCropMode) this.reflowPrefetchPage = this.nextReflowPage.number
+      }, 350)
     },
     reflowPreviousPage() {
       if (this.page > 1) {
