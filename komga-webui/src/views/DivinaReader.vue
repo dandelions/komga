@@ -1337,6 +1337,11 @@ export default Vue.extend({
       }, 350)
     },
     reflowPreviousPage() {
+      if (this.reflowCanScroll('up')) {
+        this.scrollReflowPage('up')
+        return
+      }
+
       if (this.page > 1) {
         this.goTo(this.page - 1)
         this.scrollToPageEdge('bottom')
@@ -1345,12 +1350,30 @@ export default Vue.extend({
       }
     },
     reflowNextPage() {
+      if (this.reflowCanScroll('down')) {
+        this.scrollReflowPage('down')
+        return
+      }
+
       if (this.page < this.pagesCount) {
         this.goTo(this.page + 1)
         this.scrollToPageEdge('top')
       } else {
         this.jumpToNext()
       }
+    },
+    reflowCanScroll(direction: 'up' | 'down'): boolean {
+      const scrollingElement = document.scrollingElement || document.documentElement
+      const scrollTop = scrollingElement.scrollTop || window.pageYOffset || document.documentElement.scrollTop || document.body.scrollTop || 0
+      if (direction === 'up') return scrollTop > 2
+
+      const viewportHeight = window.innerHeight || document.documentElement.clientHeight
+      const scrollHeight = scrollingElement.scrollHeight || document.documentElement.scrollHeight || document.body.scrollHeight
+      return scrollTop + viewportHeight < scrollHeight - 2
+    },
+    scrollReflowPage(direction: 'up' | 'down') {
+      const amount = Math.max(1, Math.floor((window.innerHeight || document.documentElement.clientHeight) * 0.9))
+      window.scrollBy({top: direction === 'down' ? amount : -amount, left: 0, behavior: 'auto'})
     },
     scrollToPageEdge(position: 'top' | 'bottom') {
       const scroll = () => {

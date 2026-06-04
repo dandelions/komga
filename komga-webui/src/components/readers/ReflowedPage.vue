@@ -512,7 +512,10 @@ export default Vue.extend({
       return this.clampNumber(this.options.columnCount, 1, 2, 1) >= 2 ? 2 : 1
     },
     detectColumns(isInk: (x: number, y: number) => boolean, width: number, height: number, roi: Roi): Column[] {
-      if (this.normalizedColumnCount() === 1) return [{start: roi.x, end: roi.x + roi.w}]
+      if (this.normalizedColumnCount() === 1) {
+        const column = this.trimColumn(isInk, {start: roi.x, end: roi.x + roi.w}, roi)
+        return column.end - column.start >= 8 ? [column] : [{start: roi.x, end: roi.x + roi.w}]
+      }
 
       const colInk = new Array(width).fill(0)
       for (let x = roi.x; x < roi.x + roi.w; x++) {
@@ -734,7 +737,7 @@ export default Vue.extend({
       const gap = line.line.start - previousLine.line.end
       const currentHeight = line.words[0]?.h || line.line.end - line.line.start
       const previousHeight = previousLine.words[0]?.h || previousLine.line.end - previousLine.line.start
-      if (gap > Math.max(currentHeight, previousHeight) * 0.65) return true
+      if (gap > Math.max(currentHeight, previousHeight) * 1.2) return true
 
       const indent = this.rawLineIndent(line)
       const previousIndent = this.rawLineIndent(previousLine)
