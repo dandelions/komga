@@ -47,7 +47,10 @@ class PdfExtractor(
 
   fun getToc(path: Path): List<PdfTocEntry> =
     Loader.loadPDF(path.toFile()).use { pdf ->
-      pdf.documentCatalog.documentOutline?.children()?.toTocEntries(pdf).orEmpty()
+      pdf.documentCatalog.documentOutline
+        ?.children()
+        ?.toTocEntries(pdf)
+        .orEmpty()
     }
 
   fun getPageContentAsImage(
