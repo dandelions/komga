@@ -982,7 +982,7 @@ export default Vue.extend({
 }
 
 .reader-landscape-shell {
-  overflow: hidden;
+  overflow: visible;
 }
 
 .reader-frame {
@@ -992,11 +992,11 @@ export default Vue.extend({
 
 .reader-frame-landscape {
   position: fixed;
-  top: 50%;
-  left: 50%;
+  top: calc((100vh - 100vw) / 2);
+  left: calc((100vw - 100vh) / 2);
   width: 100vh;
   height: 100vw;
-  transform: translate(-50%, -50%) rotate(90deg);
+  transform: rotate(90deg);
   transform-origin: center center;
   overflow: visible;
 }
