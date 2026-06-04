@@ -497,6 +497,7 @@ export default Vue.extend({
   destroyed() {
     document.documentElement.classList.remove('html-reader')
 
+    this.unlockOrientation()
     this.$vuetify.rtl = (this.$t('common.locale_rtl') === 'true')
     window.removeEventListener('keydown', this.keyPressed)
     if (screenfull.isEnabled) {
@@ -694,14 +695,21 @@ export default Vue.extend({
   },
   methods: {
     enterFullscreen() {
-      if (screenfull.isEnabled) screenfull.request(document.documentElement, {navigationUI: 'hide'})
+      if (screenfull.isEnabled) return screenfull.request(document.documentElement, {navigationUI: 'hide'})
+      return Promise.resolve()
     },
     switchFullscreen() {
       if (screenfull.isEnabled) screenfull.isFullscreen ? screenfull.exit() : this.enterFullscreen()
     },
     fullscreenChanged() {
       if (screenfull.isEnabled && screenfull.isFullscreen) this.fullscreenIcon = 'mdi-fullscreen-exit'
-      else this.fullscreenIcon = 'mdi-fullscreen'
+      else {
+        this.fullscreenIcon = 'mdi-fullscreen'
+        if (this.landscapeDisplay) {
+          this.unlockOrientation()
+          this.landscapeDisplay = false
+        }
+      }
     },
     keyPressed(e: KeyboardEvent) {
       if (e.ctrlKey || e.altKey || e.shiftKey || e.metaKey) return
@@ -906,9 +914,31 @@ export default Vue.extend({
     toggleNightDisplay() {
       this.backgroundColor = this.nightDisplay ? 'white' : 'black'
     },
-    toggleLandscapeDisplay() {
-      this.landscapeDisplay = !this.landscapeDisplay
+    async toggleLandscapeDisplay() {
+      const landscapeDisplay = !this.landscapeDisplay
+      if (landscapeDisplay) {
+        await this.enterFullscreen()
+        const locked = await this.lockOrientation('landscape')
+        if (!locked) return
+      } else {
+        this.unlockOrientation()
+      }
+      this.landscapeDisplay = landscapeDisplay
       window.scrollTo(0, 0)
+    },
+    async lockOrientation(orientation: string): Promise<boolean> {
+      const screenOrientation = (screen as any).orientation
+      if (!screenOrientation?.lock) return false
+      try {
+        await screenOrientation.lock(orientation)
+        return true
+      } catch (e) {
+        return false
+      }
+    },
+    unlockOrientation() {
+      const screenOrientation = (screen as any).orientation
+      screenOrientation?.unlock?.()
     },
     closeDialog() {
       if (this.showExplorer) {
@@ -991,13 +1021,6 @@ export default Vue.extend({
 }
 
 .reader-frame-landscape {
-  position: fixed;
-  top: calc((100vh - 100vw) / 2);
-  left: calc((100vw - 100vh) / 2);
-  width: 100vh;
-  height: 100vw;
-  transform: rotate(90deg);
-  transform-origin: center center;
   overflow: visible;
 }
 </style>
