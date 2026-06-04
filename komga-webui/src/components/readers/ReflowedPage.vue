@@ -67,6 +67,7 @@ import {PageDtoWithUrl} from '@/types/komga-books'
 
 type ReflowOptions = {
   autoCropBorder: boolean,
+  textScale: number,
   threshold: number,
   columnGap: number,
   wordGap: number,
@@ -109,7 +110,7 @@ const THRESHOLD = 185
 const COLUMN_GAP = 15
 const WORD_GAP = 3
 const BLOCK_PADDING = 1
-const WORD_SCALE = 1
+const WORD_SCALE = 0.75
 const MIN_CROP_SIZE = 15
 
 export default Vue.extend({
@@ -491,11 +492,14 @@ export default Vue.extend({
         rendered.push({
           ...block,
           src: sliceCanvas.toDataURL('image/png'),
-          height: block.h * WORD_SCALE,
+          height: block.h * this.textScale(),
         })
       })
 
       return rendered
+    },
+    textScale(): number {
+      return this.clampNumber(this.options.textScale, 40, 140, WORD_SCALE * 100) / 100
     },
     toggleCropMode() {
       this.cropMode = !this.cropMode

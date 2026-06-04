@@ -59,7 +59,7 @@
             icon
             :disabled="continuousReader"
             title="Reflow"
-            @click="reflowMode = !reflowMode"
+            @click="toggleReflowMode"
           >
             <v-icon>{{ reflowMode ? 'mdi-file-document' : 'mdi-file-document-outline' }}</v-icon>
           </v-btn>
@@ -316,6 +316,16 @@
                 </v-list-item>
                 <v-list-item>
                   <v-slider
+                    v-model="reflowSettings.textScale"
+                    label="Text size"
+                    min="40"
+                    max="140"
+                    thumb-label
+                    suffix="%"
+                  />
+                </v-list-item>
+                <v-list-item>
+                  <v-slider
                     v-model="reflowSettings.threshold"
                     label="Threshold"
                     min="50"
@@ -528,6 +538,7 @@ export default Vue.extend({
       reflowMode: false,
       reflowSettings: {
         autoCropBorder: true,
+        textScale: 75,
         threshold: 185,
         columnGap: 15,
         wordGap: 3,
@@ -1066,6 +1077,10 @@ export default Vue.extend({
     },
     toggleNightDisplay() {
       this.backgroundColor = this.nightDisplay ? 'white' : 'black'
+    },
+    toggleReflowMode() {
+      this.reflowMode = !this.reflowMode
+      if (!this.reflowMode) this.$nextTick(() => this.scrollToPageEdge('top'))
     },
     reflowPreviousPage() {
       if (this.page > 1) {
