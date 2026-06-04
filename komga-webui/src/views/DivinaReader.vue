@@ -130,17 +130,12 @@
         :scale="continuousScale"
         :sidePadding="sidePadding"
         :page-margin="pageMargin"
-
-        :rotation="pageRotation"
-        :brightness="brightness"
-        :contrast="contrast"
-
         @menu="toggleToolbars()"
         @jump-previous="jumpToPrevious()"
         @jump-next="jumpToNext()"
       ></continuous-reader>
 
-      <paged-reader      
+      <paged-reader
         v-else
         :pages="pages"
         :page.sync="page"
@@ -149,11 +144,6 @@
         :scale="scale"
         :animations="animations"
         :swipe="swipe"
-
-        :rotation="pageRotation"
-        :brightness="brightness"
-        :contrast="contrast"
-
         @menu="toggleToolbars()"
         @jump-previous="jumpToPrevious()"
         @jump-next="jumpToNext()"
@@ -191,22 +181,6 @@
                 v-model="readingDirection"
                 :label="$t('bookreader.settings.reading_mode')"
               />
-            </v-list-item>
-
-            <!-- 插入到 <v-list-item> 循环中 -->
-            <v-list-item>
-              <v-list-item-content><v-list-item-title>页面旋转</v-list-item-title></v-list-item-content>
-              <v-list-item-action>
-                <v-btn-toggle v-model="pageRotation" mandatory dense color="primary">
-                  <v-btn :value="0" small>竖屏</v-btn>
-                  <v-btn :value="90" small>横屏</v-btn>
-                </v-btn-toggle>
-              </v-list-item-action>
-            </v-list-item>
-
-            <v-list-item>
-              <v-list-item-content><v-list-item-title>亮度</v-list-item-title></v-list-item-content>
-              <v-slider v-model="brightness" min="30" max="180" thumb-label dense hide-details></v-slider>
             </v-list-item>
 
             <v-list-item>
@@ -422,9 +396,6 @@ export default Vue.extend({
         continuousScale: ContinuousScaleType.WIDTH,
         sidePadding: 0,
         pageMargin: 0,
-        pageRotation: 0,
-        brightness: 100,    // 亮度 (百分比)
-        contrast: 100,      // 对比度 (百分比)
         readingDirection: ReadingDirection.LEFT_TO_RIGHT,
         backgroundColor: 'black',
       },
@@ -537,32 +508,6 @@ export default Vue.extend({
     },
   },
   computed: {
-    imageStyle (): any {
-      const isRotated = this.pageRotation !== 0
-      return {
-        '--brightness': `${this.brightness}%`,
-        '--contrast': `${this.contrast}%`,
-        '--img-filter': `brightness(${this.brightness}%) contrast(${this.contrast}%)`,
-        '--rotation': `${this.pageRotation}deg`,
-        
-        // --- 核心修改：左右拖动逻辑 ---
-        // 旋转 90 度后，视觉上的“高”对应物理上的“宽”
-        // 1. 物理高度 (Height) 设为 100vw，确保旋转后视觉宽度撑满屏幕
-        '--img-height': isRotated ? '100vw' : '100vh', 
-        // 2. 物理宽度 (Width) 设为 auto，让长图在水平方向展开
-        '--img-width': isRotated ? 'auto' : '100vw',
-        
-        '--img-max-width': 'none',
-        '--img-max-height': 'none',
-        
-        // 3. 容器滚动方向切换为横向 (X轴)
-        '--container-overflow-x': isRotated ? 'auto' : 'hidden',
-        '--container-overflow-y': 'hidden',
-        
-        // 4. 边距补偿：从上下 (vh) 改为左右 (vw)
-        '--img-margin': isRotated ? '0 50vw' : '0 auto',
-      }
-    },
     continuousReader(): boolean {
       return this.readingDirection === ReadingDirection.WEBTOON
     },
@@ -718,7 +663,6 @@ export default Vue.extend({
         else screenfull.isEnabled && screenfull.exit()
       },
     },
-    
   },
   methods: {
     enterFullscreen() {
@@ -1002,67 +946,13 @@ export default Vue.extend({
   width: 100%;
 }
 </style>
-
-<style lang="scss">
-/* 1. 基础阅读器环境优化保持不变 */
-.html-reader::-webkit-scrollbar { display: none; }
-.html-reader { scrollbar-width: none; overscroll-behavior: none; }
-
-/* 2. 核心：由垂直滚动改为水平滚动 */
-.reader-container {
-  overflow: hidden !important; 
-  height: 100vh !important;
-  width: 100vw !important;
-
-  /* 穿透修改：开启横向溢出 */
-  .v-window__container,
-  .v-carousel__item,
-  .v-carousel__item > .full-height {
-    /* 关键：切换为 X 轴滚动 */
-    overflow-x: var(--container-overflow-x, hidden) !important;
-    overflow-y: var(--container-overflow-y, hidden) !important;
-    
-    /* 必须改为 flex 并禁止换行，否则长图无法在水平方向伸展 */
-    display: flex !important;
-    flex-direction: row !important;
-    align-items: center !important;
-    justify-content: flex-start !important; 
-    
-    white-space: nowrap !important;
-    -webkit-overflow-scrolling: touch;
-  }
-
-  /* 3. 穿透修改图片：实现横向长卷效果 */
-  img, .img-fit-all {
-    filter: var(--img-filter, none) !important;
-    transform: var(--img-transform, none) !important;
-    transform-origin: center center !important;
-    
-    /* 响应变量：旋转后 width 应为 auto (让图片变宽), height 为 100vw (视觉宽度) */
-    width: var(--img-width, auto) !important;
-    height: var(--img-height, 100vh) !important; 
-    
-    max-width: none !important;
-    max-height: none !important;
-    
-    /* 旋转后的横向外边距补偿 (margin: 0 50vw) */
-    margin: var(--img-margin, 0 auto) !important;
-    
-    /* 核心：防止图片被 flex 容器压缩，确保产生横向滚动条 */
-    flex-shrink: 0 !important;
-    display: block !important;
-    
-    transition: transform 0.2s ease;
-    pointer-events: auto !important;
-  }
+<style>
+.html-reader::-webkit-scrollbar {
+  display: none;
 }
 
-/* 4. 滚动条美化调整为横向 */
-.v-carousel__item::-webkit-scrollbar {
-  height: 4px; /* 横向滚动条高度 */
-}
-.v-carousel__item::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 2px;
+.html-reader {
+  scrollbar-width: none;
+  overscroll-behavior: none;
 }
 </style>
