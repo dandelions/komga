@@ -43,7 +43,10 @@
       </div>
     </div>
     <div v-else-if="loading" class="reflow-status">Reflowing...</div>
-    <div v-else-if="error" class="reflow-status">Unable to reflow this page</div>
+    <div v-else-if="error" class="reflow-status">
+      <div>Unable to reflow this page</div>
+      <div v-if="errorMessage" class="reflow-error">{{ errorMessage }}</div>
+    </div>
     <div v-else class="reflow-wrapper">
       <div v-if="wordBlocks.length === 0" class="reflow-status">No text blocks detected</div>
       <img
@@ -129,6 +132,7 @@ export default Vue.extend({
     return {
       loading: false,
       error: false,
+      errorMessage: '',
       wordBlocks: [] as RenderedWordBlock[],
       objectUrl: '',
       requestId: 0,
@@ -178,6 +182,7 @@ export default Vue.extend({
       this.requestId = requestId
       this.loading = true
       this.error = false
+      this.errorMessage = ''
       this.wordBlocks = []
 
       try {
@@ -197,22 +202,34 @@ export default Vue.extend({
       } catch (e) {
         if (requestId !== this.requestId) return
         this.error = true
+        this.errorMessage = e instanceof Error ? e.message : String(e)
       } finally {
         if (requestId === this.requestId) this.loading = false
       }
     },
     async loadPageImage(url: string): Promise<HTMLImageElement> {
       this.revokeObjectUrl()
-      const response = await fetch(url, {credentials: 'include'})
+      const response = await fetch(this.pageImageUrl(url), {credentials: 'include'})
       if (!response.ok) throw new Error(`Unable to load page: ${response.status}`)
       const blob = await response.blob()
+      if (blob.type && !blob.type.startsWith('image/')) throw new Error(`Page response is not an image: ${blob.type}`)
       this.objectUrl = URL.createObjectURL(blob)
       return new Promise((resolve, reject) => {
         const image = new Image()
-        image.onload = () => resolve(image)
-        image.onerror = reject
+        image.onload = () => {
+          if (!image.naturalWidth || !image.naturalHeight) {
+            reject(new Error('Decoded image is empty'))
+          } else {
+            resolve(image)
+          }
+        }
+        image.onerror = () => reject(new Error('Unable to decode page image'))
         image.src = this.objectUrl
       })
+    },
+    pageImageUrl(url: string): string {
+      const separator = url.includes('?') ? '&' : '?'
+      return `${url}${separator}contentNegotiation=false`
     },
     revokeObjectUrl() {
       if (this.objectUrl) URL.revokeObjectURL(this.objectUrl)
@@ -569,10 +586,20 @@ export default Vue.extend({
 .reflow-status {
   min-height: 100vh;
   display: flex;
+  flex-direction: column;
+  gap: 8px;
   align-items: center;
   justify-content: center;
   color: #9e9e9e;
   width: 100%;
+}
+
+.reflow-error {
+  max-width: 90%;
+  color: #ef5350;
+  font-size: 12px;
+  text-align: center;
+  word-break: break-word;
 }
 
 .word-block {
