@@ -62,15 +62,28 @@
       <div v-if="errorMessage" class="reflow-error">{{ errorMessage }}</div>
     </div>
     <div v-else class="reflow-wrapper">
-      <div v-if="wordBlocks.length === 0" class="reflow-status">No text blocks detected</div>
-      <img
-        v-for="(block, i) in wordBlocks"
-        :key="`word-${i}`"
-        :src="block.src"
-        class="word-block"
-        :style="`height: ${block.height}px`"
-        alt=""
-      />
+      <div v-if="reflowItems.length === 0" class="reflow-status">No text blocks detected</div>
+      <template v-for="(item, i) in reflowItems">
+        <span
+          v-if="item.type === 'break'"
+          :key="`break-${i}`"
+          class="line-break"
+        />
+        <span
+          v-else-if="item.type === 'indent'"
+          :key="`indent-${i}`"
+          class="line-indent"
+          :style="`width: ${item.width}px`"
+        />
+        <img
+          v-else
+          :key="`word-${i}`"
+          :src="item.src"
+          class="word-block"
+          :style="`height: ${item.height}px`"
+          alt=""
+        />
+      </template>
     </div>
   </div>
 </template>
@@ -116,8 +129,26 @@ type WordBlock = {
 }
 
 type RenderedWordBlock = WordBlock & {
+  type: 'word',
   src: string,
   height: number,
+}
+
+type LineBreakItem = {
+  type: 'break',
+}
+
+type LineIndentItem = {
+  type: 'indent',
+  width: number,
+}
+
+type ReflowItem = RenderedWordBlock | LineBreakItem | LineIndentItem
+
+type WordLine = {
+  column: Column,
+  line: Line,
+  words: WordBlock[],
 }
 
 const THRESHOLD = 185
@@ -126,6 +157,7 @@ const WORD_GAP = 3
 const BLOCK_PADDING = 1
 const WORD_SCALE = 0.75
 const MIN_CROP_SIZE = 15
+const MIN_INDENT = 8
 
 export default Vue.extend({
   name: 'ReflowedPage',
@@ -148,7 +180,7 @@ export default Vue.extend({
       loading: false,
       error: false,
       errorMessage: '',
-      wordBlocks: [] as RenderedWordBlock[],
+      reflowItems: [] as ReflowItem[],
       objectUrl: '',
       requestId: 0,
       imageSize: {w: 0, h: 0},
@@ -201,7 +233,7 @@ export default Vue.extend({
       this.loading = true
       this.error = false
       this.errorMessage = ''
-      this.wordBlocks = []
+      this.reflowItems = []
 
       try {
         const image = await this.loadPageImage(this.page.url)
@@ -214,9 +246,9 @@ export default Vue.extend({
         if (!context) throw new Error('Canvas is unavailable')
         context.drawImage(image, 0, 0)
         const imageData = context.getImageData(0, 0, canvas.width, canvas.height)
-        const blocks = this.detectWordBlocks(imageData, canvas.width, canvas.height)
+        const lines = this.detectWordLines(imageData, canvas.width, canvas.height)
         if (requestId !== this.requestId) return
-        this.wordBlocks = this.renderWordBlocks(canvas, blocks)
+        this.reflowItems = this.renderReflowItems(canvas, lines)
       } catch (e) {
         if (requestId !== this.requestId) return
         this.error = true
@@ -253,7 +285,7 @@ export default Vue.extend({
       if (this.objectUrl) URL.revokeObjectURL(this.objectUrl)
       this.objectUrl = ''
     },
-    detectWordBlocks(imageData: ImageData, width: number, height: number): WordBlock[] {
+    detectWordLines(imageData: ImageData, width: number, height: number): WordLine[] {
       const pixels = imageData.data
       const threshold = this.clampNumber(this.options.threshold, 50, 230, THRESHOLD)
       const isInk = (x: number, y: number): boolean => {
@@ -265,16 +297,19 @@ export default Vue.extend({
 
       const roi = this.detectRoi(isInk, width, height)
       const columns = this.detectColumns(isInk, width, height, roi)
-      const blocks = [] as WordBlock[]
+      const wordLines = [] as WordLine[]
 
       columns.forEach(column => {
         const columnWidth = column.end - column.start
         if (columnWidth < 8) return
         const lines = this.detectLines(isInk, column, roi)
-        lines.forEach(line => blocks.push(...this.detectWords(isInk, column, line)))
+        lines.forEach(line => {
+          const words = this.detectWords(isInk, column, line)
+          if (words.length > 0) wordLines.push({column, line, words})
+        })
       })
 
-      return blocks
+      return wordLines
     },
     detectRoi(isInk: (x: number, y: number) => boolean, width: number, height: number): Roi {
       if (this.cropRoi) return this.clampRoi(this.cropRoi, width, height)
@@ -427,6 +462,8 @@ export default Vue.extend({
     detectWords(isInk: (x: number, y: number) => boolean, column: Column, line: Line): WordBlock[] {
       const columnWidth = column.end - column.start
       const lineHeight = line.end - line.start
+      const lineBounds = this.tightLineBounds(isInk, column, line)
+      if (!lineBounds) return []
       const wordInk = new Array(columnWidth).fill(0)
       const gapInkTolerance = Math.max(1, Math.floor(lineHeight * 0.04))
       for (let sx = 0; sx < columnWidth; sx++) {
@@ -445,12 +482,12 @@ export default Vue.extend({
           wordStart = sx
         } else if (inWord && wordInk[sx] <= gapInkTolerance && this.realWordGap(wordInk, sx, columnWidth, gapInkTolerance)) {
           inWord = false
-          const word = this.tightWordBlock(isInk, column.start + wordStart, line.start, sx - wordStart, lineHeight)
+          const word = this.tightWordBlock(isInk, column.start + wordStart, line, sx - wordStart, lineBounds)
           if (word) words.push(word)
         }
       }
       if (inWord) {
-        const word = this.tightWordBlock(isInk, column.start + wordStart, line.start, columnWidth - wordStart, lineHeight)
+        const word = this.tightWordBlock(isInk, column.start + wordStart, line, columnWidth - wordStart, lineBounds)
         if (word) words.push(word)
       }
       return words
@@ -462,58 +499,113 @@ export default Vue.extend({
       }
       return true
     },
-    tightWordBlock(isInk: (x: number, y: number) => boolean, x: number, y: number, w: number, h: number): WordBlock | undefined {
-      let minX = x + w
-      let minY = y + h
-      let maxX = x
-      let maxY = y
+    tightLineBounds(isInk: (x: number, y: number) => boolean, column: Column, line: Line): {top: number, bottom: number} | undefined {
+      let minY = line.end
+      let maxY = line.start
 
-      for (let yy = y; yy < y + h; yy++) {
-        for (let xx = x; xx < x + w; xx++) {
+      for (let yy = line.start; yy < line.end; yy++) {
+        for (let xx = column.start; xx < column.end; xx++) {
           if (!isInk(xx, yy)) continue
-          minX = Math.min(minX, xx)
           minY = Math.min(minY, yy)
-          maxX = Math.max(maxX, xx)
           maxY = Math.max(maxY, yy)
         }
       }
 
-      if (maxX < minX || maxY < minY) return undefined
+      if (maxY < minY) return undefined
+
+      return {
+        top: Math.max(line.start, minY - BLOCK_PADDING),
+        bottom: Math.min(line.end - 1, maxY + BLOCK_PADDING),
+      }
+    },
+    tightWordBlock(
+      isInk: (x: number, y: number) => boolean,
+      x: number,
+      line: Line,
+      w: number,
+      lineBounds: {top: number, bottom: number},
+    ): WordBlock | undefined {
+      let minX = x + w
+      let maxX = x
+
+      for (let yy = line.start; yy < line.end; yy++) {
+        for (let xx = x; xx < x + w; xx++) {
+          if (!isInk(xx, yy)) continue
+          minX = Math.min(minX, xx)
+          maxX = Math.max(maxX, xx)
+        }
+      }
+
+      if (maxX < minX) return undefined
 
       const left = Math.max(x, minX - BLOCK_PADDING)
-      const top = Math.max(y, minY - BLOCK_PADDING)
       const right = Math.min(x + w - 1, maxX + BLOCK_PADDING)
-      const bottom = Math.min(y + h - 1, maxY + BLOCK_PADDING)
 
       return {
         x: left,
-        y: top,
+        y: lineBounds.top,
         w: right - left + 1,
-        h: bottom - top + 1,
+        h: lineBounds.bottom - lineBounds.top + 1,
       }
     },
-    renderWordBlocks(sourceCanvas: HTMLCanvasElement, blocks: WordBlock[]): RenderedWordBlock[] {
+    renderReflowItems(sourceCanvas: HTMLCanvasElement, lines: WordLine[]): ReflowItem[] {
       const sourceContext = sourceCanvas.getContext('2d')
       if (!sourceContext) return []
-      const rendered = [] as RenderedWordBlock[]
+      const rendered = [] as ReflowItem[]
       const sliceCanvas = document.createElement('canvas')
       const sliceContext = sliceCanvas.getContext('2d')
       if (!sliceContext) return []
 
-      blocks.forEach(block => {
-        if (block.w < 2 || block.h < 2) return
-        sliceCanvas.width = block.w
-        sliceCanvas.height = block.h
-        sliceContext.clearRect(0, 0, block.w, block.h)
-        sliceContext.drawImage(sourceCanvas, block.x, block.y, block.w, block.h, 0, 0, block.w, block.h)
-        rendered.push({
-          ...block,
-          src: sliceCanvas.toDataURL('image/png'),
-          height: block.h * this.textScale(),
+      lines.forEach((line, index) => {
+        const startParagraph = this.isParagraphStart(line, lines[index - 1])
+        const indent = startParagraph ? this.renderedLineIndent(line) : 0
+        if (startParagraph && rendered.length > 0) rendered.push({type: 'break'})
+        if (indent > 0) rendered.push({type: 'indent', width: indent})
+
+        line.words.forEach(block => {
+          if (block.w < 2 || block.h < 2) return
+          sliceCanvas.width = block.w
+          sliceCanvas.height = block.h
+          sliceContext.clearRect(0, 0, block.w, block.h)
+          sliceContext.drawImage(sourceCanvas, block.x, block.y, block.w, block.h, 0, 0, block.w, block.h)
+          rendered.push({
+            ...block,
+            type: 'word',
+            src: sliceCanvas.toDataURL('image/png'),
+            height: block.h * this.textScale(),
+          })
         })
       })
 
       return rendered
+    },
+    isParagraphStart(line: WordLine, previousLine: WordLine | undefined): boolean {
+      if (!previousLine) return true
+      if (line.column.start !== previousLine.column.start || line.column.end !== previousLine.column.end) return true
+
+      const gap = line.line.start - previousLine.line.end
+      const currentHeight = line.words[0]?.h || line.line.end - line.line.start
+      const previousHeight = previousLine.words[0]?.h || previousLine.line.end - previousLine.line.start
+      if (gap > Math.max(currentHeight, previousHeight) * 0.65) return true
+
+      const indent = this.rawLineIndent(line)
+      const previousIndent = this.rawLineIndent(previousLine)
+      const indentThreshold = Math.max(MIN_INDENT, currentHeight * 0.6)
+      return indent > previousIndent + indentThreshold
+    },
+    rawLineIndent(line: WordLine): number {
+      const firstWord = line.words[0]
+      if (!firstWord) return 0
+      return Math.max(0, firstWord.x - line.column.start)
+    },
+    renderedLineIndent(line: WordLine): number {
+      const firstWord = line.words[0]
+      if (!firstWord) return 0
+      const rawIndent = this.rawLineIndent(line)
+      const indentThreshold = Math.max(MIN_INDENT, firstWord.h * 0.3)
+      if (rawIndent < indentThreshold) return 0
+      const maxIndent = Math.max(0, (this.targetWidth - 32) * 0.45)
+      return Math.min(maxIndent, rawIndent * this.textScale())
     },
     textScale(): number {
       return this.textScalePercent / 100
@@ -632,6 +724,18 @@ export default Vue.extend({
   height: auto;
   max-width: 100%;
   object-fit: contain;
+}
+
+.line-break {
+  flex: 0 0 100%;
+  width: 100%;
+  height: 0;
+  overflow: hidden;
+}
+
+.line-indent {
+  flex: 0 0 auto;
+  height: 1px;
 }
 
 .reflow-controls {
