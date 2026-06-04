@@ -91,6 +91,7 @@ export default Vue.extend({
       logger: 'PagedReader',
       carouselPage: 0,
       spreads: [] as PageDtoWithUrl[][],
+      pendingScrollPosition: 'top' as 'top' | 'bottom',
     }
   },
   props: {
@@ -132,7 +133,6 @@ export default Vue.extend({
     },
     carouselPage(val, old) {
       this.$debug('[watch:carouselPage', `old:${old}`, `new:${val}`)
-      if (val !== old) this.scrollToPageTop()
       if (this.carouselPage >= 0 && this.carouselPage < this.spreads.length && this.spreads.length > 0) {
         const currentSpread = this.spreads[this.carouselPage]
         const currentPage = currentSpread.length == 2 && currentSpread[1].mediaType ? currentSpread[1] : currentSpread[0]
@@ -146,7 +146,8 @@ export default Vue.extend({
       const spreadIndex = this.toSpreadIndex(val)
       this.$debug('[watch:page]', `toSpreadIndex:${spreadIndex}`)
       this.carouselPage = spreadIndex
-      this.scrollToPageTop()
+      this.scrollToPageEdge(this.pendingScrollPosition)
+      this.pendingScrollPosition = 'top'
     },
     pageLayout: {
       handler(val) {
@@ -251,47 +252,49 @@ export default Vue.extend({
     },
     prev() {
       if (this.canPrev) {
+        this.pendingScrollPosition = 'bottom'
         this.carouselPage--
-        this.scrollToPageTop()
       } else {
         this.$emit('jump-previous')
       }
     },
     next() {
       if (this.canNext) {
+        this.pendingScrollPosition = 'top'
         this.carouselPage++
-        this.scrollToPageTop()
       } else {
         this.$emit('jump-next')
       }
     },
-    scrollToPageTop() {
-      const scrollTop = () => {
+    scrollToPageEdge(position: 'top' | 'bottom') {
+      const scrollToEdge = () => {
         const scrollingElement = document.scrollingElement || document.documentElement
         const reader = this.$el as HTMLElement
         const scrollableElements = [
           reader,
           ...Array.from(reader.querySelectorAll('.v-carousel, .v-window, .v-window__container, .v-window-item')),
         ] as HTMLElement[]
+        const scrollingElementTop = position === 'bottom' ? scrollingElement.scrollHeight : 0
+        const scrollableElementTop = (element: HTMLElement) => position === 'bottom' ? element.scrollHeight : 0
 
-        window.scrollTo({top: 0, left: 0, behavior: 'auto'})
-        scrollingElement.scrollTop = 0
+        window.scrollTo({top: scrollingElementTop, left: 0, behavior: 'auto'})
+        scrollingElement.scrollTop = scrollingElementTop
         scrollingElement.scrollLeft = 0
-        document.documentElement.scrollTop = 0
+        document.documentElement.scrollTop = position === 'bottom' ? document.documentElement.scrollHeight : 0
         document.documentElement.scrollLeft = 0
-        document.body.scrollTop = 0
+        document.body.scrollTop = position === 'bottom' ? document.body.scrollHeight : 0
         document.body.scrollLeft = 0
         scrollableElements.forEach(x => {
-          x.scrollTop = 0
+          x.scrollTop = scrollableElementTop(x)
           x.scrollLeft = 0
         })
       }
 
-      scrollTop()
+      scrollToEdge()
       this.$nextTick(() => {
-        scrollTop()
-        window.requestAnimationFrame(scrollTop)
-        window.setTimeout(scrollTop, 100)
+        scrollToEdge()
+        window.requestAnimationFrame(scrollToEdge)
+        window.setTimeout(scrollToEdge, 100)
       })
     },
     toSpreadIndex(i: number): number {
