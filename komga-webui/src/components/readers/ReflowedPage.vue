@@ -58,6 +58,8 @@ type RenderedWordBlock = WordBlock & {
 
 const THRESHOLD = 185
 const COLUMN_GAP = 15
+const WORD_GAP = 3
+const BLOCK_PADDING = 1
 const WORD_SCALE = 1
 
 export default Vue.extend({
@@ -305,6 +307,7 @@ export default Vue.extend({
       const columnWidth = column.end - column.start
       const lineHeight = line.end - line.start
       const wordInk = new Array(columnWidth).fill(0)
+      const gapInkTolerance = Math.max(1, Math.floor(lineHeight * 0.04))
       for (let sx = 0; sx < columnWidth; sx++) {
         const x = column.start + sx
         for (let y = line.start; y < line.end; y++) {
@@ -316,22 +319,56 @@ export default Vue.extend({
       let inWord = false
       let wordStart = 0
       for (let sx = 0; sx < columnWidth; sx++) {
-        if (!inWord && wordInk[sx] > 0) {
+        if (!inWord && wordInk[sx] > gapInkTolerance) {
           inWord = true
           wordStart = sx
-        } else if (inWord && wordInk[sx] === 0 && this.realWordGap(wordInk, sx, columnWidth)) {
+        } else if (inWord && wordInk[sx] <= gapInkTolerance && this.realWordGap(wordInk, sx, columnWidth, gapInkTolerance)) {
           inWord = false
-          if (sx - wordStart > 1) words.push({x: column.start + wordStart, y: line.start, w: sx - wordStart, h: lineHeight})
+          const word = this.tightWordBlock(isInk, column.start + wordStart, line.start, sx - wordStart, lineHeight)
+          if (word) words.push(word)
         }
       }
-      if (inWord) words.push({x: column.start + wordStart, y: line.start, w: columnWidth - wordStart, h: lineHeight})
+      if (inWord) {
+        const word = this.tightWordBlock(isInk, column.start + wordStart, line.start, columnWidth - wordStart, lineHeight)
+        if (word) words.push(word)
+      }
       return words
     },
-    realWordGap(wordInk: number[], start: number, end: number): boolean {
-      for (let x = start; x < Math.min(start + 2, end); x++) {
-        if (wordInk[x] > 0) return false
+    realWordGap(wordInk: number[], start: number, end: number, gapInkTolerance: number): boolean {
+      for (let x = start; x < Math.min(start + WORD_GAP, end); x++) {
+        if (wordInk[x] > gapInkTolerance) return false
       }
       return true
+    },
+    tightWordBlock(isInk: (x: number, y: number) => boolean, x: number, y: number, w: number, h: number): WordBlock | undefined {
+      let minX = x + w
+      let minY = y + h
+      let maxX = x
+      let maxY = y
+
+      for (let yy = y; yy < y + h; yy++) {
+        for (let xx = x; xx < x + w; xx++) {
+          if (!isInk(xx, yy)) continue
+          minX = Math.min(minX, xx)
+          minY = Math.min(minY, yy)
+          maxX = Math.max(maxX, xx)
+          maxY = Math.max(maxY, yy)
+        }
+      }
+
+      if (maxX < minX || maxY < minY) return undefined
+
+      const left = Math.max(x, minX - BLOCK_PADDING)
+      const top = Math.max(y, minY - BLOCK_PADDING)
+      const right = Math.min(x + w - 1, maxX + BLOCK_PADDING)
+      const bottom = Math.min(y + h - 1, maxY + BLOCK_PADDING)
+
+      return {
+        x: left,
+        y: top,
+        w: right - left + 1,
+        h: bottom - top + 1,
+      }
     },
     renderWordBlocks(sourceCanvas: HTMLCanvasElement, blocks: WordBlock[]): RenderedWordBlock[] {
       const sourceContext = sourceCanvas.getContext('2d')
