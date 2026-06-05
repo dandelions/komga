@@ -32,6 +32,17 @@
             @input="setStrokeStrength"
           />
         </label>
+        <label class="reflow-spacing-control">
+          <span>Spacing</span>
+          <input
+            type="number"
+            min="0"
+            max="24"
+            step="1"
+            :value="blockSpacing"
+            @input="setBlockSpacing"
+          />
+        </label>
         <div class="reflow-action-controls">
           <span class="reflow-parity-label">{{ pageParityLabel }}</span>
           <button type="button" class="reflow-control reflow-exit-control" @click="$emit('exit-reflow')">
@@ -88,7 +99,7 @@
       <div>Unable to reflow this page</div>
       <div v-if="errorMessage" class="reflow-error">{{ errorMessage }}</div>
     </div>
-    <div v-else class="reflow-wrapper">
+    <div v-else class="reflow-wrapper" :style="reflowWrapperStyle">
       <div v-if="reflowItems.length === 0" class="reflow-status">No text blocks detected</div>
       <template v-for="(item, i) in reflowItems">
         <span
@@ -127,6 +138,7 @@ type ReflowOptions = {
   columnGap: number,
   wordGap: number,
   strokeStrength: number,
+  blockSpacing: number,
   marginTop: number,
   marginRight: number,
   marginBottom: number,
@@ -252,6 +264,15 @@ export default Vue.extend({
     },
     strokeStrength(): number {
       return this.clampNumber(this.options.strokeStrength, 0.1, 3, 0.1)
+    },
+    blockSpacing(): number {
+      return this.clampNumber(this.options.blockSpacing, 0, 24, 6)
+    },
+    reflowWrapperStyle(): object {
+      return {
+        columnGap: `${this.blockSpacing}px`,
+        rowGap: `${Math.round(this.blockSpacing * 1.5)}px`,
+      }
     },
     pageParity(): PageParity {
       return this.page.number % 2 === 0 ? 'even' : 'odd'
@@ -925,6 +946,10 @@ export default Vue.extend({
       const target = event.target as HTMLInputElement
       this.$emit('stroke-strength-change', this.roundStrokeStrength(Number(target.value)))
     },
+    setBlockSpacing(event: Event) {
+      const target = event.target as HTMLInputElement
+      this.$emit('block-spacing-change', this.clampNumber(Number(target.value), 0, 24, 6))
+    },
     roundStrokeStrength(value: number): number {
       return Math.round(this.clampNumber(value, 0.1, 3, 0.1) * 10) / 10
     },
@@ -1117,7 +1142,8 @@ export default Vue.extend({
   min-width: 120px;
 }
 
-.reflow-stroke-control {
+.reflow-stroke-control,
+.reflow-spacing-control {
   flex: 1 1 180px;
   min-width: 0;
   display: flex;
@@ -1128,7 +1154,8 @@ export default Vue.extend({
   font-weight: 600;
 }
 
-.reflow-stroke-control input {
+.reflow-stroke-control input,
+.reflow-spacing-control input {
   flex: 1;
   min-width: 80px;
 }
