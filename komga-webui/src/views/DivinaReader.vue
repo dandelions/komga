@@ -641,6 +641,7 @@ import {ItemTypes} from '@/types/items'
 import {getBookReadRouteFromMedia} from '@/functions/book-format'
 import {TocEntry} from '@/types/epub'
 import {flattenToc} from '@/functions/toc'
+import {CLIENT_SETTING, ClientSettingUserUpdateDto} from '@/types/komga-clientsettings'
 
 const REFLOW_SETTINGS_STORAGE_PREFIX = 'komga.pdfReflowSettings.'
 
@@ -691,6 +692,8 @@ export default Vue.extend({
       reflowMode: false,
       reflowCropMode: false,
       reflowSettingsBookId: '',
+      loadingReflowSettings: false,
+      saveReflowSettingsServerDebounced: undefined as undefined | (() => void),
       reflowCache: {} as Record<string, any[]>,
       reflowPrefetchPage: 0,
       reflowPrefetchTimer: undefined as number | undefined,
@@ -774,6 +777,7 @@ export default Vue.extend({
       if (isSupported) this.supportedMediaTypes.push('image/avif')
     })
     this.shortcuts = this.$_.keyBy([...shortcutsSettings, ...shortcutsSettingsPaged, ...shortcutsSettingsContinuous, ...shortcutsMenus, ...shortcutsAll], x => x.key)
+    this.saveReflowSettingsServerDebounced = debounce(() => this.saveReflowSettingsServer(), 700)
     window.addEventListener('keydown', this.keyPressed)
     if (screenfull.isEnabled) screenfull.on('change', this.fullscreenChanged)
   },
@@ -847,7 +851,7 @@ export default Vue.extend({
     },
     reflowSettings: {
       handler() {
-        this.saveReflowSettings()
+        if (!this.loadingReflowSettings) this.saveReflowSettings()
       },
       deep: true,
     },
@@ -1329,12 +1333,15 @@ export default Vue.extend({
     },
     loadReflowSettings(bookId: string = this.bookId) {
       if (!bookId) return
+      this.loadingReflowSettings = true
       try {
-        const raw = window.localStorage.getItem(this.reflowSettingsStorageKey(bookId))
-        if (!raw) return
-        Object.assign(this.reflowSettings, this.normalizedReflowSettings(JSON.parse(raw)))
+        const serverSettings = this.readServerReflowSettings()[bookId]
+        const raw = serverSettings ? JSON.stringify(serverSettings) : window.localStorage.getItem(this.reflowSettingsStorageKey(bookId))
+        if (raw) Object.assign(this.reflowSettings, this.normalizedReflowSettings(JSON.parse(raw)))
       } catch (e) {
         this.$debug('Unable to load PDF reflow settings', e)
+      } finally {
+        this.$nextTick(() => this.loadingReflowSettings = false)
       }
     },
     saveReflowSettings() {
@@ -1343,6 +1350,30 @@ export default Vue.extend({
         window.localStorage.setItem(this.reflowSettingsStorageKey(), JSON.stringify(this.reflowSettings))
       } catch (e) {
         this.$debug('Unable to save PDF reflow settings', e)
+      }
+      this.saveReflowSettingsServerDebounced?.()
+    },
+    async saveReflowSettingsServer() {
+      const bookId = this.reflowSettingsBookId || this.bookId
+      if (!bookId) return
+      try {
+        const all = this.readServerReflowSettings()
+        all[bookId] = this.normalizedReflowSettings(this.reflowSettings)
+        const newSettings = {} as Record<string, ClientSettingUserUpdateDto>
+        newSettings[CLIENT_SETTING.WEBUI_PDF_REFLOW_SETTINGS] = {
+          value: JSON.stringify(all),
+        }
+        await this.$komgaSettings.updateClientSettingUser(newSettings)
+        await this.$store.dispatch('getClientSettingsUser')
+      } catch (e) {
+        this.$debug('Unable to save PDF reflow settings on server', e)
+      }
+    },
+    readServerReflowSettings(): Record<string, any> {
+      try {
+        return JSON.parse(this.$store.state.komgaSettings.clientSettingsUser[CLIENT_SETTING.WEBUI_PDF_REFLOW_SETTINGS]?.value) || {}
+      } catch (e) {
+        return {}
       }
     },
     normalizedReflowSettings(settings: Record<string, any>): object {

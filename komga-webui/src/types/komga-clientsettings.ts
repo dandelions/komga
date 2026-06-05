@@ -20,6 +20,7 @@ export enum CLIENT_SETTING {
   WEBUI_LIBRARIES = 'webui.libraries',
   WEBUI_SERIES_GROUPS = 'webui.series_groups',
   WEBUI_RECOMMENDED = 'webui.recommended',
+  WEBUI_PDF_REFLOW_SETTINGS = 'webui.pdf_reflow_settings',
 }
 
 export interface ClientSettingLibrary {
