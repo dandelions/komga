@@ -440,7 +440,7 @@
                   <v-slider
                     v-model="reflowSettings.textScale"
                     label="Text size"
-                    min="40"
+                    min="10"
                     max="140"
                     thumb-label
                     suffix="%"

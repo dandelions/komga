@@ -6,7 +6,7 @@
           <span>Text size</span>
           <input
             type="range"
-            min="40"
+            min="10"
             max="140"
             step="5"
             :value="textScalePercent"
@@ -257,7 +257,7 @@ export default Vue.extend({
   },
   computed: {
     textScalePercent(): number {
-      return this.clampNumber(this.options.textScale, 40, 140, WORD_SCALE * 100)
+      return this.clampNumber(this.options.textScale, 10, 140, WORD_SCALE * 100)
     },
     columnCount(): number {
       return this.normalizedColumnCount()
@@ -936,7 +936,7 @@ export default Vue.extend({
     },
     setTextScale(event: Event) {
       const target = event.target as HTMLInputElement
-      this.$emit('text-scale-change', this.clampNumber(Number(target.value), 40, 140, WORD_SCALE * 100))
+      this.$emit('text-scale-change', this.clampNumber(Number(target.value), 10, 140, WORD_SCALE * 100))
     },
     setColumnCount(event: Event) {
       const target = event.target as HTMLSelectElement
