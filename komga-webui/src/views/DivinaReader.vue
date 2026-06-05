@@ -1692,7 +1692,8 @@ export default Vue.extend({
 }
 
 .reader-night-mode .reader-frame img,
-.reader-night-mode .reader-frame canvas {
+.reader-night-mode .reader-frame canvas,
+.reader-night-mode .reader-frame .word-background-block {
   filter: invert(1) hue-rotate(180deg) brightness(0.92);
 }
 </style>

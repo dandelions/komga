@@ -116,12 +116,18 @@
           :style="`width: ${item.width}px`"
         />
         <img
-          v-else
+          v-else-if="item.type === 'word' && item.src"
           :key="`word-${i}`"
           :src="item.src"
           class="word-block"
           :style="`height: ${item.height}px`"
           alt=""
+        />
+        <span
+          v-else-if="item.type === 'word'"
+          :key="`word-bg-${i}`"
+          class="word-block word-background-block"
+          :style="wordBackgroundStyle(item)"
         />
       </template>
     </div>
@@ -176,7 +182,10 @@ type WordBlock = {
 
 type RenderedWordBlock = WordBlock & {
   type: 'word',
-  src: string,
+  src?: string,
+  sourceImage?: string,
+  sourceImageWidth?: number,
+  sourceImageHeight?: number,
   height: number,
 }
 
@@ -206,6 +215,9 @@ type BackendReflowItem = {
 
 type BackendReflowResponse = {
   pageNumber: number,
+  imageSrc?: string,
+  imageWidth?: number,
+  imageHeight?: number,
   items: BackendReflowItem[],
 }
 
@@ -293,10 +305,16 @@ export default Vue.extend({
       return this.clampNumber(this.options.blockSpacing, 0, 24, 6)
     },
     reflowWrapperStyle(): object {
-      return {
+      const style = {
         columnGap: `${this.blockSpacing}px`,
         rowGap: `${Math.round(this.blockSpacing * 1.5)}px`,
-      }
+      } as Record<string, string>
+      if (this.reflowSourceImage) style['--reflow-source-image'] = `url(${this.reflowSourceImage})`
+      return style
+    },
+    reflowSourceImage(): string {
+      const word = this.reflowItems.find(item => item.type === 'word' && item.sourceImage)
+      return word && word.type === 'word' ? word.sourceImage || '' : ''
     },
     pageParity(): PageParity {
       return this.page.number % 2 === 0 ? 'even' : 'odd'
@@ -433,7 +451,7 @@ export default Vue.extend({
         if (!Array.isArray(result.items)) return false
 
         this.revokeObjectUrl()
-        this.reflowItems = this.normalizeBackendReflowItems(result.items)
+        this.reflowItems = this.normalizeBackendReflowItems(result.items, result.imageSrc, result.imageWidth, result.imageHeight)
         this.lastDetectionKey = detectionKey
         this.emitReflowed()
         return true
@@ -441,7 +459,12 @@ export default Vue.extend({
         return false
       }
     },
-    normalizeBackendReflowItems(items: BackendReflowItem[]): ReflowItem[] {
+    normalizeBackendReflowItems(
+      items: BackendReflowItem[],
+      imageSrc: string | undefined,
+      imageWidth: number | undefined,
+      imageHeight: number | undefined,
+    ): ReflowItem[] {
       const normalized = [] as ReflowItem[]
       items.forEach(item => {
         if (item.type === 'break') {
@@ -459,7 +482,7 @@ export default Vue.extend({
           return
         }
 
-        if (item.type !== 'word' || !item.src) return
+        if (item.type !== 'word' || (!item.src && !imageSrc)) return
         const h = Math.max(0, this.numberOrFallback(item.h, this.numberOrFallback(item.height, 0) / this.textScale()))
         const w = Math.max(0, this.numberOrFallback(item.w, 0))
         normalized.push({
@@ -469,10 +492,24 @@ export default Vue.extend({
           w,
           h,
           src: item.src,
+          sourceImage: imageSrc,
+          sourceImageWidth: this.numberOrFallback(imageWidth, 0),
+          sourceImageHeight: this.numberOrFallback(imageHeight, 0),
           height: this.numberOrFallback(item.height, h * this.textScale()),
         })
       })
       return normalized
+    },
+    wordBackgroundStyle(item: ReflowItem): object {
+      if (item.type !== 'word' || !item.sourceImage || !item.sourceImageWidth || !item.sourceImageHeight || !item.h) return {}
+      const scale = item.height / item.h
+      return {
+        width: `${Math.max(1, Math.round(item.w * scale))}px`,
+        height: `${Math.max(1, Math.round(item.height))}px`,
+        backgroundImage: 'var(--reflow-source-image)',
+        backgroundSize: `${Math.round(item.sourceImageWidth * scale)}px ${Math.round(item.sourceImageHeight * scale)}px`,
+        backgroundPosition: `${Math.round(-item.x * scale)}px ${Math.round(-item.y * scale)}px`,
+      }
     },
     numberOrFallback(value: number | undefined, fallback: number): number {
       const numberValue = Number(value)
@@ -1183,6 +1220,13 @@ export default Vue.extend({
   height: auto;
   max-width: 100%;
   object-fit: contain;
+}
+
+.word-background-block {
+  flex: 0 0 auto;
+  background-repeat: no-repeat;
+  background-origin: border-box;
+  background-clip: border-box;
 }
 
 .line-break {

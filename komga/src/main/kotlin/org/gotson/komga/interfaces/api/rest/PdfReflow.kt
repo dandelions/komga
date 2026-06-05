@@ -40,6 +40,9 @@ data class PdfReflowRoiDto(
 
 data class PdfReflowResponseDto(
   val pageNumber: Int,
+  val imageSrc: String? = null,
+  val imageWidth: Int? = null,
+  val imageHeight: Int? = null,
   val items: List<PdfReflowItemDto>,
 )
 
@@ -87,7 +90,7 @@ object PdfReflowEngine {
     pageNumber: Int,
     request: PdfReflowRequestDto,
   ): PdfReflowResponseDto {
-    val source = ImageIO.read(ByteArrayInputStream(pageBytes)) ?: return PdfReflowResponseDto(pageNumber, emptyList())
+    val source = ImageIO.read(ByteArrayInputStream(pageBytes)) ?: return PdfReflowResponseDto(pageNumber = pageNumber, items = emptyList())
     val image = BufferedImage(source.width, source.height, BufferedImage.TYPE_INT_ARGB)
     val graphics = image.createGraphics()
     try {
@@ -98,7 +101,13 @@ object PdfReflowEngine {
     val options = request.options
     boldenSource(image, options)
     val lines = detectWordLines(image, options, request.cropRoi)
-    return PdfReflowResponseDto(pageNumber, renderItems(image, lines, options, request.targetWidth))
+    return PdfReflowResponseDto(
+      pageNumber = pageNumber,
+      imageSrc = imageDataUrl(image),
+      imageWidth = image.width,
+      imageHeight = image.height,
+      items = renderItems(lines, options, request.targetWidth),
+    )
   }
 
   private fun detectWordLines(
@@ -358,7 +367,6 @@ object PdfReflowEngine {
   }
 
   private fun renderItems(
-    image: BufferedImage,
     lines: List<ReflowWordLine>,
     options: PdfReflowOptionsDto,
     targetWidth: Int,
@@ -371,8 +379,6 @@ object PdfReflowEngine {
       if (indent > 0) items += PdfReflowItemDto("indent", width = scaledIndentWidth(indent, targetWidth, options), sourceWidth = indent)
       line.words.forEach { word ->
         if (word.w < 2 || word.h < 2) return@forEach
-        val out = ByteArrayOutputStream()
-        ImageIO.write(image.getSubimage(word.x, word.y, word.w, word.h), "png", out)
         items +=
           PdfReflowItemDto(
             type = "word",
@@ -380,12 +386,17 @@ object PdfReflowEngine {
             y = word.y,
             w = word.w,
             h = word.h,
-            src = "data:image/png;base64,${Base64.getEncoder().encodeToString(out.toByteArray())}",
             height = word.h * options.textScale.coerceIn(10.0, 140.0) / 100,
           )
       }
     }
     return items
+  }
+
+  private fun imageDataUrl(image: BufferedImage): String {
+    val out = ByteArrayOutputStream()
+    ImageIO.write(image, "png", out)
+    return "data:image/png;base64,${Base64.getEncoder().encodeToString(out.toByteArray())}"
   }
 
   private fun isParagraphStart(
