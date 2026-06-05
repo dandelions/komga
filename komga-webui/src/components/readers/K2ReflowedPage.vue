@@ -31,6 +31,9 @@
         <span>Padding</span>
         <input type="number" min="0" max="48" step="1" :value="outputPadding" @input="setOutputPadding"/>
       </label>
+      <span class="k2-page-indicator">{{ virtualPageIndex + 1 }} / {{ Math.max(1, pages.length) }}</span>
+      <button type="button" class="k2-action" @click="previousPage">Prev</button>
+      <button type="button" class="k2-action" @click="nextPage">Next</button>
       <button type="button" class="k2-action" @click="$emit('exit-k2-reflow')">Exit K2</button>
     </div>
 
@@ -41,7 +44,7 @@
     </div>
     <div v-else class="k2-output">
       <div v-if="items.length === 0" class="k2-status">No text blocks detected</div>
-      <template v-for="(item, index) in items">
+      <template v-for="(item, index) in visibleItems">
         <span v-if="item.type === 'break'" :key="`break-${index}`" class="k2-break"/>
         <img
           v-else
@@ -85,12 +88,19 @@ export default Vue.extend({
       type: Number,
       required: true,
     },
+    startAtEnd: {
+      type: Boolean,
+      default: false,
+    },
   },
   data: () => ({
     loading: false,
     error: false,
     errorMessage: '',
     items: [] as K2Item[],
+    pages: [] as K2Item[][],
+    virtualPageIndex: 0,
+    viewportHeight: 0,
     requestId: 0,
     objectUrl: '',
     textScalePercent: DEFAULT_TEXT_SCALE,
@@ -110,8 +120,21 @@ export default Vue.extend({
     targetWidth() {
       this.reflow()
     },
+    startAtEnd() {
+      this.setInitialVirtualPage()
+    },
+  },
+  computed: {
+    visibleItems(): K2Item[] {
+      return this.pages[this.virtualPageIndex] || this.items
+    },
+  },
+  mounted() {
+    this.updateViewportHeight()
+    window.addEventListener('resize', this.handleResize)
   },
   destroyed() {
+    window.removeEventListener('resize', this.handleResize)
     this.revokeObjectUrl()
   },
   methods: {
@@ -142,6 +165,7 @@ export default Vue.extend({
         if (requestId !== this.requestId) return
 
         this.items = this.renderK2Items(canvas, lines)
+        this.repaginate()
       } catch (e) {
         if (requestId !== this.requestId) return
         this.error = true
@@ -149,6 +173,13 @@ export default Vue.extend({
       } finally {
         if (requestId === this.requestId) this.loading = false
       }
+    },
+    handleResize() {
+      this.updateViewportHeight()
+      this.repaginate()
+    },
+    updateViewportHeight() {
+      this.viewportHeight = window.innerHeight || document.documentElement.clientHeight || 720
     },
     async loadPageImage(url: string): Promise<HTMLImageElement> {
       this.revokeObjectUrl()
@@ -462,6 +493,74 @@ export default Vue.extend({
 
       return items
     },
+    repaginate() {
+      this.pages = this.paginateItems(this.items)
+      this.setInitialVirtualPage()
+    },
+    setInitialVirtualPage() {
+      if (this.pages.length === 0) {
+        this.virtualPageIndex = 0
+        return
+      }
+      this.virtualPageIndex = this.startAtEnd ? this.pages.length - 1 : 0
+    },
+    paginateItems(items: K2Item[]): K2Item[][] {
+      if (items.length === 0) return []
+
+      const pageHeight = Math.max(240, this.viewportHeight - 72)
+      const pageGap = 5
+      const pages = [] as K2Item[][]
+      let currentPage = [] as K2Item[]
+      let currentPageHeight = 0
+      let currentLine = [] as K2Item[]
+      let currentLineHeight = 0
+
+      const pushLine = () => {
+        if (currentLine.length === 0) return
+        const lineHeight = Math.max(1, currentLineHeight)
+        if (currentPage.length > 0 && currentPageHeight + lineHeight + pageGap > pageHeight) {
+          pages.push(currentPage)
+          currentPage = []
+          currentPageHeight = 0
+        }
+        currentPage.push(...currentLine, {type: 'break'})
+        currentPageHeight += lineHeight + pageGap
+        currentLine = []
+        currentLineHeight = 0
+      }
+
+      items.forEach(item => {
+        if (item.type === 'break') {
+          pushLine()
+          return
+        }
+        currentLine.push(item)
+        currentLineHeight = Math.max(currentLineHeight, item.height)
+      })
+
+      pushLine()
+      if (currentPage.length > 0) pages.push(currentPage)
+      return pages
+    },
+    nextPage() {
+      if (this.virtualPageIndex < this.pages.length - 1) {
+        this.virtualPageIndex++
+        this.scrollToTop()
+        return
+      }
+      this.$emit('source-next')
+    },
+    previousPage() {
+      if (this.virtualPageIndex > 0) {
+        this.virtualPageIndex--
+        this.scrollToTop()
+        return
+      }
+      this.$emit('source-previous')
+    },
+    scrollToTop() {
+      this.$nextTick(() => window.scrollTo({top: 0, left: 0, behavior: 'auto'}))
+    },
     strengthenInk(context: CanvasRenderingContext2D, width: number, height: number) {
       const imageData = context.getImageData(0, 0, width, height)
       const data = imageData.data
@@ -596,9 +695,17 @@ export default Vue.extend({
   font-variant-numeric: tabular-nums;
 }
 
+.k2-page-indicator {
+  color: #374151;
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  padding: 0 4px;
+}
+
 .k2-output {
   width: 100%;
-  min-height: 100vh;
+  min-height: calc(100vh - 56px);
   padding: 16px;
   box-sizing: border-box;
   display: flex;

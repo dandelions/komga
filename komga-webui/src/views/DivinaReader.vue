@@ -229,17 +229,21 @@
         class="reflow-reader"
       >
         <k2-reflowed-page
+          ref="k2ReflowedPage"
           :page="currentPage"
           :target-width="reflowTargetWidth"
+          :start-at-end="k2ReflowStartAtEnd"
           @exit-k2-reflow="exitK2ReflowMode"
+          @source-previous="k2SourcePreviousPage"
+          @source-next="k2SourceNextPage"
         />
 
         <div
-          @click="reflowPreviousPage"
+          @click="k2PreviousPage"
           class="reflow-click-top"
         />
         <div
-          @click="reflowNextPage"
+          @click="k2NextPage"
           class="reflow-click-bottom"
         />
         <div
@@ -735,6 +739,7 @@ export default Vue.extend({
       landscapeDisplay: false,
       reflowMode: false,
       k2ReflowMode: false,
+      k2ReflowStartAtEnd: false,
       reflowCropMode: false,
       reflowSettingsBookId: '',
       loadingReflowSettings: false,
@@ -1476,6 +1481,7 @@ export default Vue.extend({
       this.k2ReflowMode = true
       this.reflowMode = false
       this.reflowCropMode = false
+      this.k2ReflowStartAtEnd = false
       this.clearReflowPrefetch()
       this.$nextTick(() => this.scrollToPageEdge('top'))
     },
@@ -1488,6 +1494,30 @@ export default Vue.extend({
       this.k2ReflowMode = false
       this.reflowCropMode = false
       this.clearReflowPrefetch()
+    },
+    k2PreviousPage() {
+      const reflow = this.$refs.k2ReflowedPage as any
+      reflow?.previousPage?.()
+    },
+    k2NextPage() {
+      const reflow = this.$refs.k2ReflowedPage as any
+      reflow?.nextPage?.()
+    },
+    k2SourcePreviousPage() {
+      if (this.page > 1) {
+        this.k2ReflowStartAtEnd = true
+        this.goTo(this.page - 1)
+      } else {
+        this.jumpToPrevious()
+      }
+    },
+    k2SourceNextPage() {
+      if (this.page < this.pagesCount) {
+        this.k2ReflowStartAtEnd = false
+        this.goTo(this.page + 1)
+      } else {
+        this.jumpToNext()
+      }
     },
     setReflowTextScale(textScale: number) {
       this.reflowSettings.textScale = textScale
