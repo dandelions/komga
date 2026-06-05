@@ -822,51 +822,58 @@ export default Vue.extend({
       const data = imageData.data
       const original = new Uint8ClampedArray(data)
       let mask = new Uint8Array(width * height)
+      let maskIndexes = [] as number[]
 
       for (let i = 0; i < width * height; i++) {
         const offset = i * 4
         const alpha = original[offset + 3]
         if (alpha === 0) continue
         const luma = 0.299 * original[offset] + 0.587 * original[offset + 1] + 0.114 * original[offset + 2]
-        if (luma < threshold) mask[i] = 1
+        if (luma < threshold) {
+          mask[i] = 1
+          maskIndexes.push(i)
+        }
       }
 
       const fullPasses = Math.floor(strength)
       const fractional = strength - fullPasses
       for (let pass = 0; pass < fullPasses; pass++) {
-        mask = this.expandedInkMask(mask, width, height)
+        const expanded = this.expandedInkMask(mask, maskIndexes, width, height)
+        mask = expanded.mask
+        maskIndexes = expanded.indexes
       }
 
-      if (fullPasses > 0) this.applyInkMask(data, mask)
+      if (fullPasses > 0) this.applyInkMask(data, maskIndexes)
 
       if (fractional > 0) {
-        this.applyFractionalInkExpansion(data, mask, width, height, fractional)
+        this.applyFractionalInkExpansion(data, maskIndexes, width, height, fractional)
       }
 
       targetContext.putImageData(imageData, 0, 0)
     },
-    expandedInkMask(mask: Uint8Array, width: number, height: number): Uint8Array {
+    expandedInkMask(mask: Uint8Array, sourceIndexes: number[], width: number, height: number): {mask: Uint8Array, indexes: number[]} {
       const expanded = new Uint8Array(mask)
-      for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-          const i = y * width + x
-          if (!mask[i]) continue
-          for (let dy = -1; dy <= 1; dy++) {
-            const ny = y + dy
-            if (ny < 0 || ny >= height) continue
-            for (let dx = -1; dx <= 1; dx++) {
-              const nx = x + dx
-              if (nx < 0 || nx >= width) continue
-              expanded[ny * width + nx] = 1
-            }
+      const indexes = sourceIndexes.slice()
+      for (const i of sourceIndexes) {
+        const y = Math.floor(i / width)
+        const x = i - y * width
+        for (let dy = -1; dy <= 1; dy++) {
+          const ny = y + dy
+          if (ny < 0 || ny >= height) continue
+          for (let dx = -1; dx <= 1; dx++) {
+            const nx = x + dx
+            if (nx < 0 || nx >= width) continue
+            const ni = ny * width + nx
+            if (expanded[ni]) continue
+            expanded[ni] = 1
+            indexes.push(ni)
           }
         }
       }
-      return expanded
+      return {mask: expanded, indexes}
     },
-    applyInkMask(data: Uint8ClampedArray, mask: Uint8Array) {
-      for (let i = 0; i < mask.length; i++) {
-        if (!mask[i]) continue
+    applyInkMask(data: Uint8ClampedArray, indexes: number[]) {
+      for (const i of indexes) {
         const offset = i * 4
         data[offset] = Math.min(data[offset], 0)
         data[offset + 1] = Math.min(data[offset + 1], 0)
@@ -874,23 +881,21 @@ export default Vue.extend({
         data[offset + 3] = 255
       }
     },
-    applyFractionalInkExpansion(data: Uint8ClampedArray, mask: Uint8Array, width: number, height: number, strength: number) {
-      for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-          const i = y * width + x
-          if (!mask[i]) continue
-          const centerOffset = i * 4
-          this.darkenPixel(data, centerOffset, Math.min(1, strength))
-          for (let dy = -1; dy <= 1; dy++) {
-            const ny = y + dy
-            if (ny < 0 || ny >= height) continue
-            for (let dx = -1; dx <= 1; dx++) {
-              if (dx === 0 && dy === 0) continue
-              const nx = x + dx
-              if (nx < 0 || nx >= width) continue
-              const influence = strength * (Math.abs(dx) + Math.abs(dy) === 1 ? 0.7 : 0.45)
-              this.darkenPixel(data, (ny * width + nx) * 4, influence)
-            }
+    applyFractionalInkExpansion(data: Uint8ClampedArray, indexes: number[], width: number, height: number, strength: number) {
+      for (const i of indexes) {
+        const y = Math.floor(i / width)
+        const x = i - y * width
+        const centerOffset = i * 4
+        this.darkenPixel(data, centerOffset, Math.min(1, strength))
+        for (let dy = -1; dy <= 1; dy++) {
+          const ny = y + dy
+          if (ny < 0 || ny >= height) continue
+          for (let dx = -1; dx <= 1; dx++) {
+            if (dx === 0 && dy === 0) continue
+            const nx = x + dx
+            if (nx < 0 || nx >= width) continue
+            const influence = strength * (Math.abs(dx) + Math.abs(dy) === 1 ? 0.7 : 0.45)
+            this.darkenPixel(data, (ny * width + nx) * 4, influence)
           }
         }
       }
