@@ -190,14 +190,6 @@ type ReflowCachePayload = {
   items: ReflowItem[],
 }
 
-type OutputMetrics = {
-  minBlockHeight: number,
-  paddingX: number,
-  paddingY: number,
-  strokePasses: number,
-  threshold: number,
-}
-
 const THRESHOLD = 185
 const COLUMN_GAP = 15
 const WORD_GAP = 3
@@ -657,11 +649,26 @@ export default Vue.extend({
           lineStart = y
         } else if (inLine && rowInk[y] <= 1) {
           inLine = false
-          if (y - lineStart > 3) lines.push({start: lineStart, end: y})
+          if (this.isValidTextLine(rowInk, lineStart, y, column)) lines.push({start: lineStart, end: y})
         }
       }
-      if (inLine) lines.push({start: lineStart, end: roi.y + roi.h})
+      if (inLine && this.isValidTextLine(rowInk, lineStart, roi.y + roi.h, column)) lines.push({start: lineStart, end: roi.y + roi.h})
       return lines
+    },
+    isValidTextLine(rowInk: number[], start: number, end: number, column: Column): boolean {
+      const lineHeight = end - start
+      if (lineHeight > 3) return true
+
+      let maxInk = 0
+      let totalInk = 0
+      for (let y = start; y < end; y++) {
+        maxInk = Math.max(maxInk, rowInk[y] || 0)
+        totalInk += rowInk[y] || 0
+      }
+
+      const columnWidth = column.end - column.start
+      const longHorizontalStroke = maxInk >= Math.max(3, Math.floor(columnWidth * 0.08))
+      return longHorizontalStroke && totalInk >= Math.max(4, Math.floor(columnWidth * 0.08))
     },
     detectWords(isInk: (x: number, y: number) => boolean, column: Column, line: Line): WordBlock[] {
       const columnWidth = column.end - column.start
@@ -759,7 +766,6 @@ export default Vue.extend({
       const sliceCanvas = document.createElement('canvas')
       const sliceContext = sliceCanvas.getContext('2d')
       if (!sliceContext) return []
-      const outputMetrics = this.outputMetrics(lines, sourceCanvas.height)
 
       lines.forEach((line, index) => {
         const startParagraph = this.isParagraphStart(line, lines[index - 1])
@@ -769,55 +775,24 @@ export default Vue.extend({
 
         line.words.forEach(block => {
           if (block.w < 2 || block.h < 2) return
-          const crop = this.expandedBlockCrop(block, sourceCanvas.width, sourceCanvas.height, outputMetrics.paddingX, outputMetrics.paddingY)
-          const outputHeight = Math.max(crop.h, outputMetrics.minBlockHeight)
-          const offsetY = Math.floor((outputHeight - crop.h) / 2)
-          sliceCanvas.width = crop.w
-          sliceCanvas.height = outputHeight
-          sliceContext.clearRect(0, 0, crop.w, outputHeight)
-          sliceContext.drawImage(sourceCanvas, crop.x, crop.y, crop.w, crop.h, 0, offsetY, crop.w, crop.h)
-          this.strengthenInk(sliceContext, crop.w, outputHeight, outputMetrics.threshold, outputMetrics.strokePasses)
+          sliceCanvas.width = block.w
+          sliceCanvas.height = block.h
+          sliceContext.clearRect(0, 0, block.w, block.h)
+          sliceContext.drawImage(sourceCanvas, block.x, block.y, block.w, block.h, 0, 0, block.w, block.h)
+          if (this.strokeStrength > 0) {
+            const threshold = Math.min(245, this.clampNumber(this.options.threshold, 50, 230, THRESHOLD) + 18)
+            this.strengthenInk(sliceContext, block.w, block.h, threshold, this.strokeStrength)
+          }
           rendered.push({
             ...block,
-            h: outputHeight,
             type: 'word',
             src: sliceCanvas.toDataURL('image/png'),
-            height: outputHeight * this.textScale(),
+            height: block.h * this.textScale(),
           })
         })
       })
 
       return rendered
-    },
-    outputMetrics(lines: WordLine[], sourceHeight: number): OutputMetrics {
-      const heights = lines
-        .flatMap(line => line.words.map(word => word.h))
-        .filter(height => Number.isFinite(height) && height > 1)
-        .sort((a, b) => a - b)
-      const percentile = (ratio: number): number => {
-        if (heights.length === 0) return 0
-        return heights[Math.min(heights.length - 1, Math.floor((heights.length - 1) * ratio))]
-      }
-      const pageBasedMinHeight = Math.max(12, Math.round(sourceHeight * 0.012))
-      const typicalLineHeight = Math.max(percentile(0.6), pageBasedMinHeight)
-      const paddingX = Math.max(4, Math.round(typicalLineHeight * 0.24))
-      const paddingY = Math.max(2, Math.round(typicalLineHeight * 0.15))
-      const threshold = Math.min(245, this.clampNumber(this.options.threshold, 50, 230, THRESHOLD) + 18)
-
-      return {
-        minBlockHeight: typicalLineHeight + paddingY * 2,
-        paddingX,
-        paddingY,
-        strokePasses: this.strokeStrength,
-        threshold,
-      }
-    },
-    expandedBlockCrop(block: WordBlock, sourceWidth: number, sourceHeight: number, paddingX: number, paddingY: number): Roi {
-      const x1 = Math.max(0, Math.floor(block.x - paddingX))
-      const y1 = Math.max(0, Math.floor(block.y - paddingY))
-      const x2 = Math.min(sourceWidth, Math.ceil(block.x + block.w + paddingX))
-      const y2 = Math.min(sourceHeight, Math.ceil(block.y + block.h + paddingY))
-      return {x: x1, y: y1, w: Math.max(1, x2 - x1), h: Math.max(1, y2 - y1)}
     },
     strengthenInk(targetContext: CanvasRenderingContext2D, width: number, height: number, threshold: number, passes: number) {
       const imageData = targetContext.getImageData(0, 0, width, height)
