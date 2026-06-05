@@ -47,7 +47,7 @@
           </v-btn>
 
           <v-btn
-            v-if="$vuetify.breakpoint.mdAndUp"
+            v-if="isPdf && $vuetify.breakpoint.mdAndUp"
             icon
             :disabled="continuousReader"
             :title="landscapeDisplay ? 'Portrait' : 'Landscape'"
@@ -57,13 +57,23 @@
           </v-btn>
 
           <v-btn
-            v-if="$vuetify.breakpoint.mdAndUp"
+            v-if="isPdf && $vuetify.breakpoint.mdAndUp"
             icon
             :disabled="continuousReader"
             title="Reflow"
             @click="toggleReflowMode"
           >
             <v-icon>{{ reflowMode ? 'mdi-file-document' : 'mdi-file-document-outline' }}</v-icon>
+          </v-btn>
+
+          <v-btn
+            v-if="isPdf && $vuetify.breakpoint.mdAndUp"
+            icon
+            :disabled="continuousReader"
+            title="K2 Reflow"
+            @click="toggleK2ReflowMode"
+          >
+            <v-icon>{{ k2ReflowMode ? 'mdi-text-box' : 'mdi-text-box-outline' }}</v-icon>
           </v-btn>
 
           <v-btn
@@ -111,11 +121,17 @@
                   </v-list-item-icon>
                   <v-list-item-title>{{ landscapeDisplay ? 'Portrait' : 'Landscape' }}</v-list-item-title>
                 </v-list-item>
-                <v-list-item :disabled="continuousReader" @click="toggleReflowMode">
+                <v-list-item v-if="isPdf" :disabled="continuousReader" @click="toggleReflowMode">
                   <v-list-item-icon>
                     <v-icon>{{ reflowMode ? 'mdi-file-document' : 'mdi-file-document-outline' }}</v-icon>
                   </v-list-item-icon>
                   <v-list-item-title>Reflow</v-list-item-title>
+                </v-list-item>
+                <v-list-item v-if="isPdf" :disabled="continuousReader" @click="toggleK2ReflowMode">
+                  <v-list-item-icon>
+                    <v-icon>{{ k2ReflowMode ? 'mdi-text-box' : 'mdi-text-box-outline' }}</v-icon>
+                  </v-list-item-icon>
+                  <v-list-item-title>K2 Reflow</v-list-item-title>
                 </v-list-item>
                 <v-list-item @click="showHelp = !showHelp">
                   <v-list-item-icon>
@@ -209,7 +225,31 @@
       :class="{'reader-frame-landscape': landscapeDisplay && !continuousReader}"
     >
       <div
-        v-if="reflowMode && !continuousReader"
+        v-if="isPdf && k2ReflowMode && !continuousReader"
+        class="reflow-reader"
+      >
+        <k2-reflowed-page
+          :page="currentPage"
+          :target-width="reflowTargetWidth"
+          @exit-k2-reflow="exitK2ReflowMode"
+        />
+
+        <div
+          @click="reflowPreviousPage"
+          class="reflow-click-top"
+        />
+        <div
+          @click="reflowNextPage"
+          class="reflow-click-bottom"
+        />
+        <div
+          @click="toggleToolbars()"
+          class="reflow-click-center"
+        />
+      </div>
+
+      <div
+        v-else-if="isPdf && reflowMode && !continuousReader"
         class="reflow-reader"
       >
         <reflowed-page
@@ -421,11 +461,13 @@
                 />
               </v-list-item>
 
-              <v-subheader class="font-weight-black text-h6">Reflow</v-subheader>
-              <v-list-item>
-                <settings-switch v-model="reflowMode" label="Reflow page"/>
-              </v-list-item>
-              <template v-if="reflowMode">
+              <template v-if="isPdf">
+                <v-subheader class="font-weight-black text-h6">Reflow</v-subheader>
+                <v-list-item>
+                  <settings-switch v-model="reflowMode" label="Reflow page"/>
+                </v-list-item>
+              </template>
+              <template v-if="isPdf && reflowMode">
                 <v-list-item>
                   <settings-switch v-model="reflowSettings.autoCropBorder" label="Auto crop borders"/>
                 </v-list-item>
@@ -621,6 +663,7 @@ import {Location} from 'vue-router'
 import PagedReader from '@/components/readers/PagedReader.vue'
 import ContinuousReader from '@/components/readers/ContinuousReader.vue'
 import ReflowedPage from '@/components/readers/ReflowedPage.vue'
+import K2ReflowedPage from '@/components/readers/K2ReflowedPage.vue'
 import TocList from '@/components/TocList.vue'
 import {ContinuousScaleType, MarginValues, PaddingPercentage, PagedReaderLayout, ScaleType} from '@/types/enum-reader'
 import {
@@ -651,6 +694,7 @@ export default Vue.extend({
     ContinuousReader,
     PagedReader,
     ReflowedPage,
+    K2ReflowedPage,
     TocList,
     SettingsSwitch,
     SettingsSelect,
@@ -690,6 +734,7 @@ export default Vue.extend({
       showHelp: false,
       landscapeDisplay: false,
       reflowMode: false,
+      k2ReflowMode: false,
       reflowCropMode: false,
       reflowSettingsBookId: '',
       loadingReflowSettings: false,
@@ -930,6 +975,7 @@ export default Vue.extend({
     },
     reflowCacheKey(): string {
       return JSON.stringify({
+        bookId: this.bookId,
         width: this.reflowTargetWidth,
         autoCropBorder: this.reflowSettings.autoCropBorder,
         textScale: this.reflowSettings.textScale,
@@ -1072,7 +1118,7 @@ export default Vue.extend({
     },
     keyPressed(e: KeyboardEvent) {
       if (e.ctrlKey || e.altKey || e.shiftKey || e.metaKey) return
-      if (this.reflowMode && !this.continuousReader && this.keyPressedReflow(e)) return
+      if ((this.reflowMode || this.k2ReflowMode) && !this.continuousReader && this.keyPressedReflow(e)) return
       this.shortcuts[e.key]?.execute(this)
     },
     keyPressedReflow(e: KeyboardEvent): boolean {
@@ -1098,7 +1144,10 @@ export default Vue.extend({
     },
     async setup(bookId: string, page?: number) {
       this.$debug('[setup]', `bookId:${bookId}`, `page:${page}`)
+      this.reflowCache = {}
+      this.clearReflowPrefetch()
       this.book = await this.$komgaBooks.getBook(bookId)
+      if (!this.isPdf) this.exitAllReflowModes()
       this.series = await this.$komgaSeries.getOneSeries(this.book.seriesId)
       this.showPdfToc = false
       this.pdfTocLoading = false
@@ -1398,12 +1447,15 @@ export default Vue.extend({
       return Math.max(min, Math.min(max, numberValue))
     },
     toggleReflowMode() {
+      if (!this.isPdf) return
+
       if (this.reflowMode) {
         this.exitReflowMode()
         return
       }
 
       this.reflowMode = true
+      this.k2ReflowMode = false
       this.reflowCropMode = false
       this.clearReflowPrefetch()
     },
@@ -1412,6 +1464,30 @@ export default Vue.extend({
       this.reflowCropMode = false
       this.clearReflowPrefetch()
       this.$nextTick(() => this.scrollToPageEdge('top'))
+    },
+    toggleK2ReflowMode() {
+      if (!this.isPdf) return
+
+      if (this.k2ReflowMode) {
+        this.exitK2ReflowMode()
+        return
+      }
+
+      this.k2ReflowMode = true
+      this.reflowMode = false
+      this.reflowCropMode = false
+      this.clearReflowPrefetch()
+      this.$nextTick(() => this.scrollToPageEdge('top'))
+    },
+    exitK2ReflowMode() {
+      this.k2ReflowMode = false
+      this.$nextTick(() => this.scrollToPageEdge('top'))
+    },
+    exitAllReflowModes() {
+      this.reflowMode = false
+      this.k2ReflowMode = false
+      this.reflowCropMode = false
+      this.clearReflowPrefetch()
     },
     setReflowTextScale(textScale: number) {
       this.reflowSettings.textScale = textScale
