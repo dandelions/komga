@@ -21,8 +21,12 @@
         </select>
       </label>
       <div class="reflow-action-controls">
+        <span class="reflow-parity-label">{{ pageParityLabel }}</span>
+        <button type="button" class="reflow-control reflow-exit-control" @click="$emit('exit-reflow')">
+          Exit reflow
+        </button>
         <button type="button" class="reflow-control" @click="toggleCropMode">
-          {{ cropMode ? 'Done' : 'Select area' }}
+          {{ selectAreaLabel }}
         </button>
         <button
           type="button"
@@ -30,7 +34,7 @@
           :disabled="!cropRoi && !cropMode"
           @click="resetCrop"
         >
-          Reset area
+          Reset {{ pageParityLabel }} area
         </button>
       </div>
     </div>
@@ -119,6 +123,8 @@ type Roi = {
   h: number,
 }
 
+type PageParity = 'odd' | 'even'
+
 type Column = {
   start: number,
   end: number,
@@ -164,6 +170,14 @@ type ReflowCachePayload = {
   pageNumber: number,
   cacheKey: string,
   items: ReflowItem[],
+}
+
+type OutputMetrics = {
+  minBlockHeight: number,
+  paddingX: number,
+  paddingY: number,
+  strokePasses: number,
+  threshold: number,
 }
 
 const THRESHOLD = 185
@@ -215,7 +229,7 @@ export default Vue.extend({
       cropMode: false,
       drawingCrop: false,
       cropStart: {x: 0, y: 0},
-      cropRoi: undefined as Roi | undefined,
+      cropRoisByParity: {odd: undefined, even: undefined} as Record<PageParity, Roi | undefined>,
       draftRoi: undefined as Roi | undefined,
     }
   },
@@ -225,6 +239,18 @@ export default Vue.extend({
     },
     columnCount(): number {
       return this.normalizedColumnCount()
+    },
+    pageParity(): PageParity {
+      return this.page.number % 2 === 0 ? 'even' : 'odd'
+    },
+    pageParityLabel(): string {
+      return this.pageParity === 'even' ? 'even' : 'odd'
+    },
+    selectAreaLabel(): string {
+      return this.cropMode ? 'Done' : `Select ${this.pageParityLabel} area`
+    },
+    cropRoi(): Roi | undefined {
+      return this.cropRoisByParity[this.pageParity]
     },
     activeRoi(): Roi | undefined {
       return this.draftRoi || this.cropRoi
@@ -243,6 +269,10 @@ export default Vue.extend({
   watch: {
     page: {
       handler() {
+        this.draftRoi = undefined
+        this.drawingCrop = false
+        this.cropMode = false
+        this.$emit('crop-mode-change', false)
         this.reflow()
       },
       immediate: true,
@@ -706,6 +736,7 @@ export default Vue.extend({
       const sliceCanvas = document.createElement('canvas')
       const sliceContext = sliceCanvas.getContext('2d')
       if (!sliceContext) return []
+      const outputMetrics = this.outputMetrics(lines, sourceCanvas.height)
 
       lines.forEach((line, index) => {
         const startParagraph = this.isParagraphStart(line, lines[index - 1])
@@ -715,20 +746,105 @@ export default Vue.extend({
 
         line.words.forEach(block => {
           if (block.w < 2 || block.h < 2) return
-          sliceCanvas.width = block.w
-          sliceCanvas.height = block.h
-          sliceContext.clearRect(0, 0, block.w, block.h)
-          sliceContext.drawImage(sourceCanvas, block.x, block.y, block.w, block.h, 0, 0, block.w, block.h)
+          const crop = this.expandedBlockCrop(block, sourceCanvas.width, sourceCanvas.height, outputMetrics.paddingX, outputMetrics.paddingY)
+          const outputHeight = Math.max(crop.h, outputMetrics.minBlockHeight)
+          const offsetY = Math.floor((outputHeight - crop.h) / 2)
+          sliceCanvas.width = crop.w
+          sliceCanvas.height = outputHeight
+          sliceContext.clearRect(0, 0, crop.w, outputHeight)
+          sliceContext.drawImage(sourceCanvas, crop.x, crop.y, crop.w, crop.h, 0, offsetY, crop.w, crop.h)
+          this.strengthenInk(sliceContext, crop.w, outputHeight, outputMetrics.threshold, outputMetrics.strokePasses)
           rendered.push({
             ...block,
+            h: outputHeight,
             type: 'word',
             src: sliceCanvas.toDataURL('image/png'),
-            height: block.h * this.textScale(),
+            height: outputHeight * this.textScale(),
           })
         })
       })
 
       return rendered
+    },
+    outputMetrics(lines: WordLine[], sourceHeight: number): OutputMetrics {
+      const heights = lines
+        .flatMap(line => line.words.map(word => word.h))
+        .filter(height => Number.isFinite(height) && height > 1)
+        .sort((a, b) => a - b)
+      const percentile = (ratio: number): number => {
+        if (heights.length === 0) return 0
+        return heights[Math.min(heights.length - 1, Math.floor((heights.length - 1) * ratio))]
+      }
+      const pageBasedMinHeight = Math.max(12, Math.round(sourceHeight * 0.012))
+      const typicalLineHeight = Math.max(percentile(0.6), pageBasedMinHeight)
+      const paddingX = Math.max(4, Math.round(typicalLineHeight * 0.24))
+      const paddingY = Math.max(2, Math.round(typicalLineHeight * 0.15))
+      const threshold = Math.min(245, this.clampNumber(this.options.threshold, 50, 230, THRESHOLD) + 18)
+
+      return {
+        minBlockHeight: typicalLineHeight + paddingY * 2,
+        paddingX,
+        paddingY,
+        strokePasses: Math.max(1, Math.min(3, Math.round(typicalLineHeight / 22))),
+        threshold,
+      }
+    },
+    expandedBlockCrop(block: WordBlock, sourceWidth: number, sourceHeight: number, paddingX: number, paddingY: number): Roi {
+      const x1 = Math.max(0, Math.floor(block.x - paddingX))
+      const y1 = Math.max(0, Math.floor(block.y - paddingY))
+      const x2 = Math.min(sourceWidth, Math.ceil(block.x + block.w + paddingX))
+      const y2 = Math.min(sourceHeight, Math.ceil(block.y + block.h + paddingY))
+      return {x: x1, y: y1, w: Math.max(1, x2 - x1), h: Math.max(1, y2 - y1)}
+    },
+    strengthenInk(targetContext: CanvasRenderingContext2D, width: number, height: number, threshold: number, passes: number) {
+      const imageData = targetContext.getImageData(0, 0, width, height)
+      const data = imageData.data
+      let mask = new Uint8Array(width * height)
+
+      for (let i = 0; i < width * height; i++) {
+        const offset = i * 4
+        const alpha = data[offset + 3]
+        if (alpha === 0) continue
+        const luma = 0.299 * data[offset] + 0.587 * data[offset + 1] + 0.114 * data[offset + 2]
+        if (luma < threshold) mask[i] = 1
+      }
+
+      for (let pass = 0; pass < passes; pass++) {
+        const expanded = new Uint8Array(mask)
+        for (let y = 0; y < height; y++) {
+          for (let x = 0; x < width; x++) {
+            const i = y * width + x
+            if (!mask[i]) continue
+            for (let dy = -1; dy <= 1; dy++) {
+              const ny = y + dy
+              if (ny < 0 || ny >= height) continue
+              for (let dx = -1; dx <= 1; dx++) {
+                const nx = x + dx
+                if (nx < 0 || nx >= width) continue
+                expanded[ny * width + nx] = 1
+              }
+            }
+          }
+        }
+        mask = expanded
+      }
+
+      for (let i = 0; i < width * height; i++) {
+        const offset = i * 4
+        if (mask[i]) {
+          data[offset] = 0
+          data[offset + 1] = 0
+          data[offset + 2] = 0
+          data[offset + 3] = 255
+        } else {
+          data[offset] = 0
+          data[offset + 1] = 0
+          data[offset + 2] = 0
+          data[offset + 3] = 0
+        }
+      }
+
+      targetContext.putImageData(imageData, 0, 0)
     },
     isParagraphStart(line: WordLine, previousLine: WordLine | undefined): boolean {
       if (!previousLine) return true
@@ -791,7 +907,7 @@ export default Vue.extend({
       }
     },
     resetCrop() {
-      this.cropRoi = undefined
+      this.setCurrentCropRoi(undefined)
       this.draftRoi = undefined
       this.drawingCrop = false
       this.cropMode = false
@@ -818,7 +934,7 @@ export default Vue.extend({
       const roi = this.normalizedRoi(this.cropStart, this.cropPoint(event))
       this.draftRoi = undefined
       if (roi.w > MIN_CROP_SIZE && roi.h > MIN_CROP_SIZE) {
-        this.cropRoi = roi
+        this.setCurrentCropRoi(roi)
         this.cropMode = false
         this.$emit('crop-mode-change', false)
         this.reflow()
@@ -847,6 +963,9 @@ export default Vue.extend({
         w: Math.abs(end.x - start.x),
         h: Math.abs(end.y - start.y),
       }
+    },
+    setCurrentCropRoi(roi: Roi | undefined) {
+      this.$set(this.cropRoisByParity, this.pageParity, roi)
     },
   },
 })
@@ -930,8 +1049,16 @@ export default Vue.extend({
 .reflow-action-controls {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.reflow-parity-label {
+  color: #424242;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
 }
 
 .reflow-font-control {
@@ -988,6 +1115,10 @@ export default Vue.extend({
 
 .reflow-control:disabled {
   color: #9e9e9e;
+}
+
+.reflow-exit-control {
+  font-weight: 700;
 }
 
 .crop-panel {

@@ -221,6 +221,7 @@
           @text-scale-change="setReflowTextScale"
           @column-count-change="setReflowColumnCount"
           @crop-mode-change="setReflowCropMode"
+          @exit-reflow="exitReflowMode"
           @reflowed="cacheReflowPage"
         />
         <reflowed-page
@@ -1285,10 +1286,20 @@ export default Vue.extend({
       this.backgroundColor = this.nightDisplay ? 'white' : 'black'
     },
     toggleReflowMode() {
-      this.reflowMode = !this.reflowMode
+      if (this.reflowMode) {
+        this.exitReflowMode()
+        return
+      }
+
+      this.reflowMode = true
       this.reflowCropMode = false
       this.clearReflowPrefetch()
-      if (!this.reflowMode) this.$nextTick(() => this.scrollToPageEdge('top'))
+    },
+    exitReflowMode() {
+      this.reflowMode = false
+      this.reflowCropMode = false
+      this.clearReflowPrefetch()
+      this.$nextTick(() => this.scrollToPageEdge('top'))
     },
     setReflowTextScale(textScale: number) {
       this.reflowSettings.textScale = textScale
