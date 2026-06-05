@@ -23,6 +23,14 @@
         <span>Stroke</span>
         <input type="number" min="0" max="3" step="0.1" :value="strokeStrength" @input="setStrokeStrength"/>
       </label>
+      <label class="k2-control k2-compact">
+        <span>Word gap</span>
+        <input type="number" min="1" max="30" step="1" :value="wordGap" @input="setWordGap"/>
+      </label>
+      <label class="k2-control k2-compact">
+        <span>Padding</span>
+        <input type="number" min="0" max="48" step="1" :value="outputPadding" @input="setOutputPadding"/>
+      </label>
       <button type="button" class="k2-action" @click="$emit('exit-k2-reflow')">Exit K2</button>
     </div>
 
@@ -63,8 +71,8 @@ type K2Item = BreakItem | WordItem
 
 const DEFAULT_THRESHOLD = 185
 const DEFAULT_TEXT_SCALE = 80
-const OUTPUT_PADDING = 16
-const WORD_GAP = 3
+const DEFAULT_OUTPUT_PADDING = 16
+const DEFAULT_WORD_GAP = 3
 
 export default Vue.extend({
   name: 'K2ReflowedPage',
@@ -89,6 +97,8 @@ export default Vue.extend({
     maxColumns: 2,
     threshold: DEFAULT_THRESHOLD,
     strokeStrength: 0.8,
+    wordGap: DEFAULT_WORD_GAP,
+    outputPadding: DEFAULT_OUTPUT_PADDING,
   }),
   watch: {
     page: {
@@ -346,7 +356,7 @@ export default Vue.extend({
       const wordInk = new Array(columnWidth).fill(0)
       const lineHeight = row.end - row.start
       const gapTolerance = Math.max(0, Math.floor(lineHeight * 0.03))
-      const minGap = Math.max(2, Math.floor(lineHeight * 0.16))
+      const minGap = Math.max(1, Math.round(this.clampNumber(this.wordGap, 1, 30, DEFAULT_WORD_GAP)))
 
       for (let sx = 0; sx < columnWidth; sx++) {
         const x = column.start + sx
@@ -414,7 +424,9 @@ export default Vue.extend({
       if (!sliceContext) return []
 
       const scale = this.textScalePercent / 100
-      const maxLineWidth = Math.max(80, this.targetWidth - OUTPUT_PADDING * 2)
+      const wordGap = Math.round(this.clampNumber(this.wordGap, 1, 30, DEFAULT_WORD_GAP))
+      const outputPadding = Math.round(this.clampNumber(this.outputPadding, 0, 48, DEFAULT_OUTPUT_PADDING))
+      const maxLineWidth = Math.max(80, this.targetWidth - outputPadding * 2)
       let lineWidth = 0
       const items = [] as K2Item[]
 
@@ -427,7 +439,7 @@ export default Vue.extend({
         line.words.forEach(word => {
           const scaledWidth = Math.max(1, Math.round(word.w * scale))
           const scaledHeight = Math.max(1, Math.round(word.h * scale))
-          if (lineWidth > 0 && lineWidth + scaledWidth + WORD_GAP > maxLineWidth) {
+          if (lineWidth > 0 && lineWidth + scaledWidth + wordGap > maxLineWidth) {
             items.push({type: 'break'})
             lineWidth = 0
           }
@@ -444,7 +456,7 @@ export default Vue.extend({
             width: scaledWidth,
             height: scaledHeight,
           })
-          lineWidth += scaledWidth + WORD_GAP
+          lineWidth += scaledWidth + wordGap
         })
       })
 
@@ -504,6 +516,16 @@ export default Vue.extend({
     setStrokeStrength(event: Event) {
       const target = event.target as HTMLInputElement
       this.strokeStrength = Math.round(this.clampNumber(Number(target.value), 0, 3, 0.8) * 10) / 10
+      this.reflow()
+    },
+    setWordGap(event: Event) {
+      const target = event.target as HTMLInputElement
+      this.wordGap = Math.round(this.clampNumber(Number(target.value), 1, 30, DEFAULT_WORD_GAP))
+      this.reflow()
+    },
+    setOutputPadding(event: Event) {
+      const target = event.target as HTMLInputElement
+      this.outputPadding = Math.round(this.clampNumber(Number(target.value), 0, 48, DEFAULT_OUTPUT_PADDING))
       this.reflow()
     },
     clampNumber(value: number, min: number, max: number, fallback: number): number {
