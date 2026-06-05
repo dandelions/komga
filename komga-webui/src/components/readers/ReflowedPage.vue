@@ -1,42 +1,59 @@
 <template>
   <div class="reflowed-page">
     <div v-if="!preload" class="reflow-controls" @click.stop>
-      <label class="reflow-font-control">
-        <span>Text size</span>
-        <input
-          type="range"
-          min="40"
-          max="140"
-          step="5"
-          :value="textScalePercent"
-          @input="setTextScale"
-        />
-        <span class="reflow-font-value">{{ textScalePercent }}%</span>
-      </label>
-      <label class="reflow-column-control">
-        <span>Columns</span>
-        <select :value="columnCount" @change="setColumnCount">
-          <option value="1">1</option>
-          <option value="2">2</option>
-        </select>
-      </label>
-      <div class="reflow-action-controls">
-        <span class="reflow-parity-label">{{ pageParityLabel }}</span>
-        <button type="button" class="reflow-control reflow-exit-control" @click="$emit('exit-reflow')">
-          Exit reflow
-        </button>
-        <button type="button" class="reflow-control" @click="toggleCropMode">
-          {{ selectAreaLabel }}
-        </button>
-        <button
-          type="button"
-          class="reflow-control"
-          :disabled="!cropRoi && !cropMode"
-          @click="resetCrop"
-        >
-          Reset {{ pageParityLabel }} area
-        </button>
-      </div>
+      <template v-if="!controlsCollapsed">
+        <label class="reflow-font-control">
+          <span>Text size</span>
+          <input
+            type="range"
+            min="40"
+            max="140"
+            step="5"
+            :value="textScalePercent"
+            @input="setTextScale"
+          />
+          <span class="reflow-font-value">{{ textScalePercent }}%</span>
+        </label>
+        <label class="reflow-column-control">
+          <span>Columns</span>
+          <select :value="columnCount" @change="setColumnCount">
+            <option value="1">1</option>
+            <option value="2">2</option>
+          </select>
+        </label>
+        <label class="reflow-stroke-control">
+          <span>Stroke</span>
+          <input
+            type="range"
+            min="0"
+            max="3"
+            step="1"
+            :value="strokeStrength"
+            @input="setStrokeStrength"
+          />
+          <span class="reflow-font-value">{{ strokeStrength }}</span>
+        </label>
+        <div class="reflow-action-controls">
+          <span class="reflow-parity-label">{{ pageParityLabel }}</span>
+          <button type="button" class="reflow-control reflow-exit-control" @click="$emit('exit-reflow')">
+            Exit reflow
+          </button>
+          <button type="button" class="reflow-control" @click="toggleCropMode">
+            {{ selectAreaLabel }}
+          </button>
+          <button
+            type="button"
+            class="reflow-control"
+            :disabled="!cropRoi && !cropMode"
+            @click="resetCrop"
+          >
+            Reset {{ pageParityLabel }} area
+          </button>
+        </div>
+      </template>
+      <button type="button" class="reflow-control reflow-collapse-control" @click="controlsCollapsed = !controlsCollapsed">
+        {{ controlsCollapsed ? 'Show controls' : 'Hide controls' }}
+      </button>
     </div>
 
     <div
@@ -110,6 +127,7 @@ type ReflowOptions = {
   threshold: number,
   columnGap: number,
   wordGap: number,
+  strokeStrength: number,
   marginTop: number,
   marginRight: number,
   marginBottom: number,
@@ -225,6 +243,7 @@ export default Vue.extend({
       lastDetectionKey: '',
       objectUrl: '',
       requestId: 0,
+      controlsCollapsed: false,
       imageSize: {w: 0, h: 0},
       cropMode: false,
       drawingCrop: false,
@@ -239,6 +258,9 @@ export default Vue.extend({
     },
     columnCount(): number {
       return this.normalizedColumnCount()
+    },
+    strokeStrength(): number {
+      return this.clampNumber(this.options.strokeStrength, 0, 3, 0)
     },
     pageParity(): PageParity {
       return this.page.number % 2 === 0 ? 'even' : 'odd'
@@ -357,6 +379,7 @@ export default Vue.extend({
         threshold: this.options.threshold,
         columnGap: this.options.columnGap,
         wordGap: this.options.wordGap,
+        strokeStrength: this.options.strokeStrength,
         marginTop: this.options.marginTop,
         marginRight: this.options.marginRight,
         marginBottom: this.options.marginBottom,
@@ -785,7 +808,7 @@ export default Vue.extend({
         minBlockHeight: typicalLineHeight + paddingY * 2,
         paddingX,
         paddingY,
-        strokePasses: Math.max(1, Math.min(3, Math.round(typicalLineHeight / 22))),
+        strokePasses: this.strokeStrength,
         threshold,
       }
     },
@@ -887,6 +910,10 @@ export default Vue.extend({
     setColumnCount(event: Event) {
       const target = event.target as HTMLSelectElement
       this.$emit('column-count-change', this.clampNumber(Number(target.value), 1, 2, 1) >= 2 ? 2 : 1)
+    },
+    setStrokeStrength(event: Event) {
+      const target = event.target as HTMLInputElement
+      this.$emit('stroke-strength-change', this.clampNumber(Number(target.value), 0, 3, 0))
     },
     async toggleCropMode() {
       this.draftRoi = undefined
@@ -1077,6 +1104,22 @@ export default Vue.extend({
   min-width: 120px;
 }
 
+.reflow-stroke-control {
+  flex: 1 1 180px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #212121;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.reflow-stroke-control input {
+  flex: 1;
+  min-width: 80px;
+}
+
 .reflow-column-control {
   flex: 0 0 auto;
   display: flex;
@@ -1119,6 +1162,10 @@ export default Vue.extend({
 
 .reflow-exit-control {
   font-weight: 700;
+}
+
+.reflow-collapse-control {
+  margin-left: auto;
 }
 
 .crop-panel {

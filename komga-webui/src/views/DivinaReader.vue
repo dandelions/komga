@@ -220,6 +220,7 @@
           :cache-key="reflowCacheKey"
           @text-scale-change="setReflowTextScale"
           @column-count-change="setReflowColumnCount"
+          @stroke-strength-change="setReflowStrokeStrength"
           @crop-mode-change="setReflowCropMode"
           @exit-reflow="exitReflowMode"
           @reflowed="cacheReflowPage"
@@ -442,6 +443,15 @@
                     max="140"
                     thumb-label
                     suffix="%"
+                  />
+                </v-list-item>
+                <v-list-item>
+                  <v-slider
+                    v-model="reflowSettings.strokeStrength"
+                    label="Stroke"
+                    min="0"
+                    max="3"
+                    thumb-label
                   />
                 </v-list-item>
                 <v-list-item>
@@ -675,6 +685,7 @@ export default Vue.extend({
         threshold: 185,
         columnGap: 15,
         wordGap: 3,
+        strokeStrength: 0,
         marginTop: 0,
         marginRight: 0,
         marginBottom: 0,
@@ -895,6 +906,7 @@ export default Vue.extend({
         threshold: this.reflowSettings.threshold,
         columnGap: this.reflowSettings.columnGap,
         wordGap: this.reflowSettings.wordGap,
+        strokeStrength: this.reflowSettings.strokeStrength,
         marginTop: this.reflowSettings.marginTop,
         marginRight: this.reflowSettings.marginRight,
         marginBottom: this.reflowSettings.marginBottom,
@@ -1306,6 +1318,9 @@ export default Vue.extend({
     },
     setReflowColumnCount(columnCount: number) {
       this.reflowSettings.columnCount = columnCount === 2 ? 2 : 1
+    },
+    setReflowStrokeStrength(strokeStrength: number) {
+      this.reflowSettings.strokeStrength = Math.max(0, Math.min(3, strokeStrength))
     },
     setReflowCropMode(cropMode: boolean) {
       this.reflowCropMode = cropMode
