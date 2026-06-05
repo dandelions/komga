@@ -642,6 +642,8 @@ import {getBookReadRouteFromMedia} from '@/functions/book-format'
 import {TocEntry} from '@/types/epub'
 import {flattenToc} from '@/functions/toc'
 
+const REFLOW_SETTINGS_STORAGE_PREFIX = 'komga.pdfReflowSettings.'
+
 export default Vue.extend({
   name: 'DivinaReader',
   components: {
@@ -688,6 +690,7 @@ export default Vue.extend({
       landscapeDisplay: false,
       reflowMode: false,
       reflowCropMode: false,
+      reflowSettingsBookId: '',
       reflowCache: {} as Record<string, any[]>,
       reflowPrefetchPage: 0,
       reflowPrefetchTimer: undefined as number | undefined,
@@ -789,6 +792,8 @@ export default Vue.extend({
     this.sidePadding = this.$store.state.persistedState.webreader.continuous.padding
     this.pageMargin = this.$store.state.persistedState.webreader.continuous.margin
     this.backgroundColor = this.$store.state.persistedState.webreader.background
+    this.reflowSettingsBookId = this.bookId
+    this.loadReflowSettings(this.bookId)
 
     this.setup(this.bookId, Number(this.$route.query.page))
   },
@@ -816,6 +821,8 @@ export default Vue.extend({
       // - going to previous/next book, in this case the query.page is not set, so it will default to first page
       // - pressing the back button of the browser and navigating to the previous book, in this case the query.page is set, so we honor it
       this.$debug('[beforeRouteUpdate]', 'to.query:', to.query)
+      this.reflowSettingsBookId = to.params.bookId
+      this.loadReflowSettings(to.params.bookId)
       this.setup(to.params.bookId, Number(to.query.page))
     }
     next()
@@ -837,6 +844,12 @@ export default Vue.extend({
     },
     reflowCacheKey() {
       this.clearReflowPrefetch()
+    },
+    reflowSettings: {
+      handler() {
+        this.saveReflowSettings()
+      },
+      deep: true,
     },
   },
   computed: {
@@ -1310,6 +1323,48 @@ export default Vue.extend({
     },
     toggleNightDisplay() {
       this.backgroundColor = this.nightDisplay ? 'white' : 'black'
+    },
+    reflowSettingsStorageKey(bookId: string = this.reflowSettingsBookId || this.bookId): string {
+      return `${REFLOW_SETTINGS_STORAGE_PREFIX}${bookId}`
+    },
+    loadReflowSettings(bookId: string = this.bookId) {
+      if (!bookId) return
+      try {
+        const raw = window.localStorage.getItem(this.reflowSettingsStorageKey(bookId))
+        if (!raw) return
+        Object.assign(this.reflowSettings, this.normalizedReflowSettings(JSON.parse(raw)))
+      } catch (e) {
+        this.$debug('Unable to load PDF reflow settings', e)
+      }
+    },
+    saveReflowSettings() {
+      if (!this.bookId) return
+      try {
+        window.localStorage.setItem(this.reflowSettingsStorageKey(), JSON.stringify(this.reflowSettings))
+      } catch (e) {
+        this.$debug('Unable to save PDF reflow settings', e)
+      }
+    },
+    normalizedReflowSettings(settings: Record<string, any>): object {
+      return {
+        autoCropBorder: typeof settings.autoCropBorder === 'boolean' ? settings.autoCropBorder : this.reflowSettings.autoCropBorder,
+        textScale: this.clampReflowNumber(settings.textScale, 10, 140, this.reflowSettings.textScale),
+        columnCount: Number(settings.columnCount) === 2 ? 2 : 1,
+        threshold: this.clampReflowNumber(settings.threshold, 50, 230, this.reflowSettings.threshold),
+        columnGap: this.clampReflowNumber(settings.columnGap, 5, 80, this.reflowSettings.columnGap),
+        wordGap: this.clampReflowNumber(settings.wordGap, 1, 30, this.reflowSettings.wordGap),
+        strokeStrength: Math.round(this.clampReflowNumber(settings.strokeStrength, 0.1, 3, this.reflowSettings.strokeStrength) * 10) / 10,
+        blockSpacing: Math.round(this.clampReflowNumber(settings.blockSpacing, 0, 24, this.reflowSettings.blockSpacing)),
+        marginTop: this.clampReflowNumber(settings.marginTop, 0, 45, this.reflowSettings.marginTop),
+        marginRight: this.clampReflowNumber(settings.marginRight, 0, 45, this.reflowSettings.marginRight),
+        marginBottom: this.clampReflowNumber(settings.marginBottom, 0, 45, this.reflowSettings.marginBottom),
+        marginLeft: this.clampReflowNumber(settings.marginLeft, 0, 45, this.reflowSettings.marginLeft),
+      }
+    },
+    clampReflowNumber(value: any, min: number, max: number, fallback: number): number {
+      const numberValue = Number(value)
+      if (!Number.isFinite(numberValue)) return fallback
+      return Math.max(min, Math.min(max, numberValue))
     },
     toggleReflowMode() {
       if (this.reflowMode) {
