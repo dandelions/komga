@@ -24,14 +24,13 @@
         <label class="reflow-stroke-control">
           <span>Stroke</span>
           <input
-            type="range"
-            min="0"
+            type="number"
+            min="0.1"
             max="3"
-            step="1"
+            step="0.1"
             :value="strokeStrength"
             @input="setStrokeStrength"
           />
-          <span class="reflow-font-value">{{ strokeStrength }}</span>
         </label>
         <div class="reflow-action-controls">
           <span class="reflow-parity-label">{{ pageParityLabel }}</span>
@@ -252,7 +251,7 @@ export default Vue.extend({
       return this.normalizedColumnCount()
     },
     strokeStrength(): number {
-      return this.clampNumber(this.options.strokeStrength, 0, 3, 0)
+      return this.clampNumber(this.options.strokeStrength, 0.1, 3, 0.1)
     },
     pageParity(): PageParity {
       return this.page.number % 2 === 0 ? 'even' : 'odd'
@@ -348,6 +347,7 @@ export default Vue.extend({
         const context = canvas.getContext('2d')
         if (!context) throw new Error('Canvas is unavailable')
         context.drawImage(image, 0, 0)
+        this.boldenSourceCanvas(context, canvas.width, canvas.height)
         const imageData = context.getImageData(0, 0, canvas.width, canvas.height)
         const lines = this.detectWordLines(imageData, canvas.width, canvas.height)
         if (requestId !== this.requestId) return
@@ -779,10 +779,6 @@ export default Vue.extend({
           sliceCanvas.height = block.h
           sliceContext.clearRect(0, 0, block.w, block.h)
           sliceContext.drawImage(sourceCanvas, block.x, block.y, block.w, block.h, 0, 0, block.w, block.h)
-          if (this.strokeStrength > 0) {
-            const threshold = Math.min(245, this.clampNumber(this.options.threshold, 50, 230, THRESHOLD) + 18)
-            this.strengthenInk(sliceContext, block.w, block.h, threshold, this.strokeStrength)
-          }
           rendered.push({
             ...block,
             type: 'word',
@@ -794,55 +790,94 @@ export default Vue.extend({
 
       return rendered
     },
-    strengthenInk(targetContext: CanvasRenderingContext2D, width: number, height: number, threshold: number, passes: number) {
+    boldenSourceCanvas(targetContext: CanvasRenderingContext2D, width: number, height: number) {
+      const strength = this.strokeStrength
+      if (strength <= 0) return
+
+      const threshold = Math.min(245, this.clampNumber(this.options.threshold, 50, 230, THRESHOLD) + 18)
       const imageData = targetContext.getImageData(0, 0, width, height)
       const data = imageData.data
+      const original = new Uint8ClampedArray(data)
       let mask = new Uint8Array(width * height)
 
       for (let i = 0; i < width * height; i++) {
         const offset = i * 4
-        const alpha = data[offset + 3]
+        const alpha = original[offset + 3]
         if (alpha === 0) continue
-        const luma = 0.299 * data[offset] + 0.587 * data[offset + 1] + 0.114 * data[offset + 2]
+        const luma = 0.299 * original[offset] + 0.587 * original[offset + 1] + 0.114 * original[offset + 2]
         if (luma < threshold) mask[i] = 1
       }
 
-      for (let pass = 0; pass < passes; pass++) {
-        const expanded = new Uint8Array(mask)
-        for (let y = 0; y < height; y++) {
-          for (let x = 0; x < width; x++) {
-            const i = y * width + x
-            if (!mask[i]) continue
-            for (let dy = -1; dy <= 1; dy++) {
-              const ny = y + dy
-              if (ny < 0 || ny >= height) continue
-              for (let dx = -1; dx <= 1; dx++) {
-                const nx = x + dx
-                if (nx < 0 || nx >= width) continue
-                expanded[ny * width + nx] = 1
-              }
-            }
-          }
-        }
-        mask = expanded
+      const fullPasses = Math.floor(strength)
+      const fractional = strength - fullPasses
+      for (let pass = 0; pass < fullPasses; pass++) {
+        mask = this.expandedInkMask(mask, width, height)
       }
 
-      for (let i = 0; i < width * height; i++) {
-        const offset = i * 4
-        if (mask[i]) {
-          data[offset] = 0
-          data[offset + 1] = 0
-          data[offset + 2] = 0
-          data[offset + 3] = 255
-        } else {
-          data[offset] = 0
-          data[offset + 1] = 0
-          data[offset + 2] = 0
-          data[offset + 3] = 0
-        }
+      if (fullPasses > 0) this.applyInkMask(data, mask)
+
+      if (fractional > 0) {
+        this.applyFractionalInkExpansion(data, mask, width, height, fractional)
       }
 
       targetContext.putImageData(imageData, 0, 0)
+    },
+    expandedInkMask(mask: Uint8Array, width: number, height: number): Uint8Array {
+      const expanded = new Uint8Array(mask)
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const i = y * width + x
+          if (!mask[i]) continue
+          for (let dy = -1; dy <= 1; dy++) {
+            const ny = y + dy
+            if (ny < 0 || ny >= height) continue
+            for (let dx = -1; dx <= 1; dx++) {
+              const nx = x + dx
+              if (nx < 0 || nx >= width) continue
+              expanded[ny * width + nx] = 1
+            }
+          }
+        }
+      }
+      return expanded
+    },
+    applyInkMask(data: Uint8ClampedArray, mask: Uint8Array) {
+      for (let i = 0; i < mask.length; i++) {
+        if (!mask[i]) continue
+        const offset = i * 4
+        data[offset] = Math.min(data[offset], 0)
+        data[offset + 1] = Math.min(data[offset + 1], 0)
+        data[offset + 2] = Math.min(data[offset + 2], 0)
+        data[offset + 3] = 255
+      }
+    },
+    applyFractionalInkExpansion(data: Uint8ClampedArray, mask: Uint8Array, width: number, height: number, strength: number) {
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const i = y * width + x
+          if (!mask[i]) continue
+          const centerOffset = i * 4
+          this.darkenPixel(data, centerOffset, Math.min(1, strength))
+          for (let dy = -1; dy <= 1; dy++) {
+            const ny = y + dy
+            if (ny < 0 || ny >= height) continue
+            for (let dx = -1; dx <= 1; dx++) {
+              if (dx === 0 && dy === 0) continue
+              const nx = x + dx
+              if (nx < 0 || nx >= width) continue
+              const influence = strength * (Math.abs(dx) + Math.abs(dy) === 1 ? 0.7 : 0.45)
+              this.darkenPixel(data, (ny * width + nx) * 4, influence)
+            }
+          }
+        }
+      }
+    },
+    darkenPixel(data: Uint8ClampedArray, offset: number, influence: number) {
+      const clampedInfluence = Math.max(0, Math.min(1, influence))
+      data[offset] = Math.round(data[offset] * (1 - clampedInfluence))
+      data[offset + 1] = Math.round(data[offset + 1] * (1 - clampedInfluence))
+      data[offset + 2] = Math.round(data[offset + 2] * (1 - clampedInfluence))
+      data[offset + 3] = Math.max(data[offset + 3], Math.round(255 * clampedInfluence))
     },
     isParagraphStart(line: WordLine, previousLine: WordLine | undefined): boolean {
       if (!previousLine) return true
@@ -888,7 +923,10 @@ export default Vue.extend({
     },
     setStrokeStrength(event: Event) {
       const target = event.target as HTMLInputElement
-      this.$emit('stroke-strength-change', this.clampNumber(Number(target.value), 0, 3, 0))
+      this.$emit('stroke-strength-change', this.roundStrokeStrength(Number(target.value)))
+    },
+    roundStrokeStrength(value: number): number {
+      return Math.round(this.clampNumber(value, 0.1, 3, 0.1) * 10) / 10
     },
     async toggleCropMode() {
       this.draftRoi = undefined

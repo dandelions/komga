@@ -449,8 +449,9 @@
                   <v-slider
                     v-model="reflowSettings.strokeStrength"
                     label="Stroke"
-                    min="0"
+                    min="0.1"
                     max="3"
+                    step="0.1"
                     thumb-label
                   />
                 </v-list-item>
@@ -685,7 +686,7 @@ export default Vue.extend({
         threshold: 185,
         columnGap: 15,
         wordGap: 3,
-        strokeStrength: 0,
+        strokeStrength: 0.1,
         marginTop: 0,
         marginRight: 0,
         marginBottom: 0,
@@ -1320,7 +1321,7 @@ export default Vue.extend({
       this.reflowSettings.columnCount = columnCount === 2 ? 2 : 1
     },
     setReflowStrokeStrength(strokeStrength: number) {
-      this.reflowSettings.strokeStrength = Math.max(0, Math.min(3, strokeStrength))
+      this.reflowSettings.strokeStrength = Math.round(Math.max(0.1, Math.min(3, strokeStrength)) * 10) / 10
     },
     setReflowCropMode(cropMode: boolean) {
       this.reflowCropMode = cropMode
