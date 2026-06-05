@@ -4,6 +4,7 @@
       <template v-if="!controlsCollapsed">
         <label class="reflow-font-control">
           <span>Text size</span>
+          <button type="button" class="reflow-step-control" @click="adjustTextScale(-5)">-</button>
           <input
             type="range"
             min="10"
@@ -12,6 +13,7 @@
             :value="textScalePercent"
             @input="setTextScale"
           />
+          <button type="button" class="reflow-step-control" @click="adjustTextScale(5)">+</button>
           <span class="reflow-font-value">{{ textScalePercent }}%</span>
         </label>
         <label class="reflow-column-control">
@@ -938,6 +940,9 @@ export default Vue.extend({
       const target = event.target as HTMLInputElement
       this.$emit('text-scale-change', this.clampNumber(Number(target.value), 10, 140, WORD_SCALE * 100))
     },
+    adjustTextScale(delta: number) {
+      this.$emit('text-scale-change', this.clampNumber(this.textScalePercent + delta, 10, 140, WORD_SCALE * 100))
+    },
     setColumnCount(event: Event) {
       const target = event.target as HTMLSelectElement
       this.$emit('column-count-change', this.clampNumber(Number(target.value), 1, 2, 1) >= 2 ? 2 : 1)
@@ -1140,6 +1145,19 @@ export default Vue.extend({
 .reflow-font-control input {
   flex: 1;
   min-width: 120px;
+}
+
+.reflow-step-control {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #212121;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .reflow-stroke-control,
