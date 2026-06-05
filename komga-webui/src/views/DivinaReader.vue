@@ -213,7 +213,6 @@
         class="reflow-reader"
       >
         <reflowed-page
-          :book-id="bookId"
           :page="currentPage"
           :target-width="reflowTargetWidth"
           :options="reflowOptions"
@@ -230,7 +229,6 @@
         <reflowed-page
           v-if="prefetchReflowPage"
           class="reflow-prefetch"
-          :book-id="bookId"
           :page="prefetchReflowPage"
           :target-width="reflowTargetWidth"
           :options="reflowOptions"
@@ -1692,8 +1690,7 @@ export default Vue.extend({
 }
 
 .reader-night-mode .reader-frame img,
-.reader-night-mode .reader-frame canvas,
-.reader-night-mode .reader-frame .word-background-block {
+.reader-night-mode .reader-frame canvas {
   filter: invert(1) hue-rotate(180deg) brightness(0.92);
 }
 </style>

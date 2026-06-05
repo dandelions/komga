@@ -123,12 +123,6 @@
           :style="`height: ${item.height}px`"
           alt=""
         />
-        <span
-          v-else-if="item.type === 'word' && item.sourceImage"
-          :key="`word-bg-${i}`"
-          class="word-block word-background-block"
-          :style="wordBackgroundStyle(item)"
-        />
       </template>
     </div>
   </div>
@@ -136,7 +130,6 @@
 
 <script lang="ts">
 import Vue from 'vue'
-import {bookPageReflowUrl} from '@/functions/urls'
 import {PageDtoWithUrl} from '@/types/komga-books'
 
 type ReflowOptions = {
@@ -182,10 +175,7 @@ type WordBlock = {
 
 type RenderedWordBlock = WordBlock & {
   type: 'word',
-  src?: string,
-  sourceImage?: string,
-  sourceImageWidth?: number,
-  sourceImageHeight?: number,
+  src: string,
   height: number,
 }
 
@@ -200,26 +190,6 @@ type LineIndentItem = {
 }
 
 type ReflowItem = RenderedWordBlock | LineBreakItem | LineIndentItem
-
-type BackendReflowItem = {
-  type: string,
-  x?: number,
-  y?: number,
-  w?: number,
-  h?: number,
-  src?: string,
-  height?: number,
-  width?: number,
-  sourceWidth?: number,
-}
-
-type BackendReflowResponse = {
-  pageNumber: number,
-  imageSrc?: string,
-  imageWidth?: number,
-  imageHeight?: number,
-  items: BackendReflowItem[],
-}
 
 type WordLine = {
   column: Column,
@@ -244,10 +214,6 @@ const MIN_INDENT = 8
 export default Vue.extend({
   name: 'ReflowedPage',
   props: {
-    bookId: {
-      type: String,
-      required: true,
-    },
     page: {
       type: Object as () => PageDtoWithUrl,
       required: true,
@@ -395,8 +361,6 @@ export default Vue.extend({
       this.reflowItems = []
 
       try {
-        if (await this.tryBackendReflow(requestId, detectionKey)) return
-
         const image = await this.loadPageImage(this.page.url)
         if (requestId !== this.requestId) return
         this.imageSize = {w: image.naturalWidth, h: image.naturalHeight}
@@ -419,95 +383,6 @@ export default Vue.extend({
         this.errorMessage = e instanceof Error ? e.message : String(e)
       } finally {
         if (requestId === this.requestId) this.loading = false
-      }
-    },
-    async tryBackendReflow(requestId: number, detectionKey: string): Promise<boolean> {
-      if (!this.bookId) return false
-
-      try {
-        const response = await fetch(bookPageReflowUrl(this.bookId, this.page.number), {
-          method: 'POST',
-          credentials: 'include',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            targetWidth: this.targetWidth,
-            options: this.options,
-            cropRoi: this.cropRoi || null,
-          }),
-        })
-        if (requestId !== this.requestId) return true
-        if (!response.ok) return false
-
-        const result = await response.json() as BackendReflowResponse
-        if (requestId !== this.requestId) return true
-        if (!Array.isArray(result.items) || result.items.length === 0) return false
-
-        const normalizedItems = this.normalizeBackendReflowItems(result.items, result.imageSrc, result.imageWidth, result.imageHeight)
-        if (!this.hasRenderableWords(normalizedItems)) return false
-        this.revokeObjectUrl()
-        this.reflowItems = normalizedItems
-        this.lastDetectionKey = detectionKey
-        this.emitReflowed()
-        return true
-      } catch (_e) {
-        return false
-      }
-    },
-    normalizeBackendReflowItems(
-      items: BackendReflowItem[],
-      imageSrc: string | undefined,
-      imageWidth: number | undefined,
-      imageHeight: number | undefined,
-    ): ReflowItem[] {
-      const normalized = [] as ReflowItem[]
-      items.forEach(item => {
-        if (item.type === 'break') {
-          normalized.push({type: 'break'})
-          return
-        }
-
-        if (item.type === 'indent') {
-          const sourceWidth = this.numberOrFallback(item.sourceWidth, this.numberOrFallback(item.width, 0))
-          normalized.push({
-            type: 'indent',
-            width: this.numberOrFallback(item.width, this.scaledIndentWidth(sourceWidth)),
-            sourceWidth,
-          })
-          return
-        }
-
-        if (item.type !== 'word' || (!item.src && !imageSrc)) return
-        const h = Math.max(0, this.numberOrFallback(item.h, this.numberOrFallback(item.height, 0) / this.textScale()))
-        const w = Math.max(0, this.numberOrFallback(item.w, 0))
-        normalized.push({
-          type: 'word',
-          x: this.numberOrFallback(item.x, 0),
-          y: this.numberOrFallback(item.y, 0),
-          w,
-          h,
-          src: item.src,
-          sourceImage: imageSrc,
-          sourceImageWidth: this.numberOrFallback(imageWidth, 0),
-          sourceImageHeight: this.numberOrFallback(imageHeight, 0),
-          height: this.numberOrFallback(item.height, h * this.textScale()),
-        })
-      })
-      return normalized
-    },
-    hasRenderableWords(items: ReflowItem[]): boolean {
-      return items.some(item => item.type === 'word' && Boolean(item.src || item.sourceImage))
-    },
-    wordBackgroundStyle(item: ReflowItem): object {
-      if (item.type !== 'word' || !item.sourceImage || !item.sourceImageWidth || !item.sourceImageHeight || !item.h) return {}
-      const scale = item.height / item.h
-      return {
-        width: `${Math.max(1, Math.round(item.w * scale))}px`,
-        height: `${Math.max(1, Math.round(item.height))}px`,
-        backgroundImage: `url("${item.sourceImage}")`,
-        backgroundSize: `${Math.round(item.sourceImageWidth * scale)}px ${Math.round(item.sourceImageHeight * scale)}px`,
-        backgroundPosition: `${Math.round(-item.x * scale)}px ${Math.round(-item.y * scale)}px`,
       }
     },
     numberOrFallback(value: number | undefined, fallback: number): number {
@@ -1219,13 +1094,6 @@ export default Vue.extend({
   height: auto;
   max-width: 100%;
   object-fit: contain;
-}
-
-.word-background-block {
-  flex: 0 0 auto;
-  background-repeat: no-repeat;
-  background-origin: border-box;
-  background-clip: border-box;
 }
 
 .line-break {
