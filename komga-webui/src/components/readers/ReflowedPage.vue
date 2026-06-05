@@ -130,6 +130,7 @@
 
 <script lang="ts">
 import Vue from 'vue'
+import {bookPageReflowUrl} from '@/functions/urls'
 import {PageDtoWithUrl} from '@/types/komga-books'
 
 type ReflowOptions = {
@@ -191,6 +192,23 @@ type LineIndentItem = {
 
 type ReflowItem = RenderedWordBlock | LineBreakItem | LineIndentItem
 
+type BackendReflowItem = {
+  type: string,
+  x?: number,
+  y?: number,
+  w?: number,
+  h?: number,
+  src?: string,
+  height?: number,
+  width?: number,
+  sourceWidth?: number,
+}
+
+type BackendReflowResponse = {
+  pageNumber: number,
+  items: BackendReflowItem[],
+}
+
 type WordLine = {
   column: Column,
   line: Line,
@@ -214,6 +232,10 @@ const MIN_INDENT = 8
 export default Vue.extend({
   name: 'ReflowedPage',
   props: {
+    bookId: {
+      type: String,
+      required: true,
+    },
     page: {
       type: Object as () => PageDtoWithUrl,
       required: true,
@@ -361,6 +383,8 @@ export default Vue.extend({
       this.reflowItems = []
 
       try {
+        if (await this.tryBackendReflow(requestId, detectionKey)) return
+
         const image = await this.loadPageImage(this.page.url)
         if (requestId !== this.requestId) return
         this.imageSize = {w: image.naturalWidth, h: image.naturalHeight}
@@ -384,6 +408,75 @@ export default Vue.extend({
       } finally {
         if (requestId === this.requestId) this.loading = false
       }
+    },
+    async tryBackendReflow(requestId: number, detectionKey: string): Promise<boolean> {
+      if (!this.bookId) return false
+
+      try {
+        const response = await fetch(bookPageReflowUrl(this.bookId, this.page.number), {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            targetWidth: this.targetWidth,
+            options: this.options,
+            cropRoi: this.cropRoi || null,
+          }),
+        })
+        if (requestId !== this.requestId) return true
+        if (!response.ok) return false
+
+        const result = await response.json() as BackendReflowResponse
+        if (requestId !== this.requestId) return true
+        if (!Array.isArray(result.items)) return false
+
+        this.revokeObjectUrl()
+        this.reflowItems = this.normalizeBackendReflowItems(result.items)
+        this.lastDetectionKey = detectionKey
+        this.emitReflowed()
+        return true
+      } catch (_e) {
+        return false
+      }
+    },
+    normalizeBackendReflowItems(items: BackendReflowItem[]): ReflowItem[] {
+      const normalized = [] as ReflowItem[]
+      items.forEach(item => {
+        if (item.type === 'break') {
+          normalized.push({type: 'break'})
+          return
+        }
+
+        if (item.type === 'indent') {
+          const sourceWidth = this.numberOrFallback(item.sourceWidth, this.numberOrFallback(item.width, 0))
+          normalized.push({
+            type: 'indent',
+            width: this.numberOrFallback(item.width, this.scaledIndentWidth(sourceWidth)),
+            sourceWidth,
+          })
+          return
+        }
+
+        if (item.type !== 'word' || !item.src) return
+        const h = Math.max(0, this.numberOrFallback(item.h, this.numberOrFallback(item.height, 0) / this.textScale()))
+        const w = Math.max(0, this.numberOrFallback(item.w, 0))
+        normalized.push({
+          type: 'word',
+          x: this.numberOrFallback(item.x, 0),
+          y: this.numberOrFallback(item.y, 0),
+          w,
+          h,
+          src: item.src,
+          height: this.numberOrFallback(item.height, h * this.textScale()),
+        })
+      })
+      return normalized
+    },
+    numberOrFallback(value: number | undefined, fallback: number): number {
+      const numberValue = Number(value)
+      return Number.isFinite(numberValue) ? numberValue : fallback
     },
     reflowDetectionKey(): string {
       return JSON.stringify({

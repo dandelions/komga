@@ -34,6 +34,7 @@ import org.gotson.komga.domain.persistence.ThumbnailBookRepository
 import org.gotson.komga.domain.service.BookAnalyzer
 import org.gotson.komga.domain.service.BookLifecycle
 import org.gotson.komga.infrastructure.image.ImageAnalyzer
+import org.gotson.komga.infrastructure.image.ImageType
 import org.gotson.komga.infrastructure.jooq.UnpagedSorted
 import org.gotson.komga.infrastructure.mediacontainer.ContentDetector
 import org.gotson.komga.infrastructure.openapi.OpenApiConfiguration
@@ -491,6 +492,33 @@ class BookController(
     @RequestParam(value = "contentNegotiation", defaultValue = "true")
     contentNegotiation: Boolean,
   ): ResponseEntity<ByteArray> = commonBookController.getBookPageInternal(bookId, if (zeroBasedIndex) pageNumber + 1 else pageNumber, convertTo, request, principal, if (contentNegotiation) acceptHeaders else null)
+
+  @Operation(summary = "Reflow book page image", tags = [OpenApiConfiguration.TagNames.BOOK_PAGES])
+  @PostMapping("api/v1/books/{bookId}/pages/{pageNumber}/reflow")
+  @PreAuthorize("hasRole('PAGE_STREAMING')")
+  fun reflowBookPageByNumber(
+    @AuthenticationPrincipal principal: KomgaPrincipal,
+    @PathVariable bookId: String,
+    @PathVariable pageNumber: Int,
+    @RequestBody request: PdfReflowRequestDto,
+  ): PdfReflowResponseDto =
+    bookRepository.findByIdOrNull(bookId)?.let { book ->
+      contentRestrictionChecker.checkContentRestriction(principal.user, book)
+
+      try {
+        val pageContent = bookLifecycle.getBookPage(book, pageNumber, ImageType.PNG)
+        PdfReflowEngine.reflow(pageContent.bytes, pageNumber, request)
+      } catch (ex: IndexOutOfBoundsException) {
+        throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Page number does not exist")
+      } catch (ex: ImageConversionException) {
+        throw ResponseStatusException(HttpStatus.NOT_FOUND, ex.message)
+      } catch (ex: MediaNotReadyException) {
+        throw ResponseStatusException(HttpStatus.NOT_FOUND, "Book analysis failed")
+      } catch (ex: NoSuchFileException) {
+        logger.warn(ex) { "File not found: $book" }
+        throw ResponseStatusException(HttpStatus.NOT_FOUND, "File not found, it may have moved")
+      }
+    } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
 
   @Operation(summary = "Get book page thumbnail", description = "The image is resized to 300px on the largest dimension.", tags = [OpenApiConfiguration.TagNames.BOOK_PAGES])
   @ApiResponse(content = [Content(schema = Schema(type = "string", format = "binary"))])

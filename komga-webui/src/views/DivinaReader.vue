@@ -213,6 +213,7 @@
         class="reflow-reader"
       >
         <reflowed-page
+          :book-id="bookId"
           :page="currentPage"
           :target-width="reflowTargetWidth"
           :options="reflowOptions"
@@ -229,6 +230,7 @@
         <reflowed-page
           v-if="prefetchReflowPage"
           class="reflow-prefetch"
+          :book-id="bookId"
           :page="prefetchReflowPage"
           :target-width="reflowTargetWidth"
           :options="reflowOptions"
