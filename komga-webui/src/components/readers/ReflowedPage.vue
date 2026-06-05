@@ -564,7 +564,7 @@ export default Vue.extend({
     },
     async loadPageImage(url: string): Promise<HTMLImageElement> {
       this.revokeObjectUrl()
-      const response = await fetch(this.pageImageUrl(url), {credentials: 'include'})
+      const response = await fetch(this.pageImageUrl(url), {credentials: 'include', cache: 'reload'})
       if (!response.ok) throw new Error(`Unable to load page: ${response.status}`)
       const blob = await response.blob()
       if (blob.type && !blob.type.startsWith('image/')) throw new Error(`Page response is not an image: ${blob.type}`)
@@ -584,7 +584,7 @@ export default Vue.extend({
     },
     pageImageUrl(url: string): string {
       const separator = url.includes('?') ? '&' : '?'
-      return `${url}${separator}contentNegotiation=false`
+      return `${url}${separator}contentNegotiation=false&reflowCacheBust=${Date.now()}`
     },
     revokeObjectUrl() {
       if (this.objectUrl) URL.revokeObjectURL(this.objectUrl)
