@@ -448,10 +448,12 @@ export default Vue.extend({
 
         const result = await response.json() as BackendReflowResponse
         if (requestId !== this.requestId) return true
-        if (!Array.isArray(result.items)) return false
+        if (!Array.isArray(result.items) || result.items.length === 0) return false
 
+        const normalizedItems = this.normalizeBackendReflowItems(result.items, result.imageSrc, result.imageWidth, result.imageHeight)
+        if (!this.hasRenderableWords(normalizedItems)) return false
         this.revokeObjectUrl()
-        this.reflowItems = this.normalizeBackendReflowItems(result.items, result.imageSrc, result.imageWidth, result.imageHeight)
+        this.reflowItems = normalizedItems
         this.lastDetectionKey = detectionKey
         this.emitReflowed()
         return true
@@ -499,6 +501,9 @@ export default Vue.extend({
         })
       })
       return normalized
+    },
+    hasRenderableWords(items: ReflowItem[]): boolean {
+      return items.some(item => item.type === 'word' && Boolean(item.src || item.sourceImage))
     },
     wordBackgroundStyle(item: ReflowItem): object {
       if (item.type !== 'word' || !item.sourceImage || !item.sourceImageWidth || !item.sourceImageHeight || !item.h) return {}
