@@ -124,7 +124,7 @@
           alt=""
         />
         <span
-          v-else-if="item.type === 'word'"
+          v-else-if="item.type === 'word' && item.sourceImage"
           :key="`word-bg-${i}`"
           class="word-block word-background-block"
           :style="wordBackgroundStyle(item)"
@@ -305,16 +305,10 @@ export default Vue.extend({
       return this.clampNumber(this.options.blockSpacing, 0, 24, 6)
     },
     reflowWrapperStyle(): object {
-      const style = {
+      return {
         columnGap: `${this.blockSpacing}px`,
         rowGap: `${Math.round(this.blockSpacing * 1.5)}px`,
-      } as Record<string, string>
-      if (this.reflowSourceImage) style['--reflow-source-image'] = `url(${this.reflowSourceImage})`
-      return style
-    },
-    reflowSourceImage(): string {
-      const word = this.reflowItems.find(item => item.type === 'word' && item.sourceImage)
-      return word && word.type === 'word' ? word.sourceImage || '' : ''
+      }
     },
     pageParity(): PageParity {
       return this.page.number % 2 === 0 ? 'even' : 'odd'
@@ -511,7 +505,7 @@ export default Vue.extend({
       return {
         width: `${Math.max(1, Math.round(item.w * scale))}px`,
         height: `${Math.max(1, Math.round(item.height))}px`,
-        backgroundImage: 'var(--reflow-source-image)',
+        backgroundImage: `url("${item.sourceImage}")`,
         backgroundSize: `${Math.round(item.sourceImageWidth * scale)}px ${Math.round(item.sourceImageHeight * scale)}px`,
         backgroundPosition: `${Math.round(-item.x * scale)}px ${Math.round(-item.y * scale)}px`,
       }
