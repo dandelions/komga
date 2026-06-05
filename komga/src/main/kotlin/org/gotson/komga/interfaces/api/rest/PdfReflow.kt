@@ -55,10 +55,28 @@ data class PdfReflowItemDto(
   val sourceWidth: Double? = null,
 )
 
-private data class ReflowColumn(val start: Int, val end: Int)
-private data class ReflowLine(val start: Int, val end: Int)
-private data class ReflowWord(val x: Int, val y: Int, val w: Int, val h: Int)
-private data class ReflowWordLine(val column: ReflowColumn, val line: ReflowLine, val words: List<ReflowWord>)
+private data class ReflowColumn(
+  val start: Int,
+  val end: Int,
+)
+
+private data class ReflowLine(
+  val start: Int,
+  val end: Int,
+)
+
+private data class ReflowWord(
+  val x: Int,
+  val y: Int,
+  val w: Int,
+  val h: Int,
+)
+
+private data class ReflowWordLine(
+  val column: ReflowColumn,
+  val line: ReflowLine,
+  val words: List<ReflowWord>,
+)
 
 object PdfReflowEngine {
   private const val BLOCK_PADDING = 1
@@ -89,7 +107,11 @@ object PdfReflowEngine {
     cropRoi: PdfReflowRoiDto?,
   ): List<ReflowWordLine> {
     val threshold = options.threshold.coerceIn(50, 230)
-    fun isInk(x: Int, y: Int): Boolean {
+
+    fun isInk(
+      x: Int,
+      y: Int,
+    ): Boolean {
       if (x < 0 || x >= image.width || y < 0 || y >= image.height) return false
       return luma(image.getRGB(x, y)) < threshold
     }
