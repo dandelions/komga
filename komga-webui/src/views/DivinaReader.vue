@@ -702,6 +702,8 @@ import {flattenToc} from '@/functions/toc'
 import {CLIENT_SETTING, ClientSettingUserUpdateDto} from '@/types/komga-clientsettings'
 
 const REFLOW_SETTINGS_STORAGE_PREFIX = 'komga.pdfReflowSettings.'
+const REFLOW_CACHE_RADIUS = 4
+const REFLOW_PREFETCH_DELAY_MS = 150
 
 export default Vue.extend({
   name: 'DivinaReader',
@@ -1596,6 +1598,11 @@ export default Vue.extend({
       this.pruneReflowCache()
       if (payload.pageNumber === this.page) this.scheduleNextReflowPrefetch()
     },
+    cacheCurrentReflowPage() {
+      const reflow = this.$refs.reflowedPage as any
+      const payload = reflow?.currentCachePayload?.()
+      if (payload) this.cacheReflowPage(payload)
+    },
     reflowCacheEntryKey(pageNumber: number, cacheKey: string): string {
       return `${pageNumber}|${cacheKey}`
     },
@@ -1604,7 +1611,7 @@ export default Vue.extend({
         const separator = key.indexOf('|')
         const pageNumber = Number(key.substring(0, separator))
         const cacheKey = key.substring(separator + 1)
-        if (cacheKey !== this.reflowCacheKey || Math.abs(pageNumber - this.page) > 2) this.$delete(this.reflowCache, key)
+        if (cacheKey !== this.reflowCacheKey || Math.abs(pageNumber - this.page) > REFLOW_CACHE_RADIUS) this.$delete(this.reflowCache, key)
       })
     },
     clearReflowPrefetch() {
@@ -1620,7 +1627,7 @@ export default Vue.extend({
       this.reflowPrefetchTimer = window.setTimeout(() => {
         this.reflowPrefetchTimer = undefined
         if (this.nextReflowPage && !this.reflowCropMode) this.reflowPrefetchPage = this.nextReflowPage.number
-      }, 350)
+      }, REFLOW_PREFETCH_DELAY_MS)
     },
     reflowPreviousPage() {
       const reflow = this.$refs.reflowedPage as any
@@ -1631,6 +1638,7 @@ export default Vue.extend({
       reflow?.nextPage?.()
     },
     reflowSourcePreviousPage() {
+      this.cacheCurrentReflowPage()
       if (this.page > 1) {
         this.reflowStartAtEnd = true
         this.goTo(this.page - 1)
@@ -1639,6 +1647,7 @@ export default Vue.extend({
       }
     },
     reflowSourceNextPage() {
+      this.cacheCurrentReflowPage()
       if (this.page < this.pagesCount) {
         this.reflowStartAtEnd = false
         this.goTo(this.page + 1)
@@ -1834,5 +1843,10 @@ export default Vue.extend({
 .reader-night-mode .reader-frame img,
 .reader-night-mode .reader-frame canvas {
   filter: invert(1) hue-rotate(180deg) brightness(0.92);
+}
+
+.reader-night-mode .reader-frame .word-block,
+.reader-night-mode .reader-frame .k2-word {
+  filter: none;
 }
 </style>

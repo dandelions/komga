@@ -421,7 +421,7 @@ export default Vue.extend({
       this.errorMessage = ''
       const detectionKey = this.reflowDetectionKey()
 
-      if (Array.isArray(this.cachedItems) && !this.cropRoi) {
+      if (Array.isArray(this.cachedItems)) {
         this.revokeObjectUrl()
         this.reflowItems = this.cachedItems
         this.repaginate()
@@ -430,7 +430,7 @@ export default Vue.extend({
         return
       }
 
-      if (this.lastDetectionKey === detectionKey && this.reflowItems.length > 0 && !this.cropRoi) {
+      if (this.lastDetectionKey === detectionKey && this.reflowItems.length > 0) {
         this.rescaleReflowItems()
         this.repaginate()
         this.emitReflowed()
@@ -685,12 +685,19 @@ export default Vue.extend({
       })
     },
     emitReflowed() {
-      if (this.cropRoi) return
       this.$emit('reflowed', {
         pageNumber: this.page.number,
         cacheKey: this.cacheKey,
         items: this.reflowItems,
       } as ReflowCachePayload)
+    },
+    currentCachePayload(): ReflowCachePayload | undefined {
+      if (this.reflowItems.length === 0) return undefined
+      return {
+        pageNumber: this.page.number,
+        cacheKey: this.cacheKey,
+        items: this.reflowItems,
+      }
     },
     rescaleReflowItems() {
       this.reflowItems = this.reflowItems.map(item => {
