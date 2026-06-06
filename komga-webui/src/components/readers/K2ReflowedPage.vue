@@ -18,7 +18,8 @@
         </label>
         <label class="k2-control k2-compact">
           <span>Threshold</span>
-          <input type="number" min="50" max="230" step="1" :value="threshold" @input="setThreshold"/>
+          <input type="range" min="50" max="230" step="1" :value="threshold" @change="setThreshold"/>
+          <span class="k2-value">{{ threshold }}</span>
         </label>
         <label class="k2-control k2-compact">
           <span>Stroke</span>
@@ -32,14 +33,11 @@
           <span>Padding</span>
           <input type="number" min="0" max="48" step="1" :value="outputPadding" @input="setOutputPadding"/>
         </label>
-        <span class="k2-page-indicator">{{ virtualPageIndex + 1 }} / {{ Math.max(1, pages.length) }}</span>
-        <button type="button" class="k2-action" @click="previousPage">Prev</button>
-        <button type="button" class="k2-action" @click="nextPage">Next</button>
         <button type="button" class="k2-action" @click="toggleCropMode">{{ selectAreaLabel }}</button>
         <button type="button" class="k2-action" :disabled="!cropRoi && !cropMode" @click="resetCrop">
           Reset {{ pageParityLabel }} area
         </button>
-        <button type="button" class="k2-action" @click="$emit('exit-k2-reflow')">Exit K2</button>
+        <button type="button" class="k2-action" @click="exitK2Reflow">Exit K2</button>
       </template>
       <button type="button" class="k2-action k2-collapse-action" @click="controlsCollapsed = !controlsCollapsed">
         {{ controlsCollapsed ? 'Show controls' : 'Hide controls' }}
@@ -161,7 +159,7 @@ export default Vue.extend({
     imageSize: {w: 0, h: 0},
     requestId: 0,
     objectUrl: '',
-    controlsCollapsed: false,
+    controlsCollapsed: true,
     cropMode: false,
     drawingCrop: false,
     cropStart: {x: 0, y: 0},
@@ -827,7 +825,12 @@ export default Vue.extend({
       this.emitSettingsChange()
       this.reflow()
     },
+    exitK2Reflow() {
+      this.controlsCollapsed = true
+      this.$emit('exit-k2-reflow')
+    },
     async toggleCropMode() {
+      this.controlsCollapsed = true
       this.draftRoi = undefined
       this.drawingCrop = false
       if (this.cropMode) {
@@ -846,6 +849,7 @@ export default Vue.extend({
       }
     },
     resetCrop() {
+      this.controlsCollapsed = true
       this.setCurrentCropRoi(undefined)
       this.draftRoi = undefined
       this.drawingCrop = false
@@ -962,6 +966,11 @@ export default Vue.extend({
 .k2-compact input,
 .k2-compact select {
   width: 72px;
+}
+
+.k2-compact input[type="range"] {
+  width: 120px;
+  min-width: 120px;
 }
 
 .k2-control button,

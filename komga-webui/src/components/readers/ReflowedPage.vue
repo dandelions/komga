@@ -47,14 +47,7 @@
         </label>
         <div class="reflow-action-controls">
           <span class="reflow-parity-label">{{ pageParityLabel }}</span>
-          <span class="reflow-page-indicator">{{ virtualPageIndex + 1 }} / {{ Math.max(1, pages.length) }}</span>
-          <button type="button" class="reflow-control" @click="previousPage">
-            Prev
-          </button>
-          <button type="button" class="reflow-control" @click="nextPage">
-            Next
-          </button>
-          <button type="button" class="reflow-control reflow-exit-control" @click="$emit('exit-reflow')">
+          <button type="button" class="reflow-control reflow-exit-control" @click="exitReflow">
             Exit reflow
           </button>
           <button type="button" class="reflow-control" @click="toggleCropMode">
@@ -295,7 +288,7 @@ export default Vue.extend({
       lastDetectionKey: '',
       objectUrl: '',
       requestId: 0,
-      controlsCollapsed: false,
+      controlsCollapsed: true,
       imageSize: {w: 0, h: 0},
       cropMode: false,
       drawingCrop: false,
@@ -1272,7 +1265,12 @@ export default Vue.extend({
     roundStrokeStrength(value: number): number {
       return Math.round(this.clampNumber(value, 0.1, 3, 0.1) * 10) / 10
     },
+    exitReflow() {
+      this.controlsCollapsed = true
+      this.$emit('exit-reflow')
+    },
     async toggleCropMode() {
+      this.controlsCollapsed = true
       this.draftRoi = undefined
       this.drawingCrop = false
       if (this.cropMode) {
@@ -1291,6 +1289,7 @@ export default Vue.extend({
       }
     },
     resetCrop() {
+      this.controlsCollapsed = true
       this.setCurrentCropRoi(undefined)
       this.draftRoi = undefined
       this.drawingCrop = false
