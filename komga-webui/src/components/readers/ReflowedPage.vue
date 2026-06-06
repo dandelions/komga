@@ -132,6 +132,35 @@
         />
       </template>
     </div>
+    <div
+      v-if="reflowItems.length > 0"
+      ref="measureWrapper"
+      class="reflow-measure-wrapper"
+      :style="measureWrapperStyle"
+      aria-hidden="true"
+    >
+      <template v-for="(item, i) in reflowItems">
+        <span
+          v-if="item.type === 'break'"
+          :key="`measure-break-${i}`"
+          class="line-break"
+        />
+        <span
+          v-else-if="item.type === 'indent'"
+          :key="`measure-indent-${i}`"
+          class="line-indent"
+          :style="`width: ${item.width}px`"
+        />
+        <img
+          v-else-if="item.type === 'word' && item.src"
+          :key="`measure-word-${i}`"
+          :src="item.src"
+          class="word-block"
+          :style="`height: ${item.height}px`"
+          alt=""
+        />
+      </template>
+    </div>
   </div>
 </template>
 
@@ -299,6 +328,13 @@ export default Vue.extend({
         minHeight: `${this.pageContentHeight()}px`,
       }
     },
+    measureWrapperStyle(): object {
+      return {
+        width: `${this.targetWidth}px`,
+        columnGap: `${this.blockSpacing}px`,
+        rowGap: `${Math.round(this.blockSpacing * 1.5)}px`,
+      }
+    },
     pageParity(): PageParity {
       return this.page.number % 2 === 0 ? 'even' : 'odd'
     },
@@ -446,12 +482,29 @@ export default Vue.extend({
     },
     repaginate(resetPage: boolean = true) {
       this.updateViewportMetrics()
-      this.pages = this.paginateItems(this.reflowItems)
+      if (this.reflowItems.length === 0) {
+        this.pages = []
+        this.virtualPageIndex = 0
+        return
+      }
+
+      this.pages = this.paginateItemsEstimated(this.reflowItems)
       if (resetPage) {
         this.setInitialVirtualPage()
       } else {
         this.virtualPageIndex = this.clampNumber(this.virtualPageIndex, 0, Math.max(0, this.pages.length - 1), 0)
       }
+
+      this.$nextTick(() => {
+        const pages = this.paginateItemsFromDom()
+        if (!pages) return
+        this.pages = pages
+        if (resetPage) {
+          this.setInitialVirtualPage()
+        } else {
+          this.virtualPageIndex = this.clampNumber(this.virtualPageIndex, 0, Math.max(0, this.pages.length - 1), 0)
+        }
+      })
     },
     setInitialVirtualPage() {
       if (this.pages.length === 0) {
@@ -460,7 +513,74 @@ export default Vue.extend({
       }
       this.virtualPageIndex = this.startAtEnd ? this.pages.length - 1 : 0
     },
-    paginateItems(items: ReflowItem[]): ReflowItem[][] {
+    paginateItemsFromDom(): ReflowItem[][] | undefined {
+      const measureWrapper = this.$refs.measureWrapper as HTMLElement | undefined
+      if (!measureWrapper || measureWrapper.children.length !== this.reflowItems.length) return undefined
+
+      const pageHeight = Math.max(120, this.pageContentHeight() - 32 - VIEWPORT_PAGE_BUFFER)
+      const rows = [] as Array<{indexes: number[], top: number, bottom: number}>
+      let currentIndexes = [] as number[]
+      let currentTop = 0
+      let currentBottom = 0
+
+      const pushRow = () => {
+        if (currentIndexes.length === 0) return
+        rows.push({indexes: currentIndexes, top: currentTop, bottom: currentBottom})
+        currentIndexes = []
+        currentTop = 0
+        currentBottom = 0
+      }
+
+      Array.from(measureWrapper.children).forEach((child, index) => {
+        const item = this.reflowItems[index]
+        const element = child as HTMLElement
+        const top = element.offsetTop
+        const bottom = element.offsetTop + element.offsetHeight
+
+        if (item.type === 'break') {
+          pushRow()
+          rows.push({indexes: [index], top, bottom})
+          return
+        }
+
+        if (currentIndexes.length === 0) {
+          currentIndexes = [index]
+          currentTop = top
+          currentBottom = bottom
+          return
+        }
+
+        if (Math.abs(bottom - currentBottom) > 2) {
+          pushRow()
+          currentIndexes = [index]
+          currentTop = top
+          currentBottom = bottom
+          return
+        }
+
+        currentIndexes.push(index)
+        currentTop = Math.min(currentTop, top)
+        currentBottom = Math.max(currentBottom, bottom)
+      })
+      pushRow()
+
+      const pages = [] as ReflowItem[][]
+      let currentPage = [] as ReflowItem[]
+      let pageStartTop = rows[0]?.top || 0
+
+      rows.forEach(row => {
+        if (currentPage.length > 0 && row.bottom - pageStartTop > pageHeight) {
+          pages.push(currentPage)
+          currentPage = []
+          pageStartTop = row.top
+        }
+        row.indexes.forEach(index => currentPage.push(this.reflowItems[index]))
+      })
+
+      if (currentPage.length > 0) pages.push(currentPage)
+      return pages
+    },
+    paginateItemsEstimated(items: ReflowItem[]): ReflowItem[][] {
       if (items.length === 0) return []
 
       const contentWidth = Math.max(120, this.targetWidth - 32)
@@ -1240,6 +1360,24 @@ export default Vue.extend({
   align-content: flex-start;
   gap: 4px 2px;
   overflow: hidden;
+}
+
+.reflow-measure-wrapper {
+  position: fixed;
+  left: -10000px;
+  top: 0;
+  z-index: -1;
+  min-height: 0;
+  padding: 16px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  align-content: flex-start;
+  gap: 4px 2px;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .reflow-status {
