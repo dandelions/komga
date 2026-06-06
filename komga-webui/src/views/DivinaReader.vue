@@ -233,20 +233,26 @@
           :page="currentPage"
           :target-width="reflowTargetWidth"
           :start-at-end="k2ReflowStartAtEnd"
+          :crop-rois-by-parity="reflowSettings.cropRoisByParity"
           @exit-k2-reflow="exitK2ReflowMode"
           @source-previous="k2SourcePreviousPage"
           @source-next="k2SourceNextPage"
+          @crop-mode-change="setReflowCropMode"
+          @crop-rois-change="setReflowCropRois"
         />
 
         <div
+          v-if="!reflowCropMode"
           @click="k2PreviousPage"
           class="reflow-click-left"
         />
         <div
+          v-if="!reflowCropMode"
           @click="k2NextPage"
           class="reflow-click-right"
         />
         <div
+          v-if="!reflowCropMode"
           @click="toggleToolbars()"
           class="reflow-click-center"
         />
@@ -1138,6 +1144,7 @@ export default Vue.extend({
       this.shortcuts[e.key]?.execute(this)
     },
     keyPressedReflow(e: KeyboardEvent): boolean {
+      if (this.reflowCropMode) return true
       switch (e.key) {
         case ' ':
         case 'PageDown':
@@ -1517,6 +1524,7 @@ export default Vue.extend({
     },
     exitK2ReflowMode() {
       this.k2ReflowMode = false
+      this.reflowCropMode = false
       this.$nextTick(() => this.scrollToPageEdge('top'))
     },
     exitAllReflowModes() {

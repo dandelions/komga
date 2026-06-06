@@ -1,43 +1,80 @@
 <template>
   <div class="k2-reflowed-page">
     <div class="k2-controls" @click.stop>
-      <label class="k2-control">
-        <span>Text</span>
-        <button type="button" @click="adjustTextScale(-5)">-</button>
-        <input type="range" min="20" max="160" step="5" :value="textScalePercent" @input="setTextScale"/>
-        <button type="button" @click="adjustTextScale(5)">+</button>
-        <span class="k2-value">{{ textScalePercent }}%</span>
-      </label>
-      <label class="k2-control k2-compact">
-        <span>Columns</span>
-        <select :value="maxColumns" @change="setMaxColumns">
-          <option value="1">1</option>
-          <option value="2">2</option>
-        </select>
-      </label>
-      <label class="k2-control k2-compact">
-        <span>Threshold</span>
-        <input type="number" min="50" max="230" step="1" :value="threshold" @input="setThreshold"/>
-      </label>
-      <label class="k2-control k2-compact">
-        <span>Stroke</span>
-        <input type="number" min="0" max="3" step="0.1" :value="strokeStrength" @input="setStrokeStrength"/>
-      </label>
-      <label class="k2-control k2-compact">
-        <span>Word gap</span>
-        <input type="number" min="1" max="30" step="1" :value="wordGap" @input="setWordGap"/>
-      </label>
-      <label class="k2-control k2-compact">
-        <span>Padding</span>
-        <input type="number" min="0" max="48" step="1" :value="outputPadding" @input="setOutputPadding"/>
-      </label>
-      <span class="k2-page-indicator">{{ virtualPageIndex + 1 }} / {{ Math.max(1, pages.length) }}</span>
-      <button type="button" class="k2-action" @click="previousPage">Prev</button>
-      <button type="button" class="k2-action" @click="nextPage">Next</button>
-      <button type="button" class="k2-action" @click="$emit('exit-k2-reflow')">Exit K2</button>
+      <template v-if="!controlsCollapsed">
+        <label class="k2-control">
+          <span>Text</span>
+          <button type="button" @click="adjustTextScale(-5)">-</button>
+          <input type="range" min="20" max="160" step="5" :value="textScalePercent" @input="setTextScale"/>
+          <button type="button" @click="adjustTextScale(5)">+</button>
+          <span class="k2-value">{{ textScalePercent }}%</span>
+        </label>
+        <label class="k2-control k2-compact">
+          <span>Columns</span>
+          <select :value="maxColumns" @change="setMaxColumns">
+            <option value="1">1</option>
+            <option value="2">2</option>
+          </select>
+        </label>
+        <label class="k2-control k2-compact">
+          <span>Threshold</span>
+          <input type="number" min="50" max="230" step="1" :value="threshold" @input="setThreshold"/>
+        </label>
+        <label class="k2-control k2-compact">
+          <span>Stroke</span>
+          <input type="number" min="0" max="3" step="0.1" :value="strokeStrength" @input="setStrokeStrength"/>
+        </label>
+        <label class="k2-control k2-compact">
+          <span>Word gap</span>
+          <input type="number" min="1" max="30" step="1" :value="wordGap" @input="setWordGap"/>
+        </label>
+        <label class="k2-control k2-compact">
+          <span>Padding</span>
+          <input type="number" min="0" max="48" step="1" :value="outputPadding" @input="setOutputPadding"/>
+        </label>
+        <span class="k2-page-indicator">{{ virtualPageIndex + 1 }} / {{ Math.max(1, pages.length) }}</span>
+        <button type="button" class="k2-action" @click="previousPage">Prev</button>
+        <button type="button" class="k2-action" @click="nextPage">Next</button>
+        <button type="button" class="k2-action" @click="toggleCropMode">{{ selectAreaLabel }}</button>
+        <button type="button" class="k2-action" :disabled="!cropRoi && !cropMode" @click="resetCrop">
+          Reset {{ pageParityLabel }} area
+        </button>
+        <button type="button" class="k2-action" @click="$emit('exit-k2-reflow')">Exit K2</button>
+      </template>
+      <button type="button" class="k2-action k2-collapse-action" @click="controlsCollapsed = !controlsCollapsed">
+        {{ controlsCollapsed ? 'Show controls' : 'Hide controls' }}
+      </button>
     </div>
 
-    <div v-if="loading" class="k2-status">K2 reflowing...</div>
+    <div
+      v-if="cropMode"
+      class="k2-crop-panel"
+      @click.stop
+    >
+      <div
+        class="k2-crop-stage"
+        @pointerdown.stop="startCrop"
+        @pointermove.stop="moveCrop"
+        @pointerup.stop="finishCrop"
+        @pointercancel.stop="cancelDraftCrop"
+      >
+        <img
+          v-if="objectUrl"
+          ref="cropImage"
+          :src="objectUrl"
+          class="k2-crop-image"
+          alt=""
+          draggable="false"
+          @dragstart.prevent
+        />
+        <div
+          v-if="activeRoi"
+          class="k2-crop-rect"
+          :style="cropRectStyle"
+        />
+      </div>
+    </div>
+    <div v-else-if="loading" class="k2-status">K2 reflowing...</div>
     <div v-else-if="error" class="k2-status">
       <div>Unable to K2 reflow this page</div>
       <div class="k2-error">{{ errorMessage }}</div>
@@ -64,6 +101,7 @@ import Vue from 'vue'
 import {PageDtoWithUrl} from '@/types/komga-books'
 
 type Roi = { x: number, y: number, w: number, h: number }
+type PageParity = 'odd' | 'even'
 type Column = { start: number, end: number, roi: Roi }
 type TextRow = { start: number, end: number, rowInk: number[] }
 type WordBlock = { x: number, y: number, w: number, h: number }
@@ -76,6 +114,9 @@ const DEFAULT_THRESHOLD = 185
 const DEFAULT_TEXT_SCALE = 80
 const DEFAULT_OUTPUT_PADDING = 16
 const DEFAULT_WORD_GAP = 3
+const MIN_CROP_SIZE = 15
+const K2_CONTROLS_HEIGHT = 48
+const VIEWPORT_PAGE_BUFFER = 40
 
 export default Vue.extend({
   name: 'K2ReflowedPage',
@@ -92,6 +133,10 @@ export default Vue.extend({
       type: Boolean,
       default: false,
     },
+    cropRoisByParity: {
+      type: Object as () => Partial<Record<PageParity, Roi | null | undefined>>,
+      default: () => ({}),
+    },
   },
   data: () => ({
     loading: false,
@@ -101,8 +146,15 @@ export default Vue.extend({
     pages: [] as K2Item[][],
     virtualPageIndex: 0,
     viewportHeight: 0,
+    imageSize: {w: 0, h: 0},
     requestId: 0,
     objectUrl: '',
+    controlsCollapsed: false,
+    cropMode: false,
+    drawingCrop: false,
+    cropStart: {x: 0, y: 0},
+    localCropRoisByParity: {odd: undefined, even: undefined} as Record<PageParity, Roi | undefined>,
+    draftRoi: undefined as Roi | undefined,
     textScalePercent: DEFAULT_TEXT_SCALE,
     maxColumns: 2,
     threshold: DEFAULT_THRESHOLD,
@@ -113,6 +165,11 @@ export default Vue.extend({
   watch: {
     page: {
       handler() {
+        this.syncCropRoisFromProps()
+        this.cropMode = false
+        this.drawingCrop = false
+        this.draftRoi = undefined
+        this.$emit('crop-mode-change', false)
         this.reflow()
       },
       immediate: true,
@@ -123,10 +180,45 @@ export default Vue.extend({
     startAtEnd() {
       this.setInitialVirtualPage()
     },
+    cropRoisByParity: {
+      handler() {
+        this.syncCropRoisFromProps()
+        this.reflow()
+      },
+      deep: true,
+    },
+    controlsCollapsed() {
+      this.repaginate(false)
+    },
   },
   computed: {
     visibleItems(): K2Item[] {
       return this.pages[this.virtualPageIndex] || this.items
+    },
+    pageParity(): PageParity {
+      return this.page.number % 2 === 0 ? 'even' : 'odd'
+    },
+    pageParityLabel(): string {
+      return this.pageParity === 'even' ? 'even' : 'odd'
+    },
+    selectAreaLabel(): string {
+      return this.cropMode ? 'Done' : `Select ${this.pageParityLabel} area`
+    },
+    cropRoi(): Roi | undefined {
+      return this.localCropRoisByParity[this.pageParity]
+    },
+    activeRoi(): Roi | undefined {
+      return this.draftRoi || this.cropRoi
+    },
+    cropRectStyle(): object {
+      const roi = this.activeRoi
+      if (!roi || !this.imageSize.w || !this.imageSize.h) return {}
+      return {
+        left: `${roi.x / this.imageSize.w * 100}%`,
+        top: `${roi.y / this.imageSize.h * 100}%`,
+        width: `${roi.w / this.imageSize.w * 100}%`,
+        height: `${roi.h / this.imageSize.h * 100}%`,
+      }
     },
   },
   mounted() {
@@ -149,6 +241,7 @@ export default Vue.extend({
       try {
         const image = await this.loadPageImage(this.page.url)
         if (requestId !== this.requestId) return
+        this.imageSize = {w: image.naturalWidth, h: image.naturalHeight}
 
         const canvas = document.createElement('canvas')
         canvas.width = image.naturalWidth
@@ -159,7 +252,7 @@ export default Vue.extend({
 
         const imageData = context.getImageData(0, 0, canvas.width, canvas.height)
         const ink = this.buildInkMap(imageData, canvas.width, canvas.height)
-        const roi = this.detectContentRoi(ink, canvas.width, canvas.height)
+        const roi = this.detectRoi(ink, canvas.width, canvas.height)
         const columns = this.detectColumns(ink, canvas.width, canvas.height, roi)
         const lines = this.detectWordLines(ink, canvas.width, canvas.height, columns)
         if (requestId !== this.requestId) return
@@ -180,6 +273,16 @@ export default Vue.extend({
     },
     updateViewportHeight() {
       this.viewportHeight = window.innerHeight || document.documentElement.clientHeight || 720
+    },
+    async ensureCropImage() {
+      if (this.objectUrl && this.imageSize.w && this.imageSize.h) return
+      this.loading = true
+      try {
+        const image = await this.loadPageImage(this.page.url)
+        this.imageSize = {w: image.naturalWidth, h: image.naturalHeight}
+      } finally {
+        this.loading = false
+      }
     },
     async loadPageImage(url: string): Promise<HTMLImageElement> {
       this.revokeObjectUrl()
@@ -220,6 +323,36 @@ export default Vue.extend({
     },
     hasInk(ink: Uint8Array, width: number, height: number, x: number, y: number): boolean {
       return x >= 0 && x < width && y >= 0 && y < height && ink[y * width + x] === 1
+    },
+    detectRoi(ink: Uint8Array, width: number, height: number): Roi {
+      if (this.cropRoi) return this.clampRoi(this.cropRoi, width, height)
+      return this.detectContentRoi(ink, width, height)
+    },
+    syncCropRoisFromProps() {
+      this.$set(this.localCropRoisByParity, 'odd', this.normalizedStoredRoi(this.cropRoisByParity.odd))
+      this.$set(this.localCropRoisByParity, 'even', this.normalizedStoredRoi(this.cropRoisByParity.even))
+    },
+    normalizedStoredRoi(value: Roi | null | undefined): Roi | undefined {
+      if (!value) return undefined
+      const x = Number(value.x)
+      const y = Number(value.y)
+      const w = Number(value.w)
+      const h = Number(value.h)
+      if (![x, y, w, h].every(Number.isFinite) || w <= MIN_CROP_SIZE || h <= MIN_CROP_SIZE) return undefined
+      return {x, y, w, h}
+    },
+    cropRoisPayload(): Record<PageParity, Roi | null> {
+      return {
+        odd: this.localCropRoisByParity.odd ? {...this.localCropRoisByParity.odd} : null,
+        even: this.localCropRoisByParity.even ? {...this.localCropRoisByParity.even} : null,
+      }
+    },
+    clampRoi(roi: Roi, width: number, height: number): Roi {
+      const x = this.clampNumber(Math.floor(roi.x), 0, width - 1, 0)
+      const y = this.clampNumber(Math.floor(roi.y), 0, height - 1, 0)
+      const right = this.clampNumber(Math.ceil(roi.x + roi.w), x + 1, width, width)
+      const bottom = this.clampNumber(Math.ceil(roi.y + roi.h), y + 1, height, height)
+      return {x, y, w: right - x, h: bottom - y}
     },
     detectContentRoi(ink: Uint8Array, width: number, height: number): Roi {
       const rowInk = new Array(height).fill(0)
@@ -493,9 +626,13 @@ export default Vue.extend({
 
       return items
     },
-    repaginate() {
+    repaginate(resetPage: boolean = true) {
       this.pages = this.paginateItems(this.items)
-      this.setInitialVirtualPage()
+      if (resetPage) {
+        this.setInitialVirtualPage()
+      } else {
+        this.virtualPageIndex = this.clampNumber(this.virtualPageIndex, 0, Math.max(0, this.pages.length - 1), 0)
+      }
     },
     setInitialVirtualPage() {
       if (this.pages.length === 0) {
@@ -507,7 +644,7 @@ export default Vue.extend({
     paginateItems(items: K2Item[]): K2Item[][] {
       if (items.length === 0) return []
 
-      const pageHeight = Math.max(240, this.viewportHeight - 72)
+      const pageHeight = Math.max(240, this.viewportHeight - K2_CONTROLS_HEIGHT - VIEWPORT_PAGE_BUFFER)
       const pageGap = 5
       const pages = [] as K2Item[][]
       let currentPage = [] as K2Item[]
@@ -627,6 +764,86 @@ export default Vue.extend({
       this.outputPadding = Math.round(this.clampNumber(Number(target.value), 0, 48, DEFAULT_OUTPUT_PADDING))
       this.reflow()
     },
+    async toggleCropMode() {
+      this.draftRoi = undefined
+      this.drawingCrop = false
+      if (this.cropMode) {
+        this.cropMode = false
+        this.$emit('crop-mode-change', false)
+        return
+      }
+
+      try {
+        await this.ensureCropImage()
+        this.cropMode = true
+        this.$emit('crop-mode-change', true)
+      } catch (e) {
+        this.error = true
+        this.errorMessage = e instanceof Error ? e.message : String(e)
+      }
+    },
+    resetCrop() {
+      this.setCurrentCropRoi(undefined)
+      this.draftRoi = undefined
+      this.drawingCrop = false
+      this.cropMode = false
+      this.$emit('crop-mode-change', false)
+      this.reflow()
+    },
+    startCrop(event: PointerEvent) {
+      if (!this.cropMode || !this.imageSize.w || !this.imageSize.h) return
+      const target = event.currentTarget as HTMLElement
+      target.setPointerCapture(event.pointerId)
+      this.drawingCrop = true
+      this.cropStart = this.cropPoint(event)
+      this.draftRoi = {x: this.cropStart.x, y: this.cropStart.y, w: 1, h: 1}
+      event.preventDefault()
+    },
+    moveCrop(event: PointerEvent) {
+      if (!this.drawingCrop) return
+      this.draftRoi = this.normalizedRoi(this.cropStart, this.cropPoint(event))
+      event.preventDefault()
+    },
+    finishCrop(event: PointerEvent) {
+      if (!this.drawingCrop) return
+      this.drawingCrop = false
+      const roi = this.normalizedRoi(this.cropStart, this.cropPoint(event))
+      this.draftRoi = undefined
+      if (roi.w > MIN_CROP_SIZE && roi.h > MIN_CROP_SIZE) {
+        this.setCurrentCropRoi(roi)
+        this.cropMode = false
+        this.$emit('crop-mode-change', false)
+        this.reflow()
+      }
+      event.preventDefault()
+    },
+    cancelDraftCrop() {
+      this.drawingCrop = false
+      this.draftRoi = undefined
+    },
+    cropPoint(event: PointerEvent): {x: number, y: number} {
+      const image = this.$refs.cropImage as HTMLImageElement | undefined
+      const rect = image?.getBoundingClientRect()
+      if (!rect || !this.imageSize.w || !this.imageSize.h) return {x: 0, y: 0}
+      return {
+        x: this.clampNumber((event.clientX - rect.left) * this.imageSize.w / (rect.width || 1), 0, this.imageSize.w, 0),
+        y: this.clampNumber((event.clientY - rect.top) * this.imageSize.h / (rect.height || 1), 0, this.imageSize.h, 0),
+      }
+    },
+    normalizedRoi(start: {x: number, y: number}, end: {x: number, y: number}): Roi {
+      const x = Math.min(start.x, end.x)
+      const y = Math.min(start.y, end.y)
+      return {
+        x,
+        y,
+        w: Math.abs(end.x - start.x),
+        h: Math.abs(end.y - start.y),
+      }
+    },
+    setCurrentCropRoi(roi: Roi | undefined) {
+      this.$set(this.localCropRoisByParity, this.pageParity, roi)
+      this.$emit('crop-rois-change', this.cropRoisPayload())
+    },
     clampNumber(value: number, min: number, max: number, fallback: number): number {
       return Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback
     },
@@ -645,23 +862,28 @@ export default Vue.extend({
   top: 0;
   z-index: 4;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
+  height: 48px;
+  padding: 6px 12px;
+  box-sizing: border-box;
   background: rgba(250, 250, 250, 0.96);
   border-bottom: 1px solid rgba(0, 0, 0, 0.12);
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .k2-control {
-  flex: 1 1 260px;
-  min-width: 0;
+  flex: 0 0 280px;
+  min-width: 280px;
   display: flex;
   align-items: center;
   gap: 8px;
   color: #212121;
   font-size: 13px;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .k2-control input[type="range"] {
@@ -670,7 +892,8 @@ export default Vue.extend({
 }
 
 .k2-compact {
-  flex: 0 1 auto;
+  flex: 0 0 auto;
+  min-width: auto;
 }
 
 .k2-compact input,
@@ -680,6 +903,7 @@ export default Vue.extend({
 
 .k2-control button,
 .k2-action {
+  flex: 0 0 auto;
   border: 1px solid rgba(0, 0, 0, 0.2);
   border-radius: 4px;
   background: white;
@@ -687,6 +911,11 @@ export default Vue.extend({
   min-height: 28px;
   padding: 4px 9px;
   font-weight: 700;
+  white-space: nowrap;
+}
+
+.k2-action:disabled {
+  color: #9e9e9e;
 }
 
 .k2-value {
@@ -705,7 +934,8 @@ export default Vue.extend({
 
 .k2-output {
   width: 100%;
-  min-height: calc(100vh - 56px);
+  height: calc(100vh - 48px);
+  min-height: calc(100vh - 48px);
   padding: 16px;
   box-sizing: border-box;
   display: flex;
@@ -714,6 +944,7 @@ export default Vue.extend({
   align-content: flex-start;
   gap: 5px 3px;
   background: #fbfaf7;
+  overflow: hidden;
 }
 
 .k2-word {
@@ -746,5 +977,40 @@ export default Vue.extend({
   font-size: 12px;
   text-align: center;
   word-break: break-word;
+}
+
+.k2-crop-panel {
+  min-height: 100vh;
+  padding: 8px;
+  box-sizing: border-box;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+.k2-crop-stage {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+}
+
+.k2-crop-image {
+  position: relative;
+  z-index: 1;
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.k2-crop-rect {
+  position: absolute;
+  border: 2px dashed #f97316;
+  background: rgba(249, 115, 22, 0.12);
+  box-sizing: border-box;
+  z-index: 2;
+  pointer-events: none;
 }
 </style>

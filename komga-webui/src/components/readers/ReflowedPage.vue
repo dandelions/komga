@@ -218,6 +218,8 @@ const BLOCK_PADDING = 1
 const WORD_SCALE = 0.75
 const MIN_CROP_SIZE = 15
 const MIN_INDENT = 8
+const REFLOW_CONTROLS_HEIGHT = 48
+const VIEWPORT_PAGE_BUFFER = 40
 
 export default Vue.extend({
   name: 'ReflowedPage',
@@ -440,7 +442,7 @@ export default Vue.extend({
     },
     pageContentHeight(): number {
       const height = this.viewportHeight || window.innerHeight || document.documentElement.clientHeight || 0
-      return Math.max(240, height - (this.preload ? 0 : this.controlsHeight))
+      return Math.max(240, height - (this.preload ? 0 : REFLOW_CONTROLS_HEIGHT))
     },
     repaginate(resetPage: boolean = true) {
       this.updateViewportMetrics()
@@ -462,7 +464,7 @@ export default Vue.extend({
       if (items.length === 0) return []
 
       const contentWidth = Math.max(120, this.targetWidth - 32)
-      const pageHeight = Math.max(120, this.pageContentHeight() - 32)
+      const pageHeight = Math.max(120, this.pageContentHeight() - 32 - VIEWPORT_PAGE_BUFFER)
       const rowGap = Math.max(0, Math.round(this.blockSpacing * 1.5))
       const columnGap = this.blockSpacing
       const pages = [] as ReflowItem[][]
@@ -1283,21 +1285,25 @@ export default Vue.extend({
   top: 0;
   z-index: 4;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
   width: 100%;
-  padding: 8px 12px;
+  height: 48px;
+  padding: 6px 12px;
   box-sizing: border-box;
   background: rgba(248, 250, 252, 0.94);
   border-bottom: 1px solid rgba(0, 0, 0, 0.12);
+  overflow-x: auto;
+  overflow-y: hidden;
   pointer-events: auto;
 }
 
 .reflow-action-controls {
   display: flex;
-  flex-wrap: wrap;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
@@ -1318,14 +1324,15 @@ export default Vue.extend({
 }
 
 .reflow-font-control {
-  flex: 1 1 240px;
-  min-width: 0;
+  flex: 0 0 280px;
+  min-width: 280px;
   display: flex;
   align-items: center;
   gap: 8px;
   color: #212121;
   font-size: 13px;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .reflow-font-control input {
@@ -1348,14 +1355,15 @@ export default Vue.extend({
 
 .reflow-stroke-control,
 .reflow-spacing-control {
-  flex: 1 1 180px;
-  min-width: 0;
+  flex: 0 0 136px;
+  min-width: 136px;
   display: flex;
   align-items: center;
   gap: 8px;
   color: #212121;
   font-size: 13px;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .reflow-stroke-control input,
@@ -1372,6 +1380,7 @@ export default Vue.extend({
   color: #212121;
   font-size: 13px;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .reflow-column-control select {
@@ -1391,6 +1400,7 @@ export default Vue.extend({
 }
 
 .reflow-control {
+  flex: 0 0 auto;
   border: 1px solid rgba(0, 0, 0, 0.2);
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.94);
@@ -1398,6 +1408,7 @@ export default Vue.extend({
   padding: 6px 10px;
   font-size: 13px;
   line-height: 1.2;
+  white-space: nowrap;
 }
 
 .reflow-control:disabled {
@@ -1409,7 +1420,7 @@ export default Vue.extend({
 }
 
 .reflow-collapse-control {
-  margin-left: auto;
+  margin-left: 0;
 }
 
 .crop-panel {
