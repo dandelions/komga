@@ -127,7 +127,7 @@
           :key="`word-${i}`"
           :src="item.src"
           class="word-block"
-          :style="`height: ${item.height}px`"
+          :style="wordBlockStyle(item)"
           alt=""
         />
       </template>
@@ -156,7 +156,7 @@
           :key="`measure-word-${i}`"
           :src="item.src"
           class="word-block"
-          :style="`height: ${item.height}px`"
+          :style="wordBlockStyle(item)"
           alt=""
         />
       </template>
@@ -488,7 +488,8 @@ export default Vue.extend({
         return
       }
 
-      this.pages = this.paginateItemsEstimated(this.reflowItems)
+      const estimatedPages = this.paginateItemsEstimated(this.reflowItems)
+      this.pages = estimatedPages
       if (resetPage) {
         this.setInitialVirtualPage()
       } else {
@@ -498,6 +499,7 @@ export default Vue.extend({
       this.$nextTick(() => {
         const pages = this.paginateItemsFromDom()
         if (!pages) return
+        if (pages.length <= 1 && estimatedPages.length > 1) return
         this.pages = pages
         if (resetPage) {
           this.setInitialVirtualPage()
@@ -654,6 +656,12 @@ export default Vue.extend({
     },
     scrollToTop() {
       this.$nextTick(() => window.scrollTo({top: 0, left: 0, behavior: 'auto'}))
+    },
+    wordBlockStyle(item: RenderedWordBlock): object {
+      return {
+        width: `${Math.max(1, Math.round(item.w * this.textScale()))}px`,
+        height: `${item.height}px`,
+      }
     },
     numberOrFallback(value: number | undefined, fallback: number): number {
       const numberValue = Number(value)
