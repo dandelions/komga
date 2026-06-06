@@ -594,8 +594,8 @@ export default Vue.extend({
       let lineWidth = 0
       const items = [] as K2Item[]
 
-      lines.forEach(line => {
-        if (items.length > 0) {
+      lines.forEach((line, index) => {
+        if (items.length > 0 && this.isParagraphStart(line, lines[index - 1])) {
           items.push({type: 'break'})
           lineWidth = 0
         }
@@ -625,6 +625,24 @@ export default Vue.extend({
       })
 
       return items
+    },
+    isParagraphStart(line: WordLine, previousLine: WordLine | undefined): boolean {
+      if (!previousLine) return true
+
+      const gap = line.row.start - previousLine.row.end
+      const currentHeight = line.words[0]?.h || line.row.end - line.row.start
+      const previousHeight = previousLine.words[0]?.h || previousLine.row.end - previousLine.row.start
+      if (gap > Math.max(currentHeight, previousHeight) * 1.2) return true
+
+      const indent = this.rawLineIndent(line)
+      const previousIndent = this.rawLineIndent(previousLine)
+      const indentThreshold = Math.max(8, currentHeight * 0.6)
+      return indent > previousIndent + indentThreshold
+    },
+    rawLineIndent(line: WordLine): number {
+      const firstWord = line.words[0]
+      if (!firstWord) return 0
+      return Math.max(0, firstWord.x - line.column.start)
     },
     repaginate(resetPage: boolean = true) {
       this.pages = this.paginateItems(this.items)
