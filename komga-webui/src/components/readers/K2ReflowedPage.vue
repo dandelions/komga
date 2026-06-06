@@ -958,7 +958,7 @@ export default Vue.extend({
   box-sizing: border-box;
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
+  align-items: center;
   align-content: flex-start;
   gap: 5px 3px;
   background: #fbfaf7;
