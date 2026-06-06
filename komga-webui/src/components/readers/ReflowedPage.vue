@@ -1,6 +1,6 @@
 <template>
   <div class="reflowed-page">
-    <div v-if="!preload" class="reflow-controls" @click.stop>
+    <div v-if="!preload" ref="reflowControls" class="reflow-controls" @click.stop>
       <template v-if="!controlsCollapsed">
         <label class="reflow-font-control">
           <span>Text size</span>
@@ -47,6 +47,13 @@
         </label>
         <div class="reflow-action-controls">
           <span class="reflow-parity-label">{{ pageParityLabel }}</span>
+          <span class="reflow-page-indicator">{{ virtualPageIndex + 1 }} / {{ Math.max(1, pages.length) }}</span>
+          <button type="button" class="reflow-control" @click="previousPage">
+            Prev
+          </button>
+          <button type="button" class="reflow-control" @click="nextPage">
+            Next
+          </button>
           <button type="button" class="reflow-control reflow-exit-control" @click="$emit('exit-reflow')">
             Exit reflow
           </button>
@@ -103,7 +110,7 @@
     </div>
     <div v-else class="reflow-wrapper" :style="reflowWrapperStyle">
       <div v-if="reflowItems.length === 0" class="reflow-status">No text blocks detected</div>
-      <template v-for="(item, i) in reflowItems">
+      <template v-for="(item, i) in visibleItems">
         <span
           v-if="item.type === 'break'"
           :key="`break-${i}`"
@@ -145,6 +152,7 @@ type ReflowOptions = {
   marginRight: number,
   marginBottom: number,
   marginLeft: number,
+  cropRoisByParity?: Partial<Record<PageParity, Roi | null | undefined>>,
 }
 
 type Roi = {
@@ -238,6 +246,10 @@ export default Vue.extend({
       type: Boolean,
       default: false,
     },
+    startAtEnd: {
+      type: Boolean,
+      default: false,
+    },
   },
   data: () => {
     return {
@@ -245,6 +257,10 @@ export default Vue.extend({
       error: false,
       errorMessage: '',
       reflowItems: [] as ReflowItem[],
+      pages: [] as ReflowItem[][],
+      virtualPageIndex: 0,
+      viewportHeight: 0,
+      controlsHeight: 0,
       lastDetectionKey: '',
       objectUrl: '',
       requestId: 0,
@@ -258,6 +274,9 @@ export default Vue.extend({
     }
   },
   computed: {
+    visibleItems(): ReflowItem[] {
+      return this.pages[this.virtualPageIndex] || this.reflowItems
+    },
     textScalePercent(): number {
       return this.clampNumber(this.options.textScale, 10, 140, WORD_SCALE * 100)
     },
@@ -274,6 +293,8 @@ export default Vue.extend({
       return {
         columnGap: `${this.blockSpacing}px`,
         rowGap: `${Math.round(this.blockSpacing * 1.5)}px`,
+        height: `${this.pageContentHeight()}px`,
+        minHeight: `${this.pageContentHeight()}px`,
       }
     },
     pageParity(): PageParity {
@@ -305,6 +326,7 @@ export default Vue.extend({
   watch: {
     page: {
       handler() {
+        this.syncCropRoisFromOptions()
         this.draftRoi = undefined
         this.drawingCrop = false
         this.cropMode = false
@@ -315,12 +337,16 @@ export default Vue.extend({
     },
     options: {
       handler() {
+        this.syncCropRoisFromOptions()
         this.reflow()
       },
       deep: true,
     },
     targetWidth() {
       this.reflow()
+    },
+    startAtEnd() {
+      this.setInitialVirtualPage()
     },
     cacheKey() {
       this.reflow()
@@ -330,8 +356,23 @@ export default Vue.extend({
         this.reflow()
       },
     },
+    controlsCollapsed() {
+      this.$nextTick(() => {
+        this.updateViewportMetrics()
+        this.repaginate(false)
+      })
+    },
+  },
+  mounted() {
+    this.updateViewportMetrics()
+    window.addEventListener('resize', this.handleResize)
+    this.$nextTick(() => {
+      this.updateViewportMetrics()
+      this.repaginate(false)
+    })
   },
   destroyed() {
+    window.removeEventListener('resize', this.handleResize)
     this.revokeObjectUrl()
   },
   methods: {
@@ -345,6 +386,7 @@ export default Vue.extend({
       if (Array.isArray(this.cachedItems) && !this.cropRoi) {
         this.revokeObjectUrl()
         this.reflowItems = this.cachedItems
+        this.repaginate()
         this.lastDetectionKey = detectionKey
         this.loading = false
         return
@@ -352,6 +394,7 @@ export default Vue.extend({
 
       if (this.lastDetectionKey === detectionKey && this.reflowItems.length > 0 && !this.cropRoi) {
         this.rescaleReflowItems()
+        this.repaginate()
         this.emitReflowed()
         this.loading = false
         return
@@ -375,6 +418,7 @@ export default Vue.extend({
         const lines = this.detectWordLines(imageData, canvas.width, canvas.height)
         if (requestId !== this.requestId) return
         this.reflowItems = this.renderReflowItems(canvas, lines)
+        this.repaginate()
         this.lastDetectionKey = detectionKey
         this.emitReflowed()
       } catch (e) {
@@ -384,6 +428,110 @@ export default Vue.extend({
       } finally {
         if (requestId === this.requestId) this.loading = false
       }
+    },
+    handleResize() {
+      this.updateViewportMetrics()
+      this.repaginate(false)
+    },
+    updateViewportMetrics() {
+      this.viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0
+      const controls = this.$refs.reflowControls as HTMLElement | undefined
+      this.controlsHeight = controls?.offsetHeight || 0
+    },
+    pageContentHeight(): number {
+      const height = this.viewportHeight || window.innerHeight || document.documentElement.clientHeight || 0
+      return Math.max(240, height - (this.preload ? 0 : this.controlsHeight))
+    },
+    repaginate(resetPage: boolean = true) {
+      this.updateViewportMetrics()
+      this.pages = this.paginateItems(this.reflowItems)
+      if (resetPage) {
+        this.setInitialVirtualPage()
+      } else {
+        this.virtualPageIndex = this.clampNumber(this.virtualPageIndex, 0, Math.max(0, this.pages.length - 1), 0)
+      }
+    },
+    setInitialVirtualPage() {
+      if (this.pages.length === 0) {
+        this.virtualPageIndex = 0
+        return
+      }
+      this.virtualPageIndex = this.startAtEnd ? this.pages.length - 1 : 0
+    },
+    paginateItems(items: ReflowItem[]): ReflowItem[][] {
+      if (items.length === 0) return []
+
+      const contentWidth = Math.max(120, this.targetWidth - 32)
+      const pageHeight = Math.max(120, this.pageContentHeight() - 32)
+      const rowGap = Math.max(0, Math.round(this.blockSpacing * 1.5))
+      const columnGap = this.blockSpacing
+      const pages = [] as ReflowItem[][]
+      let currentPage = [] as ReflowItem[]
+      let currentPageHeight = 0
+      let currentLine = [] as ReflowItem[]
+      let currentLineWidth = 0
+      let currentLineHeight = 0
+
+      const pushPage = () => {
+        if (currentPage.length === 0) return
+        pages.push(currentPage)
+        currentPage = []
+        currentPageHeight = 0
+      }
+
+      const pushLine = () => {
+        if (currentLine.length === 0) return
+        const lineHeight = Math.max(1, currentLineHeight)
+        if (currentPage.length > 0 && currentPageHeight + lineHeight + rowGap > pageHeight) pushPage()
+        currentPage.push(...currentLine, {type: 'break'})
+        currentPageHeight += lineHeight + rowGap
+        currentLine = []
+        currentLineWidth = 0
+        currentLineHeight = 0
+      }
+
+      const appendInlineItem = (item: ReflowItem, width: number, height: number) => {
+        const nextWidth = currentLine.length > 0 ? currentLineWidth + columnGap + width : width
+        if (currentLine.length > 0 && nextWidth > contentWidth) pushLine()
+        currentLine.push(item)
+        currentLineWidth = currentLine.length > 1 ? currentLineWidth + columnGap + width : width
+        currentLineHeight = Math.max(currentLineHeight, height)
+      }
+
+      items.forEach(item => {
+        if (item.type === 'break') {
+          pushLine()
+          return
+        }
+        if (item.type === 'indent') {
+          appendInlineItem(item, item.width, 1)
+          return
+        }
+        appendInlineItem(item, item.w * this.textScale(), item.height)
+      })
+
+      pushLine()
+      pushPage()
+      return pages
+    },
+    nextPage() {
+      if (this.virtualPageIndex < this.pages.length - 1) {
+        this.virtualPageIndex++
+        this.scrollToTop()
+        return
+      }
+      this.$emit('source-next')
+    },
+    previousPage() {
+      if (this.virtualPageIndex > 0) {
+        this.virtualPageIndex--
+        this.scrollToTop()
+        return
+      }
+      this.$emit('source-previous')
+    },
+    scrollToTop() {
+      this.$nextTick(() => window.scrollTo({top: 0, left: 0, behavior: 'auto'}))
     },
     numberOrFallback(value: number | undefined, fallback: number): number {
       const numberValue = Number(value)
@@ -552,6 +700,26 @@ export default Vue.extend({
 
       if (roi.w <= 10 || roi.h <= 10) roi = {x: 0, y: 0, w: width, h: height}
       return roi
+    },
+    syncCropRoisFromOptions() {
+      const rois = this.options.cropRoisByParity || {}
+      this.$set(this.cropRoisByParity, 'odd', this.normalizedStoredRoi(rois.odd))
+      this.$set(this.cropRoisByParity, 'even', this.normalizedStoredRoi(rois.even))
+    },
+    normalizedStoredRoi(value: Roi | null | undefined): Roi | undefined {
+      if (!value) return undefined
+      const x = Number(value.x)
+      const y = Number(value.y)
+      const w = Number(value.w)
+      const h = Number(value.h)
+      if (![x, y, w, h].every(Number.isFinite) || w <= MIN_CROP_SIZE || h <= MIN_CROP_SIZE) return undefined
+      return {x, y, w, h}
+    },
+    cropRoisPayload(): Record<PageParity, Roi | null> {
+      return {
+        odd: this.cropRoisByParity.odd ? {...this.cropRoisByParity.odd} : null,
+        even: this.cropRoisByParity.even ? {...this.cropRoisByParity.even} : null,
+      }
     },
     clampRoi(roi: Roi, width: number, height: number): Roi {
       const x = this.clampNumber(Math.floor(roi.x), 0, width - 1, 0)
@@ -1045,6 +1213,7 @@ export default Vue.extend({
     },
     setCurrentCropRoi(roi: Roi | undefined) {
       this.$set(this.cropRoisByParity, this.pageParity, roi)
+      this.$emit('crop-rois-change', this.cropRoisPayload())
     },
   },
 })
@@ -1068,6 +1237,7 @@ export default Vue.extend({
   align-items: flex-end;
   align-content: flex-start;
   gap: 4px 2px;
+  overflow: hidden;
 }
 
 .reflow-status {
@@ -1138,6 +1308,13 @@ export default Vue.extend({
   font-size: 13px;
   font-weight: 700;
   text-transform: uppercase;
+}
+
+.reflow-page-indicator {
+  color: #424242;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 .reflow-font-control {

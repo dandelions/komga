@@ -240,11 +240,11 @@
 
         <div
           @click="k2PreviousPage"
-          class="reflow-click-top"
+          class="reflow-click-left"
         />
         <div
           @click="k2NextPage"
-          class="reflow-click-bottom"
+          class="reflow-click-right"
         />
         <div
           @click="toggleToolbars()"
@@ -257,18 +257,23 @@
         class="reflow-reader"
       >
         <reflowed-page
+          ref="reflowedPage"
           :page="currentPage"
           :target-width="reflowTargetWidth"
           :options="reflowOptions"
           :cached-items="cachedReflowItems(currentPage)"
           :cache-key="reflowCacheKey"
+          :start-at-end="reflowStartAtEnd"
           @text-scale-change="setReflowTextScale"
           @column-count-change="setReflowColumnCount"
           @stroke-strength-change="setReflowStrokeStrength"
           @block-spacing-change="setReflowBlockSpacing"
           @crop-mode-change="setReflowCropMode"
+          @crop-rois-change="setReflowCropRois"
           @exit-reflow="exitReflowMode"
           @reflowed="cacheReflowPage"
+          @source-previous="reflowSourcePreviousPage"
+          @source-next="reflowSourceNextPage"
         />
         <reflowed-page
           v-if="prefetchReflowPage"
@@ -285,12 +290,12 @@
         <div
           v-if="!reflowCropMode"
           @click="reflowPreviousPage"
-          class="reflow-click-top"
+          class="reflow-click-left"
         />
         <div
           v-if="!reflowCropMode"
           @click="reflowNextPage"
-          class="reflow-click-bottom"
+          class="reflow-click-right"
         />
         <div
           v-if="!reflowCropMode"
@@ -739,6 +744,7 @@ export default Vue.extend({
       landscapeDisplay: false,
       reflowMode: false,
       k2ReflowMode: false,
+      reflowStartAtEnd: false,
       k2ReflowStartAtEnd: false,
       reflowCropMode: false,
       reflowSettingsBookId: '',
@@ -760,6 +766,10 @@ export default Vue.extend({
         marginRight: 0,
         marginBottom: 0,
         marginLeft: 0,
+        cropRoisByParity: {
+          odd: null,
+          even: null,
+        },
       },
       goToPage: 1,
       settings: {
@@ -993,6 +1003,7 @@ export default Vue.extend({
         marginRight: this.reflowSettings.marginRight,
         marginBottom: this.reflowSettings.marginBottom,
         marginLeft: this.reflowSettings.marginLeft,
+        cropRoisByParity: this.reflowSettings.cropRoisByParity,
       })
     },
 
@@ -1131,17 +1142,17 @@ export default Vue.extend({
         case ' ':
         case 'PageDown':
         case 'ArrowDown':
-          this.reflowNextPage()
+          this.activeReflowNextPage()
           return true
         case 'PageUp':
         case 'ArrowUp':
-          this.reflowPreviousPage()
+          this.activeReflowPreviousPage()
           return true
         case 'ArrowLeft':
-          this.readingDirection === ReadingDirection.RIGHT_TO_LEFT ? this.reflowNextPage() : this.reflowPreviousPage()
+          this.readingDirection === ReadingDirection.RIGHT_TO_LEFT ? this.activeReflowNextPage() : this.activeReflowPreviousPage()
           return true
         case 'ArrowRight':
-          this.readingDirection === ReadingDirection.RIGHT_TO_LEFT ? this.reflowPreviousPage() : this.reflowNextPage()
+          this.readingDirection === ReadingDirection.RIGHT_TO_LEFT ? this.activeReflowPreviousPage() : this.activeReflowNextPage()
           return true
         default:
           return false
@@ -1444,7 +1455,23 @@ export default Vue.extend({
         marginRight: this.clampReflowNumber(settings.marginRight, 0, 45, this.reflowSettings.marginRight),
         marginBottom: this.clampReflowNumber(settings.marginBottom, 0, 45, this.reflowSettings.marginBottom),
         marginLeft: this.clampReflowNumber(settings.marginLeft, 0, 45, this.reflowSettings.marginLeft),
+        cropRoisByParity: this.normalizedReflowCropRois(settings.cropRoisByParity),
       }
+    },
+    normalizedReflowCropRois(cropRoisByParity: any): Record<string, any> {
+      return {
+        odd: this.normalizedReflowCropRoi(cropRoisByParity?.odd),
+        even: this.normalizedReflowCropRoi(cropRoisByParity?.even),
+      }
+    },
+    normalizedReflowCropRoi(roi: any): object | null {
+      if (!roi) return null
+      const x = Number(roi.x)
+      const y = Number(roi.y)
+      const w = Number(roi.w)
+      const h = Number(roi.h)
+      if (![x, y, w, h].every(Number.isFinite) || w <= 15 || h <= 15) return null
+      return {x, y, w, h}
     },
     clampReflowNumber(value: any, min: number, max: number, fallback: number): number {
       const numberValue = Number(value)
@@ -1461,12 +1488,14 @@ export default Vue.extend({
 
       this.reflowMode = true
       this.k2ReflowMode = false
+      this.reflowStartAtEnd = false
       this.reflowCropMode = false
       this.clearReflowPrefetch()
     },
     exitReflowMode() {
       this.reflowMode = false
       this.reflowCropMode = false
+      this.reflowStartAtEnd = false
       this.clearReflowPrefetch()
       this.$nextTick(() => this.scrollToPageEdge('top'))
     },
@@ -1481,6 +1510,7 @@ export default Vue.extend({
       this.k2ReflowMode = true
       this.reflowMode = false
       this.reflowCropMode = false
+      this.reflowStartAtEnd = false
       this.k2ReflowStartAtEnd = false
       this.clearReflowPrefetch()
       this.$nextTick(() => this.scrollToPageEdge('top'))
@@ -1493,6 +1523,7 @@ export default Vue.extend({
       this.reflowMode = false
       this.k2ReflowMode = false
       this.reflowCropMode = false
+      this.reflowStartAtEnd = false
       this.clearReflowPrefetch()
     },
     k2PreviousPage() {
@@ -1502,6 +1533,12 @@ export default Vue.extend({
     k2NextPage() {
       const reflow = this.$refs.k2ReflowedPage as any
       reflow?.nextPage?.()
+    },
+    activeReflowPreviousPage() {
+      this.k2ReflowMode ? this.k2PreviousPage() : this.reflowPreviousPage()
+    },
+    activeReflowNextPage() {
+      this.k2ReflowMode ? this.k2NextPage() : this.reflowNextPage()
     },
     k2SourcePreviousPage() {
       if (this.page > 1) {
@@ -1534,6 +1571,12 @@ export default Vue.extend({
     setReflowCropMode(cropMode: boolean) {
       this.reflowCropMode = cropMode
       if (cropMode) this.clearReflowPrefetch()
+    },
+    setReflowCropRois(cropRoisByParity: Record<string, any>) {
+      const normalized = this.normalizedReflowCropRois(cropRoisByParity)
+      this.$set(this.reflowSettings.cropRoisByParity, 'odd', normalized.odd)
+      this.$set(this.reflowSettings.cropRoisByParity, 'even', normalized.even)
+      this.clearReflowPrefetch()
     },
     cachedReflowItems(page: PageDtoWithUrl | undefined): any[] | undefined {
       if (!page || this.reflowCropMode) return undefined
@@ -1572,43 +1615,28 @@ export default Vue.extend({
       }, 350)
     },
     reflowPreviousPage() {
-      if (this.reflowCanScroll('up')) {
-        this.scrollReflowPage('up')
-        return
-      }
-
+      const reflow = this.$refs.reflowedPage as any
+      reflow?.previousPage?.()
+    },
+    reflowNextPage() {
+      const reflow = this.$refs.reflowedPage as any
+      reflow?.nextPage?.()
+    },
+    reflowSourcePreviousPage() {
       if (this.page > 1) {
+        this.reflowStartAtEnd = true
         this.goTo(this.page - 1)
-        this.scrollToPageEdge('bottom')
       } else {
         this.jumpToPrevious()
       }
     },
-    reflowNextPage() {
-      if (this.reflowCanScroll('down')) {
-        this.scrollReflowPage('down')
-        return
-      }
-
+    reflowSourceNextPage() {
       if (this.page < this.pagesCount) {
+        this.reflowStartAtEnd = false
         this.goTo(this.page + 1)
-        this.scrollToPageEdge('top')
       } else {
         this.jumpToNext()
       }
-    },
-    reflowCanScroll(direction: 'up' | 'down'): boolean {
-      const scrollingElement = document.scrollingElement || document.documentElement
-      const scrollTop = scrollingElement.scrollTop || window.pageYOffset || document.documentElement.scrollTop || document.body.scrollTop || 0
-      if (direction === 'up') return scrollTop > 2
-
-      const viewportHeight = window.innerHeight || document.documentElement.clientHeight
-      const scrollHeight = scrollingElement.scrollHeight || document.documentElement.scrollHeight || document.body.scrollHeight
-      return scrollTop + viewportHeight < scrollHeight - 2
-    },
-    scrollReflowPage(direction: 'up' | 'down') {
-      const amount = Math.max(1, Math.floor((window.innerHeight || document.documentElement.clientHeight) * 0.9))
-      window.scrollBy({top: direction === 'down' ? amount : -amount, left: 0, behavior: 'auto'})
     },
     scrollToPageEdge(position: 'top' | 'bottom') {
       const scroll = () => {
@@ -1758,30 +1786,30 @@ export default Vue.extend({
   pointer-events: none;
 }
 
-.reflow-click-top {
+.reflow-click-left {
   position: fixed;
   top: 0;
   left: 0;
-  height: 25vh;
-  width: 100%;
+  height: 100vh;
+  width: 30vw;
   z-index: 3;
 }
 
-.reflow-click-bottom {
+.reflow-click-right {
   position: fixed;
-  top: 75vh;
-  left: 0;
-  height: 25vh;
-  width: 100%;
+  top: 0;
+  right: 0;
+  height: 100vh;
+  width: 30vw;
   z-index: 3;
 }
 
 .reflow-click-center {
   position: fixed;
-  top: 25vh;
-  left: 0;
-  height: 50vh;
-  width: 100%;
+  top: 0;
+  left: 30vw;
+  height: 100vh;
+  width: 40vw;
   z-index: 3;
 }
 </style>
