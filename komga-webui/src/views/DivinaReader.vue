@@ -1873,8 +1873,4 @@ export default Vue.extend({
   filter: invert(1) hue-rotate(180deg) brightness(0.92);
 }
 
-.reader-night-mode .reader-frame .word-block,
-.reader-night-mode .reader-frame .k2-word {
-  filter: none;
-}
 </style>
