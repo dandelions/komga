@@ -234,11 +234,13 @@
           :target-width="reflowTargetWidth"
           :start-at-end="k2ReflowStartAtEnd"
           :crop-rois-by-parity="reflowSettings.cropRoisByParity"
+          :settings="reflowSettings.k2Settings"
           @exit-k2-reflow="exitK2ReflowMode"
           @source-previous="k2SourcePreviousPage"
           @source-next="k2SourceNextPage"
           @crop-mode-change="setReflowCropMode"
           @crop-rois-change="setReflowCropRois"
+          @settings-change="setK2ReflowSettings"
         />
 
         <div
@@ -777,6 +779,14 @@ export default Vue.extend({
         cropRoisByParity: {
           odd: null,
           even: null,
+        },
+        k2Settings: {
+          textScale: 80,
+          maxColumns: 2,
+          threshold: 185,
+          strokeStrength: 0.8,
+          wordGap: 3,
+          outputPadding: 16,
         },
       },
       goToPage: 1,
@@ -1465,6 +1475,18 @@ export default Vue.extend({
         marginBottom: this.clampReflowNumber(settings.marginBottom, 0, 45, this.reflowSettings.marginBottom),
         marginLeft: this.clampReflowNumber(settings.marginLeft, 0, 45, this.reflowSettings.marginLeft),
         cropRoisByParity: this.normalizedReflowCropRois(settings.cropRoisByParity),
+        k2Settings: this.normalizedK2ReflowSettings(settings.k2Settings),
+      }
+    },
+    normalizedK2ReflowSettings(settings: Record<string, any> = {}): Record<string, any> {
+      settings = settings || {}
+      return {
+        textScale: this.clampReflowNumber(settings.textScale, 20, 160, this.reflowSettings.k2Settings.textScale),
+        maxColumns: Number(settings.maxColumns) === 1 ? 1 : 2,
+        threshold: this.clampReflowNumber(settings.threshold, 50, 230, this.reflowSettings.k2Settings.threshold),
+        strokeStrength: Math.round(this.clampReflowNumber(settings.strokeStrength, 0, 3, this.reflowSettings.k2Settings.strokeStrength) * 10) / 10,
+        wordGap: Math.round(this.clampReflowNumber(settings.wordGap, 1, 30, this.reflowSettings.k2Settings.wordGap)),
+        outputPadding: Math.round(this.clampReflowNumber(settings.outputPadding, 0, 48, this.reflowSettings.k2Settings.outputPadding)),
       }
     },
     normalizedReflowCropRois(cropRoisByParity: any): Record<string, any> {
@@ -1587,6 +1609,12 @@ export default Vue.extend({
       this.$set(this.reflowSettings.cropRoisByParity, 'odd', normalized.odd)
       this.$set(this.reflowSettings.cropRoisByParity, 'even', normalized.even)
       this.clearReflowPrefetch()
+    },
+    setK2ReflowSettings(settings: Record<string, any>) {
+      const normalized = this.normalizedK2ReflowSettings(settings)
+      Object.keys(normalized).forEach(key => {
+        this.$set(this.reflowSettings.k2Settings, key, normalized[key])
+      })
     },
     cachedReflowItems(page: PageDtoWithUrl | undefined): any[] | undefined {
       if (!page || this.reflowCropMode) return undefined

@@ -1418,6 +1418,7 @@ export default Vue.extend({
   display: inline-block;
   height: auto;
   max-width: 100%;
+  background: #fff;
   object-fit: contain;
 }
 

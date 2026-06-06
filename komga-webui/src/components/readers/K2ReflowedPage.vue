@@ -109,6 +109,14 @@ type WordLine = { column: Column, row: TextRow, words: WordBlock[] }
 type BreakItem = { type: 'break' }
 type WordItem = { type: 'word', src: string, width: number, height: number }
 type K2Item = BreakItem | WordItem
+type K2Settings = {
+  textScale: number,
+  maxColumns: number,
+  threshold: number,
+  strokeStrength: number,
+  wordGap: number,
+  outputPadding: number,
+}
 
 const DEFAULT_THRESHOLD = 185
 const DEFAULT_TEXT_SCALE = 80
@@ -135,6 +143,10 @@ export default Vue.extend({
     },
     cropRoisByParity: {
       type: Object as () => Partial<Record<PageParity, Roi | null | undefined>>,
+      default: () => ({}),
+    },
+    settings: {
+      type: Object as () => Partial<K2Settings>,
       default: () => ({}),
     },
   },
@@ -165,6 +177,7 @@ export default Vue.extend({
   watch: {
     page: {
       handler() {
+        this.syncSettingsFromProps()
         this.syncCropRoisFromProps()
         this.cropMode = false
         this.drawingCrop = false
@@ -189,6 +202,13 @@ export default Vue.extend({
     },
     controlsCollapsed() {
       this.repaginate(false)
+    },
+    settings: {
+      handler() {
+        this.syncSettingsFromProps()
+      },
+      deep: true,
+      immediate: true,
     },
   },
   computed: {
@@ -225,11 +245,29 @@ export default Vue.extend({
     this.updateViewportHeight()
     window.addEventListener('resize', this.handleResize)
   },
-  destroyed() {
+    destroyed() {
     window.removeEventListener('resize', this.handleResize)
     this.revokeObjectUrl()
   },
   methods: {
+    syncSettingsFromProps() {
+      this.textScalePercent = this.clampNumber(Number(this.settings.textScale), 20, 160, DEFAULT_TEXT_SCALE)
+      this.maxColumns = Number(this.settings.maxColumns) === 1 ? 1 : 2
+      this.threshold = this.clampNumber(Number(this.settings.threshold), 50, 230, DEFAULT_THRESHOLD)
+      this.strokeStrength = Math.round(this.clampNumber(Number(this.settings.strokeStrength), 0, 3, 0.8) * 10) / 10
+      this.wordGap = Math.round(this.clampNumber(Number(this.settings.wordGap), 1, 30, DEFAULT_WORD_GAP))
+      this.outputPadding = Math.round(this.clampNumber(Number(this.settings.outputPadding), 0, 48, DEFAULT_OUTPUT_PADDING))
+    },
+    emitSettingsChange() {
+      this.$emit('settings-change', {
+        textScale: this.textScalePercent,
+        maxColumns: this.maxColumns,
+        threshold: this.threshold,
+        strokeStrength: this.strokeStrength,
+        wordGap: this.wordGap,
+        outputPadding: this.outputPadding,
+      } as K2Settings)
+    },
     async reflow() {
       const requestId = this.requestId + 1
       this.requestId = requestId
@@ -751,35 +789,42 @@ export default Vue.extend({
     setTextScale(event: Event) {
       const target = event.target as HTMLInputElement
       this.textScalePercent = this.clampNumber(Number(target.value), 20, 160, DEFAULT_TEXT_SCALE)
+      this.emitSettingsChange()
       this.reflow()
     },
     adjustTextScale(delta: number) {
       this.textScalePercent = this.clampNumber(this.textScalePercent + delta, 20, 160, DEFAULT_TEXT_SCALE)
+      this.emitSettingsChange()
       this.reflow()
     },
     setMaxColumns(event: Event) {
       const target = event.target as HTMLSelectElement
       this.maxColumns = Number(target.value) === 1 ? 1 : 2
+      this.emitSettingsChange()
       this.reflow()
     },
     setThreshold(event: Event) {
       const target = event.target as HTMLInputElement
       this.threshold = this.clampNumber(Number(target.value), 50, 230, DEFAULT_THRESHOLD)
+      this.emitSettingsChange()
       this.reflow()
     },
     setStrokeStrength(event: Event) {
       const target = event.target as HTMLInputElement
       this.strokeStrength = Math.round(this.clampNumber(Number(target.value), 0, 3, 0.8) * 10) / 10
+      this.emitSettingsChange()
       this.reflow()
     },
     setWordGap(event: Event) {
       const target = event.target as HTMLInputElement
       this.wordGap = Math.round(this.clampNumber(Number(target.value), 1, 30, DEFAULT_WORD_GAP))
+      this.emitSettingsChange()
       this.reflow()
     },
     setOutputPadding(event: Event) {
       const target = event.target as HTMLInputElement
       this.outputPadding = Math.round(this.clampNumber(Number(target.value), 0, 48, DEFAULT_OUTPUT_PADDING))
+      this.emitSettingsChange()
       this.reflow()
     },
     async toggleCropMode() {
@@ -968,6 +1013,7 @@ export default Vue.extend({
 .k2-word {
   display: inline-block;
   max-width: 100%;
+  background: #fff;
   object-fit: contain;
 }
 
