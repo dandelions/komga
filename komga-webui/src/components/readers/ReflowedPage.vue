@@ -2,7 +2,7 @@
   <div class="reflowed-page">
     <div v-if="!preload" ref="reflowControls" class="reflow-controls" @click.stop>
       <template v-if="!controlsCollapsed">
-        <label class="reflow-font-control">
+        <label class="reflow-font-control reflow-wide-control">
           <span>Text size</span>
           <button type="button" class="reflow-step-control" @click="adjustTextScale(-5)">-</button>
           <input
@@ -26,13 +26,14 @@
         <label class="reflow-stroke-control">
           <span>Stroke</span>
           <input
-            type="number"
+            type="range"
             min="0.1"
             max="3"
             step="0.1"
             :value="strokeStrength"
             @input="setStrokeStrength"
           />
+          <span class="reflow-font-value">{{ strokeStrength }}</span>
         </label>
         <label class="reflow-spacing-control">
           <span>Spacing</span>
@@ -444,7 +445,6 @@ export default Vue.extend({
         const context = canvas.getContext('2d')
         if (!context) throw new Error('Canvas is unavailable')
         context.drawImage(image, 0, 0)
-        this.boldenSourceCanvas(context, canvas.width, canvas.height)
         const imageData = context.getImageData(0, 0, canvas.width, canvas.height)
         const lines = this.detectWordLines(imageData, canvas.width, canvas.height)
         if (requestId !== this.requestId) return
@@ -471,7 +471,7 @@ export default Vue.extend({
     },
     pageContentHeight(): number {
       const height = this.viewportHeight || window.innerHeight || document.documentElement.clientHeight || 0
-      return Math.max(240, height - (this.preload ? 0 : REFLOW_CONTROLS_HEIGHT))
+      return Math.max(240, height - (this.preload ? 0 : this.controlsHeight || REFLOW_CONTROLS_HEIGHT))
     },
     repaginate(resetPage: boolean = true) {
       this.updateViewportMetrics()
@@ -982,18 +982,15 @@ export default Vue.extend({
     },
     isValidTextLine(rowInk: number[], start: number, end: number, column: Column): boolean {
       const lineHeight = end - start
-      if (lineHeight > 3) return true
+      if (lineHeight <= 3) return false
 
-      let maxInk = 0
       let totalInk = 0
       for (let y = start; y < end; y++) {
-        maxInk = Math.max(maxInk, rowInk[y] || 0)
         totalInk += rowInk[y] || 0
       }
 
       const columnWidth = column.end - column.start
-      const longHorizontalStroke = maxInk >= Math.max(3, Math.floor(columnWidth * 0.08))
-      return longHorizontalStroke && totalInk >= Math.max(4, Math.floor(columnWidth * 0.08))
+      return totalInk >= Math.max(4, Math.floor(columnWidth * 0.02))
     },
     detectWords(isInk: (x: number, y: number) => boolean, column: Column, line: Line): WordBlock[] {
       const columnWidth = column.end - column.start
@@ -1084,6 +1081,11 @@ export default Vue.extend({
         h: lineBounds.bottom - lineBounds.top + 1,
       }
     },
+    isRuleLikeBlock(block: WordBlock): boolean {
+      const longHorizontalRule = block.h <= 3 && block.w >= 24
+      const longVerticalRule = block.w <= 3 && block.h >= 24
+      return longHorizontalRule || longVerticalRule
+    },
     renderReflowItems(sourceCanvas: HTMLCanvasElement, lines: WordLine[]): ReflowItem[] {
       const sourceContext = sourceCanvas.getContext('2d')
       if (!sourceContext) return []
@@ -1099,11 +1101,13 @@ export default Vue.extend({
         if (indent > 0) rendered.push({type: 'indent', sourceWidth: indent, width: this.scaledIndentWidth(indent)})
 
         line.words.forEach(block => {
-          if (block.w < 2 || block.h < 2) return
+          if (block.w < 2 || block.h < 2 || this.isRuleLikeBlock(block)) return
           sliceCanvas.width = block.w
           sliceCanvas.height = block.h
           sliceContext.clearRect(0, 0, block.w, block.h)
           sliceContext.drawImage(sourceCanvas, block.x, block.y, block.w, block.h, 0, 0, block.w, block.h)
+          this.makeBackgroundTransparent(sliceContext, block.w, block.h)
+          this.boldenSourceCanvas(sliceContext, block.w, block.h)
           rendered.push({
             ...block,
             type: 'word',
@@ -1114,6 +1118,20 @@ export default Vue.extend({
       })
 
       return rendered
+    },
+    makeBackgroundTransparent(context: CanvasRenderingContext2D, width: number, height: number) {
+      const imageData = context.getImageData(0, 0, width, height)
+      const data = imageData.data
+
+      for (let i = 0; i < width * height; i++) {
+        const offset = i * 4
+        const alpha = data[offset + 3]
+        if (alpha === 0) continue
+        const luma = 0.299 * data[offset] + 0.587 * data[offset + 1] + 0.114 * data[offset + 2]
+        if (luma >= 245) data[offset + 3] = 0
+      }
+
+      context.putImageData(imageData, 0, 0)
     },
     boldenSourceCanvas(targetContext: CanvasRenderingContext2D, width: number, height: number) {
       const strength = this.strokeStrength
@@ -1417,7 +1435,7 @@ export default Vue.extend({
   display: inline-block;
   height: auto;
   max-width: 100%;
-  background: #fff;
+  background: transparent;
   object-fit: contain;
 }
 
@@ -1438,18 +1456,18 @@ export default Vue.extend({
   top: 0;
   z-index: 4;
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
   width: 100%;
-  height: 48px;
+  min-height: 48px;
   padding: 6px 12px;
   box-sizing: border-box;
   background: rgba(248, 250, 252, 0.94);
   border-bottom: 1px solid rgba(0, 0, 0, 0.12);
   overflow-x: auto;
-  overflow-y: hidden;
+  overflow-y: visible;
   pointer-events: auto;
 }
 
@@ -1477,8 +1495,8 @@ export default Vue.extend({
 }
 
 .reflow-font-control {
-  flex: 0 0 280px;
-  min-width: 280px;
+  flex: 0 0 300px;
+  min-width: 300px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1486,6 +1504,10 @@ export default Vue.extend({
   font-size: 13px;
   font-weight: 600;
   white-space: nowrap;
+}
+
+.reflow-wide-control {
+  flex-basis: 300px;
 }
 
 .reflow-font-control input {
@@ -1508,8 +1530,8 @@ export default Vue.extend({
 
 .reflow-stroke-control,
 .reflow-spacing-control {
-  flex: 0 0 136px;
-  min-width: 136px;
+  flex: 0 0 180px;
+  min-width: 180px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1522,7 +1544,7 @@ export default Vue.extend({
 .reflow-stroke-control input,
 .reflow-spacing-control input {
   flex: 1;
-  min-width: 80px;
+  min-width: 100px;
 }
 
 .reflow-column-control {
