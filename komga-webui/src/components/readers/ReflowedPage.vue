@@ -128,7 +128,7 @@
           v-else-if="item.type === 'indent'"
           :key="`indent-${i}`"
           class="line-indent"
-          :style="`width: ${item.width}px`"
+          :style="indentStyle(item)"
         />
         <img
           v-else-if="item.type === 'word' && item.src"
@@ -158,7 +158,7 @@
           v-else-if="item.type === 'indent'"
           :key="`measure-indent-${i}`"
           class="line-indent"
-          :style="`width: ${item.width}px`"
+          :style="indentStyle(item)"
         />
         <img
           v-else-if="item.type === 'word' && item.src"
@@ -731,12 +731,11 @@ export default Vue.extend({
           pushColumn()
           return
         }
-        if (item.type === 'indent') return
-        const itemHeight = Math.max(1, item.height)
+        const itemHeight = Math.max(1, item.type === 'indent' ? item.width : item.height)
         const nextHeight = currentColumn.length > 0 ? currentColumnHeight + rowGap + itemHeight : itemHeight
         if (currentColumn.length > 0 && nextHeight > contentHeight) pushColumn()
         currentColumn.push(item)
-        currentColumnWidth = Math.max(currentColumnWidth, item.w * this.textScale())
+        currentColumnWidth = Math.max(currentColumnWidth, item.type === 'indent' ? 1 : item.w * this.textScale())
         currentColumnHeight = currentColumnHeight > 0 ? currentColumnHeight + rowGap + itemHeight : itemHeight
       })
 
@@ -767,6 +766,17 @@ export default Vue.extend({
       return {
         width: `${Math.max(1, Math.round(item.w * this.textScale()))}px`,
         height: `${item.height}px`,
+      }
+    },
+    indentStyle(item: LineIndentItem): object {
+      if (this.verticalText) {
+        return {
+          width: '1px',
+          height: `${item.width}px`,
+        }
+      }
+      return {
+        width: `${item.width}px`,
       }
     },
     numberOrFallback(value: number | undefined, fallback: number): number {
@@ -1086,7 +1096,28 @@ export default Vue.extend({
         if (column.end - column.start >= 2) columns.push(column)
       }
 
-      return columns.length > 0 ? columns : [{start: roi.x, end: roi.x + roi.w}]
+      const mergedColumns = this.mergeCloseVerticalColumns(columns)
+      return mergedColumns.length > 0 ? mergedColumns : [{start: roi.x, end: roi.x + roi.w}]
+    },
+    mergeCloseVerticalColumns(columns: Column[]): Column[] {
+      if (columns.length <= 1) return columns
+      const maxGap = Math.max(6, Math.floor(this.clampNumber(this.options.wordGap, 1, 30, WORD_GAP) * 2))
+      const sorted = columns.slice().sort((a, b) => a.start - b.start)
+      const merged = [] as Column[]
+      let current = {...sorted[0]}
+
+      for (let i = 1; i < sorted.length; i++) {
+        const next = sorted[i]
+        if (next.start - current.end <= maxGap) {
+          current = {start: current.start, end: Math.max(current.end, next.end)}
+          continue
+        }
+        merged.push(current)
+        current = {...next}
+      }
+
+      merged.push(current)
+      return merged
     },
     tightVerticalColumn(isInk: (x: number, y: number) => boolean, column: Column, roi: Roi): Column {
       let start = column.end
@@ -1428,6 +1459,9 @@ export default Vue.extend({
       const rendered = [] as ReflowItem[]
 
       lines.forEach(line => {
+        const indent = this.verticalLineIndentSourceHeight(line)
+        if (indent > 0) rendered.push({type: 'indent', sourceWidth: indent, width: this.scaledVerticalIndentHeight(indent)})
+
         line.words.forEach(block => {
           if (block.w < 2 || block.h < 2 || this.isRuleLikeBlock(block)) return
           sliceCanvas.width = block.w
@@ -1445,6 +1479,18 @@ export default Vue.extend({
       })
 
       return rendered
+    },
+    verticalLineIndentSourceHeight(line: WordLine): number {
+      const firstWord = line.words[0]
+      if (!firstWord) return 0
+      const rawIndent = Math.max(0, firstWord.y - line.line.start)
+      const indentThreshold = Math.max(6, firstWord.w * 0.3)
+      if (rawIndent < indentThreshold) return 0
+      return rawIndent
+    },
+    scaledVerticalIndentHeight(sourceHeight: number): number {
+      const maxIndent = Math.max(0, this.pageContentHeight() * 0.35)
+      return Math.min(maxIndent, sourceHeight * this.textScale())
     },
     boldenSourceCanvas(targetContext: CanvasRenderingContext2D, width: number, height: number) {
       const strength = this.strokeStrength
