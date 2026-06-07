@@ -359,7 +359,7 @@ export default Vue.extend({
         flexDirection: 'column',
         flexWrap: this.verticalDirection === 'rtl' ? 'wrap-reverse' : 'wrap',
         alignItems: 'center',
-        alignContent: this.verticalDirection === 'rtl' ? 'flex-end' : 'flex-start',
+        alignContent: 'flex-start',
       }
     },
     measureWrapperStyle(): object {
@@ -375,7 +375,7 @@ export default Vue.extend({
         flexDirection: 'column',
         flexWrap: this.verticalDirection === 'rtl' ? 'wrap-reverse' : 'wrap',
         alignItems: 'center',
-        alignContent: this.verticalDirection === 'rtl' ? 'flex-end' : 'flex-start',
+        alignContent: 'flex-start',
       }
     },
     pageParity(): PageParity {
@@ -1047,9 +1047,9 @@ export default Vue.extend({
         return this.verticalDirection === 'rtl' ? centerB - centerA : centerA - centerB
       })
 
-      return orderedColumns
+      const lines = orderedColumns
         .map(column => {
-          const words = this.detectVerticalBlocks(isInk, column, roi)
+          const words = this.mergeVerticalAdornmentBlocks(this.detectVerticalBlocks(isInk, column, roi))
           return {
             column,
             line: {start: roi.y, end: roi.y + roi.h},
@@ -1057,6 +1057,28 @@ export default Vue.extend({
           }
         })
         .filter(line => line.words.length > 0)
+
+      const textBounds = this.verticalTextBounds(lines)
+      if (!textBounds) return lines
+      return lines.map(line => ({
+        ...line,
+        line: textBounds,
+      }))
+    },
+    verticalTextBounds(lines: WordLine[]): Line | undefined {
+      let top = Number.MAX_SAFE_INTEGER
+      let bottom = 0
+
+      lines.forEach(line => {
+        line.words.forEach(word => {
+          if (this.isRuleLikeBlock(word)) return
+          top = Math.min(top, word.y)
+          bottom = Math.max(bottom, word.y + word.h)
+        })
+      })
+
+      if (top === Number.MAX_SAFE_INTEGER || bottom <= top) return undefined
+      return {start: top, end: bottom}
     },
     detectVerticalTextColumns(isInk: (x: number, y: number) => boolean, roi: Roi): Column[] {
       const colInk = new Array(roi.x + roi.w).fill(0)
@@ -1103,8 +1125,8 @@ export default Vue.extend({
     mergeCloseVerticalColumns(columns: Column[]): Column[] {
       if (columns.length <= 1) return columns
       const maxTextGap = Math.max(6, Math.floor(this.clampNumber(this.options.wordGap, 1, 30, WORD_GAP) * 2))
-      const maxAdornmentGap = Math.max(16, Math.floor(this.clampNumber(this.options.columnGap, 5, 80, COLUMN_GAP)))
-      const narrowAdornmentWidth = Math.max(8, Math.floor(this.clampNumber(this.options.wordGap, 1, 30, WORD_GAP) * 4))
+      const maxAdornmentGap = Math.max(24, Math.floor(this.clampNumber(this.options.columnGap, 5, 80, COLUMN_GAP) * 1.5))
+      const narrowAdornmentWidth = Math.max(10, Math.floor(this.clampNumber(this.options.wordGap, 1, 30, WORD_GAP) * 5))
       const sorted = columns.slice().sort((a, b) => a.start - b.start)
       const merged = [] as Column[]
       let current = {...sorted[0]}
@@ -1125,6 +1147,72 @@ export default Vue.extend({
 
       merged.push(current)
       return merged
+    },
+    mergeVerticalAdornmentBlocks(blocks: WordBlock[]): WordBlock[] {
+      if (blocks.length <= 1) return blocks
+      const charHeight = this.verticalCharacterSourceHeight({column: {start: 0, end: 0}, line: {start: 0, end: 0}, words: blocks})
+      const medianWidth = this.medianNumber(blocks.map(block => block.w))
+      const maxAdornmentWidth = Math.max(4, medianWidth * 0.45)
+      const maxAdornmentHeight = Math.max(charHeight * 2.4, charHeight + 8)
+      const maxGap = Math.max(6, this.clampNumber(this.options.columnGap, 5, 80, COLUMN_GAP) * 0.7)
+      const consumed = new Set<number>()
+      const merged = blocks.map(block => ({...block}))
+
+      blocks.forEach((block, index) => {
+        if (consumed.has(index)) return
+        if (!this.isVerticalAdornmentBlock(block, maxAdornmentWidth, maxAdornmentHeight)) return
+
+        const targetIndex = this.findVerticalAdornmentTarget(merged, index, maxGap)
+        if (targetIndex === undefined || consumed.has(targetIndex)) return
+
+        consumed.add(index)
+        merged[targetIndex] = this.unionWordBlocks(merged[targetIndex], block)
+      })
+
+      return merged.filter((_, index) => !consumed.has(index)).sort((a, b) => a.y - b.y || a.x - b.x)
+    },
+    isVerticalAdornmentBlock(block: WordBlock, maxWidth: number, maxHeight: number): boolean {
+      return block.w <= maxWidth && block.h <= maxHeight && block.h > block.w * 1.8
+    },
+    findVerticalAdornmentTarget(blocks: WordBlock[], sourceIndex: number, maxGap: number): number | undefined {
+      const source = blocks[sourceIndex]
+      let bestIndex = undefined as number | undefined
+      let bestScore = Number.MAX_SAFE_INTEGER
+
+      blocks.forEach((candidate, index) => {
+        if (index === sourceIndex) return
+        if (candidate.w <= source.w && candidate.h <= source.h) return
+        const gap = this.horizontalBlockGap(source, candidate)
+        if (gap > maxGap) return
+        const overlap = this.verticalOverlap(source, candidate)
+        const minHeight = Math.max(1, Math.min(source.h, candidate.h))
+        const sourceCenter = source.y + source.h / 2
+        const candidateCenter = candidate.y + candidate.h / 2
+        const centerGap = Math.abs(sourceCenter - candidateCenter)
+        if (overlap < minHeight * 0.25 && centerGap > minHeight * 0.7) return
+        const score = gap + centerGap * 0.2 - overlap * 0.4
+        if (score < bestScore) {
+          bestScore = score
+          bestIndex = index
+        }
+      })
+
+      return bestIndex
+    },
+    horizontalBlockGap(a: WordBlock, b: WordBlock): number {
+      if (a.x + a.w < b.x) return b.x - (a.x + a.w)
+      if (b.x + b.w < a.x) return a.x - (b.x + b.w)
+      return 0
+    },
+    verticalOverlap(a: WordBlock, b: WordBlock): number {
+      return Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y))
+    },
+    unionWordBlocks(a: WordBlock, b: WordBlock): WordBlock {
+      const left = Math.min(a.x, b.x)
+      const top = Math.min(a.y, b.y)
+      const right = Math.max(a.x + a.w, b.x + b.w)
+      const bottom = Math.max(a.y + a.h, b.y + b.h)
+      return {x: left, y: top, w: right - left, h: bottom - top}
     },
     tightVerticalColumn(isInk: (x: number, y: number) => boolean, column: Column, roi: Roi): Column {
       let start = column.end
@@ -1524,8 +1612,13 @@ export default Vue.extend({
     ): ReflowItem[] {
       const rendered = [] as ReflowItem[]
 
-      lines.forEach(line => {
-        const indent = this.verticalLineIndentSourceHeight(line)
+      lines.forEach((line, index) => {
+        const startParagraph = this.isVerticalParagraphStart(line, lines[index - 1])
+        if (startParagraph && rendered.length > 0) rendered.push({type: 'break'})
+
+        const indent = startParagraph
+          ? Math.max(this.verticalLineIndentSourceHeight(line), this.verticalParagraphIndentSourceHeight(line))
+          : this.verticalLineIndentSourceHeight(line)
         if (indent > 0) rendered.push({type: 'indent', sourceWidth: indent, width: this.scaledVerticalIndentHeight(indent)})
 
         line.words.forEach(block => {
@@ -1546,6 +1639,26 @@ export default Vue.extend({
 
       return rendered
     },
+    isVerticalParagraphStart(line: WordLine, previousLine: WordLine | undefined): boolean {
+      if (!previousLine) return false
+      const previousBottom = this.verticalLineBottom(previousLine)
+      if (previousBottom === undefined) return false
+
+      const blankTail = previousLine.line.end - previousBottom
+      const charHeight = Math.max(
+        this.verticalCharacterSourceHeight(line),
+        this.verticalCharacterSourceHeight(previousLine),
+      )
+      return blankTail >= Math.max(6, charHeight * 0.8)
+    },
+    verticalLineBottom(line: WordLine): number | undefined {
+      const words = line.words.filter(word => !this.isRuleLikeBlock(word))
+      if (words.length === 0) return undefined
+      return Math.max(...words.map(word => word.y + word.h))
+    },
+    verticalParagraphIndentSourceHeight(line: WordLine): number {
+      return Math.round(this.verticalCharacterSourceHeight(line) * 2)
+    },
     verticalLineIndentSourceHeight(line: WordLine): number {
       const firstWord = line.words[0]
       if (!firstWord) return 0
@@ -1553,6 +1666,20 @@ export default Vue.extend({
       const indentThreshold = Math.max(6, firstWord.w * 0.3)
       if (rawIndent < indentThreshold) return 0
       return rawIndent
+    },
+    verticalCharacterSourceHeight(line: WordLine): number {
+      const heights = line.words
+        .filter(word => word.w >= 2 && word.h >= 2 && !this.isRuleLikeBlock(word))
+        .map(word => Math.min(word.h, Math.max(word.w * 1.8, word.w + 4)))
+      if (heights.length === 0) return Math.max(8, line.column.end - line.column.start)
+      return Math.max(8, this.medianNumber(heights))
+    },
+    medianNumber(values: number[]): number {
+      if (values.length === 0) return 0
+      const sorted = values.slice().sort((a, b) => a - b)
+      const middle = Math.floor(sorted.length / 2)
+      if (sorted.length % 2 === 1) return sorted[middle]
+      return (sorted[middle - 1] + sorted[middle]) / 2
     },
     scaledVerticalIndentHeight(sourceHeight: number): number {
       const maxIndent = Math.max(0, this.pageContentHeight() * 0.35)
