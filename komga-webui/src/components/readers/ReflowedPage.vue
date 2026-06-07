@@ -116,7 +116,7 @@
       <div>Unable to reflow this page</div>
       <div v-if="errorMessage" class="reflow-error">{{ errorMessage }}</div>
     </div>
-    <div v-else class="reflow-wrapper" :style="reflowWrapperStyle">
+    <div v-else class="reflow-wrapper" :class="{'vertical-reflow-wrapper': verticalText}" :style="reflowWrapperStyle">
       <div v-if="reflowItems.length === 0" class="reflow-status">No text blocks detected</div>
       <template v-for="(item, i) in visibleItems">
         <span
@@ -144,6 +144,7 @@
       v-if="reflowItems.length > 0"
       ref="measureWrapper"
       class="reflow-measure-wrapper"
+      :class="{'vertical-reflow-wrapper': verticalText}"
       :style="measureWrapperStyle"
       aria-hidden="true"
     >
@@ -344,19 +345,36 @@ export default Vue.extend({
       return this.clampNumber(this.options.blockSpacing, 0, 24, 6)
     },
     reflowWrapperStyle(): object {
-      return {
+      const style = {
         columnGap: `${this.blockSpacing}px`,
         rowGap: `${Math.round(this.blockSpacing * 1.5)}px`,
         height: `${this.pageContentHeight()}px`,
         minHeight: `${this.pageContentHeight()}px`,
         backgroundColor: this.pageBackground,
       }
+      if (!this.verticalText) return style
+      return {
+        ...style,
+        flexDirection: 'column',
+        flexWrap: this.verticalDirection === 'rtl' ? 'wrap-reverse' : 'wrap',
+        alignItems: 'center',
+        alignContent: this.verticalDirection === 'rtl' ? 'flex-end' : 'flex-start',
+      }
     },
     measureWrapperStyle(): object {
-      return {
+      const style = {
         width: `${this.targetWidth}px`,
         columnGap: `${this.blockSpacing}px`,
         rowGap: `${Math.round(this.blockSpacing * 1.5)}px`,
+      }
+      if (!this.verticalText) return style
+      return {
+        ...style,
+        height: `${this.pageContentHeight()}px`,
+        flexDirection: 'column',
+        flexWrap: this.verticalDirection === 'rtl' ? 'wrap-reverse' : 'wrap',
+        alignItems: 'center',
+        alignContent: this.verticalDirection === 'rtl' ? 'flex-end' : 'flex-start',
       }
     },
     pageParity(): PageParity {
@@ -515,6 +533,16 @@ export default Vue.extend({
         return
       }
 
+      if (this.verticalText) {
+        this.pages = this.paginateVerticalItemsEstimated(this.reflowItems)
+        if (resetPage) {
+          this.setInitialVirtualPage()
+        } else {
+          this.virtualPageIndex = this.clampNumber(this.virtualPageIndex, 0, Math.max(0, this.pages.length - 1), 0)
+        }
+        return
+      }
+
       const estimatedPages = this.paginateItemsEstimated(this.reflowItems)
       this.pages = estimatedPages
       if (resetPage) {
@@ -662,6 +690,57 @@ export default Vue.extend({
       })
 
       pushLine()
+      pushPage()
+      return pages
+    },
+    paginateVerticalItemsEstimated(items: ReflowItem[]): ReflowItem[][] {
+      if (items.length === 0) return []
+
+      const contentWidth = Math.max(120, this.targetWidth - 32)
+      const contentHeight = Math.max(120, this.pageContentHeight() - 32 - VIEWPORT_PAGE_BUFFER)
+      const columnGap = Math.max(0, this.blockSpacing)
+      const rowGap = Math.max(0, Math.round(this.blockSpacing * 1.5))
+      const pages = [] as ReflowItem[][]
+      let currentPage = [] as ReflowItem[]
+      let currentPageWidth = 0
+      let currentColumn = [] as ReflowItem[]
+      let currentColumnWidth = 0
+      let currentColumnHeight = 0
+
+      const pushPage = () => {
+        if (currentPage.length === 0) return
+        pages.push(currentPage)
+        currentPage = []
+        currentPageWidth = 0
+      }
+
+      const pushColumn = () => {
+        if (currentColumn.length === 0) return
+        const columnWidth = Math.max(1, currentColumnWidth)
+        const nextWidth = currentPage.length > 0 ? currentPageWidth + columnGap + columnWidth : columnWidth
+        if (currentPage.length > 0 && nextWidth > contentWidth) pushPage()
+        currentPage.push(...currentColumn, {type: 'break'})
+        currentPageWidth = currentPageWidth > 0 ? currentPageWidth + columnGap + columnWidth : columnWidth
+        currentColumn = []
+        currentColumnWidth = 0
+        currentColumnHeight = 0
+      }
+
+      items.forEach(item => {
+        if (item.type === 'break') {
+          pushColumn()
+          return
+        }
+        if (item.type === 'indent') return
+        const itemHeight = Math.max(1, item.height)
+        const nextHeight = currentColumn.length > 0 ? currentColumnHeight + rowGap + itemHeight : itemHeight
+        if (currentColumn.length > 0 && nextHeight > contentHeight) pushColumn()
+        currentColumn.push(item)
+        currentColumnWidth = Math.max(currentColumnWidth, item.w * this.textScale())
+        currentColumnHeight = currentColumnHeight > 0 ? currentColumnHeight + rowGap + itemHeight : itemHeight
+      })
+
+      pushColumn()
       pushPage()
       return pages
     },
@@ -1053,7 +1132,7 @@ export default Vue.extend({
 
           if (blankRun > maxBlankRun) {
             const block = this.tightVerticalBlock(isInk, column, start, y - blankRun + 1)
-            if (block) blocks.push(block)
+            if (block) this.appendVerticalBlocks(blocks, block)
             inBlock = false
             blankRun = 0
           }
@@ -1062,10 +1141,22 @@ export default Vue.extend({
 
       if (inBlock) {
         const block = this.tightVerticalBlock(isInk, column, start, roi.y + roi.h)
-        if (block) blocks.push(block)
+        if (block) this.appendVerticalBlocks(blocks, block)
       }
 
       return blocks
+    },
+    appendVerticalBlocks(blocks: WordBlock[], block: WordBlock) {
+      const maxBlockHeight = Math.max(12, Math.round(block.w * 1.8))
+      if (block.h <= maxBlockHeight) {
+        blocks.push(block)
+        return
+      }
+
+      for (let y = block.y; y < block.y + block.h; y += maxBlockHeight) {
+        const h = Math.min(maxBlockHeight, block.y + block.h - y)
+        if (h >= 2) blocks.push({...block, y, h})
+      }
     },
     tightVerticalBlock(isInk: (x: number, y: number) => boolean, column: Column, start: number, end: number): WordBlock | undefined {
       let minY = end
@@ -1352,7 +1443,6 @@ export default Vue.extend({
             src: sliceCanvas.toDataURL('image/png'),
             height: block.h * this.textScale(),
           })
-          rendered.push({type: 'break'})
         })
       })
 
@@ -1676,6 +1766,16 @@ export default Vue.extend({
   width: 100%;
   height: 0;
   overflow: hidden;
+}
+
+.vertical-reflow-wrapper .line-break {
+  flex: 0 0 100%;
+  width: 0;
+  height: 100%;
+}
+
+.vertical-reflow-wrapper .word-block {
+  max-width: none;
 }
 
 .line-indent {
