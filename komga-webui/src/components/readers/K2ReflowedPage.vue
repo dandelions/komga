@@ -84,8 +84,14 @@
       <div v-if="items.length === 0" class="k2-status">No text blocks detected</div>
       <template v-for="(item, index) in visibleItems">
         <span v-if="item.type === 'break'" :key="`break-${index}`" class="k2-break"/>
+        <span
+          v-else-if="item.type === 'indent'"
+          :key="`indent-${index}`"
+          class="k2-indent"
+          :style="`width: ${item.width}px`"
+        />
         <img
-          v-else
+          v-else-if="item.type === 'word'"
           :key="`word-${index}`"
           :src="item.src"
           class="k2-word"
@@ -103,8 +109,14 @@
     >
       <template v-for="(item, index) in items">
         <span v-if="item.type === 'break'" :key="`measure-break-${index}`" class="k2-break"/>
+        <span
+          v-else-if="item.type === 'indent'"
+          :key="`measure-indent-${index}`"
+          class="k2-indent"
+          :style="`width: ${item.width}px`"
+        />
         <img
-          v-else
+          v-else-if="item.type === 'word'"
           :key="`measure-word-${index}`"
           :src="item.src"
           class="k2-word"
@@ -127,8 +139,9 @@ type TextRow = { start: number, end: number, rowInk: number[] }
 type WordBlock = { x: number, y: number, w: number, h: number }
 type WordLine = { column: Column, row: TextRow, words: WordBlock[] }
 type BreakItem = { type: 'break' }
+type IndentItem = { type: 'indent', width: number, sourceWidth: number }
 type WordItem = { type: 'word', src: string, width: number, height: number }
-type K2Item = BreakItem | WordItem
+type K2Item = BreakItem | IndentItem | WordItem
 type K2Settings = {
   textScale: number,
   maxColumns: number,
@@ -180,6 +193,7 @@ export default Vue.extend({
     virtualPageIndex: 0,
     viewportHeight: 0,
     controlsHeight: 0,
+    pageBackground: '#fff',
     imageSize: {w: 0, h: 0},
     requestId: 0,
     objectUrl: '',
@@ -244,6 +258,7 @@ export default Vue.extend({
       return {
         height: `${this.pageContentHeight()}px`,
         minHeight: `${this.pageContentHeight()}px`,
+        backgroundColor: this.pageBackground,
       }
     },
     k2MeasureStyle(): object {
@@ -280,6 +295,7 @@ export default Vue.extend({
   mounted() {
     this.updateViewportMetrics()
     window.addEventListener('resize', this.handleResize)
+    window.visualViewport?.addEventListener('resize', this.handleResize)
     this.$nextTick(() => {
       this.updateViewportMetrics()
       this.repaginate(false)
@@ -287,6 +303,7 @@ export default Vue.extend({
   },
   destroyed() {
     window.removeEventListener('resize', this.handleResize)
+    window.visualViewport?.removeEventListener('resize', this.handleResize)
     this.revokeObjectUrl()
   },
   methods: {
@@ -327,6 +344,7 @@ export default Vue.extend({
         const context = canvas.getContext('2d')
         if (!context) throw new Error('Canvas is unavailable')
         context.drawImage(image, 0, 0)
+        this.pageBackground = this.detectPageBackground(context, canvas.width, canvas.height)
 
         const imageData = context.getImageData(0, 0, canvas.width, canvas.height)
         const ink = this.buildInkMap(imageData, canvas.width, canvas.height)
@@ -350,12 +368,12 @@ export default Vue.extend({
       this.repaginate(false)
     },
     updateViewportMetrics() {
-      this.viewportHeight = window.innerHeight || document.documentElement.clientHeight || 720
+      this.viewportHeight = Math.floor(window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight || 720)
       const controls = this.$refs.k2Controls as HTMLElement | undefined
       this.controlsHeight = controls?.offsetHeight || 0
     },
     pageContentHeight(): number {
-      const height = this.viewportHeight || window.innerHeight || document.documentElement.clientHeight || 720
+      const height = this.viewportHeight || Math.floor(window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight || 720)
       return Math.max(240, height - (this.controlsHeight || K2_CONTROLS_HEIGHT))
     },
     async ensureCropImage() {
@@ -404,6 +422,34 @@ export default Vue.extend({
       }
 
       return ink
+    },
+    detectPageBackground(context: CanvasRenderingContext2D, width: number, height: number): string {
+      const sampleSize = Math.max(2, Math.min(8, Math.floor(Math.min(width, height) * 0.01)))
+      const marginX = Math.max(0, Math.min(width - sampleSize, Math.floor(width * 0.03)))
+      const marginY = Math.max(0, Math.min(height - sampleSize, Math.floor(height * 0.03)))
+      const positions = [
+        {x: marginX, y: marginY},
+        {x: Math.max(0, width - marginX - sampleSize), y: marginY},
+        {x: marginX, y: Math.max(0, height - marginY - sampleSize)},
+        {x: Math.max(0, width - marginX - sampleSize), y: Math.max(0, height - marginY - sampleSize)},
+      ]
+      let r = 0
+      let g = 0
+      let b = 0
+      let count = 0
+
+      positions.forEach(position => {
+        const data = context.getImageData(position.x, position.y, sampleSize, sampleSize).data
+        for (let i = 0; i < data.length; i += 4) {
+          r += data[i]
+          g += data[i + 1]
+          b += data[i + 2]
+          count++
+        }
+      })
+
+      if (count === 0) return '#fff'
+      return `rgb(${Math.round(r / count)}, ${Math.round(g / count)}, ${Math.round(b / count)})`
     },
     hasInk(ink: Uint8Array, width: number, height: number, x: number, y: number): boolean {
       return x >= 0 && x < width && y >= 0 && y < height && ink[y * width + x] === 1
@@ -603,6 +649,8 @@ export default Vue.extend({
       const columnWidth = column.end - column.start
       const wordInk = new Array(columnWidth).fill(0)
       const lineHeight = row.end - row.start
+      const rowBounds = this.tightRowBounds(ink, width, height, column, row)
+      if (!rowBounds) return []
       const gapTolerance = Math.max(0, Math.floor(lineHeight * 0.03))
       const minGap = Math.max(1, Math.round(this.clampNumber(this.wordGap, 1, 30, DEFAULT_WORD_GAP)))
 
@@ -622,17 +670,41 @@ export default Vue.extend({
           wordStart = sx
         } else if (inWord && wordInk[sx] <= gapTolerance && this.hasWordGap(wordInk, sx, minGap, gapTolerance)) {
           inWord = false
-          const word = this.tightWord(ink, width, height, column.start + wordStart, sx - wordStart, row)
+          const word = this.tightWord(ink, width, height, column.start + wordStart, sx - wordStart, row, rowBounds)
           if (word) words.push(word)
         }
       }
 
       if (inWord) {
-        const word = this.tightWord(ink, width, height, column.start + wordStart, columnWidth - wordStart, row)
+        const word = this.tightWord(ink, width, height, column.start + wordStart, columnWidth - wordStart, row, rowBounds)
         if (word) words.push(word)
       }
 
       return words
+    },
+    tightRowBounds(
+      ink: Uint8Array,
+      width: number,
+      height: number,
+      column: Column,
+      row: TextRow,
+    ): {top: number, bottom: number} | undefined {
+      let minY = row.end
+      let maxY = row.start
+
+      for (let yy = row.start; yy < row.end; yy++) {
+        for (let xx = column.start; xx < column.end; xx++) {
+          if (!this.hasInk(ink, width, height, xx, yy)) continue
+          minY = Math.min(minY, yy)
+          maxY = Math.max(maxY, yy)
+        }
+      }
+
+      if (maxY < minY) return undefined
+      return {
+        top: Math.max(0, minY - 1),
+        bottom: Math.min(height - 1, maxY + 1),
+      }
     },
     hasWordGap(wordInk: number[], start: number, minGap: number, gapTolerance: number): boolean {
       for (let i = start; i < Math.min(wordInk.length, start + minGap); i++) {
@@ -640,28 +712,34 @@ export default Vue.extend({
       }
       return true
     },
-    tightWord(ink: Uint8Array, width: number, height: number, x: number, w: number, row: TextRow): WordBlock | undefined {
+    tightWord(
+      ink: Uint8Array,
+      width: number,
+      height: number,
+      x: number,
+      w: number,
+      row: TextRow,
+      rowBounds: {top: number, bottom: number},
+    ): WordBlock | undefined {
       let minX = x + w
       let maxX = x
-      let minY = row.end
-      let maxY = row.start
 
       for (let yy = row.start; yy < row.end; yy++) {
         for (let xx = x; xx < x + w; xx++) {
           if (!this.hasInk(ink, width, height, xx, yy)) continue
           minX = Math.min(minX, xx)
           maxX = Math.max(maxX, xx)
-          minY = Math.min(minY, yy)
-          maxY = Math.max(maxY, yy)
         }
       }
 
-      if (maxX < minX || maxY < minY) return undefined
+      if (maxX < minX) return undefined
+      const top = rowBounds.top
+      const bottom = rowBounds.bottom
       return {
         x: Math.max(0, minX - 1),
-        y: Math.max(0, minY - 1),
+        y: top,
         w: Math.min(width - minX, maxX - minX + 3),
-        h: Math.min(height - minY, maxY - minY + 3),
+        h: bottom - top + 1,
       }
     },
     renderK2Items(sourceCanvas: HTMLCanvasElement, lines: WordLine[]): K2Item[] {
@@ -679,9 +757,16 @@ export default Vue.extend({
       const items = [] as K2Item[]
 
       lines.forEach((line, index) => {
-        if (items.length > 0 && this.isParagraphStart(line, lines[index - 1])) {
+        const startParagraph = this.isParagraphStart(line, lines[index - 1])
+        if (items.length > 0 && startParagraph) {
           items.push({type: 'break'})
           lineWidth = 0
+        }
+        const indent = startParagraph ? this.lineIndentSourceWidth(line) : 0
+        if (indent > 0) {
+          const indentWidth = this.scaledIndentWidth(indent)
+          items.push({type: 'indent', sourceWidth: indent, width: indentWidth})
+          lineWidth = indentWidth + wordGap
         }
 
         line.words.forEach(word => {
@@ -696,7 +781,6 @@ export default Vue.extend({
           sliceCanvas.height = word.h
           sliceContext.clearRect(0, 0, word.w, word.h)
           sliceContext.drawImage(sourceCanvas, word.x, word.y, word.w, word.h, 0, 0, word.w, word.h)
-          this.makeBackgroundTransparent(sliceContext, word.w, word.h)
           if (this.strokeStrength > 0) this.strengthenInk(sliceContext, word.w, word.h)
 
           items.push({
@@ -710,20 +794,6 @@ export default Vue.extend({
       })
 
       return items
-    },
-    makeBackgroundTransparent(context: CanvasRenderingContext2D, width: number, height: number) {
-      const imageData = context.getImageData(0, 0, width, height)
-      const data = imageData.data
-
-      for (let i = 0; i < width * height; i++) {
-        const offset = i * 4
-        const alpha = data[offset + 3]
-        if (alpha === 0) continue
-        const luma = 0.299 * data[offset] + 0.587 * data[offset + 1] + 0.114 * data[offset + 2]
-        if (luma >= 245) data[offset + 3] = 0
-      }
-
-      context.putImageData(imageData, 0, 0)
     },
     isParagraphStart(line: WordLine, previousLine: WordLine | undefined): boolean {
       if (!previousLine) return true
@@ -742,6 +812,18 @@ export default Vue.extend({
       const firstWord = line.words[0]
       if (!firstWord) return 0
       return Math.max(0, firstWord.x - line.column.start)
+    },
+    lineIndentSourceWidth(line: WordLine): number {
+      const firstWord = line.words[0]
+      if (!firstWord) return 0
+      const rawIndent = this.rawLineIndent(line)
+      const indentThreshold = Math.max(8, firstWord.h * 0.3)
+      if (rawIndent < indentThreshold) return 0
+      return rawIndent
+    },
+    scaledIndentWidth(sourceWidth: number): number {
+      const maxIndent = Math.max(0, (this.targetWidth - OUTPUT_PADDING * 2) * 0.45)
+      return Math.min(maxIndent, sourceWidth * this.textScalePercent / 100)
     },
     repaginate(resetPage: boolean = true) {
       this.updateViewportMetrics()
@@ -803,7 +885,7 @@ export default Vue.extend({
           return
         }
         currentLine.push(item)
-        currentLineHeight = Math.max(currentLineHeight, item.height)
+        currentLineHeight = Math.max(currentLineHeight, item.type === 'word' ? item.height : 1)
       })
 
       pushLine()
@@ -1190,7 +1272,7 @@ export default Vue.extend({
   box-sizing: border-box;
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-end;
   align-content: flex-start;
   gap: 5px 3px;
   background: transparent;
@@ -1207,7 +1289,7 @@ export default Vue.extend({
   box-sizing: border-box;
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-end;
   align-content: flex-start;
   gap: 5px 3px;
   visibility: hidden;
@@ -1217,8 +1299,12 @@ export default Vue.extend({
 .k2-word {
   display: inline-block;
   max-width: 100%;
-  background: transparent;
   object-fit: contain;
+}
+
+.k2-indent {
+  flex: 0 0 auto;
+  height: 1px;
 }
 
 .k2-break {

@@ -270,6 +270,7 @@
           :target-width="reflowTargetWidth"
           :options="reflowOptions"
           :cached-items="cachedReflowItems(currentPage)"
+          :cached-page-background="cachedReflowBackground(currentPage)"
           :cache-key="reflowCacheKey"
           :start-at-end="reflowStartAtEnd"
           @text-scale-change="setReflowTextScale"
@@ -290,6 +291,7 @@
           :target-width="reflowTargetWidth"
           :options="reflowOptions"
           :cached-items="cachedReflowItems(prefetchReflowPage)"
+          :cached-page-background="cachedReflowBackground(prefetchReflowPage)"
           :cache-key="reflowCacheKey"
           preload
           @reflowed="cacheReflowPage"
@@ -1616,13 +1618,25 @@ export default Vue.extend({
         this.$set(this.reflowSettings.k2Settings, key, normalized[key])
       })
     },
-    cachedReflowItems(page: PageDtoWithUrl | undefined): any[] | undefined {
+    cachedReflowEntry(page: PageDtoWithUrl | undefined): any {
       if (!page || this.reflowCropMode) return undefined
       return this.reflowCache[this.reflowCacheEntryKey(page.number, this.reflowCacheKey)]
     },
-    cacheReflowPage(payload: {pageNumber: number, cacheKey: string, items: any[]}) {
+    cachedReflowItems(page: PageDtoWithUrl | undefined): any[] | undefined {
+      const entry = this.cachedReflowEntry(page)
+      if (Array.isArray(entry)) return entry
+      return entry?.items
+    },
+    cachedReflowBackground(page: PageDtoWithUrl | undefined): string {
+      const entry = this.cachedReflowEntry(page)
+      return Array.isArray(entry) ? '' : entry?.pageBackground || ''
+    },
+    cacheReflowPage(payload: {pageNumber: number, cacheKey: string, items: any[], pageBackground?: string}) {
       if (payload.cacheKey !== this.reflowCacheKey) return
-      this.$set(this.reflowCache, this.reflowCacheEntryKey(payload.pageNumber, payload.cacheKey), payload.items)
+      this.$set(this.reflowCache, this.reflowCacheEntryKey(payload.pageNumber, payload.cacheKey), {
+        items: payload.items,
+        pageBackground: payload.pageBackground || '',
+      })
       this.pruneReflowCache()
       if (payload.pageNumber === this.page) this.scheduleNextReflowPrefetch()
     },
@@ -1868,9 +1882,14 @@ export default Vue.extend({
   overscroll-behavior: none;
 }
 
-.reader-night-mode .reader-frame img,
+.reader-night-mode .reader-frame img:not(.word-block):not(.k2-word),
 .reader-night-mode .reader-frame canvas {
   filter: invert(1) hue-rotate(180deg) brightness(0.92);
+}
+
+.reader-night-mode .reader-frame img.word-block,
+.reader-night-mode .reader-frame img.k2-word {
+  filter: none;
 }
 
 </style>

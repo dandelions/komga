@@ -232,6 +232,7 @@ type ReflowCachePayload = {
   pageNumber: number,
   cacheKey: string,
   items: ReflowItem[],
+  pageBackground: string,
 }
 
 const THRESHOLD = 185
@@ -263,6 +264,10 @@ export default Vue.extend({
       type: Array as () => ReflowItem[] | undefined,
       default: undefined,
     },
+    cachedPageBackground: {
+      type: String,
+      default: '',
+    },
     cacheKey: {
       type: String,
       default: '',
@@ -286,6 +291,7 @@ export default Vue.extend({
       virtualPageIndex: 0,
       viewportHeight: 0,
       controlsHeight: 0,
+      pageBackground: '#fff',
       lastDetectionKey: '',
       objectUrl: '',
       requestId: 0,
@@ -320,6 +326,7 @@ export default Vue.extend({
         rowGap: `${Math.round(this.blockSpacing * 1.5)}px`,
         height: `${this.pageContentHeight()}px`,
         minHeight: `${this.pageContentHeight()}px`,
+        backgroundColor: this.pageBackground,
       }
     },
     measureWrapperStyle(): object {
@@ -398,6 +405,7 @@ export default Vue.extend({
   mounted() {
     this.updateViewportMetrics()
     window.addEventListener('resize', this.handleResize)
+    window.visualViewport?.addEventListener('resize', this.handleResize)
     this.$nextTick(() => {
       this.updateViewportMetrics()
       this.repaginate(false)
@@ -405,6 +413,7 @@ export default Vue.extend({
   },
   destroyed() {
     window.removeEventListener('resize', this.handleResize)
+    window.visualViewport?.removeEventListener('resize', this.handleResize)
     this.revokeObjectUrl()
   },
   methods: {
@@ -418,6 +427,7 @@ export default Vue.extend({
       if (Array.isArray(this.cachedItems)) {
         this.revokeObjectUrl()
         this.reflowItems = this.cachedItems
+        this.pageBackground = this.cachedPageBackground || '#fff'
         this.repaginate()
         this.lastDetectionKey = detectionKey
         this.loading = false
@@ -445,6 +455,7 @@ export default Vue.extend({
         const context = canvas.getContext('2d')
         if (!context) throw new Error('Canvas is unavailable')
         context.drawImage(image, 0, 0)
+        this.pageBackground = this.detectPageBackground(context, canvas.width, canvas.height)
         const imageData = context.getImageData(0, 0, canvas.width, canvas.height)
         const lines = this.detectWordLines(imageData, canvas.width, canvas.height)
         if (requestId !== this.requestId) return
@@ -465,12 +476,12 @@ export default Vue.extend({
       this.repaginate(false)
     },
     updateViewportMetrics() {
-      this.viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0
+      this.viewportHeight = Math.floor(window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight || 0)
       const controls = this.$refs.reflowControls as HTMLElement | undefined
       this.controlsHeight = controls?.offsetHeight || 0
     },
     pageContentHeight(): number {
-      const height = this.viewportHeight || window.innerHeight || document.documentElement.clientHeight || 0
+      const height = this.viewportHeight || Math.floor(window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight || 0)
       return Math.max(240, height - (this.preload ? 0 : this.controlsHeight || REFLOW_CONTROLS_HEIGHT))
     },
     repaginate(resetPage: boolean = true) {
@@ -682,6 +693,7 @@ export default Vue.extend({
         pageNumber: this.page.number,
         cacheKey: this.cacheKey,
         items: this.reflowItems,
+        pageBackground: this.pageBackground,
       } as ReflowCachePayload)
     },
     currentCachePayload(): ReflowCachePayload | undefined {
@@ -690,6 +702,7 @@ export default Vue.extend({
         pageNumber: this.page.number,
         cacheKey: this.cacheKey,
         items: this.reflowItems,
+        pageBackground: this.pageBackground,
       }
     },
     rescaleReflowItems() {
@@ -732,6 +745,34 @@ export default Vue.extend({
     pageImageUrl(url: string): string {
       const separator = url.includes('?') ? '&' : '?'
       return `${url}${separator}contentNegotiation=false&reflowCacheBust=${Date.now()}`
+    },
+    detectPageBackground(context: CanvasRenderingContext2D, width: number, height: number): string {
+      const sampleSize = Math.max(2, Math.min(8, Math.floor(Math.min(width, height) * 0.01)))
+      const marginX = Math.max(0, Math.min(width - sampleSize, Math.floor(width * 0.03)))
+      const marginY = Math.max(0, Math.min(height - sampleSize, Math.floor(height * 0.03)))
+      const positions = [
+        {x: marginX, y: marginY},
+        {x: Math.max(0, width - marginX - sampleSize), y: marginY},
+        {x: marginX, y: Math.max(0, height - marginY - sampleSize)},
+        {x: Math.max(0, width - marginX - sampleSize), y: Math.max(0, height - marginY - sampleSize)},
+      ]
+      let r = 0
+      let g = 0
+      let b = 0
+      let count = 0
+
+      positions.forEach(position => {
+        const data = context.getImageData(position.x, position.y, sampleSize, sampleSize).data
+        for (let i = 0; i < data.length; i += 4) {
+          r += data[i]
+          g += data[i + 1]
+          b += data[i + 2]
+          count++
+        }
+      })
+
+      if (count === 0) return '#fff'
+      return `rgb(${Math.round(r / count)}, ${Math.round(g / count)}, ${Math.round(b / count)})`
     },
     revokeObjectUrl() {
       if (this.objectUrl) URL.revokeObjectURL(this.objectUrl)
@@ -1106,7 +1147,6 @@ export default Vue.extend({
           sliceCanvas.height = block.h
           sliceContext.clearRect(0, 0, block.w, block.h)
           sliceContext.drawImage(sourceCanvas, block.x, block.y, block.w, block.h, 0, 0, block.w, block.h)
-          this.makeBackgroundTransparent(sliceContext, block.w, block.h)
           this.boldenSourceCanvas(sliceContext, block.w, block.h)
           rendered.push({
             ...block,
@@ -1118,20 +1158,6 @@ export default Vue.extend({
       })
 
       return rendered
-    },
-    makeBackgroundTransparent(context: CanvasRenderingContext2D, width: number, height: number) {
-      const imageData = context.getImageData(0, 0, width, height)
-      const data = imageData.data
-
-      for (let i = 0; i < width * height; i++) {
-        const offset = i * 4
-        const alpha = data[offset + 3]
-        if (alpha === 0) continue
-        const luma = 0.299 * data[offset] + 0.587 * data[offset + 1] + 0.114 * data[offset + 2]
-        if (luma >= 245) data[offset + 3] = 0
-      }
-
-      context.putImageData(imageData, 0, 0)
     },
     boldenSourceCanvas(targetContext: CanvasRenderingContext2D, width: number, height: number) {
       const strength = this.strokeStrength
@@ -1435,7 +1461,6 @@ export default Vue.extend({
   display: inline-block;
   height: auto;
   max-width: 100%;
-  background: transparent;
   object-fit: contain;
 }
 
