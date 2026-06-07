@@ -262,6 +262,7 @@ const MIN_CROP_SIZE = 15
 const MIN_INDENT = 8
 const REFLOW_CONTROLS_HEIGHT = 48
 const VIEWPORT_PAGE_BUFFER = 40
+const SPLIT_GUARD_BAND = 5
 
 export default Vue.extend({
   name: 'ReflowedPage',
@@ -1167,9 +1168,9 @@ export default Vue.extend({
           if (rowInk[y] <= threshold) blankRun++
           else blankRun = 0
 
-          if (blankRun > maxBlankRun) {
+          if (blankRun > maxBlankRun && this.realVerticalGap(isInk, column, y - blankRun + 1, y + 1)) {
             const block = this.tightVerticalBlock(isInk, column, start, y - blankRun + 1)
-            if (block) this.appendVerticalBlocks(blocks, block)
+            if (block) this.appendVerticalBlocks(blocks, block, isInk)
             inBlock = false
             blankRun = 0
           }
@@ -1178,22 +1179,58 @@ export default Vue.extend({
 
       if (inBlock) {
         const block = this.tightVerticalBlock(isInk, column, start, roi.y + roi.h)
-        if (block) this.appendVerticalBlocks(blocks, block)
+        if (block) this.appendVerticalBlocks(blocks, block, isInk)
       }
 
       return blocks
     },
-    appendVerticalBlocks(blocks: WordBlock[], block: WordBlock) {
+    realVerticalGap(isInk: (x: number, y: number) => boolean, column: Column, gapStart: number, gapEnd: number): boolean {
+      const xStart = column.start - SPLIT_GUARD_BAND
+      const xEnd = column.end + SPLIT_GUARD_BAND
+      return this.isVerticalBandBlank(isInk, xStart, xEnd, gapStart, gapEnd)
+    },
+    isVerticalBandBlank(isInk: (x: number, y: number) => boolean, xStart: number, xEnd: number, yStart: number, yEnd: number): boolean {
+      for (let y = yStart; y < yEnd; y++) {
+        for (let x = xStart; x < xEnd; x++) {
+          if (isInk(x, y)) return false
+        }
+      }
+      return true
+    },
+    appendVerticalBlocks(blocks: WordBlock[], block: WordBlock, isInk: (x: number, y: number) => boolean) {
       const maxBlockHeight = Math.max(12, Math.round(block.w * 1.8))
       if (block.h <= maxBlockHeight) {
         blocks.push(block)
         return
       }
 
-      for (let y = block.y; y < block.y + block.h; y += maxBlockHeight) {
-        const h = Math.min(maxBlockHeight, block.y + block.h - y)
-        if (h >= 2) blocks.push({...block, y, h})
+      let y = block.y
+      const bottom = block.y + block.h
+      while (bottom - y > maxBlockHeight) {
+        const split = this.findSafeVerticalSplit(isInk, block, y + maxBlockHeight)
+        if (!split || split <= y) break
+        blocks.push({...block, y, h: split - y})
+        y = split
       }
+      if (bottom - y >= 2) blocks.push({...block, y, h: bottom - y})
+    },
+    findSafeVerticalSplit(isInk: (x: number, y: number) => boolean, block: WordBlock, targetY: number): number | undefined {
+      const searchRadius = Math.max(SPLIT_GUARD_BAND, Math.floor(block.w * 0.5))
+      const start = Math.max(block.y + 2, targetY - searchRadius)
+      const end = Math.min(block.y + block.h - 2, targetY + searchRadius)
+      let bestSplit = undefined as number | undefined
+      let bestDistance = Number.MAX_SAFE_INTEGER
+
+      for (let y = start; y <= end; y++) {
+        if (!this.isVerticalBandBlank(isInk, block.x - SPLIT_GUARD_BAND, block.x + block.w + SPLIT_GUARD_BAND, y, y + 1)) continue
+        const distance = Math.abs(y - targetY)
+        if (distance < bestDistance) {
+          bestDistance = distance
+          bestSplit = y
+        }
+      }
+
+      return bestSplit
     },
     tightVerticalBlock(isInk: (x: number, y: number) => boolean, column: Column, start: number, end: number): WordBlock | undefined {
       let minY = end
@@ -1349,7 +1386,11 @@ export default Vue.extend({
         if (!inWord && wordInk[sx] > gapInkTolerance) {
           inWord = true
           wordStart = sx
-        } else if (inWord && wordInk[sx] <= gapInkTolerance && this.realWordGap(wordInk, sx, columnWidth, gapInkTolerance)) {
+        } else if (
+          inWord &&
+          wordInk[sx] <= gapInkTolerance &&
+          this.realWordGap(isInk, column, line, wordInk, sx, columnWidth, gapInkTolerance)
+        ) {
           inWord = false
           const word = this.tightWordBlock(isInk, column.start + wordStart, line, sx - wordStart, lineBounds)
           if (word) words.push(word)
@@ -1361,10 +1402,29 @@ export default Vue.extend({
       }
       return words
     },
-    realWordGap(wordInk: number[], start: number, end: number, gapInkTolerance: number): boolean {
+    realWordGap(
+      isInk: (x: number, y: number) => boolean,
+      column: Column,
+      line: Line,
+      wordInk: number[],
+      start: number,
+      end: number,
+      gapInkTolerance: number,
+    ): boolean {
       const wordGap = this.clampNumber(this.options.wordGap, 1, 30, WORD_GAP)
-      for (let x = start; x < Math.min(start + wordGap, end); x++) {
+      const gapEnd = Math.min(start + wordGap, end)
+      for (let x = start; x < gapEnd; x++) {
         if (wordInk[x] > gapInkTolerance) return false
+      }
+      const xStart = column.start + start
+      const xEnd = column.start + gapEnd
+      return this.isHorizontalBandBlank(isInk, xStart, xEnd, line.start - SPLIT_GUARD_BAND, line.end + SPLIT_GUARD_BAND)
+    },
+    isHorizontalBandBlank(isInk: (x: number, y: number) => boolean, xStart: number, xEnd: number, yStart: number, yEnd: number): boolean {
+      for (let x = xStart; x < xEnd; x++) {
+        for (let y = yStart; y < yEnd; y++) {
+          if (isInk(x, y)) return false
+        }
       }
       return true
     },
