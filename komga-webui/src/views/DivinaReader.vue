@@ -275,6 +275,8 @@
           :start-at-end="reflowStartAtEnd"
           @text-scale-change="setReflowTextScale"
           @column-count-change="setReflowColumnCount"
+          @vertical-text-change="setReflowVerticalText"
+          @vertical-direction-change="setReflowVerticalDirection"
           @stroke-strength-change="setReflowStrokeStrength"
           @block-spacing-change="setReflowBlockSpacing"
           @crop-mode-change="setReflowCropMode"
@@ -489,6 +491,16 @@
               <template v-if="isPdf && reflowMode">
                 <v-list-item>
                   <settings-switch v-model="reflowSettings.autoCropBorder" label="Auto crop borders"/>
+                </v-list-item>
+                <v-list-item>
+                  <settings-switch v-model="reflowSettings.verticalText" label="Vertical text"/>
+                </v-list-item>
+                <v-list-item v-if="reflowSettings.verticalText">
+                  <settings-select
+                    :items="reflowVerticalDirections"
+                    v-model="reflowSettings.verticalDirection"
+                    label="Vertical direction"
+                  />
                 </v-list-item>
                 <v-list-item>
                   <settings-select
@@ -762,7 +774,7 @@ export default Vue.extend({
       reflowSettingsBookId: '',
       loadingReflowSettings: false,
       saveReflowSettingsServerDebounced: undefined as undefined | (() => void),
-      reflowCache: {} as Record<string, any[]>,
+      reflowCache: {} as Record<string, any>,
       reflowPrefetchPage: 0,
       reflowPrefetchTimer: undefined as number | undefined,
       reflowSettings: {
@@ -774,6 +786,8 @@ export default Vue.extend({
         wordGap: 3,
         strokeStrength: 0.1,
         blockSpacing: 6,
+        verticalText: false,
+        verticalDirection: 'rtl',
         marginTop: 0,
         marginRight: 0,
         marginBottom: 0,
@@ -829,6 +843,10 @@ export default Vue.extend({
       reflowColumnCounts: [
         {text: '1', value: 1},
         {text: '2', value: 2},
+      ],
+      reflowVerticalDirections: [
+        {text: 'Right to left', value: 'rtl'},
+        {text: 'Left to right', value: 'ltr'},
       ],
       paddingPercentages: Object.values(PaddingPercentage).map(x => ({
         text: x === 0 ? this.$i18n.t('bookreader.settings.side_padding_none').toString() : `${x}%`,
@@ -1019,6 +1037,8 @@ export default Vue.extend({
         columnGap: this.reflowSettings.columnGap,
         wordGap: this.reflowSettings.wordGap,
         strokeStrength: this.reflowSettings.strokeStrength,
+        verticalText: this.reflowSettings.verticalText,
+        verticalDirection: this.reflowSettings.verticalDirection,
         marginTop: this.reflowSettings.marginTop,
         marginRight: this.reflowSettings.marginRight,
         marginBottom: this.reflowSettings.marginBottom,
@@ -1472,6 +1492,8 @@ export default Vue.extend({
         wordGap: this.clampReflowNumber(settings.wordGap, 1, 30, this.reflowSettings.wordGap),
         strokeStrength: Math.round(this.clampReflowNumber(settings.strokeStrength, 0.1, 3, this.reflowSettings.strokeStrength) * 10) / 10,
         blockSpacing: Math.round(this.clampReflowNumber(settings.blockSpacing, 0, 24, this.reflowSettings.blockSpacing)),
+        verticalText: typeof settings.verticalText === 'boolean' ? settings.verticalText : this.reflowSettings.verticalText,
+        verticalDirection: settings.verticalDirection === 'ltr' ? 'ltr' : 'rtl',
         marginTop: this.clampReflowNumber(settings.marginTop, 0, 45, this.reflowSettings.marginTop),
         marginRight: this.clampReflowNumber(settings.marginRight, 0, 45, this.reflowSettings.marginRight),
         marginBottom: this.clampReflowNumber(settings.marginBottom, 0, 45, this.reflowSettings.marginBottom),
@@ -1595,6 +1617,12 @@ export default Vue.extend({
     },
     setReflowColumnCount(columnCount: number) {
       this.reflowSettings.columnCount = columnCount === 2 ? 2 : 1
+    },
+    setReflowVerticalText(verticalText: boolean) {
+      this.reflowSettings.verticalText = verticalText
+    },
+    setReflowVerticalDirection(verticalDirection: string) {
+      this.reflowSettings.verticalDirection = verticalDirection === 'ltr' ? 'ltr' : 'rtl'
     },
     setReflowStrokeStrength(strokeStrength: number) {
       this.reflowSettings.strokeStrength = Math.round(Math.max(0.1, Math.min(3, strokeStrength)) * 10) / 10

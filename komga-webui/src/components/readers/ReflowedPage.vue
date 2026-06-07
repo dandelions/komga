@@ -17,6 +17,20 @@
           <span class="reflow-font-value">{{ textScalePercent }}%</span>
         </label>
         <label class="reflow-column-control">
+          <span>Mode</span>
+          <select :value="verticalText ? 'vertical' : 'horizontal'" @change="setVerticalText">
+            <option value="horizontal">Horizontal</option>
+            <option value="vertical">Vertical</option>
+          </select>
+        </label>
+        <label v-if="verticalText" class="reflow-column-control">
+          <span>Direction</span>
+          <select :value="verticalDirection" @change="setVerticalDirection">
+            <option value="rtl">Right to left</option>
+            <option value="ltr">Left to right</option>
+          </select>
+        </label>
+        <label class="reflow-column-control">
           <span>Columns</span>
           <select :value="columnCount" @change="setColumnCount">
             <option value="1">1</option>
@@ -171,6 +185,8 @@ type ReflowOptions = {
   wordGap: number,
   strokeStrength: number,
   blockSpacing: number,
+  verticalText: boolean,
+  verticalDirection: VerticalDirection,
   marginTop: number,
   marginRight: number,
   marginBottom: number,
@@ -186,6 +202,7 @@ type Roi = {
 }
 
 type PageParity = 'odd' | 'even'
+type VerticalDirection = 'ltr' | 'rtl'
 
 type Column = {
   start: number,
@@ -313,6 +330,12 @@ export default Vue.extend({
     },
     columnCount(): number {
       return this.normalizedColumnCount()
+    },
+    verticalText(): boolean {
+      return this.options.verticalText === true
+    },
+    verticalDirection(): VerticalDirection {
+      return this.options.verticalDirection === 'ltr' ? 'ltr' : 'rtl'
     },
     strokeStrength(): number {
       return this.clampNumber(this.options.strokeStrength, 0.1, 3, 0.1)
@@ -681,6 +704,8 @@ export default Vue.extend({
         columnGap: this.options.columnGap,
         wordGap: this.options.wordGap,
         strokeStrength: this.options.strokeStrength,
+        verticalText: this.options.verticalText,
+        verticalDirection: this.options.verticalDirection,
         marginTop: this.options.marginTop,
         marginRight: this.options.marginRight,
         marginBottom: this.options.marginBottom,
@@ -789,6 +814,8 @@ export default Vue.extend({
       }
 
       const roi = this.detectRoi(isInk, width, height)
+      if (this.verticalText) return this.detectVerticalWordLines(isInk, roi)
+
       const columns = this.detectColumns(isInk, width, height, roi)
       const wordLines = [] as WordLine[]
 
@@ -921,6 +948,146 @@ export default Vue.extend({
     },
     normalizedColumnCount(): number {
       return this.clampNumber(this.options.columnCount, 1, 2, 1) >= 2 ? 2 : 1
+    },
+    detectVerticalWordLines(isInk: (x: number, y: number) => boolean, roi: Roi): WordLine[] {
+      const columns = this.detectVerticalTextColumns(isInk, roi)
+      const orderedColumns = columns.sort((a, b) => {
+        const centerA = (a.start + a.end) / 2
+        const centerB = (b.start + b.end) / 2
+        return this.verticalDirection === 'rtl' ? centerB - centerA : centerA - centerB
+      })
+
+      return orderedColumns
+        .map(column => {
+          const words = this.detectVerticalBlocks(isInk, column, roi)
+          return {
+            column,
+            line: {start: roi.y, end: roi.y + roi.h},
+            words,
+          }
+        })
+        .filter(line => line.words.length > 0)
+    },
+    detectVerticalTextColumns(isInk: (x: number, y: number) => boolean, roi: Roi): Column[] {
+      const colInk = new Array(roi.x + roi.w).fill(0)
+      const threshold = Math.max(1, Math.floor(roi.h * 0.003))
+      const maxBlankRun = Math.max(2, Math.floor(this.clampNumber(this.options.columnGap, 5, 80, COLUMN_GAP) * 0.35))
+      const columns = [] as Column[]
+      let inColumn = false
+      let start = roi.x
+      let blankRun = 0
+
+      for (let x = roi.x; x < roi.x + roi.w; x++) {
+        for (let y = roi.y; y < roi.y + roi.h; y++) {
+          if (isInk(x, y)) colInk[x]++
+        }
+      }
+
+      for (let x = roi.x; x < roi.x + roi.w; x++) {
+        if (!inColumn && colInk[x] > threshold) {
+          inColumn = true
+          start = x
+          blankRun = 0
+        } else if (inColumn) {
+          if (colInk[x] <= threshold) blankRun++
+          else blankRun = 0
+
+          if (blankRun > maxBlankRun) {
+            const end = x - blankRun + 1
+            const column = this.tightVerticalColumn(isInk, {start, end}, roi)
+            if (column.end - column.start >= 2) columns.push(column)
+            inColumn = false
+            blankRun = 0
+          }
+        }
+      }
+
+      if (inColumn) {
+        const column = this.tightVerticalColumn(isInk, {start, end: roi.x + roi.w}, roi)
+        if (column.end - column.start >= 2) columns.push(column)
+      }
+
+      return columns.length > 0 ? columns : [{start: roi.x, end: roi.x + roi.w}]
+    },
+    tightVerticalColumn(isInk: (x: number, y: number) => boolean, column: Column, roi: Roi): Column {
+      let start = column.end
+      let end = column.start
+
+      for (let x = column.start; x < column.end; x++) {
+        for (let y = roi.y; y < roi.y + roi.h; y++) {
+          if (!isInk(x, y)) continue
+          start = Math.min(start, x)
+          end = Math.max(end, x + 1)
+        }
+      }
+
+      if (end <= start) return column
+      return {
+        start: Math.max(column.start, start - BLOCK_PADDING),
+        end: Math.min(column.end, end + BLOCK_PADDING),
+      }
+    },
+    detectVerticalBlocks(isInk: (x: number, y: number) => boolean, column: Column, roi: Roi): WordBlock[] {
+      const rowInk = new Array(roi.y + roi.h).fill(0)
+      const threshold = Math.max(1, Math.floor((column.end - column.start) * 0.04))
+      const maxBlankRun = Math.max(1, Math.floor(this.clampNumber(this.options.wordGap, 1, 30, WORD_GAP) * 0.6))
+      const blocks = [] as WordBlock[]
+      let inBlock = false
+      let start = roi.y
+      let blankRun = 0
+
+      for (let y = roi.y; y < roi.y + roi.h; y++) {
+        for (let x = column.start; x < column.end; x++) {
+          if (isInk(x, y)) rowInk[y]++
+        }
+      }
+
+      for (let y = roi.y; y < roi.y + roi.h; y++) {
+        if (!inBlock && rowInk[y] > threshold) {
+          inBlock = true
+          start = y
+          blankRun = 0
+        } else if (inBlock) {
+          if (rowInk[y] <= threshold) blankRun++
+          else blankRun = 0
+
+          if (blankRun > maxBlankRun) {
+            const block = this.tightVerticalBlock(isInk, column, start, y - blankRun + 1)
+            if (block) blocks.push(block)
+            inBlock = false
+            blankRun = 0
+          }
+        }
+      }
+
+      if (inBlock) {
+        const block = this.tightVerticalBlock(isInk, column, start, roi.y + roi.h)
+        if (block) blocks.push(block)
+      }
+
+      return blocks
+    },
+    tightVerticalBlock(isInk: (x: number, y: number) => boolean, column: Column, start: number, end: number): WordBlock | undefined {
+      let minY = end
+      let maxY = start
+
+      for (let y = start; y < end; y++) {
+        for (let x = column.start; x < column.end; x++) {
+          if (!isInk(x, y)) continue
+          minY = Math.min(minY, y)
+          maxY = Math.max(maxY, y)
+        }
+      }
+
+      if (maxY < minY) return undefined
+      const top = Math.max(start, minY - BLOCK_PADDING)
+      const bottom = Math.min(end - 1, maxY + BLOCK_PADDING)
+      return {
+        x: column.start,
+        y: top,
+        w: column.end - column.start,
+        h: bottom - top + 1,
+      }
     },
     detectColumns(isInk: (x: number, y: number) => boolean, width: number, height: number, roi: Roi): Column[] {
       if (this.normalizedColumnCount() === 1) {
@@ -1135,6 +1302,8 @@ export default Vue.extend({
       const sliceContext = sliceCanvas.getContext('2d')
       if (!sliceContext) return []
 
+      if (this.verticalText) return this.renderVerticalReflowItems(sourceCanvas, sliceCanvas, sliceContext, lines)
+
       lines.forEach((line, index) => {
         const startParagraph = this.isParagraphStart(line, lines[index - 1])
         const indent = startParagraph ? this.lineIndentSourceWidth(line) : 0
@@ -1154,6 +1323,36 @@ export default Vue.extend({
             src: sliceCanvas.toDataURL('image/png'),
             height: block.h * this.textScale(),
           })
+        })
+      })
+
+      return rendered
+    },
+    renderVerticalReflowItems(
+      sourceCanvas: HTMLCanvasElement,
+      sliceCanvas: HTMLCanvasElement,
+      sliceContext: CanvasRenderingContext2D,
+      lines: WordLine[],
+    ): ReflowItem[] {
+      const rendered = [] as ReflowItem[]
+
+      lines.forEach((line, lineIndex) => {
+        if (lineIndex > 0 && rendered.length > 0) rendered.push({type: 'break'})
+
+        line.words.forEach(block => {
+          if (block.w < 2 || block.h < 2 || this.isRuleLikeBlock(block)) return
+          sliceCanvas.width = block.w
+          sliceCanvas.height = block.h
+          sliceContext.clearRect(0, 0, block.w, block.h)
+          sliceContext.drawImage(sourceCanvas, block.x, block.y, block.w, block.h, 0, 0, block.w, block.h)
+          this.boldenSourceCanvas(sliceContext, block.w, block.h)
+          rendered.push({
+            ...block,
+            type: 'word',
+            src: sliceCanvas.toDataURL('image/png'),
+            height: block.h * this.textScale(),
+          })
+          rendered.push({type: 'break'})
         })
       })
 
@@ -1297,6 +1496,14 @@ export default Vue.extend({
     setColumnCount(event: Event) {
       const target = event.target as HTMLSelectElement
       this.$emit('column-count-change', this.clampNumber(Number(target.value), 1, 2, 1) >= 2 ? 2 : 1)
+    },
+    setVerticalText(event: Event) {
+      const target = event.target as HTMLSelectElement
+      this.$emit('vertical-text-change', target.value === 'vertical')
+    },
+    setVerticalDirection(event: Event) {
+      const target = event.target as HTMLSelectElement
+      this.$emit('vertical-direction-change', target.value === 'ltr' ? 'ltr' : 'rtl')
     },
     setStrokeStrength(event: Event) {
       const target = event.target as HTMLInputElement
