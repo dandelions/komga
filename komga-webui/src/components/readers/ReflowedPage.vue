@@ -1427,9 +1427,7 @@ export default Vue.extend({
     ): ReflowItem[] {
       const rendered = [] as ReflowItem[]
 
-      lines.forEach((line, lineIndex) => {
-        if (lineIndex > 0 && rendered.length > 0) rendered.push({type: 'break'})
-
+      lines.forEach(line => {
         line.words.forEach(block => {
           if (block.w < 2 || block.h < 2 || this.isRuleLikeBlock(block)) return
           sliceCanvas.width = block.w
