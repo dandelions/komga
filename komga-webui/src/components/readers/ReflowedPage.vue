@@ -1101,14 +1101,20 @@ export default Vue.extend({
     },
     mergeCloseVerticalColumns(columns: Column[]): Column[] {
       if (columns.length <= 1) return columns
-      const maxGap = Math.max(6, Math.floor(this.clampNumber(this.options.wordGap, 1, 30, WORD_GAP) * 2))
+      const maxTextGap = Math.max(6, Math.floor(this.clampNumber(this.options.wordGap, 1, 30, WORD_GAP) * 2))
+      const maxAdornmentGap = Math.max(16, Math.floor(this.clampNumber(this.options.columnGap, 5, 80, COLUMN_GAP)))
+      const narrowAdornmentWidth = Math.max(8, Math.floor(this.clampNumber(this.options.wordGap, 1, 30, WORD_GAP) * 4))
       const sorted = columns.slice().sort((a, b) => a.start - b.start)
       const merged = [] as Column[]
       let current = {...sorted[0]}
 
       for (let i = 1; i < sorted.length; i++) {
         const next = sorted[i]
-        if (next.start - current.end <= maxGap) {
+        const gap = next.start - current.end
+        const currentWidth = current.end - current.start
+        const nextWidth = next.end - next.start
+        const hasNarrowAdornment = currentWidth <= narrowAdornmentWidth || nextWidth <= narrowAdornmentWidth
+        if (gap <= maxTextGap || (hasNarrowAdornment && gap <= maxAdornmentGap)) {
           current = {start: current.start, end: Math.max(current.end, next.end)}
           continue
         }
