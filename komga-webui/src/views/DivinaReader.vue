@@ -343,7 +343,7 @@
         :page-layout="pageLayout"
         :scale="scale"
         :animations="animations"
-        :swipe="swipe"
+        :swipe="readerSwipeEnabled"
         @menu="toggleToolbars()"
         @jump-previous="jumpToPrevious()"
         @jump-next="jumpToNext()"
@@ -818,7 +818,7 @@ export default Vue.extend({
       goToPage: 1,
       settings: {
         pageLayout: PagedReaderLayout.SINGLE_PAGE,
-        swipe: false,
+        swipe: true,
         alwaysFullscreen: false,
         animations: true,
         scale: ScaleType.SCREEN,
@@ -1045,6 +1045,9 @@ export default Vue.extend({
         up: this.reflowSwipeUp,
         down: this.reflowSwipeDown,
       }
+    },
+    readerSwipeEnabled(): boolean {
+      return this.swipe || this.$vuetify.breakpoint.smAndDown
     },
     reflowCacheKey(): string {
       return JSON.stringify({
@@ -1630,7 +1633,7 @@ export default Vue.extend({
       this.k2ReflowMode ? this.k2NextPage() : this.reflowNextPage()
     },
     reflowTouchEnabled(): boolean {
-      return this.swipe && !this.reflowCropMode
+      return this.readerSwipeEnabled && !this.reflowCropMode
     },
     reflowSwipeLeft() {
       if (!this.reflowTouchEnabled() || this.readingDirection === ReadingDirection.VERTICAL) return

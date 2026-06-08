@@ -16,7 +16,7 @@ export const persistedModule: Module<any, any> = {
         margin: '',
       },
       readingDirection: '',
-      swipe: false,
+      swipe: true,
       alwaysFullscreen: false,
       animations: true,
       background: '',
