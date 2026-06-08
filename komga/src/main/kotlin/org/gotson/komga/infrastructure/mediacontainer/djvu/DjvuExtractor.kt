@@ -60,7 +60,7 @@ class DjvuExtractor(
       runCommand(
         timeoutSeconds = 120,
         "convert",
-        "${path}[${pageNumberIndex(pageNumber)}]",
+        "$path[${pageNumberIndex(pageNumber)}]",
         "$imageFormat:-",
       )
 

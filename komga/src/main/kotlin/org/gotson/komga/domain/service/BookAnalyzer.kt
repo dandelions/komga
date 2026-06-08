@@ -21,8 +21,8 @@ import org.gotson.komga.infrastructure.image.ImageAnalyzer
 import org.gotson.komga.infrastructure.image.ImageConverter
 import org.gotson.komga.infrastructure.image.ImageType
 import org.gotson.komga.infrastructure.mediacontainer.ContentDetector
-import org.gotson.komga.infrastructure.mediacontainer.djvu.DjvuExtractor
 import org.gotson.komga.infrastructure.mediacontainer.divina.DivinaExtractor
+import org.gotson.komga.infrastructure.mediacontainer.djvu.DjvuExtractor
 import org.gotson.komga.infrastructure.mediacontainer.epub.EpubExtractor
 import org.gotson.komga.infrastructure.mediacontainer.epub.epub
 import org.gotson.komga.infrastructure.mediacontainer.pdf.PdfExtractor
