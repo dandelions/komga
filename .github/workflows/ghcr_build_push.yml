@@ -14,7 +14,7 @@ jobs:
   build-and-push:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       packages: write
 
     steps:
@@ -63,8 +63,10 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=ref,event=branch
+            type=ref,event=tag
             type=semver,pattern={{version}}
             type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
 
       # 5. 构建并推送镜像
       # 注意：此步骤假设您的 Dockerfile 基础镜像是 ubuntu 并安装了 shell 工具
@@ -73,6 +75,18 @@ jobs:
         with:
           context: .
           push: true
-          tags: ghcr.io/${{ github.repository }}:latest          
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           # 如果项目中没有现成 Dockerfile，可以通过 build-args 或直接在代码仓库创建
-          file: ./Dockerfile 
+          file: ./Dockerfile
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          body: |
+            Docker image:
+            - `ghcr.io/${{ github.repository }}:${{ github.ref_name }}`
