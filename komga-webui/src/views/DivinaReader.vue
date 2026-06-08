@@ -227,6 +227,7 @@
       <div
         v-if="isPdf && k2ReflowMode && !continuousReader"
         class="reflow-reader"
+        v-touch="reflowTouchHandlers"
       >
         <k2-reflowed-page
           ref="k2ReflowedPage"
@@ -263,6 +264,7 @@
       <div
         v-else-if="isPdf && reflowMode && !continuousReader"
         class="reflow-reader"
+        v-touch="reflowTouchHandlers"
       >
         <reflowed-page
           ref="reflowedPage"
@@ -1026,6 +1028,14 @@ export default Vue.extend({
     reflowOptions(): object {
       return this.reflowSettings
     },
+    reflowTouchHandlers(): object {
+      return {
+        left: this.reflowSwipeLeft,
+        right: this.reflowSwipeRight,
+        up: this.reflowSwipeUp,
+        down: this.reflowSwipeDown,
+      }
+    },
     reflowCacheKey(): string {
       return JSON.stringify({
         bookId: this.bookId,
@@ -1595,6 +1605,25 @@ export default Vue.extend({
     },
     activeReflowNextPage() {
       this.k2ReflowMode ? this.k2NextPage() : this.reflowNextPage()
+    },
+    reflowTouchEnabled(): boolean {
+      return this.swipe && !this.reflowCropMode
+    },
+    reflowSwipeLeft() {
+      if (!this.reflowTouchEnabled() || this.readingDirection === ReadingDirection.VERTICAL) return
+      this.readingDirection === ReadingDirection.RIGHT_TO_LEFT ? this.activeReflowPreviousPage() : this.activeReflowNextPage()
+    },
+    reflowSwipeRight() {
+      if (!this.reflowTouchEnabled() || this.readingDirection === ReadingDirection.VERTICAL) return
+      this.readingDirection === ReadingDirection.RIGHT_TO_LEFT ? this.activeReflowNextPage() : this.activeReflowPreviousPage()
+    },
+    reflowSwipeUp() {
+      if (!this.reflowTouchEnabled() || this.readingDirection !== ReadingDirection.VERTICAL) return
+      this.activeReflowNextPage()
+    },
+    reflowSwipeDown() {
+      if (!this.reflowTouchEnabled() || this.readingDirection !== ReadingDirection.VERTICAL) return
+      this.activeReflowPreviousPage()
     },
     k2SourcePreviousPage() {
       if (this.page > 1) {
