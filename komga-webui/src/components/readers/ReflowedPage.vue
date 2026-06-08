@@ -1403,7 +1403,14 @@ export default Vue.extend({
         }
       }
 
-      return {start, end}
+      const padding = this.horizontalColumnSidePadding(end - start)
+      return {
+        start: Math.max(column.start, start - padding),
+        end: Math.min(column.end, end + padding),
+      }
+    },
+    horizontalColumnSidePadding(columnWidth: number): number {
+      return Math.max(2, Math.min(8, Math.round(columnWidth * 0.015)))
     },
     columnHasInk(isInk: (x: number, y: number) => boolean, x: number, roi: Roi): boolean {
       for (let y = roi.y; y < roi.y + roi.h; y++) {
@@ -1591,8 +1598,9 @@ export default Vue.extend({
 
       if (maxX < minX) return undefined
 
-      const left = Math.max(x, minX - BLOCK_PADDING)
-      const right = Math.min(x + w - 1, maxX + BLOCK_PADDING)
+      const xPadding = this.horizontalGlyphSidePadding(lineBounds.bottom - lineBounds.top + 1)
+      const left = Math.max(x, minX - xPadding)
+      const right = Math.min(x + w - 1, maxX + xPadding)
 
       return {
         x: left,
@@ -1630,7 +1638,11 @@ export default Vue.extend({
 
         line.words.forEach(block => {
           if (block.w < 2 || block.h < 1 || this.isHorizontalRuleLikeBlock(block, glyphHeight)) return
-          const renderBlock = this.expandShortHorizontalGlyphBlock(block, glyphHeight, sourceCanvas.height)
+          const renderBlock = this.padHorizontalGlyphBlock(
+            this.expandShortHorizontalGlyphBlock(block, glyphHeight, sourceCanvas.height),
+            glyphHeight,
+            sourceCanvas.width,
+          )
           sliceCanvas.width = renderBlock.w
           sliceCanvas.height = renderBlock.h
           sliceContext.clearRect(0, 0, renderBlock.w, renderBlock.h)
@@ -1666,6 +1678,19 @@ export default Vue.extend({
         y,
         h: Math.min(sourceHeight - y, targetHeight),
       }
+    },
+    padHorizontalGlyphBlock(block: WordBlock, glyphHeight: number, sourceWidth: number): WordBlock {
+      const padding = this.horizontalGlyphSidePadding(glyphHeight)
+      const x = Math.max(0, block.x - padding)
+      const right = Math.min(sourceWidth, block.x + block.w + padding)
+      return {
+        ...block,
+        x,
+        w: Math.max(1, right - x),
+      }
+    },
+    horizontalGlyphSidePadding(glyphHeight: number): number {
+      return Math.max(2, Math.min(6, Math.round(glyphHeight * 0.1)))
     },
     renderVerticalReflowItems(
       sourceCanvas: HTMLCanvasElement,
