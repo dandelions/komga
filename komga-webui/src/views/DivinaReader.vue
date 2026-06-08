@@ -779,7 +779,7 @@ export default Vue.extend({
       reflowPrefetchTimer: undefined as number | undefined,
       reflowSettings: {
         autoCropBorder: true,
-        textScale: 75,
+        textScale: 40,
         columnCount: 1,
         threshold: 185,
         columnGap: 15,

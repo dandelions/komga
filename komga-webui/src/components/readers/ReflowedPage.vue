@@ -257,7 +257,7 @@ const THRESHOLD = 185
 const COLUMN_GAP = 15
 const WORD_GAP = 3
 const BLOCK_PADDING = 1
-const WORD_SCALE = 0.75
+const WORD_SCALE = 0.4
 const MIN_CROP_SIZE = 15
 const MIN_INDENT = 8
 const REFLOW_CONTROLS_HEIGHT = 48
@@ -896,11 +896,10 @@ export default Vue.extend({
     detectWordLines(imageData: ImageData, width: number, height: number): WordLine[] {
       const pixels = imageData.data
       const threshold = this.clampNumber(this.options.threshold, 50, 230, THRESHOLD)
+      const ink = this.buildDetectionInkMap(pixels, width, height, threshold)
       const isInk = (x: number, y: number): boolean => {
         if (x < 0 || x >= width || y < 0 || y >= height) return false
-        const index = (y * width + x) * 4
-        const luma = 0.299 * pixels[index] + 0.587 * pixels[index + 1] + 0.114 * pixels[index + 2]
-        return luma < threshold
+        return ink[y * width + x] === 1
       }
 
       const roi = this.detectRoi(isInk, width, height)
@@ -920,6 +919,42 @@ export default Vue.extend({
       })
 
       return wordLines
+    },
+    buildDetectionInkMap(pixels: Uint8ClampedArray, width: number, height: number, threshold: number): Uint8Array {
+      const ink = new Uint8Array(width * height)
+      for (let i = 0; i < width * height; i++) {
+        const offset = i * 4
+        if (pixels[offset + 3] === 0) continue
+        const luma = 0.299 * pixels[offset] + 0.587 * pixels[offset + 1] + 0.114 * pixels[offset + 2]
+        if (luma < threshold) ink[i] = 1
+      }
+
+      const radius = this.detectionStrokeRadius()
+      if (radius <= 0) return ink
+
+      const expanded = new Uint8Array(ink)
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const i = y * width + x
+          if (!ink[i]) continue
+          for (let dy = -radius; dy <= radius; dy++) {
+            const ny = y + dy
+            if (ny < 0 || ny >= height) continue
+            for (let dx = -radius; dx <= radius; dx++) {
+              const nx = x + dx
+              if (nx < 0 || nx >= width) continue
+              expanded[ny * width + nx] = 1
+            }
+          }
+        }
+      }
+
+      return expanded
+    },
+    detectionStrokeRadius(): number {
+      const strength = this.clampNumber(this.options.strokeStrength, 0.1, 3, 0.1)
+      if (strength >= 2) return 2
+      return strength > 0 ? 1 : 0
     },
     detectRoi(isInk: (x: number, y: number) => boolean, width: number, height: number): Roi {
       if (this.cropRoi) return this.clampRoi(this.cropRoi, width, height)
