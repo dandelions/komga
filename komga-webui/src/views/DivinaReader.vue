@@ -242,6 +242,7 @@
           @crop-mode-change="setReflowCropMode"
           @crop-rois-change="setReflowCropRois"
           @settings-change="setK2ReflowSettings"
+          @show-pdf-toc="openPdfToc"
         />
 
         <div
@@ -287,6 +288,7 @@
           @reflowed="cacheReflowPage"
           @source-previous="reflowSourcePreviousPage"
           @source-next="reflowSourceNextPage"
+          @show-pdf-toc="openPdfToc"
         />
         <reflowed-page
           v-if="prefetchReflowPage"
@@ -1409,6 +1411,12 @@ export default Vue.extend({
     async togglePdfToc() {
       this.showPdfToc = !this.showPdfToc
       if (this.showPdfToc && !this.pdfTocLoaded) {
+        await this.loadPdfToc()
+      }
+    },
+    async openPdfToc() {
+      this.showPdfToc = true
+      if (!this.pdfTocLoaded) {
         await this.loadPdfToc()
       }
     },

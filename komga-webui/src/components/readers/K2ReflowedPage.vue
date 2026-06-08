@@ -42,6 +42,9 @@
           <button type="button" class="k2-action" @click="exitK2Reflow">Exit K2</button>
         </div>
       </template>
+      <button type="button" class="k2-action" @click="$emit('show-pdf-toc')">
+        {{ $t('browse_book.pdf_toc') }}
+      </button>
       <button type="button" class="k2-action k2-collapse-action" @click="controlsCollapsed = !controlsCollapsed">
         {{ controlsCollapsed ? 'Show controls' : 'Hide controls' }}
       </button>
