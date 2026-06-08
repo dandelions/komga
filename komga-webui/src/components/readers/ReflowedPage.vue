@@ -1488,7 +1488,43 @@ export default Vue.extend({
         const word = this.tightWordBlock(isInk, column.start + wordStart, line, columnWidth - wordStart, lineBounds)
         if (word) words.push(word)
       }
-      return words
+      return this.mergeHorizontalGlyphFragments(words, lineBounds)
+    },
+    mergeHorizontalGlyphFragments(words: WordBlock[], lineBounds: {top: number, bottom: number}): WordBlock[] {
+      if (words.length <= 1) return words
+      const glyphHeight = Math.max(1, lineBounds.bottom - lineBounds.top + 1)
+      const sorted = words.slice().sort((a, b) => a.x - b.x)
+      const merged = [] as WordBlock[]
+      let current = {...sorted[0]}
+
+      for (let i = 1; i < sorted.length; i++) {
+        const next = sorted[i]
+        if (this.shouldMergeHorizontalGlyphFragments(current, next, glyphHeight)) {
+          current = this.unionWordBlocks(current, next)
+          continue
+        }
+        merged.push(current)
+        current = {...next}
+      }
+
+      merged.push(current)
+      return merged
+    },
+    shouldMergeHorizontalGlyphFragments(left: WordBlock, right: WordBlock, glyphHeight: number): boolean {
+      const gap = right.x - (left.x + left.w)
+      const maxInternalGap = Math.max(3, Math.min(glyphHeight * 0.24, this.clampNumber(this.options.wordGap, 1, 30, WORD_GAP) * 2.2))
+      if (gap < 0 || gap > maxInternalGap) return false
+
+      const union = this.unionWordBlocks(left, right)
+      if (union.w > glyphHeight * 1.7) return false
+
+      const overlap = this.verticalOverlap(left, right)
+      const minHeight = Math.max(1, Math.min(left.h, right.h))
+      const leftCenter = left.y + left.h / 2
+      const rightCenter = right.y + right.h / 2
+      const centerGap = Math.abs(leftCenter - rightCenter)
+      const hasSmallFragment = left.h < glyphHeight * 0.58 || right.h < glyphHeight * 0.58 || left.w < glyphHeight * 0.42 || right.w < glyphHeight * 0.42
+      return overlap >= minHeight * 0.2 || centerGap <= glyphHeight * 0.52 || hasSmallFragment
     },
     realWordGap(
       isInk: (x: number, y: number) => boolean,
@@ -1566,8 +1602,13 @@ export default Vue.extend({
       }
     },
     isRuleLikeBlock(block: WordBlock): boolean {
-      const longHorizontalRule = block.h <= 3 && block.w >= 24
-      const longVerticalRule = block.w <= 3 && block.h >= 24
+      const longHorizontalRule = block.h <= 3 && block.w >= 48
+      const longVerticalRule = block.w <= 3 && block.h >= 48
+      return longHorizontalRule || longVerticalRule
+    },
+    isHorizontalRuleLikeBlock(block: WordBlock, glyphHeight: number): boolean {
+      const longHorizontalRule = block.h <= 3 && block.w >= Math.max(48, glyphHeight * 2.2)
+      const longVerticalRule = block.w <= 3 && block.h >= Math.max(48, glyphHeight * 2.2)
       return longHorizontalRule || longVerticalRule
     },
     renderReflowItems(sourceCanvas: HTMLCanvasElement, lines: WordLine[]): ReflowItem[] {
@@ -1580,6 +1621,7 @@ export default Vue.extend({
 
       if (this.verticalText) return this.renderVerticalReflowItems(sourceCanvas, sliceCanvas, sliceContext, lines)
 
+      const glyphHeight = this.horizontalGlyphSourceHeight(lines)
       lines.forEach((line, index) => {
         const startParagraph = this.isParagraphStart(line, lines[index - 1])
         const indent = startParagraph ? this.lineIndentSourceWidth(line) : 0
@@ -1587,22 +1629,43 @@ export default Vue.extend({
         if (indent > 0) rendered.push({type: 'indent', sourceWidth: indent, width: this.scaledIndentWidth(indent)})
 
         line.words.forEach(block => {
-          if (block.w < 2 || block.h < 2 || this.isRuleLikeBlock(block)) return
-          sliceCanvas.width = block.w
-          sliceCanvas.height = block.h
-          sliceContext.clearRect(0, 0, block.w, block.h)
-          sliceContext.drawImage(sourceCanvas, block.x, block.y, block.w, block.h, 0, 0, block.w, block.h)
-          this.boldenSourceCanvas(sliceContext, block.w, block.h)
+          if (block.w < 2 || block.h < 1 || this.isHorizontalRuleLikeBlock(block, glyphHeight)) return
+          const renderBlock = this.expandShortHorizontalGlyphBlock(block, glyphHeight, sourceCanvas.height)
+          sliceCanvas.width = renderBlock.w
+          sliceCanvas.height = renderBlock.h
+          sliceContext.clearRect(0, 0, renderBlock.w, renderBlock.h)
+          sliceContext.drawImage(sourceCanvas, renderBlock.x, renderBlock.y, renderBlock.w, renderBlock.h, 0, 0, renderBlock.w, renderBlock.h)
+          this.boldenSourceCanvas(sliceContext, renderBlock.w, renderBlock.h)
           rendered.push({
-            ...block,
+            ...renderBlock,
             type: 'word',
             src: sliceCanvas.toDataURL('image/png'),
-            height: block.h * this.textScale(),
+            height: renderBlock.h * this.textScale(),
           })
         })
       })
 
       return rendered
+    },
+    horizontalGlyphSourceHeight(lines: WordLine[]): number {
+      const heights = lines.flatMap(line =>
+        line.words
+          .filter(word => word.w >= 2 && word.h >= 2 && !this.isRuleLikeBlock(word))
+          .map(word => word.h),
+      )
+      if (heights.length === 0) return 12
+      return Math.max(8, this.medianNumber(heights))
+    },
+    expandShortHorizontalGlyphBlock(block: WordBlock, glyphHeight: number, sourceHeight: number): WordBlock {
+      if (block.h >= glyphHeight * 0.45 || block.w < glyphHeight * 0.45) return block
+      const targetHeight = Math.round(glyphHeight)
+      const center = block.y + block.h / 2
+      const y = this.clampNumber(Math.floor(center - targetHeight / 2), 0, Math.max(0, sourceHeight - targetHeight), 0)
+      return {
+        ...block,
+        y,
+        h: Math.min(sourceHeight - y, targetHeight),
+      }
     },
     renderVerticalReflowItems(
       sourceCanvas: HTMLCanvasElement,
