@@ -801,6 +801,10 @@ export default Vue.extend({
         cropRoisByParity: {
           odd: null,
           even: null,
+          explicit: {
+            odd: false,
+            even: false,
+          },
         },
         k2Settings: {
           textScale: 80,
@@ -849,6 +853,8 @@ export default Vue.extend({
       reflowColumnCounts: [
         {text: '1', value: 1},
         {text: '2', value: 2},
+        {text: '3', value: 3},
+        {text: '4', value: 4},
       ],
       reflowVerticalDirections: [
         {text: 'Right to left', value: 'rtl'},
@@ -1506,7 +1512,7 @@ export default Vue.extend({
       return {
         autoCropBorder: typeof settings.autoCropBorder === 'boolean' ? settings.autoCropBorder : this.reflowSettings.autoCropBorder,
         textScale: this.clampReflowNumber(settings.textScale, 10, 140, this.reflowSettings.textScale),
-        columnCount: Number(settings.columnCount) === 2 ? 2 : 1,
+        columnCount: Math.round(this.clampReflowNumber(settings.columnCount, 1, 4, this.reflowSettings.columnCount)),
         threshold: this.clampReflowNumber(settings.threshold, 50, 230, this.reflowSettings.threshold),
         columnGap: this.clampReflowNumber(settings.columnGap, 5, 80, this.reflowSettings.columnGap),
         wordGap: this.clampReflowNumber(settings.wordGap, 1, 30, this.reflowSettings.wordGap),
@@ -1526,7 +1532,7 @@ export default Vue.extend({
       settings = settings || {}
       return {
         textScale: this.clampReflowNumber(settings.textScale, 20, 160, this.reflowSettings.k2Settings.textScale),
-        maxColumns: Number(settings.maxColumns) === 1 ? 1 : 2,
+        maxColumns: Math.round(this.clampReflowNumber(settings.maxColumns, 1, 4, this.reflowSettings.k2Settings.maxColumns)),
         threshold: this.clampReflowNumber(settings.threshold, 50, 230, this.reflowSettings.k2Settings.threshold),
         strokeStrength: Math.round(this.clampReflowNumber(settings.strokeStrength, 0, 3, this.reflowSettings.k2Settings.strokeStrength) * 10) / 10,
         wordGap: Math.round(this.clampReflowNumber(settings.wordGap, 1, 30, this.reflowSettings.k2Settings.wordGap)),
@@ -1534,9 +1540,16 @@ export default Vue.extend({
       }
     },
     normalizedReflowCropRois(cropRoisByParity: any): Record<string, any> {
+      const odd = this.normalizedReflowCropRoi(cropRoisByParity?.odd)
+      const even = this.normalizedReflowCropRoi(cropRoisByParity?.even)
+      const explicit = cropRoisByParity?.explicit || {}
       return {
-        odd: this.normalizedReflowCropRoi(cropRoisByParity?.odd),
-        even: this.normalizedReflowCropRoi(cropRoisByParity?.even),
+        odd,
+        even,
+        explicit: {
+          odd: odd ? explicit.odd !== false : false,
+          even: even ? explicit.even !== false : false,
+        },
       }
     },
     normalizedReflowCropRoi(roi: any): object | null {
@@ -1655,7 +1668,7 @@ export default Vue.extend({
       this.reflowSettings.textScale = textScale
     },
     setReflowColumnCount(columnCount: number) {
-      this.reflowSettings.columnCount = columnCount === 2 ? 2 : 1
+      this.reflowSettings.columnCount = Math.round(Math.max(1, Math.min(4, columnCount)))
     },
     setReflowVerticalText(verticalText: boolean) {
       this.reflowSettings.verticalText = verticalText
@@ -1677,6 +1690,7 @@ export default Vue.extend({
       const normalized = this.normalizedReflowCropRois(cropRoisByParity)
       this.$set(this.reflowSettings.cropRoisByParity, 'odd', normalized.odd)
       this.$set(this.reflowSettings.cropRoisByParity, 'even', normalized.even)
+      this.$set(this.reflowSettings.cropRoisByParity, 'explicit', normalized.explicit)
       this.clearReflowPrefetch()
     },
     setK2ReflowSettings(settings: Record<string, any>) {

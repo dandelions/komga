@@ -14,6 +14,8 @@
           <select :value="maxColumns" @change="setMaxColumns">
             <option value="1">1</option>
             <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
           </select>
         </label>
         <label class="k2-control k2-compact">
@@ -23,7 +25,9 @@
         </label>
         <label class="k2-control k2-compact">
           <span>Stroke</span>
+          <button type="button" @click="adjustStrokeStrength(-0.1)">-</button>
           <input type="range" min="0" max="3" step="0.1" :value="strokeStrength" @input="setStrokeStrength"/>
+          <button type="button" @click="adjustStrokeStrength(0.1)">+</button>
           <span class="k2-value">{{ strokeStrength }}</span>
         </label>
         <label class="k2-control k2-compact">
@@ -208,6 +212,7 @@ export default Vue.extend({
     drawingCrop: false,
     cropStart: {x: 0, y: 0},
     localCropRoisByParity: {odd: undefined, even: undefined} as Record<PageParity, Roi | undefined>,
+    explicitCropRoisByParity: {odd: false, even: false} as Record<PageParity, boolean>,
     draftRoi: undefined as Roi | undefined,
     textScalePercent: DEFAULT_TEXT_SCALE,
     maxColumns: 2,
@@ -282,7 +287,7 @@ export default Vue.extend({
       return this.cropMode ? 'Done' : `Select ${this.pageParityLabel} area`
     },
     cropRoi(): Roi | undefined {
-      return this.localCropRoisByParity[this.pageParity]
+      return this.effectiveCropRoi(this.pageParity)
     },
     activeRoi(): Roi | undefined {
       return this.draftRoi || this.cropRoi
@@ -315,7 +320,7 @@ export default Vue.extend({
   methods: {
     syncSettingsFromProps() {
       this.textScalePercent = this.clampNumber(Number(this.settings.textScale), 20, 160, DEFAULT_TEXT_SCALE)
-      this.maxColumns = Number(this.settings.maxColumns) === 1 ? 1 : 2
+      this.maxColumns = Math.round(this.clampNumber(Number(this.settings.maxColumns), 1, 4, 2))
       this.threshold = this.clampNumber(Number(this.settings.threshold), 50, 230, DEFAULT_THRESHOLD)
       this.strokeStrength = Math.round(this.clampNumber(Number(this.settings.strokeStrength), 0, 3, 0.8) * 10) / 10
       this.wordGap = Math.round(this.clampNumber(Number(this.settings.wordGap), 1, 30, DEFAULT_WORD_GAP))
@@ -465,8 +470,18 @@ export default Vue.extend({
       return this.detectContentRoi(ink, width, height)
     },
     syncCropRoisFromProps() {
-      this.$set(this.localCropRoisByParity, 'odd', this.normalizedStoredRoi(this.cropRoisByParity.odd))
-      this.$set(this.localCropRoisByParity, 'even', this.normalizedStoredRoi(this.cropRoisByParity.even))
+      const odd = this.normalizedStoredRoi(this.cropRoisByParity.odd)
+      const even = this.normalizedStoredRoi(this.cropRoisByParity.even)
+      const explicit = (this.cropRoisByParity as any).explicit || {}
+      this.$set(this.localCropRoisByParity, 'odd', odd)
+      this.$set(this.localCropRoisByParity, 'even', even)
+      this.$set(this.explicitCropRoisByParity, 'odd', odd ? explicit.odd !== false : false)
+      this.$set(this.explicitCropRoisByParity, 'even', even ? explicit.even !== false : false)
+    },
+    effectiveCropRoi(parity: PageParity): Roi | undefined {
+      if (this.localCropRoisByParity[parity]) return this.localCropRoisByParity[parity]
+      const fallbackParity = parity === 'odd' ? 'even' : 'odd'
+      return this.localCropRoisByParity[fallbackParity]
     },
     normalizedStoredRoi(value: Roi | null | undefined): Roi | undefined {
       if (!value) return undefined
@@ -479,9 +494,13 @@ export default Vue.extend({
     },
     cropRoisPayload(): Record<PageParity, Roi | null> {
       return {
-        odd: this.localCropRoisByParity.odd ? {...this.localCropRoisByParity.odd} : null,
-        even: this.localCropRoisByParity.even ? {...this.localCropRoisByParity.even} : null,
-      }
+        odd: this.explicitCropRoisByParity.odd && this.localCropRoisByParity.odd ? {...this.localCropRoisByParity.odd} : null,
+        even: this.explicitCropRoisByParity.even && this.localCropRoisByParity.even ? {...this.localCropRoisByParity.even} : null,
+        explicit: {
+          odd: this.explicitCropRoisByParity.odd,
+          even: this.explicitCropRoisByParity.even,
+        },
+      } as Record<PageParity, Roi | null>
     },
     clampRoi(roi: Roi, width: number, height: number): Roi {
       const x = this.clampNumber(Math.floor(roi.x), 0, width - 1, 0)
@@ -534,10 +553,26 @@ export default Vue.extend({
         }
       }
 
-      const center = roi.x + roi.w / 2
-      const searchLeft = Math.floor(roi.x + roi.w * 0.30)
-      const searchRight = Math.ceil(roi.x + roi.w * 0.70)
-      const minGap = Math.max(8, Math.floor(roi.w * 0.025))
+      const boundaries = [roi.x]
+      for (let i = 1; i < this.maxColumns; i++) {
+        const target = roi.x + Math.floor(roi.w * i / this.maxColumns)
+        const split = this.detectColumnSplit(colInk, roi, target)
+        if (split > boundaries[boundaries.length - 1] + 8) boundaries.push(split)
+      }
+      boundaries.push(roi.x + roi.w)
+
+      const columns = boundaries
+        .slice(0, -1)
+        .map((start, index) => this.trimColumn(ink, width, height, {start, end: boundaries[index + 1], roi}))
+        .filter(column => column.end - column.start >= 8)
+      return columns.length > 0 ? columns : [{start: roi.x, end: roi.x + roi.w, roi}]
+    },
+    detectColumnSplit(colInk: number[], roi: Roi, target: number): number {
+      const center = this.clampNumber(target, roi.x + 8, roi.x + roi.w - 8, roi.x + roi.w / 2)
+      const searchRadius = Math.max(1, Math.floor(roi.w * 0.12))
+      const searchLeft = Math.max(roi.x + 8, Math.floor(center - searchRadius))
+      const searchRight = Math.min(roi.x + roi.w - 8, Math.ceil(center + searchRadius))
+      const minGap = Math.max(8, Math.floor(roi.w * 0.02))
       let bestStart = -1
       let bestEnd = -1
       let bestScore = Number.MAX_SAFE_INTEGER
@@ -560,13 +595,8 @@ export default Vue.extend({
         }
       }
 
-      if (bestStart < 0) return [{start: roi.x, end: roi.x + roi.w, roi}]
-
-      const split = Math.floor((bestStart + bestEnd) / 2)
-      return [
-        this.trimColumn(ink, width, height, {start: roi.x, end: split, roi}),
-        this.trimColumn(ink, width, height, {start: split, end: roi.x + roi.w, roi}),
-      ].filter(column => column.end - column.start >= 8)
+      if (bestStart < 0) return Math.round(center)
+      return Math.floor((bestStart + bestEnd) / 2)
     },
     trimColumn(ink: Uint8Array, width: number, height: number, column: Column): Column {
       let start = column.start
@@ -1051,7 +1081,7 @@ export default Vue.extend({
     },
     setMaxColumns(event: Event) {
       const target = event.target as HTMLSelectElement
-      this.maxColumns = Number(target.value) === 1 ? 1 : 2
+      this.maxColumns = Math.round(this.clampNumber(Number(target.value), 1, 4, 2))
       this.emitSettingsChange()
       this.reflow()
     },
@@ -1064,6 +1094,11 @@ export default Vue.extend({
     setStrokeStrength(event: Event) {
       const target = event.target as HTMLInputElement
       this.strokeStrength = Math.round(this.clampNumber(Number(target.value), 0, 3, 0.8) * 10) / 10
+      this.emitSettingsChange()
+      this.reflow()
+    },
+    adjustStrokeStrength(delta: number) {
+      this.strokeStrength = Math.round(this.clampNumber(this.strokeStrength + delta, 0, 3, 0.8) * 10) / 10
       this.emitSettingsChange()
       this.reflow()
     },
@@ -1163,6 +1198,7 @@ export default Vue.extend({
     },
     setCurrentCropRoi(roi: Roi | undefined) {
       this.$set(this.localCropRoisByParity, this.pageParity, roi)
+      this.$set(this.explicitCropRoisByParity, this.pageParity, !!roi)
       this.$emit('crop-rois-change', this.cropRoisPayload())
     },
     clampNumber(value: number, min: number, max: number, fallback: number): number {

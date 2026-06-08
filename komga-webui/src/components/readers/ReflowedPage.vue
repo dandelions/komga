@@ -35,10 +35,13 @@
           <select :value="columnCount" @change="setColumnCount">
             <option value="1">1</option>
             <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
           </select>
         </label>
         <label class="reflow-stroke-control">
           <span>Stroke</span>
+          <button type="button" class="reflow-step-control" @click="adjustStrokeStrength(-0.1)">-</button>
           <input
             type="range"
             min="0.1"
@@ -47,6 +50,7 @@
             :value="strokeStrength"
             @input="setStrokeStrength"
           />
+          <button type="button" class="reflow-step-control" @click="adjustStrokeStrength(0.1)">+</button>
           <span class="reflow-font-value">{{ strokeStrength }}</span>
         </label>
         <label class="reflow-spacing-control">
@@ -198,7 +202,7 @@ type ReflowOptions = {
   marginRight: number,
   marginBottom: number,
   marginLeft: number,
-  cropRoisByParity?: Partial<Record<PageParity, Roi | null | undefined>>,
+  cropRoisByParity?: Partial<Record<PageParity, Roi | null | undefined>> & {explicit?: Partial<Record<PageParity, boolean>>},
 }
 
 type Roi = {
@@ -326,6 +330,7 @@ export default Vue.extend({
       drawingCrop: false,
       cropStart: {x: 0, y: 0},
       cropRoisByParity: {odd: undefined, even: undefined} as Record<PageParity, Roi | undefined>,
+      explicitCropRoisByParity: {odd: false, even: false} as Record<PageParity, boolean>,
       draftRoi: undefined as Roi | undefined,
     }
   },
@@ -394,7 +399,7 @@ export default Vue.extend({
       return this.cropMode ? 'Done' : `Select ${this.pageParityLabel} area`
     },
     cropRoi(): Roi | undefined {
-      return this.cropRoisByParity[this.pageParity]
+      return this.effectiveCropRoi(this.pageParity)
     },
     activeRoi(): Roi | undefined {
       return this.draftRoi || this.cropRoi
@@ -1032,8 +1037,17 @@ export default Vue.extend({
     },
     syncCropRoisFromOptions() {
       const rois = this.options.cropRoisByParity || {}
-      this.$set(this.cropRoisByParity, 'odd', this.normalizedStoredRoi(rois.odd))
-      this.$set(this.cropRoisByParity, 'even', this.normalizedStoredRoi(rois.even))
+      const odd = this.normalizedStoredRoi(rois.odd)
+      const even = this.normalizedStoredRoi(rois.even)
+      this.$set(this.cropRoisByParity, 'odd', odd)
+      this.$set(this.cropRoisByParity, 'even', even)
+      this.$set(this.explicitCropRoisByParity, 'odd', odd ? rois.explicit?.odd !== false : false)
+      this.$set(this.explicitCropRoisByParity, 'even', even ? rois.explicit?.even !== false : false)
+    },
+    effectiveCropRoi(parity: PageParity): Roi | undefined {
+      if (this.cropRoisByParity[parity]) return this.cropRoisByParity[parity]
+      const fallbackParity = parity === 'odd' ? 'even' : 'odd'
+      return this.cropRoisByParity[fallbackParity]
     },
     normalizedStoredRoi(value: Roi | null | undefined): Roi | undefined {
       if (!value) return undefined
@@ -1046,9 +1060,13 @@ export default Vue.extend({
     },
     cropRoisPayload(): Record<PageParity, Roi | null> {
       return {
-        odd: this.cropRoisByParity.odd ? {...this.cropRoisByParity.odd} : null,
-        even: this.cropRoisByParity.even ? {...this.cropRoisByParity.even} : null,
-      }
+        odd: this.explicitCropRoisByParity.odd && this.cropRoisByParity.odd ? {...this.cropRoisByParity.odd} : null,
+        even: this.explicitCropRoisByParity.even && this.cropRoisByParity.even ? {...this.cropRoisByParity.even} : null,
+        explicit: {
+          odd: this.explicitCropRoisByParity.odd,
+          even: this.explicitCropRoisByParity.even,
+        },
+      } as Record<PageParity, Roi | null>
     },
     clampRoi(roi: Roi, width: number, height: number): Roi {
       const x = this.clampNumber(Math.floor(roi.x), 0, width - 1, 0)
@@ -1078,7 +1096,7 @@ export default Vue.extend({
       return Math.max(min, Math.min(max, numberValue))
     },
     normalizedColumnCount(): number {
-      return this.clampNumber(this.options.columnCount, 1, 2, 1) >= 2 ? 2 : 1
+      return Math.round(this.clampNumber(this.options.columnCount, 1, 4, 1))
     },
     detectVerticalWordLines(isInk: (x: number, y: number) => boolean, roi: Roi): WordLine[] {
       const columns = this.detectVerticalTextColumns(isInk, roi)
@@ -1384,7 +1402,8 @@ export default Vue.extend({
       }
     },
     detectColumns(isInk: (x: number, y: number) => boolean, width: number, height: number, roi: Roi): Column[] {
-      if (this.normalizedColumnCount() === 1) {
+      const columnCount = this.normalizedColumnCount()
+      if (columnCount === 1) {
         const column = this.trimColumn(isInk, {start: roi.x, end: roi.x + roi.w}, roi)
         return column.end - column.start >= 8 ? [column] : [{start: roi.x, end: roi.x + roi.w}]
       }
@@ -1396,16 +1415,22 @@ export default Vue.extend({
         }
       }
 
-      const split = this.detectColumnSplit(colInk, roi)
-      const columns = [
-        this.trimColumn(isInk, {start: roi.x, end: split}, roi),
-        this.trimColumn(isInk, {start: split, end: roi.x + roi.w}, roi),
-      ].filter(column => column.end - column.start >= 8)
+      const boundaries = [roi.x]
+      for (let i = 1; i < columnCount; i++) {
+        const target = roi.x + Math.floor(roi.w * i / columnCount)
+        const split = this.detectColumnSplit(colInk, roi, target)
+        if (split > boundaries[boundaries.length - 1] + 8) boundaries.push(split)
+      }
+      boundaries.push(roi.x + roi.w)
+      const columns = boundaries
+        .slice(0, -1)
+        .map((start, index) => this.trimColumn(isInk, {start, end: boundaries[index + 1]}, roi))
+        .filter(column => column.end - column.start >= 8)
 
       return columns.length > 0 ? columns : [{start: roi.x, end: roi.x + roi.w}]
     },
-    detectColumnSplit(colInk: number[], roi: Roi): number {
-      const center = roi.x + Math.floor(roi.w / 2)
+    detectColumnSplit(colInk: number[], roi: Roi, target: number): number {
+      const center = this.clampNumber(target, roi.x + 8, roi.x + roi.w - 8, roi.x + Math.floor(roi.w / 2))
       const searchRadius = Math.max(1, Math.floor(roi.w * 0.18))
       const searchStart = Math.max(roi.x + 8, center - searchRadius)
       const searchEnd = Math.min(roi.x + roi.w - 8, center + searchRadius)
@@ -1951,7 +1976,7 @@ export default Vue.extend({
     },
     setColumnCount(event: Event) {
       const target = event.target as HTMLSelectElement
-      this.$emit('column-count-change', this.clampNumber(Number(target.value), 1, 2, 1) >= 2 ? 2 : 1)
+      this.$emit('column-count-change', Math.round(this.clampNumber(Number(target.value), 1, 4, 1)))
     },
     setVerticalText(event: Event) {
       const target = event.target as HTMLSelectElement
@@ -1964,6 +1989,9 @@ export default Vue.extend({
     setStrokeStrength(event: Event) {
       const target = event.target as HTMLInputElement
       this.$emit('stroke-strength-change', this.roundStrokeStrength(Number(target.value)))
+    },
+    adjustStrokeStrength(delta: number) {
+      this.$emit('stroke-strength-change', this.roundStrokeStrength(this.strokeStrength + delta))
     },
     setBlockSpacing(event: Event) {
       const target = event.target as HTMLInputElement
@@ -2056,6 +2084,7 @@ export default Vue.extend({
     },
     setCurrentCropRoi(roi: Roi | undefined) {
       this.$set(this.cropRoisByParity, this.pageParity, roi)
+      this.$set(this.explicitCropRoisByParity, this.pageParity, !!roi)
       this.$emit('crop-rois-change', this.cropRoisPayload())
     },
   },
