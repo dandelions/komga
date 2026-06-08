@@ -1939,15 +1939,43 @@ export default Vue.extend({
   overscroll-behavior: none;
 }
 
+.reader-shell {
+  --reflow-text-background: #fff;
+  --reflow-text-filter: none;
+}
+
+.reader-night-mode {
+  --reflow-text-background: #000;
+  --reflow-text-filter: invert(1) grayscale(1) contrast(1.08);
+}
+
+@media (prefers-color-scheme: dark) {
+  .reader-shell {
+    --reflow-text-background: #000;
+    --reflow-text-filter: invert(1) grayscale(1) contrast(1.08);
+  }
+}
+
 .reader-night-mode .reader-frame img:not(.word-block):not(.k2-word),
 .reader-night-mode .reader-frame canvas {
   filter: invert(1) hue-rotate(180deg) brightness(0.92);
 }
 
+.reader-frame .reflow-wrapper,
+.reader-frame .k2-output {
+  background: var(--reflow-text-background) !important;
+}
+
+.reader-frame img.word-block,
+.reader-frame img.k2-word {
+  background: var(--reflow-text-background);
+  filter: var(--reflow-text-filter);
+}
+
 .reader-night-mode .reader-frame img.word-block,
 .reader-night-mode .reader-frame img.k2-word {
-  background: #000;
-  filter: invert(1) grayscale(1) contrast(1.08);
+  background: var(--reflow-text-background);
+  filter: var(--reflow-text-filter);
 }
 
 </style>

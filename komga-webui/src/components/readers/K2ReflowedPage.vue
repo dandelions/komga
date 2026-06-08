@@ -258,7 +258,7 @@ export default Vue.extend({
       return {
         height: `${this.pageContentHeight()}px`,
         minHeight: `${this.pageContentHeight()}px`,
-        backgroundColor: '#000',
+        backgroundColor: this.pageBackground,
       }
     },
     k2MeasureStyle(): object {
@@ -1297,9 +1297,7 @@ export default Vue.extend({
 }
 
 .k2-word {
-  background: #000;
   display: inline-block;
-  filter: invert(1) grayscale(1) contrast(1.08);
   max-width: 100%;
   object-fit: contain;
 }
