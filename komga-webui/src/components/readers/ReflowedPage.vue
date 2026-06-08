@@ -351,7 +351,7 @@ export default Vue.extend({
         rowGap: `${Math.round(this.blockSpacing * 1.5)}px`,
         height: `${this.pageContentHeight()}px`,
         minHeight: `${this.pageContentHeight()}px`,
-        backgroundColor: this.pageBackground,
+        backgroundColor: '#000',
       }
       if (!this.verticalText) return style
       return {
@@ -2115,7 +2115,9 @@ export default Vue.extend({
 }
 
 .word-block {
+  background: #000;
   display: inline-block;
+  filter: invert(1) grayscale(1) contrast(1.08);
   height: auto;
   max-width: 100%;
   object-fit: contain;

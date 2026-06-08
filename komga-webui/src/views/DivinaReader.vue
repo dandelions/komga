@@ -1946,7 +1946,8 @@ export default Vue.extend({
 
 .reader-night-mode .reader-frame img.word-block,
 .reader-night-mode .reader-frame img.k2-word {
-  filter: none;
+  background: #000;
+  filter: invert(1) grayscale(1) contrast(1.08);
 }
 
 </style>
