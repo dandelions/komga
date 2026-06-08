@@ -78,6 +78,9 @@
           </button>
         </div>
       </template>
+      <button type="button" class="reflow-control" @click="$emit('back-to-book')">
+        Back to details
+      </button>
       <button type="button" class="reflow-control" @click="$emit('show-pdf-toc')">
         {{ $t('browse_book.pdf_toc') }}
       </button>

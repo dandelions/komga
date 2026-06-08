@@ -243,6 +243,7 @@
           @crop-rois-change="setReflowCropRois"
           @settings-change="setK2ReflowSettings"
           @show-pdf-toc="openPdfToc"
+          @back-to-book="closeBook"
         />
 
         <div
@@ -289,6 +290,7 @@
           @source-previous="reflowSourcePreviousPage"
           @source-next="reflowSourceNextPage"
           @show-pdf-toc="openPdfToc"
+          @back-to-book="closeBook"
         />
         <reflowed-page
           v-if="prefetchReflowPage"
