@@ -211,7 +211,7 @@ export default Vue.extend({
       totalPages: 1,
       totalElements: null as number | null,
       sortActive: {} as SortActive,
-      sortDefault: {key: 'series,metadata.numberSort', order: 'asc'} as SortActive,
+      sortDefault: {key: 'createdDate', order: 'desc'} as SortActive,
       filters: {} as FiltersActive,
       filtersMode: {} as FiltersActiveMode,
       sortUnwatch: null as any,
