@@ -67,16 +67,6 @@
           </v-btn>
 
           <v-btn
-            v-if="isPdf && $vuetify.breakpoint.mdAndUp"
-            icon
-            :disabled="continuousReader"
-            title="K2 Reflow"
-            @click="toggleK2ReflowMode"
-          >
-            <v-icon>{{ k2ReflowMode ? 'mdi-text-box' : 'mdi-text-box-outline' }}</v-icon>
-          </v-btn>
-
-          <v-btn
             v-if="$vuetify.breakpoint.mdAndUp"
             icon
             @click="showHelp = !showHelp">
@@ -126,12 +116,6 @@
                     <v-icon>{{ reflowMode ? 'mdi-file-document' : 'mdi-file-document-outline' }}</v-icon>
                   </v-list-item-icon>
                   <v-list-item-title>Reflow</v-list-item-title>
-                </v-list-item>
-                <v-list-item v-if="isPdf" :disabled="continuousReader" @click="toggleK2ReflowMode">
-                  <v-list-item-icon>
-                    <v-icon>{{ k2ReflowMode ? 'mdi-text-box' : 'mdi-text-box-outline' }}</v-icon>
-                  </v-list-item-icon>
-                  <v-list-item-title>K2 Reflow</v-list-item-title>
                 </v-list-item>
                 <v-list-item @click="showHelp = !showHelp">
                   <v-list-item-icon>
@@ -1067,6 +1051,7 @@ export default Vue.extend({
         marginBottom: this.reflowSettings.marginBottom,
         marginLeft: this.reflowSettings.marginLeft,
         cropRoisByParity: this.reflowSettings.cropRoisByParity,
+        imageExclusionVersion: 1,
       })
     },
 
