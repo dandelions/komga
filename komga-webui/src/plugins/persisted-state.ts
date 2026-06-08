@@ -20,6 +20,7 @@ export const persistedModule: Module<any, any> = {
       alwaysFullscreen: false,
       animations: true,
       background: '',
+      strokeStrength: 0,
     },
     epubreader: {},
     browsingPageSize: undefined as unknown as number,
@@ -129,6 +130,9 @@ export const persistedModule: Module<any, any> = {
     },
     setWebreaderBackground(state, val) {
       state.webreader.background = val
+    },
+    setWebreaderStrokeStrength(state, val) {
+      state.webreader.strokeStrength = val
     },
     setEpubreaderSettings(state, val) {
       state.epubreader = val

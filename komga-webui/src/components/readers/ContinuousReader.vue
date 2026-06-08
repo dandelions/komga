@@ -10,7 +10,7 @@
            :height="calcHeight(page)"
            :width="calcWidth(page)"
            :id="`page${page.number}`"
-           :style="`margin: ${i === 0 ? 0 : pageMargin}px auto;`"
+           :style="pageStyle(i)"
            v-intersect="onIntersect"
       />
     </div>
@@ -75,6 +75,10 @@ export default Vue.extend({
     pageMargin: {
       type: Number,
       required: true,
+    },
+    imageFilter: {
+      type: String,
+      default: 'none',
     },
   },
   watch: {
@@ -173,6 +177,12 @@ export default Vue.extend({
           return page.width || undefined
         default:
           return undefined
+      }
+    },
+    pageStyle(index: number): object {
+      return {
+        margin: `${index === 0 ? 0 : this.pageMargin}px auto`,
+        filter: this.imageFilter,
       }
     },
     centerClick() {

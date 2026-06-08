@@ -144,15 +144,15 @@ class FileSystemScannerTest {
   }
 
   private fun libraryScanFileTypesArguments(): Stream<Arguments> {
-    val sourceFiles = listOf("cbz.cbz", "cbr.cbr", "zip.zip", "rar.rar", "pdf.pdf", "epub.epub")
+    val sourceFiles = listOf("cbz.cbz", "cbr.cbr", "zip.zip", "rar.rar", "pdf.pdf", "djvu.djvu", "djv.djv", "epub.epub")
     return Stream.of(
-      Arguments.of(sourceFiles, true, true, true, listOf("cbz", "cbr", "zip", "rar", "pdf", "epub")),
-      Arguments.of(sourceFiles, false, true, true, listOf("pdf", "epub")),
+      Arguments.of(sourceFiles, true, true, true, listOf("cbz", "cbr", "zip", "rar", "pdf", "djvu", "djv", "epub")),
+      Arguments.of(sourceFiles, false, true, true, listOf("pdf", "djvu", "djv", "epub")),
       Arguments.of(sourceFiles, true, false, true, listOf("cbz", "cbr", "zip", "rar", "epub")),
-      Arguments.of(sourceFiles, true, true, false, listOf("cbz", "cbr", "zip", "rar", "pdf")),
+      Arguments.of(sourceFiles, true, true, false, listOf("cbz", "cbr", "zip", "rar", "pdf", "djvu", "djv")),
       Arguments.of(sourceFiles, false, false, true, listOf("epub")),
       Arguments.of(sourceFiles, true, false, false, listOf("cbz", "cbr", "zip", "rar")),
-      Arguments.of(sourceFiles, false, true, false, listOf("pdf")),
+      Arguments.of(sourceFiles, false, true, false, listOf("pdf", "djvu", "djv")),
       Arguments.of(sourceFiles, false, false, false, emptyList<String>()),
     )
   }

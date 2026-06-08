@@ -57,7 +57,7 @@ class FileSystemScanner(
     val scanForExtensions =
       buildList {
         if (scanCbx) addAll(listOf("cbz", "zip", "cbr", "rar"))
-        if (scanPdf) add("pdf")
+        if (scanPdf) addAll(listOf("pdf", "djvu", "djv"))
         if (scanEpub) add("epub")
       }
     logger.info { "Scanning folder: $root" }

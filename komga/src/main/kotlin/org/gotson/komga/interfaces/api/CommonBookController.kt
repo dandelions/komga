@@ -148,7 +148,7 @@ class CommonBookController(
 
     contentRestrictionChecker.checkContentRestriction(principal.user, book)
 
-    if (media.profile == MediaProfile.PDF && acceptHeaders != null && acceptHeaders.any { it.isCompatibleWith(MediaType.APPLICATION_PDF) }) {
+    if (media.mediaType == org.gotson.komga.domain.model.MediaType.PDF.type && acceptHeaders != null && acceptHeaders.any { it.isCompatibleWith(MediaType.APPLICATION_PDF) }) {
       // keep only pdf and image
       acceptHeaders.removeIf { !it.isCompatibleWith(MediaType.APPLICATION_PDF) && !it.isCompatibleWith(MediaType("image")) }
       MimeTypeUtils.sortBySpecificity(acceptHeaders)

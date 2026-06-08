@@ -586,7 +586,7 @@ export default Vue.extend({
       return getBookReadRouteFromMedia(this.book.media)
     },
     isPdf(): boolean {
-      return this.book.media?.mediaType === 'application/pdf'
+      return this.book.media?.mediaProfile === 'PDF'
     },
     pdfTocFlattened(): TocEntry[] {
       return flattenToc(this.pdfToc, 1)

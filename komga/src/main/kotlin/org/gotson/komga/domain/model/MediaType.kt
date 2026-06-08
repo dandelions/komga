@@ -12,6 +12,9 @@ enum class MediaType(
   RAR_5("application/x-rar-compressed; version=5", MediaProfile.DIVINA, "cbr", "application/vnd.comicbook-rar"),
   EPUB("application/epub+zip", MediaProfile.EPUB, "epub"),
   PDF("application/pdf", MediaProfile.PDF, "pdf"),
+  DJVU("image/vnd.djvu", MediaProfile.PDF, "djvu"),
+  DJVU_X("image/x-djvu", MediaProfile.PDF, "djvu"),
+  DJVU_APPLICATION("application/x-djvu", MediaProfile.PDF, "djvu"),
   ;
 
   companion object {

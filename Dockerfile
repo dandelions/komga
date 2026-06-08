@@ -9,6 +9,8 @@ RUN apt-get update && apt-get install -y \
     wget \
     vim-tiny \
     iputils-ping \
+    imagemagick \
+    djvulibre-bin \
     openjdk-21-jre-headless \
     && locale-gen en_US.UTF-8 \
     && apt-get clean \

@@ -21,6 +21,7 @@ import org.gotson.komga.infrastructure.image.ImageAnalyzer
 import org.gotson.komga.infrastructure.image.ImageConverter
 import org.gotson.komga.infrastructure.image.ImageType
 import org.gotson.komga.infrastructure.mediacontainer.ContentDetector
+import org.gotson.komga.infrastructure.mediacontainer.djvu.DjvuExtractor
 import org.gotson.komga.infrastructure.mediacontainer.divina.DivinaExtractor
 import org.gotson.komga.infrastructure.mediacontainer.epub.EpubExtractor
 import org.gotson.komga.infrastructure.mediacontainer.epub.epub
@@ -42,6 +43,7 @@ class BookAnalyzer(
   private val contentDetector: ContentDetector,
   extractors: List<DivinaExtractor>,
   private val pdfExtractor: PdfExtractor,
+  private val djvuExtractor: DjvuExtractor,
   private val epubExtractor: EpubExtractor,
   private val imageConverter: ImageConverter,
   private val imageAnalyzer: ImageAnalyzer,
@@ -67,7 +69,11 @@ class BookAnalyzer(
       var mediaType =
         contentDetector.detectMediaType(book.path).let {
           logger.info { "Detected media type: $it" }
-          MediaType.fromMediaType(it) ?: return Media(mediaType = it, status = Media.Status.UNSUPPORTED, comment = "ERR_1001", bookId = book.id)
+          MediaType.fromMediaType(it)
+            ?: when (book.path.extension.lowercase()) {
+              "djvu", "djv" -> MediaType.DJVU
+              else -> return Media(mediaType = it, status = Media.Status.UNSUPPORTED, comment = "ERR_1001", bookId = book.id)
+            }
         }
 
       if (book.path.extension.lowercase() == "epub" && mediaType != MediaType.EPUB) {
@@ -81,7 +87,7 @@ class BookAnalyzer(
 
       when (mediaType.profile) {
         MediaProfile.DIVINA -> analyzeDivina(book, mediaType, analyzeDimensions)
-        MediaProfile.PDF -> analyzePdf(book, analyzeDimensions)
+        MediaProfile.PDF -> analyzePdf(book, mediaType, analyzeDimensions)
         MediaProfile.EPUB -> analyzeEpub(book, analyzeDimensions)
       }.copy(mediaType = mediaType.type)
     } catch (ade: AccessDeniedException) {
@@ -232,9 +238,16 @@ class BookAnalyzer(
 
   private fun analyzePdf(
     book: Book,
+    mediaType: MediaType,
     analyzeDimensions: Boolean,
   ): Media {
-    val pages = pdfExtractor.getPages(book.path, analyzeDimensions).map { BookPage(it.name, "", it.dimension) }
+    val entries =
+      when (mediaType) {
+        MediaType.PDF -> pdfExtractor.getPages(book.path, analyzeDimensions)
+        MediaType.DJVU, MediaType.DJVU_X, MediaType.DJVU_APPLICATION -> djvuExtractor.getPages(book.path, analyzeDimensions)
+        else -> throw MediaUnsupportedException("Unsupported PDF profile media type: ${mediaType.type}")
+      }
+    val pages = entries.map { BookPage(it.name, "", it.dimension) }
     return Media(status = Media.Status.READY, pages = pages)
   }
 
@@ -268,7 +281,12 @@ class BookAnalyzer(
   fun getPoster(book: BookWithMedia): TypedBytes? =
     when (book.media.profile) {
       MediaProfile.DIVINA -> divinaExtractors[book.media.mediaType]?.getPoster(book)
-      MediaProfile.PDF -> pdfExtractor.getPageContentAsImage(book.book.path, 1)
+      MediaProfile.PDF ->
+        when (book.media.mediaType) {
+          MediaType.PDF.type -> pdfExtractor.getPageContentAsImage(book.book.path, 1)
+          MediaType.DJVU.type, MediaType.DJVU_X.type, MediaType.DJVU_APPLICATION.type -> djvuExtractor.getPageContentAsImage(book.book.path, 1)
+          else -> null
+        }
       MediaProfile.EPUB -> epubExtractor.getCover(book.book.path) ?: if (book.media.epubDivinaCompatible) divinaExtractors[MediaType.ZIP.type]?.getPoster(book) else null
       null -> null
     }
@@ -311,7 +329,12 @@ class BookAnalyzer(
 
     return when (book.media.profile) {
       MediaProfile.DIVINA -> divinaExtractors.getValue(book.media.mediaType!!).getEntryStream(book.book.path, book.media.pages[number - 1].fileName)
-      MediaProfile.PDF -> pdfExtractor.getPageContentAsImage(book.book.path, number).bytes
+      MediaProfile.PDF ->
+        when (book.media.mediaType) {
+          MediaType.PDF.type -> pdfExtractor.getPageContentAsImage(book.book.path, number).bytes
+          MediaType.DJVU.type, MediaType.DJVU_X.type, MediaType.DJVU_APPLICATION.type -> djvuExtractor.getPageContentAsImage(book.book.path, number).bytes
+          else -> throw MediaUnsupportedException("Unsupported PDF profile media type: ${book.media.mediaType}")
+        }
       MediaProfile.EPUB ->
         if (book.media.epubDivinaCompatible)
           epubExtractor.getEntryStream(book.book.path, book.media.pages[number - 1].fileName)
@@ -331,7 +354,7 @@ class BookAnalyzer(
     number: Int,
   ): TypedBytes {
     logger.debug { "Get raw page #$number for book: $book" }
-    if (book.media.profile != MediaProfile.PDF) throw MediaUnsupportedException("Extractor does not support raw extraction of pages")
+    if (book.media.mediaType != MediaType.PDF.type) throw MediaUnsupportedException("Extractor does not support raw extraction of pages")
 
     if (book.media.status != Media.Status.READY) {
       logger.warn { "Book media is not ready, cannot get pages" }
@@ -417,7 +440,7 @@ class BookAnalyzer(
     return media.pages.map { page ->
       page.copy(
         mediaType = pdfImageType.mediaType,
-        dimension = page.dimension?.let { pdfExtractor.scaleDimension(it) },
+        dimension = if (media.mediaType == MediaType.PDF.type) page.dimension?.let { pdfExtractor.scaleDimension(it) } else page.dimension,
       )
     }
   }

@@ -34,6 +34,7 @@
                  :src="page.url"
                  :class="imgClass(spread)"
                  class="img-fit-all"
+                 :style="{filter: imageFilter}"
             />
           </div>
         </div>
@@ -122,6 +123,10 @@ export default Vue.extend({
     scale: {
       type: String as () => ScaleType,
       required: true,
+    },
+    imageFilter: {
+      type: String,
+      default: 'none',
     },
   },
   watch: {

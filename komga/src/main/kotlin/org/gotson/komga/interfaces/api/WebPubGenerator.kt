@@ -133,14 +133,30 @@ class WebPubGenerator(
         mediaType = MEDIATYPE_WEBPUB_JSON,
         metadata = it.metadata.withSeriesMetadata(seriesMetadata).copy(conformsTo = PROFILE_PDF),
         readingOrder =
-          List(media.pageCount) { index: Int ->
-            WPLinkDto(
-              href = uriBuilder.cloneBuilder().path("books/${bookDto.id}/pages/${index + 1}/raw").toUriString(),
-              type = KomgaMediaType.PDF.type,
-            )
+          if (media.mediaType == KomgaMediaType.PDF.type) {
+            List(media.pageCount) { index: Int ->
+              WPLinkDto(
+                href = uriBuilder.cloneBuilder().path("books/${bookDto.id}/pages/${index + 1}/raw").toUriString(),
+                type = KomgaMediaType.PDF.type,
+              )
+            }
+          } else {
+            bookAnalyzer.getPdfPagesDynamic(media).mapIndexed { index: Int, page: BookPage ->
+              WPLinkDto(
+                href =
+                  uriBuilder
+                    .cloneBuilder()
+                    .path("books/${bookDto.id}/pages/${index + 1}")
+                    .queryParam("contentNegotiation", "false")
+                    .toUriString(),
+                type = page.mediaType,
+                width = page.dimension?.width,
+                height = page.dimension?.height,
+              )
+            }
           },
         resources = buildThumbnailLinkDtos(bookDto.id),
-        toc = bookAnalyzer.getPdfToc(book).map { entry -> entry.toWPLinkDto(uriBuilder.cloneBuilder(), bookDto.id) },
+        toc = if (media.mediaType == KomgaMediaType.PDF.type) bookAnalyzer.getPdfToc(book).map { entry -> entry.toWPLinkDto(uriBuilder.cloneBuilder(), bookDto.id) } else emptyList(),
       )
     }
   }

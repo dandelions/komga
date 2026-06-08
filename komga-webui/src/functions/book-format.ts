@@ -10,6 +10,10 @@ export function getBookFormatFromMedia(media: MediaDto): BookFormat {
       return {type: 'CBZ', color: '#4CAF50'}
     case 'application/pdf':
       return {type: 'PDF', color: '#FF5722'}
+    case 'image/vnd.djvu':
+    case 'image/x-djvu':
+    case 'application/x-djvu':
+      return {type: 'DJVU', color: '#795548'}
     case 'application/epub+zip':
       return media.epubIsKepub ? {type: 'KEPUB', color: '#ff5ab1'} : {type: 'EPUB', color: '#ff5ab1'}
     case 'application/x-rar-compressed; version=5':
@@ -28,6 +32,10 @@ export function getBookFormatFromMediaType(mediaType: string): BookFormat {
       return {type: 'CBZ', color: '#4CAF50'}
     case 'application/pdf':
       return {type: 'PDF', color: '#FF5722'}
+    case 'image/vnd.djvu':
+    case 'image/x-djvu':
+    case 'application/x-djvu':
+      return {type: 'DJVU', color: '#795548'}
     case 'application/epub+zip':
       return {type: 'EPUB', color: '#ff5ab1'}
     case 'application/x-rar-compressed; version=5':

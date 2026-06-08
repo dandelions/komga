@@ -314,6 +314,7 @@
         :scale="continuousScale"
         :sidePadding="sidePadding"
         :page-margin="pageMargin"
+        :image-filter="normalReaderImageFilter"
         @menu="toggleToolbars()"
         @jump-previous="jumpToPrevious()"
         @jump-next="jumpToNext()"
@@ -328,6 +329,7 @@
         :scale="scale"
         :animations="animations"
         :swipe="readerSwipeEnabled"
+        :image-filter="normalReaderImageFilter"
         @menu="toggleToolbars()"
         @jump-previous="jumpToPrevious()"
         @jump-next="jumpToNext()"
@@ -426,6 +428,16 @@
                 :items="backgroundColors"
                 v-model="backgroundColor"
                 :label="$t('bookreader.settings.background_color')"
+              />
+            </v-list-item>
+            <v-list-item v-if="!activeReflowMode">
+              <v-slider
+                v-model="readerStrokeStrength"
+                label="Stroke"
+                min="0"
+                max="3"
+                step="0.1"
+                thumb-label
               />
             </v-list-item>
 
@@ -811,6 +823,7 @@ export default Vue.extend({
         pageMargin: 0,
         readingDirection: ReadingDirection.LEFT_TO_RIGHT,
         backgroundColor: 'black',
+        strokeStrength: 0,
       },
       shortcuts: {} as any,
       notification: {
@@ -890,6 +903,7 @@ export default Vue.extend({
     this.sidePadding = this.$store.state.persistedState.webreader.continuous.padding
     this.pageMargin = this.$store.state.persistedState.webreader.continuous.margin
     this.backgroundColor = this.$store.state.persistedState.webreader.background
+    this.readerStrokeStrength = this.$store.state.persistedState.webreader.strokeStrength
     this.reflowSettingsBookId = this.bookId
     this.loadReflowSettings(this.bookId)
 
@@ -1008,13 +1022,25 @@ export default Vue.extend({
       return this.pages[this.reflowPrefetchPage - 1]
     },
     isPdf(): boolean {
-      return this.book.media?.mediaType === 'application/pdf'
+      return this.book.media?.mediaProfile === 'PDF'
     },
     pdfTocFlattened(): TocEntry[] {
       return flattenToc(this.pdfToc, 1)
     },
     nightDisplay(): boolean {
       return this.backgroundColor === 'black'
+    },
+    activeReflowMode(): boolean {
+      return this.isPdf && !this.continuousReader && (this.reflowMode || this.k2ReflowMode)
+    },
+    normalReaderImageFilter(): string {
+      const filters = []
+      if (this.readerStrokeStrength > 0) {
+        filters.push(`contrast(${(1 + this.readerStrokeStrength * 0.35).toFixed(2)})`)
+        filters.push(`brightness(${(1 - this.readerStrokeStrength * 0.04).toFixed(2)})`)
+      }
+      if (this.nightDisplay) filters.push('invert(1) hue-rotate(180deg) brightness(0.92)')
+      return filters.join(' ') || 'none'
     },
     reflowTargetWidth(): number {
       return this.$vuetify.breakpoint.width
@@ -1117,6 +1143,16 @@ export default Vue.extend({
           this.settings.backgroundColor = color
           this.$store.commit('setWebreaderBackground', color)
         }
+      },
+    },
+    readerStrokeStrength: {
+      get: function (): number {
+        return this.settings.strokeStrength
+      },
+      set: function (strokeStrength: number): void {
+        const normalized = Math.round(Math.max(0, Math.min(3, Number(strokeStrength) || 0)) * 10) / 10
+        this.settings.strokeStrength = normalized
+        this.$store.commit('setWebreaderStrokeStrength', normalized)
       },
     },
     readingDirection: {
