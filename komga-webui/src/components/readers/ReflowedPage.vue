@@ -2524,16 +2524,18 @@ export default Vue.extend({
 
 .reflow-action-controls {
   display: flex;
-  flex: 0 0 auto;
-  flex-wrap: nowrap;
+  flex: 1 1 320px;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 8px;
+  min-width: 0;
 }
 
 .reflow-region-controls {
   display: flex;
   flex: 0 0 auto;
+  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
 }
@@ -2646,6 +2648,7 @@ export default Vue.extend({
 
 .reflow-control {
   flex: 0 0 auto;
+  max-width: 100%;
   border: 1px solid rgba(0, 0, 0, 0.2);
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.94);
