@@ -116,6 +116,7 @@
       class="crop-panel"
       @click.stop
     >
+      <div v-if="cropWarning" class="crop-warning">{{ cropWarning }}</div>
       <div
         class="crop-stage"
         @pointerdown.stop="startCrop"
@@ -360,6 +361,7 @@ export default Vue.extend({
       controlsCollapsed: true,
       imageSize: {w: 0, h: 0},
       cropMode: false,
+      cropWarning: '',
       activeCropRegion: 0 as CropRegionIndex,
       drawingCrop: false,
       cropStart: {x: 0, y: 0},
@@ -1284,7 +1286,7 @@ export default Vue.extend({
       return roi
     },
     reflowCropRois(): Array<Roi | undefined> {
-      const rois = this.effectiveCropRois(this.pageParity).filter((roi): roi is Roi => !!roi)
+      const rois = this.nonOverlappingCropRois(this.effectiveCropRois(this.pageParity)).filter((roi): roi is Roi => !!roi)
       return rois.length > 0 ? rois : [undefined]
     },
     joinRegionReflowItems(regionItems: ReflowItem[][]): ReflowItem[] {
@@ -1320,10 +1322,11 @@ export default Vue.extend({
       parity: PageParity,
     ): Array<Roi | undefined> {
       const regions = rois.regions?.[parity] || []
-      return [
+      const normalized = [
         this.normalizedStoredRoi(regions[0]) || this.normalizedStoredRoi(rois[parity]),
         this.normalizedStoredRoi(regions[1]),
       ]
+      return this.nonOverlappingCropRois(normalized)
     },
     normalizedStoredExplicitRegions(
       rois: Partial<Record<PageParity, Roi | null | undefined>> & {
@@ -1373,6 +1376,17 @@ export default Vue.extend({
         const roi = this.cropRoisByParity[parity][region]
         return this.explicitCropRoisByParity[parity][region] && roi ? {...roi} : null
       })
+    },
+    nonOverlappingCropRois(rois: Array<Roi | undefined>): Array<Roi | undefined> {
+      const normalized = rois.slice(0, 2)
+      if (normalized[0] && normalized[1] && this.cropRegionsOverlap(normalized[0], normalized[1])) normalized[1] = undefined
+      return normalized
+    },
+    cropRegionsOverlap(a: Roi, b: Roi): boolean {
+      return a.x < b.x + b.w &&
+        a.x + a.w > b.x &&
+        a.y < b.y + b.h &&
+        a.y + a.h > b.y
     },
     clampRoi(roi: Roi, width: number, height: number): Roi {
       const x = this.clampNumber(Math.floor(roi.x), 0, width - 1, 0)
@@ -2314,11 +2328,13 @@ export default Vue.extend({
       this.activeCropRegion = region
       this.draftRoi = undefined
       this.drawingCrop = false
+      this.cropWarning = ''
     },
     async toggleCropMode() {
       this.controlsCollapsed = true
       this.draftRoi = undefined
       this.drawingCrop = false
+      this.cropWarning = ''
       if (this.cropMode) {
         this.cropMode = false
         this.$emit('crop-mode-change', false)
@@ -2339,6 +2355,7 @@ export default Vue.extend({
       this.setCurrentCropRoi(undefined)
       this.draftRoi = undefined
       this.drawingCrop = false
+      this.cropWarning = ''
       this.cropMode = false
       this.$emit('crop-mode-change', false)
       this.reflow()
@@ -2363,6 +2380,12 @@ export default Vue.extend({
       const roi = this.normalizedRoi(this.cropStart, this.cropPoint(event))
       this.draftRoi = undefined
       if (roi.w > MIN_CROP_SIZE && roi.h > MIN_CROP_SIZE) {
+        if (this.overlapsOtherCropRegion(roi)) {
+          this.cropWarning = `Area ${this.activeCropRegion + 1} cannot overlap area ${this.activeCropRegion === 0 ? 2 : 1}`
+          event.preventDefault()
+          return
+        }
+        this.cropWarning = ''
         this.setCurrentCropRoi(roi)
         this.cropMode = false
         this.$emit('crop-mode-change', false)
@@ -2401,6 +2424,11 @@ export default Vue.extend({
         width: `${roi.w / this.imageSize.w * 100}%`,
         height: `${roi.h / this.imageSize.h * 100}%`,
       }
+    },
+    overlapsOtherCropRegion(roi: Roi): boolean {
+      const otherRegion = this.activeCropRegion === 0 ? 1 : 0
+      const otherRoi = this.effectiveCropRoi(this.pageParity, otherRegion)
+      return !!otherRoi && this.cropRegionsOverlap(roi, otherRoi)
     },
     setCurrentCropRoi(roi: Roi | undefined) {
       const rois = this.cropRoisByParity[this.pageParity].slice()
@@ -2676,8 +2704,21 @@ export default Vue.extend({
   padding: 8px;
   box-sizing: border-box;
   display: flex;
-  justify-content: center;
-  align-items: flex-start;
+  flex-direction: column;
+  gap: 8px;
+  justify-content: flex-start;
+  align-items: center;
+}
+
+.crop-warning {
+  max-width: min(100%, 720px);
+  padding: 8px 12px;
+  border: 1px solid rgba(245, 158, 11, 0.55);
+  border-radius: 4px;
+  background: rgba(255, 251, 235, 0.96);
+  color: #92400e;
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .crop-stage {

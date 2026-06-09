@@ -1595,10 +1595,12 @@ export default Vue.extend({
     },
     normalizedReflowCropRegionRois(cropRoisByParity: any, parity: 'odd' | 'even'): Array<object | null> {
       const regions = cropRoisByParity?.regions?.[parity] || []
-      return [
+      const normalized = [
         this.normalizedReflowCropRoi(regions[0]) || this.normalizedReflowCropRoi(cropRoisByParity?.[parity]),
         this.normalizedReflowCropRoi(regions[1]),
       ]
+      if (normalized[0] && normalized[1] && this.reflowCropRoisOverlap(normalized[0], normalized[1])) normalized[1] = null
+      return normalized
     },
     normalizedReflowCropRegionExplicit(cropRoisByParity: any, parity: 'odd' | 'even', regions: Array<object | null>): boolean[] {
       const explicit = cropRoisByParity?.explicit || {}
@@ -1616,6 +1618,12 @@ export default Vue.extend({
       const h = Number(roi.h)
       if (![x, y, w, h].every(Number.isFinite) || w <= 15 || h <= 15) return null
       return {x, y, w, h}
+    },
+    reflowCropRoisOverlap(a: any, b: any): boolean {
+      return a.x < b.x + b.w &&
+        a.x + a.w > b.x &&
+        a.y < b.y + b.h &&
+        a.y + a.h > b.y
     },
     clampReflowNumber(value: any, min: number, max: number, fallback: number): number {
       const numberValue = Number(value)
