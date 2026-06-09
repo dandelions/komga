@@ -2645,8 +2645,6 @@ export default Vue.extend({
 
 .reflow-stroke-control,
 .reflow-spacing-control {
-  flex: 0 0 180px;
-  min-width: 180px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -2654,6 +2652,16 @@ export default Vue.extend({
   font-size: 13px;
   font-weight: 600;
   white-space: nowrap;
+}
+
+.reflow-stroke-control {
+  flex: 0 0 280px;
+  min-width: 260px;
+}
+
+.reflow-spacing-control {
+  flex: 0 0 180px;
+  min-width: 180px;
 }
 
 .reflow-stroke-control input,
