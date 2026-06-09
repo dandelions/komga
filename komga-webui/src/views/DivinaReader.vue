@@ -797,9 +797,17 @@ export default Vue.extend({
         cropRoisByParity: {
           odd: null,
           even: null,
+          regions: {
+            odd: [null, null],
+            even: [null, null],
+          },
           explicit: {
             odd: false,
             even: false,
+          },
+          explicitRegions: {
+            odd: [false, false],
+            even: [false, false],
           },
         },
         k2Settings: {
@@ -1564,17 +1572,41 @@ export default Vue.extend({
       }
     },
     normalizedReflowCropRois(cropRoisByParity: any): Record<string, any> {
-      const odd = this.normalizedReflowCropRoi(cropRoisByParity?.odd)
-      const even = this.normalizedReflowCropRoi(cropRoisByParity?.even)
-      const explicit = cropRoisByParity?.explicit || {}
+      const odd = this.normalizedReflowCropRegionRois(cropRoisByParity, 'odd')
+      const even = this.normalizedReflowCropRegionRois(cropRoisByParity, 'even')
+      const oddExplicit = this.normalizedReflowCropRegionExplicit(cropRoisByParity, 'odd', odd)
+      const evenExplicit = this.normalizedReflowCropRegionExplicit(cropRoisByParity, 'even', even)
       return {
-        odd,
-        even,
+        odd: odd[0],
+        even: even[0],
+        regions: {
+          odd,
+          even,
+        },
         explicit: {
-          odd: odd ? explicit.odd !== false : false,
-          even: even ? explicit.even !== false : false,
+          odd: oddExplicit[0],
+          even: evenExplicit[0],
+        },
+        explicitRegions: {
+          odd: oddExplicit,
+          even: evenExplicit,
         },
       }
+    },
+    normalizedReflowCropRegionRois(cropRoisByParity: any, parity: 'odd' | 'even'): Array<object | null> {
+      const regions = cropRoisByParity?.regions?.[parity] || []
+      return [
+        this.normalizedReflowCropRoi(regions[0]) || this.normalizedReflowCropRoi(cropRoisByParity?.[parity]),
+        this.normalizedReflowCropRoi(regions[1]),
+      ]
+    },
+    normalizedReflowCropRegionExplicit(cropRoisByParity: any, parity: 'odd' | 'even', regions: Array<object | null>): boolean[] {
+      const explicit = cropRoisByParity?.explicit || {}
+      const explicitRegions = cropRoisByParity?.explicitRegions?.[parity] || []
+      return [
+        regions[0] ? (explicitRegions[0] ?? explicit[parity]) !== false : false,
+        regions[1] ? explicitRegions[1] !== false : false,
+      ]
     },
     normalizedReflowCropRoi(roi: any): object | null {
       if (!roi) return null
@@ -1714,7 +1746,9 @@ export default Vue.extend({
       const normalized = this.normalizedReflowCropRois(cropRoisByParity)
       this.$set(this.reflowSettings.cropRoisByParity, 'odd', normalized.odd)
       this.$set(this.reflowSettings.cropRoisByParity, 'even', normalized.even)
+      this.$set(this.reflowSettings.cropRoisByParity, 'regions', normalized.regions)
       this.$set(this.reflowSettings.cropRoisByParity, 'explicit', normalized.explicit)
+      this.$set(this.reflowSettings.cropRoisByParity, 'explicitRegions', normalized.explicitRegions)
       this.clearReflowPrefetch()
     },
     setK2ReflowSettings(settings: Record<string, any>) {

@@ -66,6 +66,24 @@
         </label>
         <div class="reflow-action-controls">
           <span class="reflow-parity-label">{{ pageParityLabel }}</span>
+          <div class="reflow-region-controls">
+            <button
+              type="button"
+              class="reflow-control reflow-region-control"
+              :class="{'reflow-region-active': activeCropRegion === 0}"
+              @click="setActiveCropRegion(0)"
+            >
+              Area 1
+            </button>
+            <button
+              type="button"
+              class="reflow-control reflow-region-control"
+              :class="{'reflow-region-active': activeCropRegion === 1}"
+              @click="setActiveCropRegion(1)"
+            >
+              Area 2
+            </button>
+          </div>
           <button type="button" class="reflow-control reflow-exit-control" @click="exitReflow">
             Exit reflow
           </button>
@@ -78,7 +96,7 @@
             :disabled="!cropRoi && !cropMode"
             @click="resetCrop"
           >
-            Reset {{ pageParityLabel }} area
+            Reset {{ pageParityLabel }} area {{ activeCropRegion + 1 }}
           </button>
         </div>
       </template>
@@ -115,9 +133,11 @@
           @dragstart.prevent
         />
         <div
-          v-if="activeRoi"
+          v-for="rect in cropRects"
+          :key="rect.key"
           class="crop-rect"
-          :style="cropRectStyle"
+          :class="{'crop-rect-active': rect.active, 'crop-rect-secondary': !rect.active}"
+          :style="rect.style"
         />
       </div>
     </div>
@@ -202,7 +222,11 @@ type ReflowOptions = {
   marginRight: number,
   marginBottom: number,
   marginLeft: number,
-  cropRoisByParity?: Partial<Record<PageParity, Roi | null | undefined>> & {explicit?: Partial<Record<PageParity, boolean>>},
+  cropRoisByParity?: Partial<Record<PageParity, Roi | null | undefined>> & {
+    regions?: Partial<Record<PageParity, Array<Roi | null | undefined>>>,
+    explicit?: Partial<Record<PageParity, boolean>>,
+    explicitRegions?: Partial<Record<PageParity, boolean[]>>,
+  },
 }
 
 type Roi = {
@@ -214,6 +238,7 @@ type Roi = {
 
 type PageParity = 'odd' | 'even'
 type VerticalDirection = 'ltr' | 'rtl'
+type CropRegionIndex = 0 | 1
 
 type Column = {
   start: number,
@@ -256,6 +281,12 @@ type WordLine = {
   column: Column,
   line: Line,
   words: WordBlock[],
+}
+
+type CropRect = {
+  key: string,
+  active: boolean,
+  style: object,
 }
 
 type ReflowCachePayload = {
@@ -329,10 +360,17 @@ export default Vue.extend({
       controlsCollapsed: true,
       imageSize: {w: 0, h: 0},
       cropMode: false,
+      activeCropRegion: 0 as CropRegionIndex,
       drawingCrop: false,
       cropStart: {x: 0, y: 0},
-      cropRoisByParity: {odd: undefined, even: undefined} as Record<PageParity, Roi | undefined>,
-      explicitCropRoisByParity: {odd: false, even: false} as Record<PageParity, boolean>,
+      cropRoisByParity: {
+        odd: [undefined, undefined],
+        even: [undefined, undefined],
+      } as Record<PageParity, Array<Roi | undefined>>,
+      explicitCropRoisByParity: {
+        odd: [false, false],
+        even: [false, false],
+      } as Record<PageParity, boolean[]>,
       draftRoi: undefined as Roi | undefined,
     }
   },
@@ -398,23 +436,28 @@ export default Vue.extend({
       return this.pageParity === 'even' ? 'even' : 'odd'
     },
     selectAreaLabel(): string {
-      return this.cropMode ? 'Done' : `Select ${this.pageParityLabel} area`
+      return this.cropMode ? 'Done' : `Select ${this.pageParityLabel} area ${this.activeCropRegion + 1}`
     },
     cropRoi(): Roi | undefined {
-      return this.effectiveCropRoi(this.pageParity)
+      return this.effectiveCropRoi(this.pageParity, this.activeCropRegion)
     },
     activeRoi(): Roi | undefined {
       return this.draftRoi || this.cropRoi
     },
-    cropRectStyle(): object {
-      const roi = this.activeRoi
-      if (!roi || !this.imageSize.w || !this.imageSize.h) return {}
-      return {
-        left: `${roi.x / this.imageSize.w * 100}%`,
-        top: `${roi.y / this.imageSize.h * 100}%`,
-        width: `${roi.w / this.imageSize.w * 100}%`,
-        height: `${roi.h / this.imageSize.h * 100}%`,
-      }
+    cropRects(): CropRect[] {
+      if (!this.imageSize.w || !this.imageSize.h) return []
+      const rois = this.effectiveCropRois(this.pageParity)
+      return ([0, 1] as CropRegionIndex[])
+        .map(region => {
+          const roi = region === this.activeCropRegion ? this.activeRoi : rois[region]
+          if (!roi) return undefined
+          return {
+            key: `${this.pageParity}-${region}`,
+            active: region === this.activeCropRegion,
+            style: this.cropRectStyle(roi),
+          } as CropRect
+        })
+        .filter((rect): rect is CropRect => !!rect)
     },
   },
   watch: {
@@ -512,9 +555,13 @@ export default Vue.extend({
         context.drawImage(image, 0, 0)
         this.pageBackground = this.detectPageBackground(context, canvas.width, canvas.height)
         const imageData = context.getImageData(0, 0, canvas.width, canvas.height)
-        const lines = this.detectWordLines(imageData, canvas.width, canvas.height)
+        const cropRois = this.reflowCropRois()
+        const regionItems = cropRois.map(roi => {
+          const lines = this.detectWordLines(imageData, canvas.width, canvas.height, roi)
+          return this.renderReflowItems(canvas, lines)
+        })
         if (requestId !== this.requestId) return
-        this.reflowItems = this.renderReflowItems(canvas, lines)
+        this.reflowItems = this.joinRegionReflowItems(regionItems)
         this.repaginate()
         this.lastDetectionKey = detectionKey
         this.emitReflowed()
@@ -813,7 +860,7 @@ export default Vue.extend({
         marginRight: this.options.marginRight,
         marginBottom: this.options.marginBottom,
         marginLeft: this.options.marginLeft,
-        cropRoi: this.cropRoi,
+        cropRois: this.effectiveCropRois(this.pageParity),
         imageExclusionVersion: 1,
       })
     },
@@ -907,7 +954,7 @@ export default Vue.extend({
       if (this.objectUrl) URL.revokeObjectURL(this.objectUrl)
       this.objectUrl = ''
     },
-    detectWordLines(imageData: ImageData, width: number, height: number): WordLine[] {
+    detectWordLines(imageData: ImageData, width: number, height: number, cropRoi?: Roi): WordLine[] {
       const pixels = imageData.data
       const threshold = this.clampNumber(this.options.threshold, 50, 230, THRESHOLD)
       const ink = this.buildDetectionInkMap(pixels, width, height, threshold)
@@ -916,7 +963,7 @@ export default Vue.extend({
         return ink[y * width + x] === 1
       }
 
-      const roi = this.detectRoi(rawIsInk, width, height)
+      const roi = this.detectRoi(rawIsInk, width, height, cropRoi)
       const imageRegions = this.detectImageRegions(pixels, width, height, roi, threshold)
       const isInk = (x: number, y: number): boolean => {
         if (x < 0 || x >= width || y < 0 || y >= height) return false
@@ -1168,8 +1215,8 @@ export default Vue.extend({
       if (strength >= 2) return 2
       return strength > 0 ? 1 : 0
     },
-    detectRoi(isInk: (x: number, y: number) => boolean, width: number, height: number): Roi {
-      if (this.cropRoi) return this.clampRoi(this.cropRoi, width, height)
+    detectRoi(isInk: (x: number, y: number) => boolean, width: number, height: number, cropRoi?: Roi): Roi {
+      if (cropRoi) return this.clampRoi(cropRoi, width, height)
 
       let roi = this.manualRoi(width, height)
       const manualCrop = this.options.marginTop || this.options.marginRight || this.options.marginBottom || this.options.marginLeft
@@ -1236,19 +1283,61 @@ export default Vue.extend({
       if (roi.w <= 10 || roi.h <= 10) roi = {x: 0, y: 0, w: width, h: height}
       return roi
     },
+    reflowCropRois(): Array<Roi | undefined> {
+      const rois = this.effectiveCropRois(this.pageParity).filter((roi): roi is Roi => !!roi)
+      return rois.length > 0 ? rois : [undefined]
+    },
+    joinRegionReflowItems(regionItems: ReflowItem[][]): ReflowItem[] {
+      const rendered = [] as ReflowItem[]
+      regionItems.forEach(items => {
+        if (items.length === 0) return
+        if (rendered.length > 0) rendered.push({type: 'break'})
+        rendered.push(...items)
+      })
+      return rendered
+    },
     syncCropRoisFromOptions() {
       const rois = this.options.cropRoisByParity || {}
-      const odd = this.normalizedStoredRoi(rois.odd)
-      const even = this.normalizedStoredRoi(rois.even)
+      const odd = this.normalizedStoredRegions(rois, 'odd')
+      const even = this.normalizedStoredRegions(rois, 'even')
+      const oddExplicit = this.normalizedStoredExplicitRegions(rois, 'odd', odd)
+      const evenExplicit = this.normalizedStoredExplicitRegions(rois, 'even', even)
       this.$set(this.cropRoisByParity, 'odd', odd)
       this.$set(this.cropRoisByParity, 'even', even)
-      this.$set(this.explicitCropRoisByParity, 'odd', odd ? rois.explicit?.odd !== false : false)
-      this.$set(this.explicitCropRoisByParity, 'even', even ? rois.explicit?.even !== false : false)
+      this.$set(this.explicitCropRoisByParity, 'odd', oddExplicit)
+      this.$set(this.explicitCropRoisByParity, 'even', evenExplicit)
     },
-    effectiveCropRoi(parity: PageParity): Roi | undefined {
-      if (this.cropRoisByParity[parity]) return this.cropRoisByParity[parity]
+    effectiveCropRoi(parity: PageParity, region: CropRegionIndex): Roi | undefined {
+      if (this.cropRoisByParity[parity]?.[region]) return this.cropRoisByParity[parity][region]
       const fallbackParity = parity === 'odd' ? 'even' : 'odd'
-      return this.cropRoisByParity[fallbackParity]
+      return this.cropRoisByParity[fallbackParity]?.[region]
+    },
+    effectiveCropRois(parity: PageParity): Array<Roi | undefined> {
+      return ([0, 1] as CropRegionIndex[]).map(region => this.effectiveCropRoi(parity, region))
+    },
+    normalizedStoredRegions(
+      rois: Partial<Record<PageParity, Roi | null | undefined>> & {regions?: Partial<Record<PageParity, Array<Roi | null | undefined>>>},
+      parity: PageParity,
+    ): Array<Roi | undefined> {
+      const regions = rois.regions?.[parity] || []
+      return [
+        this.normalizedStoredRoi(regions[0]) || this.normalizedStoredRoi(rois[parity]),
+        this.normalizedStoredRoi(regions[1]),
+      ]
+    },
+    normalizedStoredExplicitRegions(
+      rois: Partial<Record<PageParity, Roi | null | undefined>> & {
+        explicit?: Partial<Record<PageParity, boolean>>,
+        explicitRegions?: Partial<Record<PageParity, boolean[]>>,
+      },
+      parity: PageParity,
+      regions: Array<Roi | undefined>,
+    ): boolean[] {
+      const explicitRegions = rois.explicitRegions?.[parity] || []
+      return [
+        regions[0] ? (explicitRegions[0] ?? rois.explicit?.[parity]) !== false : false,
+        regions[1] ? explicitRegions[1] !== false : false,
+      ]
     },
     normalizedStoredRoi(value: Roi | null | undefined): Roi | undefined {
       if (!value) return undefined
@@ -1259,15 +1348,31 @@ export default Vue.extend({
       if (![x, y, w, h].every(Number.isFinite) || w <= MIN_CROP_SIZE || h <= MIN_CROP_SIZE) return undefined
       return {x, y, w, h}
     },
-    cropRoisPayload(): Record<PageParity, Roi | null> {
+    cropRoisPayload(): Record<string, any> {
+      const odd = this.payloadRegions('odd')
+      const even = this.payloadRegions('even')
       return {
-        odd: this.explicitCropRoisByParity.odd && this.cropRoisByParity.odd ? {...this.cropRoisByParity.odd} : null,
-        even: this.explicitCropRoisByParity.even && this.cropRoisByParity.even ? {...this.cropRoisByParity.even} : null,
-        explicit: {
-          odd: this.explicitCropRoisByParity.odd,
-          even: this.explicitCropRoisByParity.even,
+        odd: odd[0],
+        even: even[0],
+        regions: {
+          odd,
+          even,
         },
-      } as Record<PageParity, Roi | null>
+        explicit: {
+          odd: this.explicitCropRoisByParity.odd[0],
+          even: this.explicitCropRoisByParity.even[0],
+        },
+        explicitRegions: {
+          odd: this.explicitCropRoisByParity.odd.slice(0, 2),
+          even: this.explicitCropRoisByParity.even.slice(0, 2),
+        },
+      }
+    },
+    payloadRegions(parity: PageParity): Array<Roi | null> {
+      return ([0, 1] as CropRegionIndex[]).map(region => {
+        const roi = this.cropRoisByParity[parity][region]
+        return this.explicitCropRoisByParity[parity][region] && roi ? {...roi} : null
+      })
     },
     clampRoi(roi: Roi, width: number, height: number): Roi {
       const x = this.clampNumber(Math.floor(roi.x), 0, width - 1, 0)
@@ -2205,6 +2310,11 @@ export default Vue.extend({
       this.controlsCollapsed = true
       this.$emit('exit-reflow')
     },
+    setActiveCropRegion(region: CropRegionIndex) {
+      this.activeCropRegion = region
+      this.draftRoi = undefined
+      this.drawingCrop = false
+    },
     async toggleCropMode() {
       this.controlsCollapsed = true
       this.draftRoi = undefined
@@ -2283,9 +2393,22 @@ export default Vue.extend({
         h: Math.abs(end.y - start.y),
       }
     },
+    cropRectStyle(roi: Roi): object {
+      if (!this.imageSize.w || !this.imageSize.h) return {}
+      return {
+        left: `${roi.x / this.imageSize.w * 100}%`,
+        top: `${roi.y / this.imageSize.h * 100}%`,
+        width: `${roi.w / this.imageSize.w * 100}%`,
+        height: `${roi.h / this.imageSize.h * 100}%`,
+      }
+    },
     setCurrentCropRoi(roi: Roi | undefined) {
-      this.$set(this.cropRoisByParity, this.pageParity, roi)
-      this.$set(this.explicitCropRoisByParity, this.pageParity, !!roi)
+      const rois = this.cropRoisByParity[this.pageParity].slice()
+      const explicit = this.explicitCropRoisByParity[this.pageParity].slice()
+      rois[this.activeCropRegion] = roi
+      explicit[this.activeCropRegion] = !!roi
+      this.$set(this.cropRoisByParity, this.pageParity, rois)
+      this.$set(this.explicitCropRoisByParity, this.pageParity, explicit)
       this.$emit('crop-rois-change', this.cropRoisPayload())
     },
   },
@@ -2406,6 +2529,25 @@ export default Vue.extend({
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.reflow-region-controls {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+}
+
+.reflow-region-control {
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
+.reflow-region-active {
+  border-color: #2563eb;
+  background: #dbeafe;
+  color: #1e40af;
+  font-weight: 700;
 }
 
 .reflow-parity-label {
@@ -2554,10 +2696,18 @@ export default Vue.extend({
 
 .crop-rect {
   position: absolute;
-  border: 2px dashed #f97316;
-  background: rgba(249, 115, 22, 0.12);
   box-sizing: border-box;
   z-index: 2;
   pointer-events: none;
+}
+
+.crop-rect-active {
+  border: 2px dashed #f97316;
+  background: rgba(249, 115, 22, 0.12);
+}
+
+.crop-rect-secondary {
+  border: 2px dashed #2563eb;
+  background: rgba(37, 99, 235, 0.10);
 }
 </style>
