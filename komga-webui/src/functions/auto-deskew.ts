@@ -3,14 +3,14 @@ type InkPoint = {
   y: number,
 }
 
-const MAX_SAMPLE_SIDE = 420
+const MAX_SAMPLE_SIDE = 640
 const LUMA_THRESHOLD = 185
-const MAX_POINTS = 18000
+const MAX_POINTS = 24000
 const MIN_POINTS = 300
 const MAX_ANGLE = 10
-const ANGLE_STEP = 0.5
-const MIN_ANGLE = 0.75
-const MIN_SCORE_GAIN = 1.015
+const ANGLE_STEP = 0.25
+const MIN_ANGLE = 0.5
+const MIN_SCORE_GAIN = 1.004
 
 export async function detectAutoDeskewAngle(image: HTMLImageElement): Promise<number> {
   const sourceWidth = image.naturalWidth || image.width
