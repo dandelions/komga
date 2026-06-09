@@ -58,7 +58,7 @@ class FileSystemScanner(
       buildList {
         if (scanCbx) addAll(listOf("cbz", "zip", "cbr", "rar"))
         if (scanPdf) addAll(listOf("pdf", "djvu", "djv"))
-        if (scanEpub) add("epub")
+        if (scanEpub) addAll(listOf("epub", "mobi", "azw3"))
       }
     logger.info { "Scanning folder: $root" }
     logger.info { "Scan for extensions: $scanForExtensions" }

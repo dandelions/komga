@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y \
     iputils-ping \
     imagemagick \
     djvulibre-bin \
+    calibre \
     openjdk-21-jre-headless \
     && locale-gen en_US.UTF-8 \
     && apt-get clean \

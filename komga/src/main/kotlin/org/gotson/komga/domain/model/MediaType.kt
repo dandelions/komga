@@ -11,6 +11,8 @@ enum class MediaType(
   RAR_4("application/x-rar-compressed; version=4", MediaProfile.DIVINA, "cbr", "application/vnd.comicbook-rar"),
   RAR_5("application/x-rar-compressed; version=5", MediaProfile.DIVINA, "cbr", "application/vnd.comicbook-rar"),
   EPUB("application/epub+zip", MediaProfile.EPUB, "epub"),
+  MOBI("application/x-mobipocket-ebook", MediaProfile.EPUB, "mobi"),
+  AZW3("application/vnd.amazon.mobi8-ebook", MediaProfile.EPUB, "azw3"),
   PDF("application/pdf", MediaProfile.PDF, "pdf"),
   DJVU("image/vnd.djvu", MediaProfile.PDF, "djvu"),
   DJVU_X("image/x-djvu", MediaProfile.PDF, "djvu"),

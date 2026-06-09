@@ -52,7 +52,7 @@ class BookConverter(
   private val convertibleTypes = listOf(MediaType.RAR_4.type, MediaType.RAR_5.type)
 
   private val mediaTypeToExtension =
-    listOf(MediaType.RAR_4, MediaType.RAR_5, MediaType.ZIP, MediaType.PDF, MediaType.DJVU, MediaType.DJVU_X, MediaType.DJVU_APPLICATION, MediaType.EPUB)
+    listOf(MediaType.RAR_4, MediaType.RAR_5, MediaType.ZIP, MediaType.PDF, MediaType.DJVU, MediaType.DJVU_X, MediaType.DJVU_APPLICATION, MediaType.EPUB, MediaType.MOBI, MediaType.AZW3)
       .associate { it.type to it.fileExtension }
 
   private val failedConversions = mutableListOf<String>()
