@@ -2097,21 +2097,36 @@ export default Vue.extend({
 
         line.words.forEach(block => {
           if (block.w < 2 || block.h < 2 || this.isRuleLikeBlock(block)) return
-          sliceCanvas.width = block.w
-          sliceCanvas.height = block.h
-          sliceContext.clearRect(0, 0, block.w, block.h)
-          sliceContext.drawImage(sourceCanvas, block.x, block.y, block.w, block.h, 0, 0, block.w, block.h)
-          this.boldenSourceCanvas(sliceContext, block.w, block.h)
+          const renderBlock = this.padVerticalGlyphBlock(block, sourceCanvas.width, sourceCanvas.height)
+          sliceCanvas.width = renderBlock.w
+          sliceCanvas.height = renderBlock.h
+          sliceContext.clearRect(0, 0, renderBlock.w, renderBlock.h)
+          sliceContext.drawImage(sourceCanvas, renderBlock.x, renderBlock.y, renderBlock.w, renderBlock.h, 0, 0, renderBlock.w, renderBlock.h)
+          this.boldenSourceCanvas(sliceContext, renderBlock.w, renderBlock.h)
           rendered.push({
-            ...block,
+            ...renderBlock,
             type: 'word',
             src: sliceCanvas.toDataURL('image/png'),
-            height: block.h * this.textScale(),
+            height: renderBlock.h * this.textScale(),
           })
         })
       })
 
       return rendered
+    },
+    padVerticalGlyphBlock(block: WordBlock, sourceWidth: number, sourceHeight: number): WordBlock {
+      const horizontalPadding = Math.max(2, Math.min(8, Math.round(block.w * 0.18)))
+      const verticalPadding = Math.max(2, Math.min(6, Math.round(block.w * 0.14)))
+      const x = Math.max(0, block.x - horizontalPadding)
+      const y = Math.max(0, block.y - verticalPadding)
+      const right = Math.min(sourceWidth, block.x + block.w + horizontalPadding)
+      const bottom = Math.min(sourceHeight, block.y + block.h + verticalPadding)
+      return {
+        x,
+        y,
+        w: Math.max(1, right - x),
+        h: Math.max(1, bottom - y),
+      }
     },
     isVerticalParagraphStart(line: WordLine, previousLine: WordLine | undefined): boolean {
       if (!previousLine) return false
