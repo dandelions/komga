@@ -1,5 +1,5 @@
 <template>
-  <div class="k2-reflowed-page">
+  <div class="k2-reflowed-page" :class="{'k2-reflowed-page-dark': $vuetify.theme.dark}">
     <div ref="k2Controls" class="k2-controls" @click.stop>
       <template v-if="!controlsCollapsed">
         <label class="k2-control k2-wide-control">
@@ -1306,6 +1306,33 @@ export default Vue.extend({
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   padding: 0 4px;
+}
+
+.k2-reflowed-page-dark .k2-controls {
+  background: rgba(30, 30, 30, 0.96);
+  border-bottom-color: rgba(255, 255, 255, 0.14);
+}
+
+.k2-reflowed-page-dark .k2-control,
+.k2-reflowed-page-dark .k2-page-indicator {
+  color: #eeeeee;
+}
+
+.k2-reflowed-page-dark .k2-control input,
+.k2-reflowed-page-dark .k2-control select,
+.k2-reflowed-page-dark .k2-control button,
+.k2-reflowed-page-dark .k2-action {
+  border-color: rgba(255, 255, 255, 0.22);
+  background: rgba(48, 48, 48, 0.96);
+  color: #eeeeee;
+}
+
+.k2-reflowed-page-dark .k2-control input[type="range"] {
+  background: transparent;
+}
+
+.k2-reflowed-page-dark .k2-action:disabled {
+  color: #9e9e9e;
 }
 
 .k2-output {

@@ -1,5 +1,5 @@
 <template>
-  <div class="reflowed-page">
+  <div class="reflowed-page" :class="{'reflowed-page-dark': $vuetify.theme.dark}">
     <div v-if="!preload" ref="reflowControls" class="reflow-controls" @click.stop>
       <div class="reflow-top-controls">
         <button
@@ -2881,6 +2881,43 @@ export default Vue.extend({
 
 .reflow-exit-control {
   font-weight: 700;
+}
+
+.reflowed-page-dark .reflow-controls {
+  background: rgba(30, 30, 30, 0.96);
+  border-bottom-color: rgba(255, 255, 255, 0.14);
+}
+
+.reflowed-page-dark .reflow-font-control,
+.reflowed-page-dark .reflow-stroke-control,
+.reflowed-page-dark .reflow-spacing-control,
+.reflowed-page-dark .reflow-column-control,
+.reflowed-page-dark .reflow-parity-label,
+.reflowed-page-dark .reflow-page-indicator {
+  color: #eeeeee;
+}
+
+.reflowed-page-dark .reflow-step-control,
+.reflowed-page-dark .reflow-column-control select,
+.reflowed-page-dark .reflow-control {
+  border-color: rgba(255, 255, 255, 0.22);
+  background: rgba(48, 48, 48, 0.96);
+  color: #eeeeee;
+}
+
+.reflowed-page-dark .reflow-column-control input[type="checkbox"] {
+  accent-color: #90caf9;
+}
+
+.reflowed-page-dark .reflow-column-control select:disabled,
+.reflowed-page-dark .reflow-control:disabled {
+  color: #9e9e9e;
+}
+
+.reflowed-page-dark .reflow-region-active {
+  border-color: #90caf9;
+  background: rgba(25, 118, 210, 0.28);
+  color: #e3f2fd;
 }
 
 .crop-panel {
