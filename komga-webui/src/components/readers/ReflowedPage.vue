@@ -1,9 +1,39 @@
 <template>
   <div class="reflowed-page">
     <div v-if="!preload" ref="reflowControls" class="reflow-controls" @click.stop>
+      <div class="reflow-top-controls">
+        <button
+          type="button"
+          class="reflow-control reflow-icon-control reflow-toc-control"
+          title="目录"
+          aria-label="目录"
+          @click="$emit('show-pdf-toc')"
+        >
+          <v-icon small>mdi-menu</v-icon>
+        </button>
+        <div class="reflow-navigation-controls">
+          <button type="button" class="reflow-control reflow-nav-control" @click="$emit('back-to-book')">
+            <v-icon small>mdi-arrow-left</v-icon>
+            <span>返回</span>
+          </button>
+          <button type="button" class="reflow-control reflow-nav-control reflow-exit-control" @click="exitReflow">
+            <v-icon small>mdi-exit-to-app</v-icon>
+            <span>退出重排</span>
+          </button>
+        </div>
+        <button
+          type="button"
+          class="reflow-control reflow-icon-control reflow-collapse-control"
+          :title="controlsCollapsed ? '显示控制项' : '隐藏控制项'"
+          :aria-label="controlsCollapsed ? '显示控制项' : '隐藏控制项'"
+          @click="controlsCollapsed = !controlsCollapsed"
+        >
+          <v-icon small>{{ controlsCollapsed ? 'mdi-chevron-double-down' : 'mdi-chevron-double-up' }}</v-icon>
+        </button>
+      </div>
       <template v-if="!controlsCollapsed">
         <label class="reflow-font-control reflow-wide-control">
-          <span>Text size</span>
+          <span>文字大小</span>
           <button type="button" class="reflow-step-control" @click="adjustTextScale(-5)">-</button>
           <input
             type="range"
@@ -17,21 +47,21 @@
           <span class="reflow-font-value">{{ textScalePercent }}%</span>
         </label>
         <label class="reflow-column-control">
-          <span>Mode</span>
+          <span>排列模式</span>
           <select :value="verticalText ? 'vertical' : 'horizontal'" @change="setVerticalText">
-            <option value="horizontal">Horizontal</option>
-            <option value="vertical">Vertical</option>
+            <option value="horizontal">横排</option>
+            <option value="vertical">竖排</option>
           </select>
         </label>
         <label v-if="verticalText" class="reflow-column-control">
-          <span>Direction</span>
+          <span>方向</span>
           <select :value="verticalDirection" @change="setVerticalDirection">
-            <option value="rtl">Right to left</option>
-            <option value="ltr">Left to right</option>
+            <option value="rtl">右到左</option>
+            <option value="ltr">左到右</option>
           </select>
         </label>
         <label class="reflow-column-control">
-          <span>Columns</span>
+          <span>列数</span>
           <select :value="columnCount" @change="setColumnCount">
             <option value="1">1</option>
             <option value="2">2</option>
@@ -40,7 +70,7 @@
           </select>
         </label>
         <label class="reflow-stroke-control">
-          <span>Stroke</span>
+          <span>字体宽度</span>
           <button type="button" class="reflow-step-control" @click="adjustStrokeStrength(-0.1)">-</button>
           <input
             type="range"
@@ -54,7 +84,7 @@
           <span class="reflow-font-value">{{ strokeStrength }}</span>
         </label>
         <label class="reflow-spacing-control">
-          <span>Spacing</span>
+          <span>字体间隔</span>
           <input
             type="number"
             min="0"
@@ -73,7 +103,7 @@
               :class="{'reflow-region-active': activeCropRegion === 0}"
               @click="setActiveCropRegion(0)"
             >
-              Area 1
+              区域 1
             </button>
             <button
               type="button"
@@ -81,12 +111,9 @@
               :class="{'reflow-region-active': activeCropRegion === 1}"
               @click="setActiveCropRegion(1)"
             >
-              Area 2
+              区域 2
             </button>
           </div>
-          <button type="button" class="reflow-control reflow-exit-control" @click="exitReflow">
-            Exit reflow
-          </button>
           <button type="button" class="reflow-control" @click="toggleCropMode">
             {{ selectAreaLabel }}
           </button>
@@ -96,19 +123,10 @@
             :disabled="!cropRoi && !cropMode"
             @click="resetCrop"
           >
-            Reset {{ pageParityLabel }} area {{ activeCropRegion + 1 }}
+            重置{{ pageParityLabel }}区域 {{ activeCropRegion + 1 }}
           </button>
         </div>
       </template>
-      <button type="button" class="reflow-control" @click="$emit('back-to-book')">
-        Back to details
-      </button>
-      <button type="button" class="reflow-control" @click="$emit('show-pdf-toc')">
-        {{ $t('browse_book.pdf_toc') }}
-      </button>
-      <button type="button" class="reflow-control reflow-collapse-control" @click="controlsCollapsed = !controlsCollapsed">
-        {{ controlsCollapsed ? 'Show controls' : 'Hide controls' }}
-      </button>
     </div>
 
     <div
@@ -439,10 +457,10 @@ export default Vue.extend({
       return this.page.number % 2 === 0 ? 'even' : 'odd'
     },
     pageParityLabel(): string {
-      return this.pageParity === 'even' ? 'even' : 'odd'
+      return this.pageParity === 'even' ? '偶数页' : '奇数页'
     },
     selectAreaLabel(): string {
-      return this.cropMode ? 'Done' : `Select ${this.pageParityLabel} area ${this.activeCropRegion + 1}`
+      return this.cropMode ? '完成' : `截取${this.pageParityLabel}区域 ${this.activeCropRegion + 1}`
     },
     cropRoi(): Roi | undefined {
       return this.effectiveCropRoi(this.pageParity, this.activeCropRegion)
@@ -2404,7 +2422,7 @@ export default Vue.extend({
       this.draftRoi = undefined
       if (roi.w > MIN_CROP_SIZE && roi.h > MIN_CROP_SIZE) {
         if (this.overlapsOtherCropRegion(roi)) {
-          this.cropWarning = `Area ${this.activeCropRegion + 1} cannot overlap area ${this.activeCropRegion === 0 ? 2 : 1}`
+          this.cropWarning = `区域 ${this.activeCropRegion + 1} 不能与区域 ${this.activeCropRegion === 0 ? 2 : 1} 重叠`
           event.preventDefault()
           return
         }
@@ -2573,6 +2591,32 @@ export default Vue.extend({
   pointer-events: auto;
 }
 
+.reflow-top-controls {
+  flex: 0 0 100%;
+  min-width: 100%;
+  display: grid;
+  grid-template-columns: minmax(40px, 1fr) auto minmax(40px, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.reflow-navigation-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.reflow-toc-control {
+  justify-self: start;
+}
+
+.reflow-collapse-control {
+  justify-self: end;
+}
+
 .reflow-action-controls {
   display: flex;
   flex: 1 1 320px;
@@ -2708,6 +2752,10 @@ export default Vue.extend({
 .reflow-control {
   flex: 0 0 auto;
   max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
   border: 1px solid rgba(0, 0, 0, 0.2);
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.94);
@@ -2718,16 +2766,18 @@ export default Vue.extend({
   white-space: nowrap;
 }
 
+.reflow-icon-control {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+}
+
 .reflow-control:disabled {
   color: #9e9e9e;
 }
 
 .reflow-exit-control {
   font-weight: 700;
-}
-
-.reflow-collapse-control {
-  margin-left: 0;
 }
 
 .crop-panel {
