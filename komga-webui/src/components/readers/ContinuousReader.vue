@@ -10,7 +10,9 @@
            :height="calcHeight(page)"
            :width="calcWidth(page)"
            :id="`page${page.number}`"
-           :style="pageStyle(i)"
+           :data-page-number="page.number"
+           :style="pageStyle(page, i)"
+           @load="analyzeDeskew(page, $event)"
            v-intersect="onIntersect"
       />
     </div>
@@ -40,6 +42,7 @@ import Vue from 'vue'
 import {ContinuousScaleType} from '@/types/enum-reader'
 import {PageDtoWithUrl} from '@/types/komga-books'
 import {throttle} from 'lodash'
+import {detectAutoDeskewAngle} from '@/functions/auto-deskew'
 
 export default Vue.extend({
   name: 'ContinuousReader',
@@ -49,6 +52,8 @@ export default Vue.extend({
       totalHeight: 1000,
       currentPage: 1,
       seen: [] as boolean[],
+      deskewAngles: {} as Record<number, number>,
+      deskewPending: {} as Record<number, boolean>,
     }
   },
   props: {
@@ -80,14 +85,23 @@ export default Vue.extend({
       type: String,
       default: 'none',
     },
+    autoDeskew: {
+      type: Boolean,
+      default: false,
+    },
   },
   watch: {
     pages: {
       handler(val) {
         this.seen = new Array(val.length).fill(false)
+        this.deskewAngles = {}
+        this.deskewPending = {}
         if (this.page === 1) window.scrollTo(0, 0)
       },
       immediate: true,
+    },
+    autoDeskew(val) {
+      if (val) this.analyzeLoadedImages()
     },
     page: {
       handler(val) {
@@ -179,11 +193,45 @@ export default Vue.extend({
           return undefined
       }
     },
-    pageStyle(index: number): object {
+    pageStyle(page: PageDtoWithUrl, index: number): object {
+      const angle = this.autoDeskew ? this.deskewAngles[page.number] || 0 : 0
       return {
         margin: `${index === 0 ? 0 : this.pageMargin}px auto`,
         filter: this.imageFilter,
+        transform: this.deskewTransform(angle),
+        transformOrigin: 'center center',
       }
+    },
+    deskewTransform(angle: number): string | undefined {
+      if (!angle) return undefined
+      const scale = Math.max(0.9, 1 - Math.abs(angle) * 0.01)
+      return `rotate(${angle}deg) scale(${scale.toFixed(3)})`
+    },
+    async analyzeDeskew(page: PageDtoWithUrl, event: Event) {
+      if (!this.autoDeskew || this.deskewAngles[page.number] !== undefined || this.deskewPending[page.number]) return
+
+      const image = event.target as HTMLImageElement
+      if (!image?.complete || image.naturalWidth <= 0) return
+
+      this.$set(this.deskewPending, page.number, true)
+      try {
+        const angle = await detectAutoDeskewAngle(image)
+        this.$set(this.deskewAngles, page.number, angle)
+      } catch (e) {
+        this.$set(this.deskewAngles, page.number, 0)
+      } finally {
+        this.$delete(this.deskewPending, page.number)
+      }
+    },
+    analyzeLoadedImages() {
+      this.$nextTick(() => {
+        const images = Array.from(this.$el.querySelectorAll('img[data-page-number]')) as HTMLImageElement[]
+        images.forEach(image => {
+          const pageNumber = Number(image.dataset.pageNumber)
+          const page = this.pages.find(x => x.number === pageNumber)
+          if (page && image.complete && image.naturalWidth > 0) this.analyzeDeskew(page, {target: image} as unknown as Event)
+        })
+      })
     },
     centerClick() {
       this.$emit('menu')

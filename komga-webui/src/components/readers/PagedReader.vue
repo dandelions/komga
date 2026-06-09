@@ -32,9 +32,11 @@
                  :alt="`Page ${page.number}`"
                  :key="`spread${i}-${j}`"
                  :src="page.url"
+                 :data-page-number="page.number"
                  :class="imgClass(spread)"
                  class="img-fit-all"
-                 :style="{filter: imageFilter}"
+                 :style="imageStyle(page)"
+                 @load="analyzeDeskew(page, $event)"
             />
           </div>
         </div>
@@ -84,6 +86,7 @@ import {PagedReaderLayout, ScaleType} from '@/types/enum-reader'
 import {shortcutsLTR, shortcutsRTL, shortcutsVertical} from '@/functions/shortcuts/paged-reader'
 import {PageDtoWithUrl} from '@/types/komga-books'
 import {buildSpreads} from '@/functions/book-spreads'
+import {detectAutoDeskewAngle} from '@/functions/auto-deskew'
 
 export default Vue.extend({
   name: 'PagedReader',
@@ -93,6 +96,8 @@ export default Vue.extend({
       carouselPage: 0,
       spreads: [] as PageDtoWithUrl[][],
       pendingScrollPosition: 'top' as 'top' | 'bottom',
+      deskewAngles: {} as Record<number, number>,
+      deskewPending: {} as Record<number, boolean>,
     }
   },
   props: {
@@ -128,13 +133,22 @@ export default Vue.extend({
       type: String,
       default: 'none',
     },
+    autoDeskew: {
+      type: Boolean,
+      default: false,
+    },
   },
   watch: {
     pages: {
       handler(val) {
         this.spreads = buildSpreads(val, this.pageLayout)
+        this.deskewAngles = {}
+        this.deskewPending = {}
       },
       immediate: true,
+    },
+    autoDeskew(val) {
+      if (val) this.analyzeLoadedImages()
     },
     carouselPage(val, old) {
       this.$debug('[watch:carouselPage', `old:${old}`, `new:${val}`)
@@ -216,6 +230,45 @@ export default Vue.extend({
   methods: {
     keyPressed(e: KeyboardEvent) {
       this.shortcuts[e.key]?.execute(this)
+    },
+    imageStyle(page: PageDtoWithUrl): object {
+      const angle = this.autoDeskew ? this.deskewAngles[page.number] || 0 : 0
+      return {
+        filter: this.imageFilter,
+        transform: this.deskewTransform(angle),
+        transformOrigin: 'center center',
+      }
+    },
+    deskewTransform(angle: number): string | undefined {
+      if (!angle) return undefined
+      const scale = Math.max(0.9, 1 - Math.abs(angle) * 0.01)
+      return `rotate(${angle}deg) scale(${scale.toFixed(3)})`
+    },
+    async analyzeDeskew(page: PageDtoWithUrl, event: Event) {
+      if (!this.autoDeskew || this.deskewAngles[page.number] !== undefined || this.deskewPending[page.number]) return
+
+      const image = event.target as HTMLImageElement
+      if (!image?.complete || image.naturalWidth <= 0) return
+
+      this.$set(this.deskewPending, page.number, true)
+      try {
+        const angle = await detectAutoDeskewAngle(image)
+        this.$set(this.deskewAngles, page.number, angle)
+      } catch (e) {
+        this.$set(this.deskewAngles, page.number, 0)
+      } finally {
+        this.$delete(this.deskewPending, page.number)
+      }
+    },
+    analyzeLoadedImages() {
+      this.$nextTick(() => {
+        const images = Array.from(this.$el.querySelectorAll('img[data-page-number]')) as HTMLImageElement[]
+        images.forEach(image => {
+          const pageNumber = Number(image.dataset.pageNumber)
+          const page = this.pages.find(x => x.number === pageNumber)
+          if (page && image.complete && image.naturalWidth > 0) this.analyzeDeskew(page, {target: image} as unknown as Event)
+        })
+      })
     },
     imgClass(spread: PageDtoWithUrl[]): string {
       const double = spread.length > 1

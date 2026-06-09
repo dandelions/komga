@@ -316,6 +316,7 @@
         :sidePadding="sidePadding"
         :page-margin="pageMargin"
         :image-filter="normalReaderImageFilter"
+        :auto-deskew="autoDeskew"
         @menu="toggleToolbars()"
         @jump-previous="jumpToPrevious()"
         @jump-next="jumpToNext()"
@@ -331,6 +332,7 @@
         :animations="animations"
         :swipe="readerSwipeEnabled"
         :image-filter="normalReaderImageFilter"
+        :auto-deskew="autoDeskew"
         @menu="toggleToolbars()"
         @jump-previous="jumpToPrevious()"
         @jump-next="jumpToNext()"
@@ -440,6 +442,9 @@
                 step="0.1"
                 thumb-label
               />
+            </v-list-item>
+            <v-list-item v-if="!activeReflowMode">
+              <settings-switch v-model="autoDeskew" label="自动纠斜"/>
             </v-list-item>
 
             <template v-if="continuousReader">
@@ -834,6 +839,7 @@ export default Vue.extend({
         readingDirection: ReadingDirection.LEFT_TO_RIGHT,
         backgroundColor: 'black',
         strokeStrength: 0,
+        autoDeskew: false,
       },
       shortcuts: {} as any,
       notification: {
@@ -914,6 +920,7 @@ export default Vue.extend({
     this.pageMargin = this.$store.state.persistedState.webreader.continuous.margin
     this.backgroundColor = this.$store.state.persistedState.webreader.background
     this.readerStrokeStrength = this.$store.state.persistedState.webreader.strokeStrength
+    this.autoDeskew = this.$store.state.persistedState.webreader.autoDeskew || false
     this.reflowSettingsBookId = this.bookId
     this.loadReflowSettings(this.bookId)
 
@@ -1164,6 +1171,15 @@ export default Vue.extend({
         const normalized = Math.round(Math.max(0, Math.min(3, Number(strokeStrength) || 0)) * 10) / 10
         this.settings.strokeStrength = normalized
         this.$store.commit('setWebreaderStrokeStrength', normalized)
+      },
+    },
+    autoDeskew: {
+      get: function (): boolean {
+        return this.settings.autoDeskew
+      },
+      set: function (autoDeskew: boolean): void {
+        this.settings.autoDeskew = autoDeskew
+        this.$store.commit('setWebreaderAutoDeskew', autoDeskew)
       },
     },
     readingDirection: {

@@ -21,6 +21,7 @@ export const persistedModule: Module<any, any> = {
       animations: true,
       background: '',
       strokeStrength: 0,
+      autoDeskew: false,
     },
     epubreader: {},
     browsingPageSize: undefined as unknown as number,
@@ -133,6 +134,9 @@ export const persistedModule: Module<any, any> = {
     },
     setWebreaderStrokeStrength(state, val) {
       state.webreader.strokeStrength = val
+    },
+    setWebreaderAutoDeskew(state, val) {
+      state.webreader.autoDeskew = val
     },
     setEpubreaderSettings(state, val) {
       state.epubreader = val
