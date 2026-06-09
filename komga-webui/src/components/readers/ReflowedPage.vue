@@ -2594,27 +2594,28 @@ export default Vue.extend({
 .reflow-top-controls {
   flex: 0 0 100%;
   min-width: 100%;
-  display: grid;
-  grid-template-columns: minmax(40px, 1fr) auto minmax(40px, 1fr);
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  justify-content: flex-start;
+  gap: 14px;
 }
 
 .reflow-navigation-controls {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
+  justify-content: flex-start;
+  gap: 14px;
   min-width: 0;
 }
 
 .reflow-toc-control {
-  justify-self: start;
+  margin-right: 0;
 }
 
 .reflow-collapse-control {
-  justify-self: end;
+  margin-left: 0;
 }
 
 .reflow-action-controls {
