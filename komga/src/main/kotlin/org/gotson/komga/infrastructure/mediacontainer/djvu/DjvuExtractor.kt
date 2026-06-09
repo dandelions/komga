@@ -3,9 +3,11 @@ package org.gotson.komga.infrastructure.mediacontainer.djvu
 import org.gotson.komga.domain.model.Dimension
 import org.gotson.komga.domain.model.MediaContainerEntry
 import org.gotson.komga.domain.model.TypedBytes
+import org.gotson.komga.infrastructure.image.ImageConverter
 import org.gotson.komga.infrastructure.image.ImageType
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.stereotype.Service
+import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -14,35 +16,43 @@ import java.util.concurrent.TimeUnit
 class DjvuExtractor(
   @Qualifier("pdfImageType")
   private val imageType: ImageType,
+  private val imageConverter: ImageConverter,
 ) {
   fun getPages(
     path: Path,
     analyzeDimensions: Boolean,
   ): List<MediaContainerEntry> {
-    val lines =
+    val pageCount =
       runCommand(
         timeoutSeconds = 60,
-        "identify",
-        "-format",
-        "%w %h\n",
+        "djvused",
+        "-e",
+        "n",
         path.toString(),
       ).decodeToString()
-        .lines()
-        .filter { it.isNotBlank() }
+        .trim()
+        .toInt()
 
-    return lines.mapIndexed { index, line ->
-      val dimension =
-        if (analyzeDimensions) {
-          line
-            .trim()
-            .split(Regex("\\s+"))
-            .takeIf { it.size >= 2 }
-            ?.let { Dimension(it[0].toInt(), it[1].toInt()) }
-        } else {
-          null
-        }
+    val dimensions =
+      if (analyzeDimensions) {
+        val script = (1..pageCount).joinToString("; ") { "select $it; size" }
 
-      MediaContainerEntry(name = "${index + 1}", dimension = dimension)
+        runCommand(
+          timeoutSeconds = 60,
+          "djvused",
+          "-e",
+          script,
+          path.toString(),
+        ).decodeToString()
+          .lines()
+          .filter { it.isNotBlank() }
+          .map { it.toDimension() }
+      } else {
+        emptyList()
+      }
+
+    return (1..pageCount).map { pageNumber ->
+      MediaContainerEntry(name = "$pageNumber", dimension = dimensions.getOrNull(pageNumber - 1))
     }
   }
 
@@ -50,24 +60,32 @@ class DjvuExtractor(
     path: Path,
     pageNumber: Int,
   ): TypedBytes {
-    val imageFormat =
-      when (imageType) {
-        ImageType.JPEG -> "jpeg"
-        ImageType.PNG -> "png"
-      }
-
-    val bytes =
+    val tiffFile = Files.createTempFile("komga-djvu-", ".tiff")
+    try {
       runCommand(
         timeoutSeconds = 120,
-        "convert",
-        "$path[${pageNumberIndex(pageNumber)}]",
-        "$imageFormat:-",
+        "ddjvu",
+        "-format=tiff",
+        "-page=$pageNumber",
+        path.toString(),
+        tiffFile.toString(),
       )
 
-    return TypedBytes(bytes, imageType.mediaType)
+      val bytes = imageConverter.convertImage(Files.readAllBytes(tiffFile), imageType.imageIOFormat)
+
+      return TypedBytes(bytes, imageType.mediaType)
+    } finally {
+      Files.deleteIfExists(tiffFile)
+    }
   }
 
-  private fun pageNumberIndex(pageNumber: Int) = pageNumber - 1
+  private fun String.toDimension(): Dimension {
+    val match =
+      Regex("""width=(\d+)\s+height=(\d+)""").find(this.trim())
+        ?: throw IllegalStateException("Could not parse DJVU page size: $this")
+
+    return Dimension(match.groupValues[1].toInt(), match.groupValues[2].toInt())
+  }
 
   private fun runCommand(
     timeoutSeconds: Long,
