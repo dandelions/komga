@@ -70,8 +70,16 @@
           </select>
         </label>
         <label class="reflow-column-control">
+          <span>自动纠斜</span>
+          <input
+            type="checkbox"
+            :checked="autoDeskew"
+            @change="setAutoDeskew"
+          />
+        </label>
+        <label class="reflow-column-control">
           <span>纠斜</span>
-          <select :value="skewCorrection" @change="setSkewCorrection">
+          <select :value="skewCorrection" :disabled="autoDeskew" @change="setSkewCorrection">
             <option value="0">0°</option>
             <option value="5">+5°</option>
             <option value="10">+10°</option>
@@ -237,12 +245,14 @@
 
 <script lang="ts">
 import Vue from 'vue'
+import {detectAutoDeskewAngle} from '@/functions/auto-deskew'
 import {PageDtoWithUrl} from '@/types/komga-books'
 
 type ReflowOptions = {
   autoCropBorder: boolean,
   textScale: number,
   columnCount: number,
+  autoDeskew: boolean,
   skewCorrection: number,
   threshold: number,
   columnGap: number,
@@ -421,6 +431,9 @@ export default Vue.extend({
     skewCorrection(): number {
       return this.normalizedSkewCorrection(this.options.skewCorrection)
     },
+    autoDeskew(): boolean {
+      return this.options.autoDeskew === true
+    },
     verticalText(): boolean {
       return this.options.verticalText === true
     },
@@ -598,7 +611,9 @@ export default Vue.extend({
         if (!context) throw new Error('Canvas is unavailable')
         context.drawImage(image, 0, 0)
         this.pageBackground = this.detectPageBackground(context, canvas.width, canvas.height)
-        const sourceCanvas = this.skewCorrection === 0 ? canvas : this.skewCorrectedCanvas(canvas, this.skewCorrection)
+        const skewCorrection = await this.detectReflowSkewCorrection(image)
+        if (requestId !== this.requestId) return
+        const sourceCanvas = skewCorrection === 0 ? canvas : this.skewCorrectedCanvas(canvas, skewCorrection)
         const sourceContext = sourceCanvas.getContext('2d')
         if (!sourceContext) throw new Error('Canvas is unavailable')
         const imageData = sourceContext.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height)
@@ -901,6 +916,7 @@ export default Vue.extend({
         url: this.page.url,
         autoCropBorder: this.options.autoCropBorder,
         columnCount: this.options.columnCount,
+        autoDeskew: this.autoDeskew,
         skewCorrection: this.skewCorrection,
         threshold: this.options.threshold,
         columnGap: this.options.columnGap,
@@ -973,6 +989,14 @@ export default Vue.extend({
     pageImageUrl(url: string): string {
       const separator = url.includes('?') ? '&' : '?'
       return `${url}${separator}contentNegotiation=false&reflowCacheBust=${Date.now()}`
+    },
+    async detectReflowSkewCorrection(image: HTMLImageElement): Promise<number> {
+      if (!this.autoDeskew) return this.skewCorrection
+      try {
+        return await detectAutoDeskewAngle(image)
+      } catch (e) {
+        return 0
+      }
     },
     detectPageBackground(context: CanvasRenderingContext2D, width: number, height: number): string {
       const sampleSize = Math.max(2, Math.min(8, Math.floor(Math.min(width, height) * 0.01)))
@@ -2405,6 +2429,10 @@ export default Vue.extend({
     setColumnCount(event: Event) {
       const target = event.target as HTMLSelectElement
       this.$emit('column-count-change', Math.round(this.clampNumber(Number(target.value), 1, 4, 1)))
+    },
+    setAutoDeskew(event: Event) {
+      const target = event.target as HTMLInputElement
+      this.$emit('auto-deskew-change', target.checked)
     },
     setSkewCorrection(event: Event) {
       const target = event.target as HTMLSelectElement

@@ -263,6 +263,7 @@
           :start-at-end="reflowStartAtEnd"
           @text-scale-change="setReflowTextScale"
           @column-count-change="setReflowColumnCount"
+          @auto-deskew-change="setReflowAutoDeskew"
           @skew-correction-change="setReflowSkewCorrection"
           @vertical-text-change="setReflowVerticalText"
           @vertical-direction-change="setReflowVerticalDirection"
@@ -789,6 +790,7 @@ export default Vue.extend({
         autoCropBorder: true,
         textScale: 40,
         columnCount: 1,
+        autoDeskew: false,
         skewCorrection: 0,
         threshold: 185,
         columnGap: 15,
@@ -1083,6 +1085,7 @@ export default Vue.extend({
         autoCropBorder: this.reflowSettings.autoCropBorder,
         textScale: this.reflowSettings.textScale,
         columnCount: this.reflowSettings.columnCount,
+        autoDeskew: this.reflowSettings.autoDeskew,
         skewCorrection: this.reflowSettings.skewCorrection,
         threshold: this.reflowSettings.threshold,
         columnGap: this.reflowSettings.columnGap,
@@ -1564,6 +1567,7 @@ export default Vue.extend({
         autoCropBorder: typeof settings.autoCropBorder === 'boolean' ? settings.autoCropBorder : this.reflowSettings.autoCropBorder,
         textScale: this.clampReflowNumber(settings.textScale, 10, 140, this.reflowSettings.textScale),
         columnCount: Math.round(this.clampReflowNumber(settings.columnCount, 1, 4, this.reflowSettings.columnCount)),
+        autoDeskew: typeof settings.autoDeskew === 'boolean' ? settings.autoDeskew : this.reflowSettings.autoDeskew,
         skewCorrection: this.normalizedReflowSkewCorrection(settings.skewCorrection),
         threshold: this.clampReflowNumber(settings.threshold, 50, 230, this.reflowSettings.threshold),
         columnGap: this.clampReflowNumber(settings.columnGap, 5, 80, this.reflowSettings.columnGap),
@@ -1757,6 +1761,9 @@ export default Vue.extend({
     },
     setReflowColumnCount(columnCount: number) {
       this.reflowSettings.columnCount = Math.round(Math.max(1, Math.min(4, columnCount)))
+    },
+    setReflowAutoDeskew(autoDeskew: boolean) {
+      this.reflowSettings.autoDeskew = autoDeskew
     },
     setReflowSkewCorrection(skewCorrection: number) {
       this.reflowSettings.skewCorrection = this.normalizedReflowSkewCorrection(skewCorrection)
