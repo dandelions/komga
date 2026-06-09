@@ -2129,35 +2129,61 @@ export default Vue.extend({
 
         line.words.forEach(block => {
           if (block.w < 2 || block.h < 2 || this.isRuleLikeBlock(block)) return
-          const renderBlock = this.padVerticalGlyphBlock(block, sourceCanvas.width, sourceCanvas.height)
-          sliceCanvas.width = renderBlock.w
-          sliceCanvas.height = renderBlock.h
-          sliceContext.clearRect(0, 0, renderBlock.w, renderBlock.h)
-          sliceContext.drawImage(sourceCanvas, renderBlock.x, renderBlock.y, renderBlock.w, renderBlock.h, 0, 0, renderBlock.w, renderBlock.h)
-          this.boldenSourceCanvas(sliceContext, renderBlock.w, renderBlock.h)
+          const renderBlock = this.paddedVerticalGlyphBlock(block, sourceCanvas.width, sourceCanvas.height)
+          sliceCanvas.width = renderBlock.outputWidth
+          sliceCanvas.height = renderBlock.outputHeight
+          sliceContext.clearRect(0, 0, renderBlock.outputWidth, renderBlock.outputHeight)
+          sliceContext.fillStyle = this.pageBackground || '#fff'
+          sliceContext.fillRect(0, 0, renderBlock.outputWidth, renderBlock.outputHeight)
+          sliceContext.drawImage(
+            sourceCanvas,
+            renderBlock.source.x,
+            renderBlock.source.y,
+            renderBlock.source.w,
+            renderBlock.source.h,
+            renderBlock.offsetX,
+            renderBlock.offsetY,
+            renderBlock.source.w,
+            renderBlock.source.h,
+          )
+          this.boldenSourceCanvas(sliceContext, renderBlock.outputWidth, renderBlock.outputHeight)
           rendered.push({
-            ...renderBlock,
+            x: block.x,
+            y: block.y,
+            w: renderBlock.outputWidth,
+            h: renderBlock.outputHeight,
             type: 'word',
             src: sliceCanvas.toDataURL('image/png'),
-            height: renderBlock.h * this.textScale(),
+            height: renderBlock.outputHeight * this.textScale(),
           })
         })
       })
 
       return rendered
     },
-    padVerticalGlyphBlock(block: WordBlock, sourceWidth: number, sourceHeight: number): WordBlock {
+    paddedVerticalGlyphBlock(
+      block: WordBlock,
+      sourceWidth: number,
+      sourceHeight: number,
+    ): {source: WordBlock, outputWidth: number, outputHeight: number, offsetX: number, offsetY: number} {
       const horizontalPadding = Math.max(2, Math.min(8, Math.round(block.w * 0.18)))
       const verticalPadding = Math.max(2, Math.min(6, Math.round(block.w * 0.14)))
       const x = Math.max(0, block.x - horizontalPadding)
       const y = Math.max(0, block.y - verticalPadding)
       const right = Math.min(sourceWidth, block.x + block.w + horizontalPadding)
       const bottom = Math.min(sourceHeight, block.y + block.h + verticalPadding)
-      return {
+      const source = {
         x,
         y,
         w: Math.max(1, right - x),
         h: Math.max(1, bottom - y),
+      }
+      return {
+        source,
+        outputWidth: block.w + horizontalPadding * 2,
+        outputHeight: block.h + verticalPadding * 2,
+        offsetX: horizontalPadding - (block.x - x),
+        offsetY: verticalPadding - (block.y - y),
       }
     },
     isVerticalParagraphStart(line: WordLine, previousLine: WordLine | undefined): boolean {
