@@ -263,6 +263,7 @@
           :start-at-end="reflowStartAtEnd"
           @text-scale-change="setReflowTextScale"
           @column-count-change="setReflowColumnCount"
+          @skew-correction-change="setReflowSkewCorrection"
           @vertical-text-change="setReflowVerticalText"
           @vertical-direction-change="setReflowVerticalDirection"
           @stroke-strength-change="setReflowStrokeStrength"
@@ -783,6 +784,7 @@ export default Vue.extend({
         autoCropBorder: true,
         textScale: 40,
         columnCount: 1,
+        skewCorrection: 0,
         threshold: 185,
         columnGap: 15,
         wordGap: 3,
@@ -1074,6 +1076,7 @@ export default Vue.extend({
         autoCropBorder: this.reflowSettings.autoCropBorder,
         textScale: this.reflowSettings.textScale,
         columnCount: this.reflowSettings.columnCount,
+        skewCorrection: this.reflowSettings.skewCorrection,
         threshold: this.reflowSettings.threshold,
         columnGap: this.reflowSettings.columnGap,
         wordGap: this.reflowSettings.wordGap,
@@ -1545,6 +1548,7 @@ export default Vue.extend({
         autoCropBorder: typeof settings.autoCropBorder === 'boolean' ? settings.autoCropBorder : this.reflowSettings.autoCropBorder,
         textScale: this.clampReflowNumber(settings.textScale, 10, 140, this.reflowSettings.textScale),
         columnCount: Math.round(this.clampReflowNumber(settings.columnCount, 1, 4, this.reflowSettings.columnCount)),
+        skewCorrection: this.normalizedReflowSkewCorrection(settings.skewCorrection),
         threshold: this.clampReflowNumber(settings.threshold, 50, 230, this.reflowSettings.threshold),
         columnGap: this.clampReflowNumber(settings.columnGap, 5, 80, this.reflowSettings.columnGap),
         wordGap: this.clampReflowNumber(settings.wordGap, 1, 30, this.reflowSettings.wordGap),
@@ -1618,6 +1622,10 @@ export default Vue.extend({
       const h = Number(roi.h)
       if (![x, y, w, h].every(Number.isFinite) || w <= 15 || h <= 15) return null
       return {x, y, w, h}
+    },
+    normalizedReflowSkewCorrection(value: any): number {
+      const numberValue = Number(value)
+      return [-10, -5, 0, 5, 10].includes(numberValue) ? numberValue : 0
     },
     reflowCropRoisOverlap(a: any, b: any): boolean {
       return a.x < b.x + b.w &&
@@ -1733,6 +1741,9 @@ export default Vue.extend({
     },
     setReflowColumnCount(columnCount: number) {
       this.reflowSettings.columnCount = Math.round(Math.max(1, Math.min(4, columnCount)))
+    },
+    setReflowSkewCorrection(skewCorrection: number) {
+      this.reflowSettings.skewCorrection = this.normalizedReflowSkewCorrection(skewCorrection)
     },
     setReflowVerticalText(verticalText: boolean) {
       this.reflowSettings.verticalText = verticalText

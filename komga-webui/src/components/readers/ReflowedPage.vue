@@ -69,6 +69,16 @@
             <option value="4">4</option>
           </select>
         </label>
+        <label class="reflow-column-control">
+          <span>纠斜</span>
+          <select :value="skewCorrection" @change="setSkewCorrection">
+            <option value="0">0°</option>
+            <option value="5">+5°</option>
+            <option value="10">+10°</option>
+            <option value="-5">-5°</option>
+            <option value="-10">-10°</option>
+          </select>
+        </label>
         <label class="reflow-stroke-control">
           <span>字体宽度</span>
           <button type="button" class="reflow-step-control" @click="adjustStrokeStrength(-0.1)">-</button>
@@ -233,6 +243,7 @@ type ReflowOptions = {
   autoCropBorder: boolean,
   textScale: number,
   columnCount: number,
+  skewCorrection: number,
   threshold: number,
   columnGap: number,
   wordGap: number,
@@ -406,6 +417,9 @@ export default Vue.extend({
     },
     columnCount(): number {
       return this.normalizedColumnCount()
+    },
+    skewCorrection(): number {
+      return this.normalizedSkewCorrection(this.options.skewCorrection)
     },
     verticalText(): boolean {
       return this.options.verticalText === true
@@ -584,11 +598,14 @@ export default Vue.extend({
         if (!context) throw new Error('Canvas is unavailable')
         context.drawImage(image, 0, 0)
         this.pageBackground = this.detectPageBackground(context, canvas.width, canvas.height)
-        const imageData = context.getImageData(0, 0, canvas.width, canvas.height)
+        const sourceCanvas = this.skewCorrection === 0 ? canvas : this.skewCorrectedCanvas(canvas, this.skewCorrection)
+        const sourceContext = sourceCanvas.getContext('2d')
+        if (!sourceContext) throw new Error('Canvas is unavailable')
+        const imageData = sourceContext.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height)
         const cropRois = this.reflowCropRois()
         const regionItems = cropRois.map(roi => {
-          const lines = this.detectWordLines(imageData, canvas.width, canvas.height, roi)
-          return this.renderReflowItems(canvas, lines)
+          const lines = this.detectWordLines(imageData, sourceCanvas.width, sourceCanvas.height, roi)
+          return this.renderReflowItems(sourceCanvas, lines)
         })
         if (requestId !== this.requestId) return
         this.reflowItems = this.joinRegionReflowItems(regionItems)
@@ -884,6 +901,7 @@ export default Vue.extend({
         url: this.page.url,
         autoCropBorder: this.options.autoCropBorder,
         columnCount: this.options.columnCount,
+        skewCorrection: this.skewCorrection,
         threshold: this.options.threshold,
         columnGap: this.options.columnGap,
         wordGap: this.options.wordGap,
@@ -983,6 +1001,19 @@ export default Vue.extend({
 
       if (count === 0) return '#fff'
       return `rgb(${Math.round(r / count)}, ${Math.round(g / count)}, ${Math.round(b / count)})`
+    },
+    skewCorrectedCanvas(sourceCanvas: HTMLCanvasElement, degrees: number): HTMLCanvasElement {
+      const correctedCanvas = document.createElement('canvas')
+      correctedCanvas.width = sourceCanvas.width
+      correctedCanvas.height = sourceCanvas.height
+      const context = correctedCanvas.getContext('2d')
+      if (!context) return sourceCanvas
+      context.fillStyle = this.pageBackground || '#fff'
+      context.fillRect(0, 0, correctedCanvas.width, correctedCanvas.height)
+      context.translate(correctedCanvas.width / 2, correctedCanvas.height / 2)
+      context.rotate(degrees * Math.PI / 180)
+      context.drawImage(sourceCanvas, -sourceCanvas.width / 2, -sourceCanvas.height / 2)
+      return correctedCanvas
     },
     revokeObjectUrl() {
       if (this.objectUrl) URL.revokeObjectURL(this.objectUrl)
@@ -1449,6 +1480,10 @@ export default Vue.extend({
     },
     normalizedColumnCount(): number {
       return Math.round(this.clampNumber(this.options.columnCount, 1, 4, 1))
+    },
+    normalizedSkewCorrection(value: number | undefined): number {
+      const numberValue = Number(value)
+      return [-10, -5, 0, 5, 10].includes(numberValue) ? numberValue : 0
     },
     detectVerticalWordLines(isInk: (x: number, y: number) => boolean, roi: Roi): WordLine[] {
       const columns = this.detectVerticalTextColumns(isInk, roi)
@@ -2370,6 +2405,10 @@ export default Vue.extend({
     setColumnCount(event: Event) {
       const target = event.target as HTMLSelectElement
       this.$emit('column-count-change', Math.round(this.clampNumber(Number(target.value), 1, 4, 1)))
+    },
+    setSkewCorrection(event: Event) {
+      const target = event.target as HTMLSelectElement
+      this.$emit('skew-correction-change', this.normalizedSkewCorrection(Number(target.value)))
     },
     setVerticalText(event: Event) {
       const target = event.target as HTMLSelectElement
