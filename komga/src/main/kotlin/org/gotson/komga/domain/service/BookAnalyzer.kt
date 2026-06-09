@@ -445,11 +445,18 @@ class BookAnalyzer(
     }
   }
 
-  fun getPdfToc(book: Book): List<PdfTocEntry> =
+  fun getPdfToc(
+    book: Book,
+    mediaType: String?,
+  ): List<PdfTocEntry> =
     try {
-      pdfExtractor.getToc(book.path)
+      when (mediaType) {
+        MediaType.PDF.type -> pdfExtractor.getToc(book.path)
+        MediaType.DJVU.type, MediaType.DJVU_X.type, MediaType.DJVU_APPLICATION.type -> djvuExtractor.getToc(book.path)
+        else -> emptyList()
+      }
     } catch (e: Exception) {
-      logger.error(e) { "Error while getting PDF TOC" }
+      logger.error(e) { "Error while getting PDF profile TOC" }
       emptyList()
     }
 }

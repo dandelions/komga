@@ -128,6 +128,8 @@ class WebPubGenerator(
     seriesMetadata: SeriesMetadata,
   ): WPPublicationDto {
     val uriBuilder = ServletUriComponentsBuilder.fromCurrentContextPath().pathSegment(*pathSegments.toTypedArray())
+    val syntheticPages = if (media.mediaType == KomgaMediaType.PDF.type) emptyList() else bookAnalyzer.getPdfPagesDynamic(media)
+
     return toBasePublicationDto(bookDto).let {
       it.copy(
         mediaType = MEDIATYPE_WEBPUB_JSON,
@@ -141,7 +143,7 @@ class WebPubGenerator(
               )
             }
           } else {
-            bookAnalyzer.getPdfPagesDynamic(media).mapIndexed { index: Int, page: BookPage ->
+            syntheticPages.mapIndexed { index: Int, page: BookPage ->
               WPLinkDto(
                 href =
                   uriBuilder
@@ -156,7 +158,7 @@ class WebPubGenerator(
             }
           },
         resources = buildThumbnailLinkDtos(bookDto.id),
-        toc = if (media.mediaType == KomgaMediaType.PDF.type) bookAnalyzer.getPdfToc(book).map { entry -> entry.toWPLinkDto(uriBuilder.cloneBuilder(), bookDto.id) } else emptyList(),
+        toc = bookAnalyzer.getPdfToc(book, media.mediaType).map { entry -> entry.toWPLinkDto(uriBuilder.cloneBuilder(), bookDto.id, media.mediaType, syntheticPages) },
       )
     }
   }
@@ -233,12 +235,25 @@ class WebPubGenerator(
   private fun PdfTocEntry.toWPLinkDto(
     uriBuilder: UriComponentsBuilder,
     bookId: String,
+    mediaType: String?,
+    pages: List<BookPage>,
   ): WPLinkDto =
     WPLinkDto(
       title = title,
-      href = pageNumber?.let { uriBuilder.cloneBuilder().path("books/$bookId/pages/$it/raw").toUriString() },
-      type = pageNumber?.let { KomgaMediaType.PDF.type },
-      children = children.map { it.toWPLinkDto(uriBuilder, bookId) },
+      href =
+        pageNumber?.let {
+          if (mediaType == KomgaMediaType.PDF.type) {
+            uriBuilder.cloneBuilder().path("books/$bookId/pages/$it/raw").toUriString()
+          } else {
+            uriBuilder
+              .cloneBuilder()
+              .path("books/$bookId/pages/$it")
+              .queryParam("contentNegotiation", "false")
+              .toUriString()
+          }
+        },
+      type = pageNumber?.let { if (mediaType == KomgaMediaType.PDF.type) KomgaMediaType.PDF.type else pages.getOrNull(it - 1)?.mediaType },
+      children = children.map { it.toWPLinkDto(uriBuilder, bookId, mediaType, pages) },
     )
 
   protected fun toWPMetadataDto(bookDto: BookDto) =
