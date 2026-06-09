@@ -413,6 +413,8 @@ export default Vue.extend({
         flexWrap: this.verticalDirection === 'rtl' ? 'wrap-reverse' : 'wrap',
         alignItems: 'center',
         alignContent: 'flex-start',
+        paddingLeft: `${this.horizontalContentPadding()}px`,
+        paddingRight: `${this.horizontalContentPadding()}px`,
       }
     },
     measureWrapperStyle(): object {
@@ -429,6 +431,8 @@ export default Vue.extend({
         flexWrap: this.verticalDirection === 'rtl' ? 'wrap-reverse' : 'wrap',
         alignItems: 'center',
         alignContent: 'flex-start',
+        paddingLeft: `${this.horizontalContentPadding()}px`,
+        paddingRight: `${this.horizontalContentPadding()}px`,
       }
     },
     pageParity(): PageParity {
@@ -588,6 +592,10 @@ export default Vue.extend({
       const height = this.viewportHeight || Math.floor(window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight || 0)
       return Math.max(240, height - (this.preload ? 0 : this.controlsHeight || REFLOW_CONTROLS_HEIGHT))
     },
+    horizontalContentPadding(): number {
+      if (!this.verticalText) return 16
+      return Math.max(24, Math.min(36, Math.round(this.targetWidth * 0.08)))
+    },
     repaginate(resetPage: boolean = true) {
       this.updateViewportMetrics()
       if (this.reflowItems.length === 0) {
@@ -703,7 +711,7 @@ export default Vue.extend({
     paginateItemsEstimated(items: ReflowItem[]): ReflowItem[][] {
       if (items.length === 0) return []
 
-      const contentWidth = Math.max(120, this.targetWidth - 32)
+      const contentWidth = Math.max(120, this.targetWidth - this.horizontalContentPadding() * 2)
       const pageHeight = Math.max(120, this.pageContentHeight() - 32 - VIEWPORT_PAGE_BUFFER)
       const rowGap = Math.max(0, Math.round(this.blockSpacing * 1.5))
       const columnGap = this.blockSpacing
@@ -759,7 +767,7 @@ export default Vue.extend({
     paginateVerticalItemsEstimated(items: ReflowItem[]): ReflowItem[][] {
       if (items.length === 0) return []
 
-      const contentWidth = Math.max(120, this.targetWidth - 32)
+      const contentWidth = Math.max(120, this.targetWidth - this.horizontalContentPadding() * 2)
       const contentHeight = Math.max(120, this.pageContentHeight() - 32 - VIEWPORT_PAGE_BUFFER)
       const columnGap = Math.max(0, this.blockSpacing)
       const rowGap = Math.max(0, Math.round(this.blockSpacing * 1.5))
