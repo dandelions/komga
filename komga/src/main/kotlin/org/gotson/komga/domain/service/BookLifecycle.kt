@@ -35,6 +35,7 @@ import org.gotson.komga.infrastructure.hash.KoreaderHasher
 import org.gotson.komga.infrastructure.image.ImageConverter
 import org.gotson.komga.infrastructure.image.ImageType
 import org.springframework.beans.factory.annotation.Qualifier
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.data.domain.Pageable
 import org.springframework.stereotype.Service
@@ -43,6 +44,10 @@ import java.io.File
 import java.net.URLDecoder
 import java.time.LocalDateTime
 import java.time.ZoneId
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import kotlin.io.path.deleteIfExists
 import kotlin.io.path.exists
 import kotlin.io.path.isWritable
@@ -72,17 +77,19 @@ class BookLifecycle(
   private val komgaSettingsProvider: KomgaSettingsProvider,
   @Qualifier("pdfImageType")
   private val pdfImageType: ImageType,
+  @Value("\${komga.analysis-timeout-seconds:1800}")
+  private val analysisTimeoutSeconds: Long,
 ) {
   private val resizeTargetFormat = ImageType.JPEG
 
   fun analyzeAndPersist(book: Book): Set<BookAction> {
     logger.info { "Analyze and persist book: $book" }
-    val media = bookAnalyzer.analyze(book, libraryRepository.findById(book.libraryId).analyzeDimensions)
+    val media = analyzeWithTimeout(book, libraryRepository.findById(book.libraryId).analyzeDimensions)
 
     transactionTemplate.executeWithoutResult {
       // if the number of pages has changed, delete all read progress for that book
       mediaRepository.findById(book.id).let { previous ->
-        if (previous.status == Media.Status.OUTDATED && previous.pageCount != media.pageCount) {
+        if (media.status == Media.Status.READY && previous.status == Media.Status.OUTDATED && previous.pageCount != media.pageCount) {
           val adjustedProgress =
             readProgressRepository
               .findAllByBookId(book.id)
@@ -100,6 +107,34 @@ class BookLifecycle(
     eventPublisher.publishEvent(DomainEvent.BookUpdated(book))
 
     return if (media.status == Media.Status.READY) setOf(BookAction.GENERATE_THUMBNAIL, BookAction.REFRESH_METADATA) else emptySet()
+  }
+
+  private fun analyzeWithTimeout(
+    book: Book,
+    analyzeDimensions: Boolean,
+  ): Media {
+    val executor =
+      Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "book-analysis-${book.id}").apply { isDaemon = true }
+      }
+    val future = executor.submit<Media> { bookAnalyzer.analyze(book, analyzeDimensions) }
+
+    return try {
+      future.get(analysisTimeoutSeconds, TimeUnit.SECONDS)
+    } catch (ex: TimeoutException) {
+      future.cancel(true)
+      logger.error { "Book analysis timed out after ${analysisTimeoutSeconds}s, marking media as error and skipping: $book" }
+      Media(status = Media.Status.ERROR, comment = "ERR_1041", bookId = book.id)
+    } catch (ex: ExecutionException) {
+      logger.error(ex.cause ?: ex) { "Error while analyzing book: $book" }
+      Media(status = Media.Status.ERROR, comment = "ERR_1005", bookId = book.id)
+    } catch (ex: InterruptedException) {
+      Thread.currentThread().interrupt()
+      logger.error(ex) { "Book analysis interrupted: $book" }
+      Media(status = Media.Status.ERROR, comment = "ERR_1005", bookId = book.id)
+    } finally {
+      executor.shutdownNow()
+    }
   }
 
   fun hashAndPersist(book: Book) {
