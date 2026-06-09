@@ -929,7 +929,7 @@ export default Vue.extend({
         marginBottom: this.options.marginBottom,
         marginLeft: this.options.marginLeft,
         cropRois: this.effectiveCropRois(this.pageParity),
-        imageExclusionVersion: 1,
+        imageExclusionVersion: 2,
       })
     },
     emitReflowed() {
@@ -1085,6 +1085,7 @@ export default Vue.extend({
       const candidates = new Uint8Array(tileCount)
       const coloredTiles = new Uint8Array(tileCount)
       const denseTiles = new Uint8Array(tileCount)
+      const texturedTiles = new Uint8Array(tileCount)
 
       for (let tileY = 0; tileY < tileRows; tileY++) {
         for (let tileX = 0; tileX < tileColumns; tileX++) {
@@ -1095,15 +1096,17 @@ export default Vue.extend({
           const metrics = this.imageTileMetrics(pixels, width, xStart, yStart, xEnd, yEnd, threshold)
           const index = tileY * tileColumns + tileX
           const colored = metrics.coloredRatio >= 0.055
-          const dense = metrics.inkRatio >= 0.32 && metrics.coveredRatio >= 0.26
+          const dense = metrics.inkRatio >= 0.24 && metrics.coveredRatio >= 0.20
+          const textured = metrics.inkRatio >= 0.08 && metrics.coveredRatio >= 0.18 && metrics.lumaStdDev >= 38
 
-          if (colored || dense) candidates[index] = 1
+          if (colored || dense || textured) candidates[index] = 1
           if (colored) coloredTiles[index] = 1
           if (dense) denseTiles[index] = 1
+          if (textured) texturedTiles[index] = 1
         }
       }
 
-      return this.collectImageRegions(candidates, coloredTiles, denseTiles, tileColumns, tileRows, tileSize, roi)
+      return this.collectImageRegions(candidates, coloredTiles, denseTiles, texturedTiles, tileColumns, tileRows, tileSize, roi)
     },
     imageTileMetrics(
       pixels: Uint8ClampedArray,
@@ -1113,11 +1116,13 @@ export default Vue.extend({
       xEnd: number,
       yEnd: number,
       threshold: number,
-    ): {inkRatio: number, coloredRatio: number, coveredRatio: number} {
+    ): {inkRatio: number, coloredRatio: number, coveredRatio: number, lumaStdDev: number} {
       let pixelsCount = 0
       let inkPixels = 0
       let coloredPixels = 0
       let coveredPixels = 0
+      let lumaSum = 0
+      let lumaSquareSum = 0
       const coverageThreshold = Math.min(248, threshold + 42)
 
       for (let y = yStart; y < yEnd; y++) {
@@ -1132,23 +1137,29 @@ export default Vue.extend({
           const min = Math.min(r, g, b)
           const luma = 0.299 * r + 0.587 * g + 0.114 * b
           pixelsCount++
+          lumaSum += luma
+          lumaSquareSum += luma * luma
           if (luma < threshold) inkPixels++
           if (luma < coverageThreshold) coveredPixels++
           if (max - min >= 28 && max > 36) coloredPixels++
         }
       }
 
-      if (pixelsCount === 0) return {inkRatio: 0, coloredRatio: 0, coveredRatio: 0}
+      if (pixelsCount === 0) return {inkRatio: 0, coloredRatio: 0, coveredRatio: 0, lumaStdDev: 0}
+      const mean = lumaSum / pixelsCount
+      const variance = Math.max(0, lumaSquareSum / pixelsCount - mean * mean)
       return {
         inkRatio: inkPixels / pixelsCount,
         coloredRatio: coloredPixels / pixelsCount,
         coveredRatio: coveredPixels / pixelsCount,
+        lumaStdDev: Math.sqrt(variance),
       }
     },
     collectImageRegions(
       candidates: Uint8Array,
       coloredTiles: Uint8Array,
       denseTiles: Uint8Array,
+      texturedTiles: Uint8Array,
       tileColumns: number,
       tileRows: number,
       tileSize: number,
@@ -1168,6 +1179,7 @@ export default Vue.extend({
         let componentTiles = 0
         let componentColoredTiles = 0
         let componentDenseTiles = 0
+        let componentTexturedTiles = 0
 
         for (let cursor = 0; cursor < queue.length; cursor++) {
           const index = queue[cursor]
@@ -1180,6 +1192,7 @@ export default Vue.extend({
           componentTiles++
           if (coloredTiles[index]) componentColoredTiles++
           if (denseTiles[index]) componentDenseTiles++
+          if (texturedTiles[index]) componentTexturedTiles++
 
           this.neighborImageTiles(tileX, tileY, tileColumns, tileRows).forEach(next => {
             if (!candidates[next] || visited[next]) return
@@ -1189,7 +1202,7 @@ export default Vue.extend({
         }
 
         const region = this.imageRegionFromTiles(minTileX, minTileY, maxTileX, maxTileY, tileSize, roi)
-        if (this.isLikelyImageRegion(region, roi, componentTiles, componentColoredTiles, componentDenseTiles, minTileX, minTileY, maxTileX, maxTileY)) {
+        if (this.isLikelyImageRegion(region, roi, componentTiles, componentColoredTiles, componentDenseTiles, componentTexturedTiles, minTileX, minTileY, maxTileX, maxTileY)) {
           regions.push(region)
         }
       }
@@ -1217,6 +1230,7 @@ export default Vue.extend({
       componentTiles: number,
       componentColoredTiles: number,
       componentDenseTiles: number,
+      componentTexturedTiles: number,
       minTileX: number,
       minTileY: number,
       maxTileX: number,
@@ -1226,15 +1240,17 @@ export default Vue.extend({
       const fillRatio = componentTiles / rectTiles
       const coloredRatio = componentColoredTiles / Math.max(1, componentTiles)
       const denseRatio = componentDenseTiles / Math.max(1, componentTiles)
+      const texturedRatio = componentTexturedTiles / Math.max(1, componentTiles)
       const roiArea = Math.max(1, roi.w * roi.h)
       const areaRatio = region.w * region.h / roiArea
-      const minWidth = Math.max(48, roi.w * 0.10)
-      const minHeight = Math.max(42, roi.h * 0.055)
+      const minWidth = Math.max(44, roi.w * 0.08)
+      const minHeight = Math.max(36, roi.h * 0.04)
       const spansTextColumn = region.w >= minWidth && region.h >= minHeight
-      const colorImage = coloredRatio >= 0.28 && areaRatio >= 0.012 && fillRatio >= 0.18
-      const denseGraphic = denseRatio >= 0.42 && areaRatio >= 0.025 && fillRatio >= 0.24
+      const colorImage = coloredRatio >= 0.22 && areaRatio >= 0.008 && fillRatio >= 0.16
+      const denseGraphic = denseRatio >= 0.34 && areaRatio >= 0.016 && fillRatio >= 0.20
+      const texturedGraphic = texturedRatio >= 0.42 && areaRatio >= 0.018 && fillRatio >= 0.22
 
-      return spansTextColumn && (colorImage || denseGraphic)
+      return spansTextColumn && (colorImage || denseGraphic || texturedGraphic)
     },
     mergeImageRegions(regions: ImageRegion[]): ImageRegion[] {
       if (regions.length <= 1) return regions

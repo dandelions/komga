@@ -147,6 +147,7 @@ type PageParity = 'odd' | 'even'
 type Column = { start: number, end: number, roi: Roi }
 type TextRow = { start: number, end: number, rowInk: number[] }
 type WordBlock = { x: number, y: number, w: number, h: number }
+type ImageRegion = Roi
 type WordLine = { column: Column, row: TextRow, words: WordBlock[] }
 type BreakItem = { type: 'break' }
 type IndentItem = { type: 'indent', width: number, sourceWidth: number }
@@ -358,7 +359,10 @@ export default Vue.extend({
         this.pageBackground = this.detectPageBackground(context, canvas.width, canvas.height)
 
         const imageData = context.getImageData(0, 0, canvas.width, canvas.height)
-        const ink = this.buildInkMap(imageData, canvas.width, canvas.height)
+        const rawInk = this.buildInkMap(imageData, canvas.width, canvas.height)
+        const initialRoi = this.detectRoi(rawInk, canvas.width, canvas.height)
+        const imageRegions = this.detectImageRegions(imageData.data, canvas.width, canvas.height, initialRoi, this.clampNumber(this.threshold, 50, 230, DEFAULT_THRESHOLD))
+        const ink = this.clearImageRegions(rawInk, canvas.width, canvas.height, imageRegions)
         const roi = this.detectRoi(ink, canvas.width, canvas.height)
         const columns = this.detectColumns(ink, canvas.width, canvas.height, roi)
         const lines = this.detectWordLines(ink, canvas.width, canvas.height, columns)
@@ -433,6 +437,227 @@ export default Vue.extend({
       }
 
       return ink
+    },
+    detectImageRegions(pixels: Uint8ClampedArray, width: number, height: number, roi: Roi, threshold: number): ImageRegion[] {
+      const tileSize = Math.max(12, Math.min(28, Math.round(Math.min(roi.w, roi.h) / 64)))
+      const tileColumns = Math.ceil(roi.w / tileSize)
+      const tileRows = Math.ceil(roi.h / tileSize)
+      const tileCount = tileColumns * tileRows
+      const candidates = new Uint8Array(tileCount)
+      const coloredTiles = new Uint8Array(tileCount)
+      const denseTiles = new Uint8Array(tileCount)
+      const texturedTiles = new Uint8Array(tileCount)
+
+      for (let tileY = 0; tileY < tileRows; tileY++) {
+        for (let tileX = 0; tileX < tileColumns; tileX++) {
+          const xStart = roi.x + tileX * tileSize
+          const yStart = roi.y + tileY * tileSize
+          const xEnd = Math.min(roi.x + roi.w, xStart + tileSize)
+          const yEnd = Math.min(roi.y + roi.h, yStart + tileSize)
+          const metrics = this.imageTileMetrics(pixels, width, xStart, yStart, xEnd, yEnd, threshold)
+          const index = tileY * tileColumns + tileX
+          const colored = metrics.coloredRatio >= 0.055
+          const dense = metrics.inkRatio >= 0.24 && metrics.coveredRatio >= 0.20
+          const textured = metrics.inkRatio >= 0.08 && metrics.coveredRatio >= 0.18 && metrics.lumaStdDev >= 38
+
+          if (colored || dense || textured) candidates[index] = 1
+          if (colored) coloredTiles[index] = 1
+          if (dense) denseTiles[index] = 1
+          if (textured) texturedTiles[index] = 1
+        }
+      }
+
+      return this.collectImageRegions(candidates, coloredTiles, denseTiles, texturedTiles, tileColumns, tileRows, tileSize, roi)
+    },
+    imageTileMetrics(
+      pixels: Uint8ClampedArray,
+      width: number,
+      xStart: number,
+      yStart: number,
+      xEnd: number,
+      yEnd: number,
+      threshold: number,
+    ): {inkRatio: number, coloredRatio: number, coveredRatio: number, lumaStdDev: number} {
+      let pixelsCount = 0
+      let inkPixels = 0
+      let coloredPixels = 0
+      let coveredPixels = 0
+      let lumaSum = 0
+      let lumaSquareSum = 0
+      const coverageThreshold = Math.min(248, threshold + 42)
+
+      for (let y = yStart; y < yEnd; y++) {
+        for (let x = xStart; x < xEnd; x++) {
+          const offset = (y * width + x) * 4
+          const alpha = pixels[offset + 3]
+          if (alpha === 0) continue
+          const r = pixels[offset]
+          const g = pixels[offset + 1]
+          const b = pixels[offset + 2]
+          const max = Math.max(r, g, b)
+          const min = Math.min(r, g, b)
+          const luma = 0.299 * r + 0.587 * g + 0.114 * b
+          pixelsCount++
+          lumaSum += luma
+          lumaSquareSum += luma * luma
+          if (luma < threshold) inkPixels++
+          if (luma < coverageThreshold) coveredPixels++
+          if (max - min >= 28 && max > 36) coloredPixels++
+        }
+      }
+
+      if (pixelsCount === 0) return {inkRatio: 0, coloredRatio: 0, coveredRatio: 0, lumaStdDev: 0}
+      const mean = lumaSum / pixelsCount
+      const variance = Math.max(0, lumaSquareSum / pixelsCount - mean * mean)
+      return {
+        inkRatio: inkPixels / pixelsCount,
+        coloredRatio: coloredPixels / pixelsCount,
+        coveredRatio: coveredPixels / pixelsCount,
+        lumaStdDev: Math.sqrt(variance),
+      }
+    },
+    collectImageRegions(
+      candidates: Uint8Array,
+      coloredTiles: Uint8Array,
+      denseTiles: Uint8Array,
+      texturedTiles: Uint8Array,
+      tileColumns: number,
+      tileRows: number,
+      tileSize: number,
+      roi: Roi,
+    ): ImageRegion[] {
+      const visited = new Uint8Array(candidates.length)
+      const regions = [] as ImageRegion[]
+
+      for (let start = 0; start < candidates.length; start++) {
+        if (!candidates[start] || visited[start]) continue
+        const queue = [start]
+        visited[start] = 1
+        let minTileX = tileColumns
+        let minTileY = tileRows
+        let maxTileX = 0
+        let maxTileY = 0
+        let componentTiles = 0
+        let componentColoredTiles = 0
+        let componentDenseTiles = 0
+        let componentTexturedTiles = 0
+
+        for (let cursor = 0; cursor < queue.length; cursor++) {
+          const index = queue[cursor]
+          const tileX = index % tileColumns
+          const tileY = Math.floor(index / tileColumns)
+          minTileX = Math.min(minTileX, tileX)
+          minTileY = Math.min(minTileY, tileY)
+          maxTileX = Math.max(maxTileX, tileX)
+          maxTileY = Math.max(maxTileY, tileY)
+          componentTiles++
+          if (coloredTiles[index]) componentColoredTiles++
+          if (denseTiles[index]) componentDenseTiles++
+          if (texturedTiles[index]) componentTexturedTiles++
+
+          this.neighborImageTiles(tileX, tileY, tileColumns, tileRows).forEach(next => {
+            if (!candidates[next] || visited[next]) return
+            visited[next] = 1
+            queue.push(next)
+          })
+        }
+
+        const region = this.imageRegionFromTiles(minTileX, minTileY, maxTileX, maxTileY, tileSize, roi)
+        if (this.isLikelyImageRegion(region, roi, componentTiles, componentColoredTiles, componentDenseTiles, componentTexturedTiles, minTileX, minTileY, maxTileX, maxTileY)) {
+          regions.push(region)
+        }
+      }
+
+      return this.mergeImageRegions(regions)
+    },
+    neighborImageTiles(tileX: number, tileY: number, tileColumns: number, tileRows: number): number[] {
+      const neighbors = [] as number[]
+      if (tileX > 0) neighbors.push(tileY * tileColumns + tileX - 1)
+      if (tileX < tileColumns - 1) neighbors.push(tileY * tileColumns + tileX + 1)
+      if (tileY > 0) neighbors.push((tileY - 1) * tileColumns + tileX)
+      if (tileY < tileRows - 1) neighbors.push((tileY + 1) * tileColumns + tileX)
+      return neighbors
+    },
+    imageRegionFromTiles(minTileX: number, minTileY: number, maxTileX: number, maxTileY: number, tileSize: number, roi: Roi): ImageRegion {
+      const x = roi.x + minTileX * tileSize
+      const y = roi.y + minTileY * tileSize
+      const right = Math.min(roi.x + roi.w, roi.x + (maxTileX + 1) * tileSize)
+      const bottom = Math.min(roi.y + roi.h, roi.y + (maxTileY + 1) * tileSize)
+      return {x, y, w: right - x, h: bottom - y}
+    },
+    isLikelyImageRegion(
+      region: ImageRegion,
+      roi: Roi,
+      componentTiles: number,
+      componentColoredTiles: number,
+      componentDenseTiles: number,
+      componentTexturedTiles: number,
+      minTileX: number,
+      minTileY: number,
+      maxTileX: number,
+      maxTileY: number,
+    ): boolean {
+      const rectTiles = Math.max(1, (maxTileX - minTileX + 1) * (maxTileY - minTileY + 1))
+      const fillRatio = componentTiles / rectTiles
+      const coloredRatio = componentColoredTiles / Math.max(1, componentTiles)
+      const denseRatio = componentDenseTiles / Math.max(1, componentTiles)
+      const texturedRatio = componentTexturedTiles / Math.max(1, componentTiles)
+      const roiArea = Math.max(1, roi.w * roi.h)
+      const areaRatio = region.w * region.h / roiArea
+      const minWidth = Math.max(44, roi.w * 0.08)
+      const minHeight = Math.max(36, roi.h * 0.04)
+      const spansTextColumn = region.w >= minWidth && region.h >= minHeight
+      const colorImage = coloredRatio >= 0.22 && areaRatio >= 0.008 && fillRatio >= 0.16
+      const denseGraphic = denseRatio >= 0.34 && areaRatio >= 0.016 && fillRatio >= 0.20
+      const texturedGraphic = texturedRatio >= 0.42 && areaRatio >= 0.018 && fillRatio >= 0.22
+
+      return spansTextColumn && (colorImage || denseGraphic || texturedGraphic)
+    },
+    mergeImageRegions(regions: ImageRegion[]): ImageRegion[] {
+      if (regions.length <= 1) return regions
+      const merged = [] as ImageRegion[]
+
+      regions
+        .slice()
+        .sort((a, b) => a.y - b.y || a.x - b.x)
+        .forEach(region => {
+          const target = merged.find(existing => this.imageRegionsTouch(existing, region))
+          if (target) {
+            const left = Math.min(target.x, region.x)
+            const top = Math.min(target.y, region.y)
+            const right = Math.max(target.x + target.w, region.x + region.w)
+            const bottom = Math.max(target.y + target.h, region.y + region.h)
+            target.x = left
+            target.y = top
+            target.w = right - left
+            target.h = bottom - top
+          } else {
+            merged.push({...region})
+          }
+        })
+
+      return merged
+    },
+    imageRegionsTouch(a: ImageRegion, b: ImageRegion): boolean {
+      const gap = 4
+      return a.x <= b.x + b.w + gap &&
+        a.x + a.w + gap >= b.x &&
+        a.y <= b.y + b.h + gap &&
+        a.y + a.h + gap >= b.y
+    },
+    clearImageRegions(ink: Uint8Array, width: number, height: number, regions: ImageRegion[]): Uint8Array {
+      if (regions.length === 0) return ink
+      const cleared = new Uint8Array(ink)
+      regions.forEach(region => {
+        const left = this.clampNumber(Math.floor(region.x), 0, width - 1, 0)
+        const top = this.clampNumber(Math.floor(region.y), 0, height - 1, 0)
+        const right = this.clampNumber(Math.ceil(region.x + region.w), left + 1, width, width)
+        const bottom = this.clampNumber(Math.ceil(region.y + region.h), top + 1, height, height)
+        for (let y = top; y < bottom; y++) {
+          cleared.fill(0, y * width + left, y * width + right)
+        }
+      })
+      return cleared
     },
     detectPageBackground(context: CanvasRenderingContext2D, width: number, height: number): string {
       const sampleSize = Math.max(2, Math.min(8, Math.floor(Math.min(width, height) * 0.01)))

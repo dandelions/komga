@@ -1098,7 +1098,7 @@ export default Vue.extend({
         marginBottom: this.reflowSettings.marginBottom,
         marginLeft: this.reflowSettings.marginLeft,
         cropRoisByParity: this.reflowSettings.cropRoisByParity,
-        imageExclusionVersion: 1,
+        imageExclusionVersion: 2,
       })
     },
 
