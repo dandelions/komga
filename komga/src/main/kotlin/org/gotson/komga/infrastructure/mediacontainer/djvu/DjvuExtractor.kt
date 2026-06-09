@@ -58,7 +58,6 @@ class DjvuExtractor(
   }
 
   fun getToc(path: Path): List<PdfTocEntry> {
-    val pageIds = getPageIds(path)
     val outline =
       runCommand(
         timeoutSeconds = 60,
@@ -68,6 +67,12 @@ class DjvuExtractor(
         "print-outline",
         path.toString(),
       ).decodeToString()
+    val pageIds =
+      try {
+        getPageIds(path)
+      } catch (_: Exception) {
+        emptyMap()
+      }
 
     return parseDjvuOutline(outline, pageIds)
   }
@@ -163,7 +168,7 @@ private class OutlineParser(
 
   fun parse(): List<PdfTocEntry> {
     if (next() !is OutlineToken.Open) return emptyList()
-    if ((next() as? OutlineToken.Atom)?.value != "bookmarks") return emptyList()
+    if (peek() is OutlineToken.Atom) index++
 
     val entries = mutableListOf<PdfTocEntry>()
     while (peek() !is OutlineToken.Close && peek() != null) {
@@ -175,7 +180,7 @@ private class OutlineParser(
   private fun parseEntry(): PdfTocEntry? {
     if (next() !is OutlineToken.Open) return null
     val title = (next() as? OutlineToken.StringValue)?.value ?: return null
-    val pageNumber = (next() as? OutlineToken.StringValue)?.value?.toPageNumber()
+    val pageNumber = parseTarget()?.toPageNumber()
     val children = mutableListOf<PdfTocEntry>()
 
     while (peek() !is OutlineToken.Close && peek() != null) {
@@ -186,9 +191,32 @@ private class OutlineParser(
     return PdfTocEntry(title = title, pageNumber = pageNumber, children = children)
   }
 
+  private fun parseTarget(): String? =
+    when (val token = next()) {
+      is OutlineToken.StringValue -> token.value
+      is OutlineToken.Open -> {
+        val type = next()
+        val value = next()
+        skipUntilCurrentListEnd()
+        if ((type as? OutlineToken.Atom)?.value == "url") (value as? OutlineToken.StringValue)?.value else null
+      }
+      else -> null
+    }
+
   private fun String.toPageNumber(): Int? {
     val target = removePrefix("#")
     return target.toIntOrNull()?.takeIf { it > 0 } ?: pageIds[target]
+  }
+
+  private fun skipUntilCurrentListEnd() {
+    var depth = 1
+    while (depth > 0 && peek() != null) {
+      when (next()) {
+        is OutlineToken.Open -> depth++
+        is OutlineToken.Close -> depth--
+        else -> Unit
+      }
+    }
   }
 
   private fun peek(): OutlineToken? = tokens.getOrNull(index)
