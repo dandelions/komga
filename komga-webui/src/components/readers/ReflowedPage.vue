@@ -85,14 +85,17 @@
         </label>
         <label class="reflow-spacing-control">
           <span>字体间隔</span>
+          <button type="button" class="reflow-step-control" @click="adjustBlockSpacing(-1)">-</button>
           <input
-            type="number"
+            type="range"
             min="0"
             max="24"
             step="1"
             :value="blockSpacing"
             @input="setBlockSpacing"
           />
+          <button type="button" class="reflow-step-control" @click="adjustBlockSpacing(1)">+</button>
+          <span class="reflow-font-value">{{ blockSpacing }}</span>
         </label>
         <div class="reflow-action-controls">
           <span class="reflow-parity-label">{{ pageParityLabel }}</span>
@@ -123,7 +126,7 @@
             :disabled="!cropRoi && !cropMode"
             @click="resetCrop"
           >
-            重置{{ pageParityLabel }}区域 {{ activeCropRegion + 1 }}
+            重置{{ pageParityShortLabel }}区域{{ activeCropRegion + 1 }}
           </button>
         </div>
       </template>
@@ -459,8 +462,11 @@ export default Vue.extend({
     pageParityLabel(): string {
       return this.pageParity === 'even' ? '偶数页' : '奇数页'
     },
+    pageParityShortLabel(): string {
+      return this.pageParity === 'even' ? '偶数' : '奇数'
+    },
     selectAreaLabel(): string {
-      return this.cropMode ? '完成' : `截取${this.pageParityLabel}区域 ${this.activeCropRegion + 1}`
+      return this.cropMode ? '完成' : `截取${this.pageParityShortLabel}区域${this.activeCropRegion + 1}`
     },
     cropRoi(): Roi | undefined {
       return this.effectiveCropRoi(this.pageParity, this.activeCropRegion)
@@ -2358,6 +2364,9 @@ export default Vue.extend({
       const target = event.target as HTMLInputElement
       this.$emit('block-spacing-change', this.clampNumber(Number(target.value), 0, 24, 6))
     },
+    adjustBlockSpacing(delta: number) {
+      this.$emit('block-spacing-change', this.clampNumber(this.blockSpacing + delta, 0, 24, 6))
+    },
     roundStrokeStrength(value: number): number {
       return Math.round(this.clampNumber(value, 0.1, 3, 0.1) * 10) / 10
     },
@@ -2713,8 +2722,8 @@ export default Vue.extend({
 }
 
 .reflow-spacing-control {
-  flex: 0 0 180px;
-  min-width: 180px;
+  flex: 0 0 280px;
+  min-width: 260px;
 }
 
 .reflow-stroke-control input,
