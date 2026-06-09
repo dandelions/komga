@@ -49,7 +49,8 @@ class EbookConverter(
     val destination = cacheDir.resolve("${path.nameWithoutExtension}-${path.cacheKey()}.epub")
     if (destination.exists()) return destination
 
-    val temp = Files.createTempFile(cacheDir, destination.fileName.toString(), ".tmp")
+    val temp = Files.createTempFile(cacheDir, "${destination.fileName}.", ".epub")
+    temp.deleteIfExists()
     try {
       val command =
         arrayOf(
