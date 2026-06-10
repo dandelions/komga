@@ -119,6 +119,7 @@
           </div>
           <label class="reflow-skew-control">
             <span>手动纠斜</span>
+            <button type="button" class="reflow-step-control" @click="adjustSkewCorrection(-0.5)">-</button>
             <input
               type="range"
               min="-10"
@@ -127,6 +128,7 @@
               :value="skewCorrection"
               @input="setSkewCorrection"
             />
+            <button type="button" class="reflow-step-control" @click="adjustSkewCorrection(0.5)">+</button>
             <span class="reflow-font-value">{{ skewCorrectionLabel }}</span>
           </label>
           <button type="button" class="reflow-control" @click="toggleCropMode">
@@ -2459,6 +2461,9 @@ export default Vue.extend({
     setSkewCorrection(event: Event) {
       const target = event.target as HTMLInputElement
       this.$emit('skew-correction-change', this.normalizedSkewCorrection(Number(target.value)))
+    },
+    adjustSkewCorrection(delta: number) {
+      this.$emit('skew-correction-change', this.normalizedSkewCorrection(this.skewCorrection + delta))
     },
     setVerticalText(event: Event) {
       const target = event.target as HTMLSelectElement

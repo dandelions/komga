@@ -486,7 +486,19 @@
                 step="0.5"
                 thumb-label
                 suffix="°"
-              />
+              >
+                <template v-slot:prepend>
+                  <v-btn icon small @click="adjustReaderSkewCorrection(-0.5)">
+                    <v-icon small>mdi-minus</v-icon>
+                  </v-btn>
+                </template>
+                <template v-slot:append>
+                  <span class="mr-1 text-caption">{{ readerSkewCorrectionLabel }}</span>
+                  <v-btn icon small @click="adjustReaderSkewCorrection(0.5)">
+                    <v-icon small>mdi-plus</v-icon>
+                  </v-btn>
+                </template>
+              </v-slider>
             </v-list-item>
             <v-list-item v-if="!activeReflowMode && readerCropEnabled">
               <span class="mr-2">{{ readerCropPageParityLabel }}</span>
@@ -1274,6 +1286,10 @@ export default Vue.extend({
         this.$store.commit('setWebreaderSkewCorrection', normalized)
       },
     },
+    readerSkewCorrectionLabel(): string {
+      const prefix = this.readerSkewCorrection > 0 ? '+' : ''
+      return `${prefix}${this.readerSkewCorrection.toFixed(1)}°`
+    },
     readerCropRegionsByParity: {
       get: function (): any {
         return this.normalizedReaderCropRegionsByParity(this.settings.cropRegionsByParity)
@@ -1357,6 +1373,9 @@ export default Vue.extend({
           even: [false, false],
         },
       }
+    },
+    adjustReaderSkewCorrection(delta: number) {
+      this.readerSkewCorrection = this.normalizedReaderSkewCorrection(this.readerSkewCorrection + delta)
     },
     normalizedReaderSkewCorrection(value: any): number {
       const numberValue = Number(value)
