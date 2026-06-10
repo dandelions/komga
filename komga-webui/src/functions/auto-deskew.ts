@@ -37,6 +37,7 @@ const MAX_ANGLE = 10
 const ANGLE_STEP = 0.2
 const MIN_ANGLE = 0.2
 const MIN_SCORE_GAIN = 1.0008
+const MIN_BOUNDING_BOX_GAIN = 1.003
 
 export async function detectAutoDeskewAngle(image: DeskewImageSource): Promise<number> {
   const sourceWidth = 'naturalWidth' in image ? image.naturalWidth || image.width : image.width
@@ -66,7 +67,8 @@ export async function detectAutoDeskewAngle(image: DeskewImageSource): Promise<n
 
   const projectionEstimate = estimateProjectionDeskewAngle(points.sampled, width, height)
   const textLineEstimate = estimateTextLineDeskewAngle(points.raw, width, height)
-  return chooseDeskewAngle(projectionEstimate, textLineEstimate)
+  const boundingBoxEstimate = estimateBoundingBoxDeskewAngle(points.sampled, width, height)
+  return chooseDeskewAngle(projectionEstimate, textLineEstimate, boundingBoxEstimate)
 }
 
 function estimateProjectionDeskewAngle(points: InkPoint[], width: number, height: number): AngleEstimate | undefined {
@@ -147,6 +149,55 @@ function estimateTextLineDeskewAngle(points: InkPoint[], width: number, height: 
   if (!horizontal) return vertical
   if (!vertical) return horizontal
   return horizontal.confidence >= vertical.confidence ? horizontal : vertical
+}
+
+function estimateBoundingBoxDeskewAngle(points: InkPoint[], width: number, height: number): AngleEstimate | undefined {
+  const centerX = width / 2
+  const centerY = height / 2
+  const zeroArea = rotatedBoundingBoxArea(points, centerX, centerY, 0)
+  if (zeroArea <= 0) return undefined
+
+  let bestAngle = 0
+  let bestArea = zeroArea
+  for (let angle = -MAX_ANGLE; angle <= MAX_ANGLE; angle += ANGLE_STEP) {
+    if (Math.abs(angle) < MIN_ANGLE) continue
+    const area = rotatedBoundingBoxArea(points, centerX, centerY, angle)
+    if (area > 0 && area < bestArea) {
+      bestArea = area
+      bestAngle = angle
+    }
+  }
+
+  const gain = zeroArea / Math.max(1, bestArea)
+  if (Math.abs(bestAngle) < MIN_ANGLE || gain < MIN_BOUNDING_BOX_GAIN) return undefined
+  return {
+    angle: bestAngle,
+    confidence: gain,
+  }
+}
+
+function rotatedBoundingBoxArea(points: InkPoint[], centerX: number, centerY: number, angle: number): number {
+  const radians = angle * Math.PI / 180
+  const cos = Math.cos(radians)
+  const sin = Math.sin(radians)
+  let minX = Number.MAX_SAFE_INTEGER
+  let maxX = Number.MIN_SAFE_INTEGER
+  let minY = Number.MAX_SAFE_INTEGER
+  let maxY = Number.MIN_SAFE_INTEGER
+
+  points.forEach(point => {
+    const x = point.x - centerX
+    const y = point.y - centerY
+    const rotatedX = x * cos - y * sin
+    const rotatedY = x * sin + y * cos
+    minX = Math.min(minX, rotatedX)
+    maxX = Math.max(maxX, rotatedX)
+    minY = Math.min(minY, rotatedY)
+    maxY = Math.max(maxY, rotatedY)
+  })
+
+  if (maxX <= minX || maxY <= minY) return 0
+  return (maxX - minX) * (maxY - minY)
 }
 
 function estimateBandDeskewAngle(points: InkPoint[], width: number, height: number, direction: 'horizontal' | 'vertical'): AngleEstimate | undefined {
@@ -265,15 +316,30 @@ function detectInkBands(counts: number[], threshold: number, maxBandSize: number
   return bands
 }
 
-function chooseDeskewAngle(projection: AngleEstimate | undefined, textLine: AngleEstimate | undefined): number {
+function chooseDeskewAngle(
+  projection: AngleEstimate | undefined,
+  textLine: AngleEstimate | undefined,
+  boundingBox: AngleEstimate | undefined,
+): number {
   if (textLine && textLine.confidence >= 2) {
+    if (boundingBox && Math.abs(boundingBox.angle - textLine.angle) <= 2.5) {
+      return roundedAngle(textLine.angle * 0.65 + boundingBox.angle * 0.35)
+    }
     if (projection && Math.abs(projection.angle - textLine.angle) <= 2.5) {
       return roundedAngle(textLine.angle * 0.75 + projection.angle * 0.25)
     }
     return roundedAngle(textLine.angle)
   }
 
+  if (boundingBox) {
+    if (projection && Math.abs(projection.angle - boundingBox.angle) <= 2.5) {
+      return roundedAngle(boundingBox.angle * 0.65 + projection.angle * 0.35)
+    }
+    if (boundingBox.confidence >= 1.01) return roundedAngle(boundingBox.angle)
+  }
+
   if (projection) return roundedAngle(projection.angle)
+  if (boundingBox) return roundedAngle(boundingBox.angle)
   if (textLine) return roundedAngle(textLine.angle)
   return 0
 }
