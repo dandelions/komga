@@ -69,27 +69,6 @@
             <option value="4">4</option>
           </select>
         </label>
-        <label class="reflow-column-control">
-          <span>自动纠斜</span>
-          <input
-            type="checkbox"
-            :checked="autoDeskew"
-            @change="setAutoDeskew"
-          />
-        </label>
-        <label class="reflow-skew-control">
-          <span>纠斜</span>
-          <input
-            type="range"
-            min="-10"
-            max="10"
-            step="0.2"
-            :value="skewCorrection"
-            :disabled="autoDeskew"
-            @input="setSkewCorrection"
-          />
-          <span class="reflow-font-value">{{ skewCorrectionLabel }}</span>
-        </label>
         <label class="reflow-stroke-control">
           <span>字体宽度</span>
           <button type="button" class="reflow-step-control" @click="adjustStrokeStrength(-0.1)">-</button>
@@ -138,6 +117,18 @@
               区域 2
             </button>
           </div>
+          <label class="reflow-skew-control">
+            <span>手动纠斜</span>
+            <input
+              type="range"
+              min="-10"
+              max="10"
+              step="0.5"
+              :value="skewCorrection"
+              @input="setSkewCorrection"
+            />
+            <span class="reflow-font-value">{{ skewCorrectionLabel }}</span>
+          </label>
           <button type="button" class="reflow-control" @click="toggleCropMode">
             {{ selectAreaLabel }}
           </button>
@@ -248,14 +239,12 @@
 
 <script lang="ts">
 import Vue from 'vue'
-import {detectAutoDeskewAngle} from '@/functions/auto-deskew'
 import {PageDtoWithUrl} from '@/types/komga-books'
 
 type ReflowOptions = {
   autoCropBorder: boolean,
   textScale: number,
   columnCount: number,
-  autoDeskew: boolean,
   skewCorrection: number,
   threshold: number,
   columnGap: number,
@@ -443,9 +432,6 @@ export default Vue.extend({
       const prefix = this.skewCorrection > 0 ? '+' : ''
       return `${prefix}${this.skewCorrection.toFixed(1)}°`
     },
-    autoDeskew(): boolean {
-      return this.options.autoDeskew === true
-    },
     verticalText(): boolean {
       return this.options.verticalText === true
     },
@@ -627,8 +613,7 @@ export default Vue.extend({
         const regionItems = [] as ReflowItem[][]
         for (const roi of cropRois) {
           const regionSource = this.reflowRegionSource(canvas, roi)
-          const skewCorrection = await this.detectReflowSkewCorrection(regionSource.canvas)
-          if (requestId !== this.requestId) return
+          const skewCorrection = this.skewCorrection
           const sourceCanvas = skewCorrection === 0 ? regionSource.canvas : this.skewCorrectedCanvas(regionSource.canvas, skewCorrection)
           const sourceContext = sourceCanvas.getContext('2d')
           if (!sourceContext) throw new Error('Canvas is unavailable')
@@ -930,7 +915,6 @@ export default Vue.extend({
         url: this.page.url,
         autoCropBorder: this.options.autoCropBorder,
         columnCount: this.options.columnCount,
-        autoDeskew: this.autoDeskew,
         skewCorrection: this.skewCorrection,
         threshold: this.options.threshold,
         columnGap: this.options.columnGap,
@@ -943,7 +927,7 @@ export default Vue.extend({
         marginBottom: this.options.marginBottom,
         marginLeft: this.options.marginLeft,
         cropRois: this.effectiveCropRois(this.pageParity),
-        deskewDetectionVersion: 6,
+        deskewDetectionVersion: 7,
         imageExclusionVersion: 2,
       })
     },
@@ -1004,14 +988,6 @@ export default Vue.extend({
     pageImageUrl(url: string): string {
       const separator = url.includes('?') ? '&' : '?'
       return `${url}${separator}contentNegotiation=false&reflowCacheBust=${Date.now()}`
-    },
-    async detectReflowSkewCorrection(image: HTMLImageElement | HTMLCanvasElement): Promise<number> {
-      if (!this.autoDeskew) return this.skewCorrection
-      try {
-        return await detectAutoDeskewAngle(image)
-      } catch (e) {
-        return 0
-      }
     },
     reflowRegionSource(sourceCanvas: HTMLCanvasElement, cropRoi?: Roi): ReflowRegionSource {
       if (!cropRoi) return {canvas: sourceCanvas}
@@ -1557,7 +1533,7 @@ export default Vue.extend({
       const numberValue = Number(value)
       if (!Number.isFinite(numberValue)) return 0
       const clamped = this.clampNumber(numberValue, -10, 10, 0)
-      return Math.round(clamped * 5) / 5
+      return Math.round(clamped * 2) / 2
     },
     detectVerticalWordLines(isInk: (x: number, y: number) => boolean, roi: Roi): WordLine[] {
       const columns = this.detectVerticalTextColumns(isInk, roi)
@@ -2479,10 +2455,6 @@ export default Vue.extend({
     setColumnCount(event: Event) {
       const target = event.target as HTMLSelectElement
       this.$emit('column-count-change', Math.round(this.clampNumber(Number(target.value), 1, 4, 1)))
-    },
-    setAutoDeskew(event: Event) {
-      const target = event.target as HTMLInputElement
-      this.$emit('auto-deskew-change', target.checked)
     },
     setSkewCorrection(event: Event) {
       const target = event.target as HTMLInputElement

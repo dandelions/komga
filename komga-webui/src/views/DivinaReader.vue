@@ -263,7 +263,6 @@
           :start-at-end="reflowStartAtEnd"
           @text-scale-change="setReflowTextScale"
           @column-count-change="setReflowColumnCount"
-          @auto-deskew-change="setReflowAutoDeskew"
           @skew-correction-change="setReflowSkewCorrection"
           @vertical-text-change="setReflowVerticalText"
           @vertical-direction-change="setReflowVerticalDirection"
@@ -312,14 +311,14 @@
         v-else-if="continuousReader"
         :pages="pages"
         :page.sync="page"
-        :animations="animations"
-        :scale="continuousScale"
-        :sidePadding="sidePadding"
-        :page-margin="pageMargin"
-        :image-filter="normalReaderImageFilter"
-        :auto-deskew="autoDeskew"
-        :crop-regions-by-parity="readerCropRegionsByParity"
-        :active-crop-region="readerActiveCropRegion"
+          :animations="animations"
+          :scale="continuousScale"
+          :sidePadding="sidePadding"
+          :page-margin="pageMargin"
+          :image-filter="normalReaderImageFilter"
+          :skew-correction="readerSkewCorrection"
+          :crop-regions-by-parity="readerCropRegionsByParity"
+          :active-crop-region="readerActiveCropRegion"
         @menu="toggleToolbars()"
         @jump-previous="jumpToPrevious()"
         @jump-next="jumpToNext()"
@@ -335,7 +334,7 @@
         :animations="animations"
         :swipe="readerSwipeEnabled"
         :image-filter="normalReaderImageFilter"
-        :auto-deskew="autoDeskew"
+        :skew-correction="readerSkewCorrection"
         :crop-regions-by-parity="readerCropRegionsByParity"
         :active-crop-region="readerActiveCropRegion"
         @menu="toggleToolbars()"
@@ -476,10 +475,18 @@
               />
             </v-list-item>
             <v-list-item v-if="!activeReflowMode">
-              <settings-switch v-model="autoDeskew" label="自动纠斜"/>
-            </v-list-item>
-            <v-list-item v-if="!activeReflowMode">
               <settings-switch v-model="readerCropEnabled" label="截取区域"/>
+            </v-list-item>
+            <v-list-item v-if="!activeReflowMode && readerCropEnabled">
+              <v-slider
+                v-model="readerSkewCorrection"
+                label="手动纠斜"
+                min="-10"
+                max="10"
+                step="0.5"
+                thumb-label
+                suffix="°"
+              />
             </v-list-item>
             <v-list-item v-if="!activeReflowMode && readerCropEnabled">
               <span class="mr-2">{{ readerCropPageParityLabel }}</span>
@@ -831,7 +838,6 @@ export default Vue.extend({
         autoCropBorder: true,
         textScale: 40,
         columnCount: 1,
-        autoDeskew: false,
         skewCorrection: 0,
         threshold: 185,
         columnGap: 15,
@@ -882,7 +888,7 @@ export default Vue.extend({
         readingDirection: ReadingDirection.LEFT_TO_RIGHT,
         backgroundColor: 'black',
         strokeStrength: 0,
-        autoDeskew: false,
+        skewCorrection: 0,
         cropRegionsByParity: {
           enabled: false,
           odd: null,
@@ -985,7 +991,7 @@ export default Vue.extend({
     this.pageMargin = this.$store.state.persistedState.webreader.continuous.margin
     this.backgroundColor = this.$store.state.persistedState.webreader.background
     this.readerStrokeStrength = this.$store.state.persistedState.webreader.strokeStrength
-    this.autoDeskew = this.$store.state.persistedState.webreader.autoDeskew || false
+    this.readerSkewCorrection = this.normalizedReaderSkewCorrection(this.$store.state.persistedState.webreader.skewCorrection)
     this.readerCropRegionsByParity = this.$store.state.persistedState.webreader.cropRegionsByParity ||
       this.$store.state.persistedState.webreader.cropRegion ||
       this.readerCropRegionsByParity
@@ -1167,7 +1173,6 @@ export default Vue.extend({
         autoCropBorder: this.reflowSettings.autoCropBorder,
         textScale: this.reflowSettings.textScale,
         columnCount: this.reflowSettings.columnCount,
-        autoDeskew: this.reflowSettings.autoDeskew,
         skewCorrection: this.reflowSettings.skewCorrection,
         threshold: this.reflowSettings.threshold,
         columnGap: this.reflowSettings.columnGap,
@@ -1180,7 +1185,7 @@ export default Vue.extend({
         marginBottom: this.reflowSettings.marginBottom,
         marginLeft: this.reflowSettings.marginLeft,
         cropRoisByParity: this.reflowSettings.cropRoisByParity,
-        deskewDetectionVersion: 6,
+        deskewDetectionVersion: 7,
         imageExclusionVersion: 2,
       })
     },
@@ -1259,13 +1264,14 @@ export default Vue.extend({
         this.$store.commit('setWebreaderStrokeStrength', normalized)
       },
     },
-    autoDeskew: {
-      get: function (): boolean {
-        return this.settings.autoDeskew
+    readerSkewCorrection: {
+      get: function (): number {
+        return this.settings.skewCorrection
       },
-      set: function (autoDeskew: boolean): void {
-        this.settings.autoDeskew = autoDeskew
-        this.$store.commit('setWebreaderAutoDeskew', autoDeskew)
+      set: function (skewCorrection: number): void {
+        const normalized = this.normalizedReaderSkewCorrection(skewCorrection)
+        this.settings.skewCorrection = normalized
+        this.$store.commit('setWebreaderSkewCorrection', normalized)
       },
     },
     readerCropRegionsByParity: {
@@ -1351,6 +1357,11 @@ export default Vue.extend({
           even: [false, false],
         },
       }
+    },
+    normalizedReaderSkewCorrection(value: any): number {
+      const numberValue = Number(value)
+      if (!Number.isFinite(numberValue)) return 0
+      return Math.round(this.clampReflowNumber(numberValue, -10, 10, 0) * 2) / 2
     },
     normalizedReaderCropRegionsByParity(value: any): any {
       if (this.normalizedReaderCropRegionValue(value) && !value?.regions && value?.odd === undefined && value?.even === undefined) {
@@ -1884,7 +1895,6 @@ export default Vue.extend({
         autoCropBorder: typeof settings.autoCropBorder === 'boolean' ? settings.autoCropBorder : this.reflowSettings.autoCropBorder,
         textScale: this.clampReflowNumber(settings.textScale, 10, 140, this.reflowSettings.textScale),
         columnCount: Math.round(this.clampReflowNumber(settings.columnCount, 1, 4, this.reflowSettings.columnCount)),
-        autoDeskew: typeof settings.autoDeskew === 'boolean' ? settings.autoDeskew : this.reflowSettings.autoDeskew,
         skewCorrection: this.normalizedReflowSkewCorrection(settings.skewCorrection),
         threshold: this.clampReflowNumber(settings.threshold, 50, 230, this.reflowSettings.threshold),
         columnGap: this.clampReflowNumber(settings.columnGap, 5, 80, this.reflowSettings.columnGap),
@@ -1963,7 +1973,7 @@ export default Vue.extend({
     normalizedReflowSkewCorrection(value: any): number {
       const numberValue = Number(value)
       if (!Number.isFinite(numberValue)) return 0
-      return Math.round(this.clampReflowNumber(numberValue, -10, 10, 0) * 5) / 5
+      return Math.round(this.clampReflowNumber(numberValue, -10, 10, 0) * 2) / 2
     },
     reflowCropRoisOverlap(a: any, b: any): boolean {
       return a.x < b.x + b.w &&
@@ -2079,9 +2089,6 @@ export default Vue.extend({
     },
     setReflowColumnCount(columnCount: number) {
       this.reflowSettings.columnCount = Math.round(Math.max(1, Math.min(4, columnCount)))
-    },
-    setReflowAutoDeskew(autoDeskew: boolean) {
-      this.reflowSettings.autoDeskew = autoDeskew
     },
     setReflowSkewCorrection(skewCorrection: number) {
       this.reflowSettings.skewCorrection = this.normalizedReflowSkewCorrection(skewCorrection)

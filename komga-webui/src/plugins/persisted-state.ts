@@ -21,7 +21,7 @@ export const persistedModule: Module<any, any> = {
       animations: true,
       background: '',
       strokeStrength: 0,
-      autoDeskew: false,
+      skewCorrection: 0,
       cropRegionsByParity: {
         enabled: false,
         odd: null,
@@ -152,8 +152,8 @@ export const persistedModule: Module<any, any> = {
     setWebreaderStrokeStrength(state, val) {
       state.webreader.strokeStrength = val
     },
-    setWebreaderAutoDeskew(state, val) {
-      state.webreader.autoDeskew = val
+    setWebreaderSkewCorrection(state, val) {
+      state.webreader.skewCorrection = val
     },
     setWebreaderCropRegionsByParity(state, val) {
       state.webreader.cropRegionsByParity = val
