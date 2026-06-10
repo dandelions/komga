@@ -318,7 +318,8 @@
         :page-margin="pageMargin"
         :image-filter="normalReaderImageFilter"
         :auto-deskew="autoDeskew"
-        :crop-region="readerCropRegion"
+        :crop-regions-by-parity="readerCropRegionsByParity"
+        :active-crop-region="readerActiveCropRegion"
         @menu="toggleToolbars()"
         @jump-previous="jumpToPrevious()"
         @jump-next="jumpToNext()"
@@ -335,7 +336,8 @@
         :swipe="readerSwipeEnabled"
         :image-filter="normalReaderImageFilter"
         :auto-deskew="autoDeskew"
-        :crop-region="readerCropRegion"
+        :crop-regions-by-parity="readerCropRegionsByParity"
+        :active-crop-region="readerActiveCropRegion"
         @menu="toggleToolbars()"
         @jump-previous="jumpToPrevious()"
         @jump-next="jumpToNext()"
@@ -480,6 +482,9 @@
               <settings-switch v-model="readerCropEnabled" label="截取区域"/>
             </v-list-item>
             <v-list-item v-if="!activeReflowMode && readerCropEnabled">
+              <span class="mr-2">{{ readerCropPageParityLabel }}</span>
+              <v-btn small class="mr-1" :color="readerActiveCropRegion === 0 ? 'primary' : undefined" @click="setReaderActiveCropRegion(0)">区域 1</v-btn>
+              <v-btn small class="mr-2" :color="readerActiveCropRegion === 1 ? 'primary' : undefined" @click="setReaderActiveCropRegion(1)">区域 2</v-btn>
               <v-btn small class="mr-2" @click="startReaderCropMode">设置截取区域</v-btn>
               <v-btn small text @click="clearReaderCropRegion">清除</v-btn>
             </v-list-item>
@@ -878,16 +883,27 @@ export default Vue.extend({
         backgroundColor: 'black',
         strokeStrength: 0,
         autoDeskew: false,
-        cropRegion: {
+        cropRegionsByParity: {
           enabled: false,
-          x: 0,
-          y: 0,
-          w: 100,
-          h: 100,
+          odd: null,
+          even: null,
+          regions: {
+            odd: [null, null],
+            even: [null, null],
+          },
+          explicit: {
+            odd: false,
+            even: false,
+          },
+          explicitRegions: {
+            odd: [false, false],
+            even: [false, false],
+          },
         },
       },
       readerCropMode: false,
       readerCropDrawing: false,
+      readerActiveCropRegion: 0,
       readerCropStart: {x: 0, y: 0},
       readerCropDraft: undefined as undefined | {x: number, y: number, w: number, h: number},
       shortcuts: {} as any,
@@ -970,7 +986,9 @@ export default Vue.extend({
     this.backgroundColor = this.$store.state.persistedState.webreader.background
     this.readerStrokeStrength = this.$store.state.persistedState.webreader.strokeStrength
     this.autoDeskew = this.$store.state.persistedState.webreader.autoDeskew || false
-    this.readerCropRegion = this.$store.state.persistedState.webreader.cropRegion || this.readerCropRegion
+    this.readerCropRegionsByParity = this.$store.state.persistedState.webreader.cropRegionsByParity ||
+      this.$store.state.persistedState.webreader.cropRegion ||
+      this.readerCropRegionsByParity
     this.reflowSettingsBookId = this.bookId
     this.loadReflowSettings(this.bookId)
 
@@ -1100,8 +1118,14 @@ export default Vue.extend({
     activeReflowMode(): boolean {
       return this.isPdf && !this.continuousReader && (this.reflowMode || this.k2ReflowMode)
     },
+    readerCropPageParity(): 'odd' | 'even' {
+      return this.currentPage?.number % 2 === 0 ? 'even' : 'odd'
+    },
+    readerCropPageParityLabel(): string {
+      return this.readerCropPageParity === 'even' ? '偶数页' : '奇数页'
+    },
     readerCropActiveRect(): object | undefined {
-      const region = this.readerCropDraft || (this.readerCropRegion.enabled ? this.readerCropRegion : undefined)
+      const region = this.readerCropDraft || this.effectiveReaderCropRegion(this.readerCropPageParity, this.readerActiveCropRegion)
       if (!region) return undefined
       return {
         left: `${region.x}%`,
@@ -1244,24 +1268,24 @@ export default Vue.extend({
         this.$store.commit('setWebreaderAutoDeskew', autoDeskew)
       },
     },
-    readerCropRegion: {
+    readerCropRegionsByParity: {
       get: function (): any {
-        return this.normalizedReaderCropRegion(this.settings.cropRegion)
+        return this.normalizedReaderCropRegionsByParity(this.settings.cropRegionsByParity)
       },
-      set: function (cropRegion: any): void {
-        const normalized = this.normalizedReaderCropRegion(cropRegion)
-        this.$set(this.settings, 'cropRegion', normalized)
-        this.$store.commit('setWebreaderCropRegion', normalized)
+      set: function (cropRegionsByParity: any): void {
+        const normalized = this.normalizedReaderCropRegionsByParity(cropRegionsByParity)
+        this.$set(this.settings, 'cropRegionsByParity', normalized)
+        this.$store.commit('setWebreaderCropRegionsByParity', normalized)
       },
     },
     readerCropEnabled: {
       get: function (): boolean {
-        return this.readerCropRegion.enabled
+        return this.readerCropRegionsByParity.enabled
       },
       set: function (enabled: boolean): void {
-        const current = this.readerCropRegion
-        this.readerCropRegion = {...current, enabled}
-        const hasSavedRegion = current.w < 99 || current.h < 99 || current.x > 0.5 || current.y > 0.5
+        const current = this.readerCropRegionsByParity
+        this.readerCropRegionsByParity = {...current, enabled}
+        const hasSavedRegion = !!this.effectiveReaderCropRegion(this.readerCropPageParity, this.readerActiveCropRegion)
         if (enabled && !hasSavedRegion) this.$nextTick(() => this.startReaderCropMode())
       },
     },
@@ -1309,32 +1333,124 @@ export default Vue.extend({
     },
   },
   methods: {
-    normalizedReaderCropRegion(region: any): any {
+    emptyReaderCropRegionsByParity(enabled: boolean = false): any {
+      return {
+        enabled,
+        odd: null,
+        even: null,
+        regions: {
+          odd: [null, null],
+          even: [null, null],
+        },
+        explicit: {
+          odd: false,
+          even: false,
+        },
+        explicitRegions: {
+          odd: [false, false],
+          even: [false, false],
+        },
+      }
+    },
+    normalizedReaderCropRegionsByParity(value: any): any {
+      if (this.normalizedReaderCropRegionValue(value) && !value?.regions && value?.odd === undefined && value?.even === undefined) {
+        const migrated = this.normalizedReaderCropRegionValue(value)
+        const enabled = value?.enabled === true && !!migrated
+        return {
+          enabled,
+          odd: enabled ? migrated : null,
+          even: enabled ? migrated : null,
+          regions: {
+            odd: [enabled ? migrated : null, null],
+            even: [enabled ? migrated : null, null],
+          },
+          explicit: {
+            odd: enabled,
+            even: enabled,
+          },
+          explicitRegions: {
+            odd: [enabled, false],
+            even: [enabled, false],
+          },
+        }
+      }
+
+      const odd = this.normalizedReaderCropRegionArray(value, 'odd')
+      const even = this.normalizedReaderCropRegionArray(value, 'even')
+      const oddExplicit = this.normalizedReaderCropExplicitArray(value, 'odd', odd)
+      const evenExplicit = this.normalizedReaderCropExplicitArray(value, 'even', even)
+      return {
+        enabled: value?.enabled === true,
+        odd: oddExplicit[0] ? odd[0] : null,
+        even: evenExplicit[0] ? even[0] : null,
+        regions: {
+          odd: odd.map((region, index) => oddExplicit[index] ? region : null),
+          even: even.map((region, index) => evenExplicit[index] ? region : null),
+        },
+        explicit: {
+          odd: oddExplicit[0],
+          even: evenExplicit[0],
+        },
+        explicitRegions: {
+          odd: oddExplicit,
+          even: evenExplicit,
+        },
+      }
+    },
+    normalizedReaderCropRegionArray(value: any, parity: 'odd' | 'even'): Array<any | null> {
+      const regions = value?.regions?.[parity] || []
+      const normalized = [
+        this.normalizedReaderCropRegionValue(regions[0]) || this.normalizedReaderCropRegionValue(value?.[parity]),
+        this.normalizedReaderCropRegionValue(regions[1]),
+      ]
+      if (normalized[0] && normalized[1] && this.readerCropRegionsOverlap(normalized[0], normalized[1])) normalized[1] = null
+      return normalized
+    },
+    normalizedReaderCropExplicitArray(value: any, parity: 'odd' | 'even', regions: Array<any | null>): boolean[] {
+      const explicitRegions = value?.explicitRegions?.[parity] || []
+      return [
+        regions[0] ? (explicitRegions[0] ?? value?.explicit?.[parity]) !== false : false,
+        regions[1] ? explicitRegions[1] !== false : false,
+      ]
+    },
+    normalizedReaderCropRegionValue(region: any): any | null {
+      if (!region) return null
       const x = this.clampReaderCropNumber(region?.x, 0)
       const y = this.clampReaderCropNumber(region?.y, 0)
       const w = this.clampReaderCropNumber(region?.w, 100)
       const h = this.clampReaderCropNumber(region?.h, 100)
-      const normalized = {
-        enabled: region?.enabled === true,
+      return {
         x: Math.min(95, x),
         y: Math.min(95, y),
         w: Math.max(5, Math.min(100 - Math.min(95, x), w)),
         h: Math.max(5, Math.min(100 - Math.min(95, y), h)),
       }
-      if (normalized.w >= 99 && normalized.h >= 99 && normalized.x <= 0.5 && normalized.y <= 0.5) normalized.enabled = false
-      return normalized
     },
     clampReaderCropNumber(value: any, fallback: number): number {
       const numberValue = Number(value)
       if (!Number.isFinite(numberValue)) return fallback
       return Math.round(Math.max(0, Math.min(100, numberValue)) * 10) / 10
     },
+    effectiveReaderCropRegion(parity: 'odd' | 'even', regionIndex: number): any | undefined {
+      const regions = this.readerCropRegionsByParity
+      if (!regions.enabled) return undefined
+      const current = regions.regions?.[parity]?.[regionIndex]
+      if (current) return current
+      const fallbackParity = parity === 'odd' ? 'even' : 'odd'
+      return regions.regions?.[fallbackParity]?.[regionIndex] || undefined
+    },
+    setReaderActiveCropRegion(region: number) {
+      this.readerActiveCropRegion = region === 1 ? 1 : 0
+      this.readerCropDraft = undefined
+      this.readerCropDrawing = false
+    },
     startReaderCropMode() {
       if (!this.currentPage?.url) return
       this.showSettings = false
       this.readerCropMode = true
       this.readerCropDrawing = false
-      this.readerCropDraft = this.readerCropRegion.enabled ? {...this.readerCropRegion} : undefined
+      const current = this.effectiveReaderCropRegion(this.readerCropPageParity, this.readerActiveCropRegion)
+      this.readerCropDraft = current ? {...current} : undefined
     },
     cancelReaderCropMode() {
       this.readerCropMode = false
@@ -1342,7 +1458,7 @@ export default Vue.extend({
       this.readerCropDraft = undefined
     },
     clearReaderCropRegion() {
-      this.readerCropRegion = {enabled: false, x: 0, y: 0, w: 100, h: 100}
+      this.setReaderCropRegion(this.readerCropPageParity, this.readerActiveCropRegion, null)
       this.readerCropMode = false
       this.readerCropDrawing = false
       this.readerCropDraft = undefined
@@ -1366,7 +1482,7 @@ export default Vue.extend({
       this.readerCropDrawing = false
       const region = this.normalizedReaderCropRect(this.readerCropStart, this.readerCropPoint(event))
       if (region.w >= 5 && region.h >= 5) {
-        this.readerCropRegion = {...region, enabled: true}
+        this.setReaderCropRegion(this.readerCropPageParity, this.readerActiveCropRegion, region)
         this.readerCropMode = false
         this.readerCropDraft = undefined
       }
@@ -1396,6 +1512,39 @@ export default Vue.extend({
         w: Math.round((right - left) * 10) / 10,
         h: Math.round((bottom - top) * 10) / 10,
       }
+    },
+    setReaderCropRegion(parity: 'odd' | 'even', regionIndex: number, region: any | null) {
+      const current = this.normalizedReaderCropRegionsByParity(this.readerCropRegionsByParity)
+      const regions = {
+        odd: (current.regions.odd || [null, null]).slice(0, 2),
+        even: (current.regions.even || [null, null]).slice(0, 2),
+      }
+      const explicitRegions = {
+        odd: (current.explicitRegions.odd || [false, false]).slice(0, 2),
+        even: (current.explicitRegions.even || [false, false]).slice(0, 2),
+      }
+      regions[parity][regionIndex] = region
+      explicitRegions[parity][regionIndex] = !!region
+      const next = {
+        ...current,
+        enabled: true,
+        regions,
+        explicitRegions,
+        odd: regions.odd[0],
+        even: regions.even[0],
+        explicit: {
+          odd: explicitRegions.odd[0],
+          even: explicitRegions.even[0],
+        },
+      }
+      const hasAnyRegion = !!regions.odd[0] || !!regions.odd[1] || !!regions.even[0] || !!regions.even[1]
+      this.readerCropRegionsByParity = hasAnyRegion ? next : this.emptyReaderCropRegionsByParity(false)
+    },
+    readerCropRegionsOverlap(a: any, b: any): boolean {
+      return a.x < b.x + b.w &&
+        a.x + a.w > b.x &&
+        a.y < b.y + b.h &&
+        a.y + a.h > b.y
     },
     enterFullscreen() {
       if (screenfull.isEnabled) return screenfull.request(document.documentElement, {navigationUI: 'hide'})

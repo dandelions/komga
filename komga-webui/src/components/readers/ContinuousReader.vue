@@ -45,11 +45,19 @@ import {throttle} from 'lodash'
 import {detectAutoDeskewAngle} from '@/functions/auto-deskew'
 
 type CropRegion = {
-  enabled: boolean,
   x: number,
   y: number,
   w: number,
   h: number,
+}
+
+type PageParity = 'odd' | 'even'
+
+type CropRegionsByParity = {
+  enabled: boolean,
+  odd?: CropRegion | null,
+  even?: CropRegion | null,
+  regions?: Partial<Record<PageParity, Array<CropRegion | null | undefined>>>,
 }
 
 export default Vue.extend({
@@ -97,9 +105,13 @@ export default Vue.extend({
       type: Boolean,
       default: false,
     },
-    cropRegion: {
-      type: Object as () => CropRegion,
-      default: () => ({enabled: false, x: 0, y: 0, w: 100, h: 100}),
+    cropRegionsByParity: {
+      type: Object as () => CropRegionsByParity,
+      default: () => ({enabled: false}),
+    },
+    activeCropRegion: {
+      type: Number,
+      default: 0,
     },
   },
   watch: {
@@ -207,18 +219,18 @@ export default Vue.extend({
     },
     pageStyle(page: PageDtoWithUrl, index: number): object {
       const angle = this.autoDeskew ? this.deskewAngles[page.number] || 0 : 0
+      const crop = this.effectiveCropRegion(page.number)
       return {
         margin: `${index === 0 ? 0 : this.pageMargin}px auto`,
         filter: this.imageFilter,
-        clipPath: this.cropClipPath(),
-        transform: this.imageTransform(angle),
+        clipPath: this.cropClipPath(crop),
+        transform: this.imageTransform(angle, crop),
         transformOrigin: 'center center',
       }
     },
-    imageTransform(angle: number): string | undefined {
+    imageTransform(angle: number, crop: CropRegion | undefined): string | undefined {
       const transforms = [] as string[]
-      const crop = this.normalizedCropRegion()
-      if (crop.enabled) {
+      if (crop) {
         const scaleX = 100 / crop.w
         const scaleY = 100 / crop.h
         const scale = Math.min(2.5, Math.max(scaleX, scaleY))
@@ -231,20 +243,27 @@ export default Vue.extend({
       if (deskewTransform) transforms.push(deskewTransform)
       return transforms.join(' ') || undefined
     },
-    cropClipPath(): string | undefined {
-      const crop = this.normalizedCropRegion()
-      if (!crop.enabled) return undefined
+    cropClipPath(crop: CropRegion | undefined): string | undefined {
+      if (!crop) return undefined
       const right = Math.max(0, 100 - crop.x - crop.w)
       const bottom = Math.max(0, 100 - crop.y - crop.h)
       return `inset(${crop.y}% ${right}% ${bottom}% ${crop.x}%)`
     },
-    normalizedCropRegion(): CropRegion {
-      const crop = this.cropRegion || {enabled: false, x: 0, y: 0, w: 100, h: 100}
+    effectiveCropRegion(pageNumber: number): CropRegion | undefined {
+      const crops = this.cropRegionsByParity
+      if (!crops?.enabled) return undefined
+      const parity = pageNumber % 2 === 0 ? 'even' : 'odd'
+      const index = this.activeCropRegion === 1 ? 1 : 0
+      return this.normalizedCropRegion(crops.regions?.[parity]?.[index] || (index === 0 ? crops[parity] : undefined)) ||
+        this.normalizedCropRegion(crops.regions?.[parity === 'odd' ? 'even' : 'odd']?.[index])
+    },
+    normalizedCropRegion(crop: CropRegion | null | undefined): CropRegion | undefined {
+      if (!crop) return undefined
       const x = this.clampCropNumber(crop.x, 0)
       const y = this.clampCropNumber(crop.y, 0)
       const w = Math.max(5, Math.min(100 - x, this.clampCropNumber(crop.w, 100)))
       const h = Math.max(5, Math.min(100 - y, this.clampCropNumber(crop.h, 100)))
-      return {enabled: crop.enabled === true, x, y, w, h}
+      return {x, y, w, h}
     },
     clampCropNumber(value: number, fallback: number): number {
       const numberValue = Number(value)
