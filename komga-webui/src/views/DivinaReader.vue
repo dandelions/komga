@@ -1180,7 +1180,7 @@ export default Vue.extend({
         marginBottom: this.reflowSettings.marginBottom,
         marginLeft: this.reflowSettings.marginLeft,
         cropRoisByParity: this.reflowSettings.cropRoisByParity,
-        deskewDetectionVersion: 3,
+        deskewDetectionVersion: 4,
         imageExclusionVersion: 2,
       })
     },

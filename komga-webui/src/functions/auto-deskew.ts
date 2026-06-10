@@ -27,6 +27,8 @@ type BandStats = {
   endCount: number,
 }
 
+type DeskewImageSource = HTMLImageElement | HTMLCanvasElement
+
 const MAX_SAMPLE_SIDE = 640
 const LUMA_THRESHOLD = 185
 const MAX_POINTS = 24000
@@ -36,9 +38,9 @@ const ANGLE_STEP = 0.2
 const MIN_ANGLE = 0.2
 const MIN_SCORE_GAIN = 1.0008
 
-export async function detectAutoDeskewAngle(image: HTMLImageElement): Promise<number> {
-  const sourceWidth = image.naturalWidth || image.width
-  const sourceHeight = image.naturalHeight || image.height
+export async function detectAutoDeskewAngle(image: DeskewImageSource): Promise<number> {
+  const sourceWidth = 'naturalWidth' in image ? image.naturalWidth || image.width : image.width
+  const sourceHeight = 'naturalHeight' in image ? image.naturalHeight || image.height : image.height
   if (sourceWidth <= 0 || sourceHeight <= 0) return 0
 
   const scale = Math.min(1, MAX_SAMPLE_SIDE / Math.max(sourceWidth, sourceHeight))

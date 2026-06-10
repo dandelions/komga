@@ -342,6 +342,11 @@ type ReflowCachePayload = {
   pageBackground: string,
 }
 
+type ReflowRegionSource = {
+  canvas: HTMLCanvasElement,
+  detectionRoi?: Roi,
+}
+
 const THRESHOLD = 185
 const COLUMN_GAP = 15
 const WORD_GAP = 3
@@ -618,17 +623,19 @@ export default Vue.extend({
         if (!context) throw new Error('Canvas is unavailable')
         context.drawImage(image, 0, 0)
         this.pageBackground = this.detectPageBackground(context, canvas.width, canvas.height)
-        const skewCorrection = await this.detectReflowSkewCorrection(image)
-        if (requestId !== this.requestId) return
-        const sourceCanvas = skewCorrection === 0 ? canvas : this.skewCorrectedCanvas(canvas, skewCorrection)
-        const sourceContext = sourceCanvas.getContext('2d')
-        if (!sourceContext) throw new Error('Canvas is unavailable')
-        const imageData = sourceContext.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height)
         const cropRois = this.reflowCropRois()
-        const regionItems = cropRois.map(roi => {
-          const lines = this.detectWordLines(imageData, sourceCanvas.width, sourceCanvas.height, roi)
-          return this.renderReflowItems(sourceCanvas, lines)
-        })
+        const regionItems = [] as ReflowItem[][]
+        for (const roi of cropRois) {
+          const regionSource = this.reflowRegionSource(canvas, roi)
+          const skewCorrection = await this.detectReflowSkewCorrection(regionSource.canvas)
+          if (requestId !== this.requestId) return
+          const sourceCanvas = skewCorrection === 0 ? regionSource.canvas : this.skewCorrectedCanvas(regionSource.canvas, skewCorrection)
+          const sourceContext = sourceCanvas.getContext('2d')
+          if (!sourceContext) throw new Error('Canvas is unavailable')
+          const imageData = sourceContext.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height)
+          const lines = this.detectWordLines(imageData, sourceCanvas.width, sourceCanvas.height, regionSource.detectionRoi)
+          regionItems.push(this.renderReflowItems(sourceCanvas, lines))
+        }
         if (requestId !== this.requestId) return
         this.reflowItems = this.joinRegionReflowItems(regionItems)
         this.repaginate()
@@ -936,7 +943,7 @@ export default Vue.extend({
         marginBottom: this.options.marginBottom,
         marginLeft: this.options.marginLeft,
         cropRois: this.effectiveCropRois(this.pageParity),
-        deskewDetectionVersion: 3,
+        deskewDetectionVersion: 4,
         imageExclusionVersion: 2,
       })
     },
@@ -998,12 +1005,29 @@ export default Vue.extend({
       const separator = url.includes('?') ? '&' : '?'
       return `${url}${separator}contentNegotiation=false&reflowCacheBust=${Date.now()}`
     },
-    async detectReflowSkewCorrection(image: HTMLImageElement): Promise<number> {
+    async detectReflowSkewCorrection(image: HTMLImageElement | HTMLCanvasElement): Promise<number> {
       if (!this.autoDeskew) return this.skewCorrection
       try {
         return await detectAutoDeskewAngle(image)
       } catch (e) {
         return 0
+      }
+    },
+    reflowRegionSource(sourceCanvas: HTMLCanvasElement, cropRoi?: Roi): ReflowRegionSource {
+      if (!cropRoi) return {canvas: sourceCanvas}
+
+      const roi = this.clampRoi(cropRoi, sourceCanvas.width, sourceCanvas.height)
+      const canvas = document.createElement('canvas')
+      canvas.width = roi.w
+      canvas.height = roi.h
+      const context = canvas.getContext('2d')
+      if (!context) return {canvas: sourceCanvas}
+      context.fillStyle = this.pageBackground || '#fff'
+      context.fillRect(0, 0, canvas.width, canvas.height)
+      context.drawImage(sourceCanvas, roi.x, roi.y, roi.w, roi.h, 0, 0, roi.w, roi.h)
+      return {
+        canvas,
+        detectionRoi: {x: 0, y: 0, w: canvas.width, h: canvas.height},
       }
     },
     detectPageBackground(context: CanvasRenderingContext2D, width: number, height: number): string {
