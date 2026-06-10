@@ -8,9 +8,9 @@ const LUMA_THRESHOLD = 185
 const MAX_POINTS = 24000
 const MIN_POINTS = 300
 const MAX_ANGLE = 10
-const ANGLE_STEP = 0.25
-const MIN_ANGLE = 0.5
-const MIN_SCORE_GAIN = 1.004
+const ANGLE_STEP = 0.2
+const MIN_ANGLE = 0.2
+const MIN_SCORE_GAIN = 1.0008
 
 export async function detectAutoDeskewAngle(image: HTMLImageElement): Promise<number> {
   const sourceWidth = image.naturalWidth || image.width
@@ -62,6 +62,8 @@ function collectInkPoints(data: ImageData, width: number, height: number): InkPo
   const rawPoints: InkPoint[] = []
   const marginX = Math.floor(width * 0.03)
   const marginY = Math.floor(height * 0.03)
+  let lumaSum = 0
+  let sampleCount = 0
 
   for (let y = marginY; y < height - marginY; y++) {
     for (let x = marginX; x < width - marginX; x++) {
@@ -73,7 +75,25 @@ function collectInkPoints(data: ImageData, width: number, height: number): InkPo
       const green = data.data[index + 1]
       const blue = data.data[index + 2]
       const luma = red * 0.299 + green * 0.587 + blue * 0.114
-      if (luma < LUMA_THRESHOLD) rawPoints.push({x, y})
+      lumaSum += luma
+      sampleCount++
+    }
+  }
+
+  const averageLuma = sampleCount > 0 ? lumaSum / sampleCount : 255
+  const threshold = Math.max(LUMA_THRESHOLD, Math.min(220, averageLuma - 28))
+
+  for (let y = marginY; y < height - marginY; y++) {
+    for (let x = marginX; x < width - marginX; x++) {
+      const index = (y * width + x) * 4
+      const alpha = data.data[index + 3]
+      if (alpha < 32) continue
+
+      const red = data.data[index]
+      const green = data.data[index + 1]
+      const blue = data.data[index + 2]
+      const luma = red * 0.299 + green * 0.587 + blue * 0.114
+      if (luma < threshold) rawPoints.push({x, y})
     }
   }
 

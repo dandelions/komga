@@ -77,15 +77,18 @@
             @change="setAutoDeskew"
           />
         </label>
-        <label class="reflow-column-control">
+        <label class="reflow-skew-control">
           <span>纠斜</span>
-          <select :value="skewCorrection" :disabled="autoDeskew" @change="setSkewCorrection">
-            <option value="0">0°</option>
-            <option value="5">+5°</option>
-            <option value="10">+10°</option>
-            <option value="-5">-5°</option>
-            <option value="-10">-10°</option>
-          </select>
+          <input
+            type="range"
+            min="-10"
+            max="10"
+            step="0.2"
+            :value="skewCorrection"
+            :disabled="autoDeskew"
+            @input="setSkewCorrection"
+          />
+          <span class="reflow-font-value">{{ skewCorrectionLabel }}</span>
         </label>
         <label class="reflow-stroke-control">
           <span>字体宽度</span>
@@ -430,6 +433,10 @@ export default Vue.extend({
     },
     skewCorrection(): number {
       return this.normalizedSkewCorrection(this.options.skewCorrection)
+    },
+    skewCorrectionLabel(): string {
+      const prefix = this.skewCorrection > 0 ? '+' : ''
+      return `${prefix}${this.skewCorrection.toFixed(1)}°`
     },
     autoDeskew(): boolean {
       return this.options.autoDeskew === true
@@ -929,6 +936,7 @@ export default Vue.extend({
         marginBottom: this.options.marginBottom,
         marginLeft: this.options.marginLeft,
         cropRois: this.effectiveCropRois(this.pageParity),
+        deskewDetectionVersion: 2,
         imageExclusionVersion: 2,
       })
     },
@@ -1523,7 +1531,9 @@ export default Vue.extend({
     },
     normalizedSkewCorrection(value: number | undefined): number {
       const numberValue = Number(value)
-      return [-10, -5, 0, 5, 10].includes(numberValue) ? numberValue : 0
+      if (!Number.isFinite(numberValue)) return 0
+      const clamped = this.clampNumber(numberValue, -10, 10, 0)
+      return Math.round(clamped * 5) / 5
     },
     detectVerticalWordLines(isInk: (x: number, y: number) => boolean, roi: Roi): WordLine[] {
       const columns = this.detectVerticalTextColumns(isInk, roi)
@@ -2451,7 +2461,7 @@ export default Vue.extend({
       this.$emit('auto-deskew-change', target.checked)
     },
     setSkewCorrection(event: Event) {
-      const target = event.target as HTMLSelectElement
+      const target = event.target as HTMLInputElement
       this.$emit('skew-correction-change', this.normalizedSkewCorrection(Number(target.value)))
     },
     setVerticalText(event: Event) {
@@ -2815,7 +2825,8 @@ export default Vue.extend({
 }
 
 .reflow-stroke-control,
-.reflow-spacing-control {
+.reflow-spacing-control,
+.reflow-skew-control {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -2835,10 +2846,20 @@ export default Vue.extend({
   min-width: 260px;
 }
 
+.reflow-skew-control {
+  flex: 0 0 260px;
+  min-width: 240px;
+}
+
 .reflow-stroke-control input,
-.reflow-spacing-control input {
+.reflow-spacing-control input,
+.reflow-skew-control input {
   flex: 1;
   min-width: 100px;
+}
+
+.reflow-skew-control input:disabled {
+  opacity: 0.55;
 }
 
 .reflow-column-control {
@@ -2907,6 +2928,7 @@ export default Vue.extend({
 .reflowed-page-dark .reflow-font-control,
 .reflowed-page-dark .reflow-stroke-control,
 .reflowed-page-dark .reflow-spacing-control,
+.reflowed-page-dark .reflow-skew-control,
 .reflowed-page-dark .reflow-column-control,
 .reflowed-page-dark .reflow-parity-label,
 .reflowed-page-dark .reflow-page-indicator {

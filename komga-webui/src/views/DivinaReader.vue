@@ -1098,6 +1098,7 @@ export default Vue.extend({
         marginBottom: this.reflowSettings.marginBottom,
         marginLeft: this.reflowSettings.marginLeft,
         cropRoisByParity: this.reflowSettings.cropRoisByParity,
+        deskewDetectionVersion: 2,
         imageExclusionVersion: 2,
       })
     },
@@ -1645,7 +1646,8 @@ export default Vue.extend({
     },
     normalizedReflowSkewCorrection(value: any): number {
       const numberValue = Number(value)
-      return [-10, -5, 0, 5, 10].includes(numberValue) ? numberValue : 0
+      if (!Number.isFinite(numberValue)) return 0
+      return Math.round(this.clampReflowNumber(numberValue, -10, 10, 0) * 5) / 5
     },
     reflowCropRoisOverlap(a: any, b: any): boolean {
       return a.x < b.x + b.w &&
