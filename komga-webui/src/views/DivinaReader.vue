@@ -1259,7 +1259,10 @@ export default Vue.extend({
         return this.readerCropRegion.enabled
       },
       set: function (enabled: boolean): void {
-        this.readerCropRegion = {...this.readerCropRegion, enabled}
+        const current = this.readerCropRegion
+        this.readerCropRegion = {...current, enabled}
+        const hasSavedRegion = current.w < 99 || current.h < 99 || current.x > 0.5 || current.y > 0.5
+        if (enabled && !hasSavedRegion) this.$nextTick(() => this.startReaderCropMode())
       },
     },
     readingDirection: {
@@ -2222,7 +2225,7 @@ export default Vue.extend({
 .reader-crop-panel {
   position: fixed;
   inset: 0;
-  z-index: 10;
+  z-index: 300;
   display: flex;
   flex-direction: column;
   align-items: center;
