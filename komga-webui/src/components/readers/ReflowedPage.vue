@@ -943,7 +943,7 @@ export default Vue.extend({
         marginBottom: this.options.marginBottom,
         marginLeft: this.options.marginLeft,
         cropRois: this.effectiveCropRois(this.pageParity),
-        deskewDetectionVersion: 5,
+        deskewDetectionVersion: 6,
         imageExclusionVersion: 2,
       })
     },

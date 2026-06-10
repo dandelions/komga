@@ -67,8 +67,9 @@ export async function detectAutoDeskewAngle(image: DeskewImageSource): Promise<n
 
   const projectionEstimate = estimateProjectionDeskewAngle(points.sampled, width, height)
   const textLineEstimate = estimateTextLineDeskewAngle(points.raw, width, height)
+  const textEdgeEstimate = estimateTextEdgeDeskewAngle(points.sampled, width, height)
   const boundingBoxEstimate = estimateBoundingBoxDeskewAngle(points.sampled, width, height)
-  return chooseDeskewAngle(projectionEstimate, textLineEstimate, boundingBoxEstimate)
+  return chooseDeskewAngle(projectionEstimate, textLineEstimate, textEdgeEstimate, boundingBoxEstimate)
 }
 
 function estimateProjectionDeskewAngle(points: InkPoint[], width: number, height: number): AngleEstimate | undefined {
@@ -149,6 +150,95 @@ function estimateTextLineDeskewAngle(points: InkPoint[], width: number, height: 
   if (!horizontal) return vertical
   if (!vertical) return horizontal
   return horizontal.confidence >= vertical.confidence ? horizontal : vertical
+}
+
+function estimateTextEdgeDeskewAngle(points: InkPoint[], width: number, height: number): AngleEstimate | undefined {
+  const horizontal = estimateAxisEdgeDeskewAngle(points, width, 'horizontal')
+  const vertical = estimateAxisEdgeDeskewAngle(points, height, 'vertical')
+  if (!horizontal) return vertical
+  if (!vertical) return horizontal
+  return horizontal.confidence >= vertical.confidence ? horizontal : vertical
+}
+
+function estimateAxisEdgeDeskewAngle(points: InkPoint[], axisSize: number, direction: 'horizontal' | 'vertical'): AngleEstimate | undefined {
+  const binCount = Math.max(12, Math.min(48, Math.floor(axisSize / 18)))
+  const minBinPoints = Math.max(5, Math.floor(points.length / binCount / 8))
+  const bins = Array.from({length: binCount}, () => [] as number[])
+  const binWidth = axisSize / binCount
+
+  points.forEach(point => {
+    const axis = direction === 'horizontal' ? point.x : point.y
+    const value = direction === 'horizontal' ? point.y : point.x
+    const bin = Math.max(0, Math.min(binCount - 1, Math.floor(axis / binWidth)))
+    bins[bin].push(value)
+  })
+
+  const leading = [] as InkPoint[]
+  const trailing = [] as InkPoint[]
+  bins.forEach((values, index) => {
+    if (values.length < minBinPoints) return
+    values.sort((a, b) => a - b)
+    const axis = (index + 0.5) * binWidth
+    leading.push({x: axis, y: quantile(values, 0.08)})
+    trailing.push({x: axis, y: quantile(values, 0.92)})
+  })
+
+  const leadingAngle = estimateEdgeAngle(leading, direction)
+  const trailingAngle = estimateEdgeAngle(trailing, direction)
+  if (!leadingAngle || !trailingAngle) return undefined
+  if (Math.sign(leadingAngle.angle) !== Math.sign(trailingAngle.angle)) return undefined
+  if (Math.abs(leadingAngle.angle - trailingAngle.angle) > 1.6) return undefined
+
+  return {
+    angle: roundedAngle((leadingAngle.angle * leadingAngle.confidence + trailingAngle.angle * trailingAngle.confidence) /
+      Math.max(1, leadingAngle.confidence + trailingAngle.confidence)),
+    confidence: leadingAngle.confidence + trailingAngle.confidence,
+  }
+}
+
+function estimateEdgeAngle(edge: InkPoint[], direction: 'horizontal' | 'vertical'): AngleEstimate | undefined {
+  if (edge.length < 8) return undefined
+  const fit = linearRegression(edge)
+  if (!fit || fit.r2 < 0.55) return undefined
+  const angle = direction === 'horizontal'
+    ? -Math.atan(fit.slope) * 180 / Math.PI
+    : Math.atan(fit.slope) * 180 / Math.PI
+  if (Math.abs(angle) < 0.6 || Math.abs(angle) > MAX_ANGLE) return undefined
+  return {
+    angle,
+    confidence: fit.r2 * edge.length,
+  }
+}
+
+function linearRegression(points: InkPoint[]): {slope: number, r2: number} | undefined {
+  let sumX = 0
+  let sumY = 0
+  points.forEach(point => {
+    sumX += point.x
+    sumY += point.y
+  })
+  const meanX = sumX / points.length
+  const meanY = sumY / points.length
+  let varianceX = 0
+  let varianceY = 0
+  let covariance = 0
+  points.forEach(point => {
+    const dx = point.x - meanX
+    const dy = point.y - meanY
+    varianceX += dx * dx
+    varianceY += dy * dy
+    covariance += dx * dy
+  })
+
+  if (varianceX <= 0 || varianceY <= 0) return undefined
+  const slope = covariance / varianceX
+  const r2 = covariance * covariance / Math.max(1, varianceX * varianceY)
+  return {slope, r2}
+}
+
+function quantile(values: number[], ratio: number): number {
+  const index = Math.max(0, Math.min(values.length - 1, Math.round((values.length - 1) * ratio)))
+  return values[index]
 }
 
 function estimateBoundingBoxDeskewAngle(points: InkPoint[], width: number, height: number): AngleEstimate | undefined {
@@ -319,6 +409,7 @@ function detectInkBands(counts: number[], threshold: number, maxBandSize: number
 function chooseDeskewAngle(
   projection: AngleEstimate | undefined,
   textLine: AngleEstimate | undefined,
+  textEdge: AngleEstimate | undefined,
   boundingBox: AngleEstimate | undefined,
 ): number {
   if (textLine && textLine.confidence >= 2) {
@@ -331,15 +422,23 @@ function chooseDeskewAngle(
     return roundedAngle(textLine.angle)
   }
 
+  if (textEdge && textEdge.confidence >= 10) {
+    if (boundingBox && Math.abs(boundingBox.angle - textEdge.angle) <= 2) {
+      return roundedAngle(textEdge.angle * 0.75 + boundingBox.angle * 0.25)
+    }
+    if (projection && Math.abs(projection.angle - textEdge.angle) <= 2.5) {
+      return roundedAngle(textEdge.angle * 0.75 + projection.angle * 0.25)
+    }
+    return roundedAngle(textEdge.angle)
+  }
+
   if (boundingBox) {
     if (projection && Math.abs(projection.angle - boundingBox.angle) <= 2.5) {
       return roundedAngle(boundingBox.angle * 0.65 + projection.angle * 0.35)
     }
-    if (boundingBox.confidence >= 1.01) return roundedAngle(boundingBox.angle)
   }
 
   if (projection) return roundedAngle(projection.angle)
-  if (boundingBox) return roundedAngle(boundingBox.angle)
   if (textLine) return roundedAngle(textLine.angle)
   return 0
 }
