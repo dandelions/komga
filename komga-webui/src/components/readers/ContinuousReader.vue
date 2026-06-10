@@ -225,8 +225,8 @@ export default Vue.extend({
         const scaleX = 100 / crop.w
         const scaleY = 100 / crop.h
         const scale = Math.min(2.5, Math.max(scaleX, scaleY))
-        const translateX = 50 - crop.x - crop.w / 2
-        const translateY = 50 - crop.y - crop.h / 2
+        const translateX = (50 - crop.x - crop.w / 2) * scale
+        const translateY = (50 - crop.y - crop.h / 2) * scale
         transforms.push(`translate(${translateX.toFixed(2)}%, ${translateY.toFixed(2)}%)`)
         transforms.push(`scale(${scale.toFixed(3)})`)
       }
