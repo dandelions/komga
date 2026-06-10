@@ -3,6 +3,30 @@ type InkPoint = {
   y: number,
 }
 
+type InkPoints = {
+  raw: InkPoint[],
+  sampled: InkPoint[],
+}
+
+type AngleEstimate = {
+  angle: number,
+  confidence: number,
+}
+
+type InkBand = {
+  start: number,
+  end: number,
+}
+
+type BandStats = {
+  startSum: number,
+  startAxisSum: number,
+  startCount: number,
+  endSum: number,
+  endAxisSum: number,
+  endCount: number,
+}
+
 const MAX_SAMPLE_SIDE = 640
 const LUMA_THRESHOLD = 185
 const MAX_POINTS = 24000
@@ -36,8 +60,14 @@ export async function detectAutoDeskewAngle(image: HTMLImageElement): Promise<nu
   }
 
   const points = collectInkPoints(data, width, height)
-  if (points.length < MIN_POINTS) return 0
+  if (points.raw.length < MIN_POINTS) return 0
 
+  const projectionEstimate = estimateProjectionDeskewAngle(points.sampled, width, height)
+  const textLineEstimate = estimateTextLineDeskewAngle(points.raw, width, height)
+  return chooseDeskewAngle(projectionEstimate, textLineEstimate)
+}
+
+function estimateProjectionDeskewAngle(points: InkPoint[], width: number, height: number): AngleEstimate | undefined {
   const centerX = width / 2
   const centerY = height / 2
   const projectionSize = Math.ceil(Math.sqrt(width * width + height * height)) + 8
@@ -54,11 +84,14 @@ export async function detectAutoDeskewAngle(image: HTMLImageElement): Promise<nu
     }
   }
 
-  if (Math.abs(bestAngle) < MIN_ANGLE || bestScore < zeroScore * MIN_SCORE_GAIN) return 0
-  return Math.round(bestAngle * 10) / 10
+  if (Math.abs(bestAngle) < MIN_ANGLE || bestScore < zeroScore * MIN_SCORE_GAIN) return undefined
+  return {
+    angle: bestAngle,
+    confidence: bestScore / Math.max(1, zeroScore),
+  }
 }
 
-function collectInkPoints(data: ImageData, width: number, height: number): InkPoint[] {
+function collectInkPoints(data: ImageData, width: number, height: number): InkPoints {
   const rawPoints: InkPoint[] = []
   const marginX = Math.floor(width * 0.03)
   const marginY = Math.floor(height * 0.03)
@@ -97,10 +130,155 @@ function collectInkPoints(data: ImageData, width: number, height: number): InkPo
     }
   }
 
-  if (rawPoints.length <= MAX_POINTS) return rawPoints
+  if (rawPoints.length <= MAX_POINTS) return {raw: rawPoints, sampled: rawPoints}
 
   const step = Math.ceil(rawPoints.length / MAX_POINTS)
-  return rawPoints.filter((_, index) => index % step === 0)
+  return {
+    raw: rawPoints,
+    sampled: rawPoints.filter((_, index) => index % step === 0),
+  }
+}
+
+function estimateTextLineDeskewAngle(points: InkPoint[], width: number, height: number): AngleEstimate | undefined {
+  const horizontal = estimateBandDeskewAngle(points, width, height, 'horizontal')
+  const vertical = estimateBandDeskewAngle(points, width, height, 'vertical')
+  if (!horizontal) return vertical
+  if (!vertical) return horizontal
+  return horizontal.confidence >= vertical.confidence ? horizontal : vertical
+}
+
+function estimateBandDeskewAngle(points: InkPoint[], width: number, height: number, direction: 'horizontal' | 'vertical'): AngleEstimate | undefined {
+  const primarySize = direction === 'horizontal' ? height : width
+  const secondarySize = direction === 'horizontal' ? width : height
+  const counts = new Array(primarySize).fill(0)
+  points.forEach(point => {
+    counts[direction === 'horizontal' ? point.y : point.x]++
+  })
+
+  const threshold = Math.max(4, Math.floor(secondarySize * 0.012))
+  const maxBandSize = Math.max(12, Math.floor(primarySize * 0.08))
+  const bands = detectInkBands(counts, threshold, maxBandSize)
+  if (bands.length === 0) return undefined
+
+  const bandIndex = new Int16Array(primarySize)
+  bandIndex.fill(-1)
+  bands.forEach((band, index) => {
+    const padding = Math.max(2, Math.round((band.end - band.start + 1) * 0.5))
+    const start = Math.max(0, band.start - padding)
+    const end = Math.min(primarySize - 1, band.end + padding)
+    for (let i = start; i <= end; i++) bandIndex[i] = index
+  })
+
+  const stats = bands.map(() => ({
+    startSum: 0,
+    startAxisSum: 0,
+    startCount: 0,
+    endSum: 0,
+    endAxisSum: 0,
+    endCount: 0,
+  } as BandStats))
+
+  points.forEach(point => {
+    const primary = direction === 'horizontal' ? point.y : point.x
+    const secondary = direction === 'horizontal' ? point.x : point.y
+    const band = bandIndex[primary]
+    if (band < 0) return
+
+    const positionRatio = secondary / Math.max(1, secondarySize - 1)
+    if (positionRatio <= 0.35) {
+      stats[band].startSum += primary
+      stats[band].startAxisSum += secondary
+      stats[band].startCount++
+    } else if (positionRatio >= 0.65) {
+      stats[band].endSum += primary
+      stats[band].endAxisSum += secondary
+      stats[band].endCount++
+    }
+  })
+
+  const estimates = [] as AngleEstimate[]
+  const minSidePoints = Math.max(8, Math.floor(secondarySize * 0.015))
+  stats.forEach(stat => {
+    if (stat.startCount < minSidePoints || stat.endCount < minSidePoints) return
+    const startPrimary = stat.startSum / stat.startCount
+    const endPrimary = stat.endSum / stat.endCount
+    const startAxis = stat.startAxisSum / stat.startCount
+    const endAxis = stat.endAxisSum / stat.endCount
+    const axisSpan = endAxis - startAxis
+    if (Math.abs(axisSpan) < secondarySize * 0.25) return
+
+    const angle = direction === 'horizontal'
+      ? -Math.atan2(endPrimary - startPrimary, axisSpan) * 180 / Math.PI
+      : Math.atan2(endPrimary - startPrimary, axisSpan) * 180 / Math.PI
+    if (Math.abs(angle) < MIN_ANGLE || Math.abs(angle) > MAX_ANGLE) return
+
+    const support = Math.min(stat.startCount, stat.endCount)
+    estimates.push({
+      angle,
+      confidence: support * Math.abs(axisSpan) / Math.max(1, secondarySize),
+    })
+  })
+
+  if (estimates.length === 0) return undefined
+  const confidenceSum = estimates.reduce((sum, estimate) => sum + estimate.confidence, 0)
+  if (confidenceSum <= 0) return undefined
+
+  return {
+    angle: estimates.reduce((sum, estimate) => sum + estimate.angle * estimate.confidence, 0) / confidenceSum,
+    confidence: estimates.length,
+  }
+}
+
+function detectInkBands(counts: number[], threshold: number, maxBandSize: number): InkBand[] {
+  const bands = [] as InkBand[]
+  let inBand = false
+  let start = 0
+  let lastInk = 0
+  let gap = 0
+
+  counts.forEach((count, index) => {
+    if (count > threshold) {
+      if (!inBand) {
+        inBand = true
+        start = index
+      }
+      lastInk = index
+      gap = 0
+    } else if (inBand) {
+      gap++
+      if (gap > 2) {
+        const end = lastInk
+        if (end - start + 1 <= maxBandSize) bands.push({start, end})
+        inBand = false
+        gap = 0
+      }
+    }
+  })
+
+  if (inBand) {
+    const end = lastInk
+    if (end - start + 1 <= maxBandSize) bands.push({start, end})
+  }
+
+  return bands
+}
+
+function chooseDeskewAngle(projection: AngleEstimate | undefined, textLine: AngleEstimate | undefined): number {
+  if (textLine && textLine.confidence >= 2) {
+    if (projection && Math.abs(projection.angle - textLine.angle) <= 2.5) {
+      return roundedAngle(textLine.angle * 0.75 + projection.angle * 0.25)
+    }
+    return roundedAngle(textLine.angle)
+  }
+
+  if (projection) return roundedAngle(projection.angle)
+  if (textLine) return roundedAngle(textLine.angle)
+  return 0
+}
+
+function roundedAngle(angle: number): number {
+  if (Math.abs(angle) < MIN_ANGLE) return 0
+  return Math.round(Math.max(-MAX_ANGLE, Math.min(MAX_ANGLE, angle)) * 10) / 10
 }
 
 function scoreAngle(points: InkPoint[], centerX: number, centerY: number, projectionSize: number, angle: number): number {
