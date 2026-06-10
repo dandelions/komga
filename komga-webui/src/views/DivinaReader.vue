@@ -318,6 +318,7 @@
         :page-margin="pageMargin"
         :image-filter="normalReaderImageFilter"
         :auto-deskew="autoDeskew"
+        :crop-region="readerCropRegion"
         @menu="toggleToolbars()"
         @jump-previous="jumpToPrevious()"
         @jump-next="jumpToNext()"
@@ -334,10 +335,38 @@
         :swipe="readerSwipeEnabled"
         :image-filter="normalReaderImageFilter"
         :auto-deskew="autoDeskew"
+        :crop-region="readerCropRegion"
         @menu="toggleToolbars()"
         @jump-previous="jumpToPrevious()"
         @jump-next="jumpToNext()"
       ></paged-reader>
+    </div>
+
+    <div v-if="readerCropMode" class="reader-crop-panel" @click.stop>
+      <div class="reader-crop-toolbar">
+        <v-btn small @click="cancelReaderCropMode">取消</v-btn>
+        <span>拖拽选择阅读范围</span>
+      </div>
+      <div
+        class="reader-crop-stage"
+        @pointerdown="startReaderCrop"
+        @pointermove="moveReaderCrop"
+        @pointerup="finishReaderCrop"
+        @pointercancel="cancelReaderCropDraft"
+      >
+        <img
+          ref="readerCropImage"
+          :src="currentPage.url"
+          class="reader-crop-image"
+          alt=""
+          draggable="false"
+        />
+        <div
+          v-if="readerCropActiveRect"
+          class="reader-crop-rect"
+          :style="readerCropActiveRect"
+        />
+      </div>
     </div>
 
     <thumbnail-explorer-dialog
@@ -446,6 +475,13 @@
             </v-list-item>
             <v-list-item v-if="!activeReflowMode">
               <settings-switch v-model="autoDeskew" label="自动纠斜"/>
+            </v-list-item>
+            <v-list-item v-if="!activeReflowMode">
+              <settings-switch v-model="readerCropEnabled" label="截取区域"/>
+            </v-list-item>
+            <v-list-item v-if="!activeReflowMode && readerCropEnabled">
+              <v-btn small class="mr-2" @click="startReaderCropMode">设置截取区域</v-btn>
+              <v-btn small text @click="clearReaderCropRegion">清除</v-btn>
             </v-list-item>
 
             <template v-if="continuousReader">
@@ -842,7 +878,18 @@ export default Vue.extend({
         backgroundColor: 'black',
         strokeStrength: 0,
         autoDeskew: false,
+        cropRegion: {
+          enabled: false,
+          x: 0,
+          y: 0,
+          w: 100,
+          h: 100,
+        },
       },
+      readerCropMode: false,
+      readerCropDrawing: false,
+      readerCropStart: {x: 0, y: 0},
+      readerCropDraft: undefined as undefined | {x: number, y: number, w: number, h: number},
       shortcuts: {} as any,
       notification: {
         enabled: false,
@@ -923,6 +970,7 @@ export default Vue.extend({
     this.backgroundColor = this.$store.state.persistedState.webreader.background
     this.readerStrokeStrength = this.$store.state.persistedState.webreader.strokeStrength
     this.autoDeskew = this.$store.state.persistedState.webreader.autoDeskew || false
+    this.readerCropRegion = this.$store.state.persistedState.webreader.cropRegion || this.readerCropRegion
     this.reflowSettingsBookId = this.bookId
     this.loadReflowSettings(this.bookId)
 
@@ -1051,6 +1099,16 @@ export default Vue.extend({
     },
     activeReflowMode(): boolean {
       return this.isPdf && !this.continuousReader && (this.reflowMode || this.k2ReflowMode)
+    },
+    readerCropActiveRect(): object | undefined {
+      const region = this.readerCropDraft || (this.readerCropRegion.enabled ? this.readerCropRegion : undefined)
+      if (!region) return undefined
+      return {
+        left: `${region.x}%`,
+        top: `${region.y}%`,
+        width: `${region.w}%`,
+        height: `${region.h}%`,
+      }
     },
     normalReaderImageFilter(): string {
       const filters = []
@@ -1186,6 +1244,24 @@ export default Vue.extend({
         this.$store.commit('setWebreaderAutoDeskew', autoDeskew)
       },
     },
+    readerCropRegion: {
+      get: function (): any {
+        return this.normalizedReaderCropRegion(this.settings.cropRegion)
+      },
+      set: function (cropRegion: any): void {
+        const normalized = this.normalizedReaderCropRegion(cropRegion)
+        this.$set(this.settings, 'cropRegion', normalized)
+        this.$store.commit('setWebreaderCropRegion', normalized)
+      },
+    },
+    readerCropEnabled: {
+      get: function (): boolean {
+        return this.readerCropRegion.enabled
+      },
+      set: function (enabled: boolean): void {
+        this.readerCropRegion = {...this.readerCropRegion, enabled}
+      },
+    },
     readingDirection: {
       get: function (): ReadingDirection {
         return this.settings.readingDirection
@@ -1230,6 +1306,94 @@ export default Vue.extend({
     },
   },
   methods: {
+    normalizedReaderCropRegion(region: any): any {
+      const x = this.clampReaderCropNumber(region?.x, 0)
+      const y = this.clampReaderCropNumber(region?.y, 0)
+      const w = this.clampReaderCropNumber(region?.w, 100)
+      const h = this.clampReaderCropNumber(region?.h, 100)
+      const normalized = {
+        enabled: region?.enabled === true,
+        x: Math.min(95, x),
+        y: Math.min(95, y),
+        w: Math.max(5, Math.min(100 - Math.min(95, x), w)),
+        h: Math.max(5, Math.min(100 - Math.min(95, y), h)),
+      }
+      if (normalized.w >= 99 && normalized.h >= 99 && normalized.x <= 0.5 && normalized.y <= 0.5) normalized.enabled = false
+      return normalized
+    },
+    clampReaderCropNumber(value: any, fallback: number): number {
+      const numberValue = Number(value)
+      if (!Number.isFinite(numberValue)) return fallback
+      return Math.round(Math.max(0, Math.min(100, numberValue)) * 10) / 10
+    },
+    startReaderCropMode() {
+      if (!this.currentPage?.url) return
+      this.showSettings = false
+      this.readerCropMode = true
+      this.readerCropDrawing = false
+      this.readerCropDraft = this.readerCropRegion.enabled ? {...this.readerCropRegion} : undefined
+    },
+    cancelReaderCropMode() {
+      this.readerCropMode = false
+      this.readerCropDrawing = false
+      this.readerCropDraft = undefined
+    },
+    clearReaderCropRegion() {
+      this.readerCropRegion = {enabled: false, x: 0, y: 0, w: 100, h: 100}
+      this.readerCropMode = false
+      this.readerCropDrawing = false
+      this.readerCropDraft = undefined
+    },
+    startReaderCrop(event: PointerEvent) {
+      const point = this.readerCropPoint(event)
+      const target = event.currentTarget as HTMLElement
+      target.setPointerCapture(event.pointerId)
+      this.readerCropDrawing = true
+      this.readerCropStart = point
+      this.readerCropDraft = {x: point.x, y: point.y, w: 1, h: 1}
+      event.preventDefault()
+    },
+    moveReaderCrop(event: PointerEvent) {
+      if (!this.readerCropDrawing) return
+      this.readerCropDraft = this.normalizedReaderCropRect(this.readerCropStart, this.readerCropPoint(event))
+      event.preventDefault()
+    },
+    finishReaderCrop(event: PointerEvent) {
+      if (!this.readerCropDrawing) return
+      this.readerCropDrawing = false
+      const region = this.normalizedReaderCropRect(this.readerCropStart, this.readerCropPoint(event))
+      if (region.w >= 5 && region.h >= 5) {
+        this.readerCropRegion = {...region, enabled: true}
+        this.readerCropMode = false
+        this.readerCropDraft = undefined
+      }
+      event.preventDefault()
+    },
+    cancelReaderCropDraft() {
+      this.readerCropDrawing = false
+      this.readerCropDraft = undefined
+    },
+    readerCropPoint(event: PointerEvent): {x: number, y: number} {
+      const image = this.$refs.readerCropImage as HTMLImageElement | undefined
+      const rect = image?.getBoundingClientRect()
+      if (!rect || rect.width <= 0 || rect.height <= 0) return {x: 0, y: 0}
+      return {
+        x: this.clampReaderCropNumber((event.clientX - rect.left) * 100 / rect.width, 0),
+        y: this.clampReaderCropNumber((event.clientY - rect.top) * 100 / rect.height, 0),
+      }
+    },
+    normalizedReaderCropRect(start: {x: number, y: number}, end: {x: number, y: number}): any {
+      const left = Math.min(start.x, end.x)
+      const top = Math.min(start.y, end.y)
+      const right = Math.max(start.x, end.x)
+      const bottom = Math.max(start.y, end.y)
+      return {
+        x: Math.round(left * 10) / 10,
+        y: Math.round(top * 10) / 10,
+        w: Math.round((right - left) * 10) / 10,
+        h: Math.round((bottom - top) * 10) / 10,
+      }
+    },
     enterFullscreen() {
       if (screenfull.isEnabled) return screenfull.request(document.documentElement, {navigationUI: 'hide'})
       return Promise.resolve()
@@ -2053,6 +2217,54 @@ export default Vue.extend({
   height: 100vh;
   width: 40vw;
   z-index: 3;
+}
+
+.reader-crop-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  box-sizing: border-box;
+  background: rgba(0, 0, 0, 0.86);
+}
+
+.reader-crop-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 36px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.reader-crop-stage {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  max-height: calc(100vh - 60px);
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+}
+
+.reader-crop-image {
+  display: block;
+  max-width: 100%;
+  max-height: calc(100vh - 60px);
+  object-fit: contain;
+}
+
+.reader-crop-rect {
+  position: absolute;
+  border: 2px dashed #90caf9;
+  background: rgba(144, 202, 249, 0.18);
+  box-sizing: border-box;
+  pointer-events: none;
 }
 </style>
 <style>

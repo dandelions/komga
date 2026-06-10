@@ -22,6 +22,13 @@ export const persistedModule: Module<any, any> = {
       background: '',
       strokeStrength: 0,
       autoDeskew: false,
+      cropRegion: {
+        enabled: false,
+        x: 0,
+        y: 0,
+        w: 100,
+        h: 100,
+      },
     },
     epubreader: {},
     browsingPageSize: undefined as unknown as number,
@@ -137,6 +144,9 @@ export const persistedModule: Module<any, any> = {
     },
     setWebreaderAutoDeskew(state, val) {
       state.webreader.autoDeskew = val
+    },
+    setWebreaderCropRegion(state, val) {
+      state.webreader.cropRegion = val
     },
     setEpubreaderSettings(state, val) {
       state.epubreader = val

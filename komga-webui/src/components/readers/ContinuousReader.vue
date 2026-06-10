@@ -44,6 +44,14 @@ import {PageDtoWithUrl} from '@/types/komga-books'
 import {throttle} from 'lodash'
 import {detectAutoDeskewAngle} from '@/functions/auto-deskew'
 
+type CropRegion = {
+  enabled: boolean,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+}
+
 export default Vue.extend({
   name: 'ContinuousReader',
   data: () => {
@@ -88,6 +96,10 @@ export default Vue.extend({
     autoDeskew: {
       type: Boolean,
       default: false,
+    },
+    cropRegion: {
+      type: Object as () => CropRegion,
+      default: () => ({enabled: false, x: 0, y: 0, w: 100, h: 100}),
     },
   },
   watch: {
@@ -198,9 +210,46 @@ export default Vue.extend({
       return {
         margin: `${index === 0 ? 0 : this.pageMargin}px auto`,
         filter: this.imageFilter,
-        transform: this.deskewTransform(angle),
+        clipPath: this.cropClipPath(),
+        transform: this.imageTransform(angle),
         transformOrigin: 'center center',
       }
+    },
+    imageTransform(angle: number): string | undefined {
+      const transforms = [] as string[]
+      const crop = this.normalizedCropRegion()
+      if (crop.enabled) {
+        const scaleX = 100 / crop.w
+        const scaleY = 100 / crop.h
+        const scale = Math.min(2.5, Math.max(scaleX, scaleY))
+        const translateX = 50 - crop.x - crop.w / 2
+        const translateY = 50 - crop.y - crop.h / 2
+        transforms.push(`translate(${translateX.toFixed(2)}%, ${translateY.toFixed(2)}%)`)
+        transforms.push(`scale(${scale.toFixed(3)})`)
+      }
+      const deskewTransform = this.deskewTransform(angle)
+      if (deskewTransform) transforms.push(deskewTransform)
+      return transforms.join(' ') || undefined
+    },
+    cropClipPath(): string | undefined {
+      const crop = this.normalizedCropRegion()
+      if (!crop.enabled) return undefined
+      const right = Math.max(0, 100 - crop.x - crop.w)
+      const bottom = Math.max(0, 100 - crop.y - crop.h)
+      return `inset(${crop.y}% ${right}% ${bottom}% ${crop.x}%)`
+    },
+    normalizedCropRegion(): CropRegion {
+      const crop = this.cropRegion || {enabled: false, x: 0, y: 0, w: 100, h: 100}
+      const x = this.clampCropNumber(crop.x, 0)
+      const y = this.clampCropNumber(crop.y, 0)
+      const w = Math.max(5, Math.min(100 - x, this.clampCropNumber(crop.w, 100)))
+      const h = Math.max(5, Math.min(100 - y, this.clampCropNumber(crop.h, 100)))
+      return {enabled: crop.enabled === true, x, y, w, h}
+    },
+    clampCropNumber(value: number, fallback: number): number {
+      const numberValue = Number(value)
+      if (!Number.isFinite(numberValue)) return fallback
+      return Math.max(0, Math.min(100, numberValue))
     },
     deskewTransform(angle: number): string | undefined {
       if (!angle) return undefined
