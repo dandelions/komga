@@ -1227,7 +1227,7 @@ export default Vue.extend({
         cropRoisByParity: this.reflowSettings.cropRoisByParity,
         deskewDetectionVersion: 8,
         imageExclusionVersion: 2,
-        wordBlockTransparencyVersion: 2,
+        wordBlockTransparencyVersion: 3,
       })
     },
 

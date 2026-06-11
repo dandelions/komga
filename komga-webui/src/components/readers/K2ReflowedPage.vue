@@ -1288,21 +1288,23 @@ export default Vue.extend({
       context.putImageData(imageData, 0, 0)
     },
     transparentizeWordBackground(context: CanvasRenderingContext2D, width: number, height: number) {
-      const threshold = Math.min(245, this.clampNumber(this.threshold, 50, 230, DEFAULT_THRESHOLD) + 18)
       const imageData = context.getImageData(0, 0, width, height)
       const data = imageData.data
+      const background = this.estimatedWordBackground(data, width, height)
 
       for (let i = 0; i < width * height; i++) {
         const offset = i * 4
         if (data[offset + 3] === 0) continue
 
         const luma = 0.299 * data[offset] + 0.587 * data[offset + 1] + 0.114 * data[offset + 2]
-        if (luma >= threshold) {
+        const distance = Math.abs(data[offset] - background.r) + Math.abs(data[offset + 1] - background.g) + Math.abs(data[offset + 2] - background.b)
+        const inkContrast = background.luma - luma
+        if (distance < 36 || inkContrast < 18) {
           data[offset + 3] = 0
           continue
         }
 
-        const inkAlpha = Math.round((1 - luma / threshold) * 255 * 1.4)
+        const inkAlpha = Math.round(Math.min(1, inkContrast / Math.max(48, background.luma * 0.42)) * 255)
         data[offset] = 0
         data[offset + 1] = 0
         data[offset + 2] = 0
@@ -1311,6 +1313,50 @@ export default Vue.extend({
 
       this.removeWordLineArtifacts(data, width, height)
       context.putImageData(imageData, 0, 0)
+    },
+    estimatedWordBackground(data: Uint8ClampedArray, width: number, height: number): {r: number, g: number, b: number, luma: number} {
+      const samples = [] as Array<{r: number, g: number, b: number, luma: number}>
+
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const border = x === 0 || y === 0 || x === width - 1 || y === height - 1
+          if (!border) continue
+          const offset = (y * width + x) * 4
+          if (data[offset + 3] === 0) continue
+          const r = data[offset]
+          const g = data[offset + 1]
+          const b = data[offset + 2]
+          samples.push({r, g, b, luma: 0.299 * r + 0.587 * g + 0.114 * b})
+        }
+      }
+
+      if (samples.length < 8) {
+        for (let i = 0; i < width * height; i++) {
+          const offset = i * 4
+          if (data[offset + 3] === 0) continue
+          const r = data[offset]
+          const g = data[offset + 1]
+          const b = data[offset + 2]
+          samples.push({r, g, b, luma: 0.299 * r + 0.587 * g + 0.114 * b})
+        }
+      }
+
+      if (samples.length === 0) return {r: 255, g: 255, b: 255, luma: 255}
+      samples.sort((a, b) => b.luma - a.luma)
+      const selected = samples.slice(0, Math.max(1, Math.ceil(samples.length * 0.35)))
+      const sum = selected.reduce((acc, sample) => {
+        acc.r += sample.r
+        acc.g += sample.g
+        acc.b += sample.b
+        acc.luma += sample.luma
+        return acc
+      }, {r: 0, g: 0, b: 0, luma: 0})
+      return {
+        r: sum.r / selected.length,
+        g: sum.g / selected.length,
+        b: sum.b / selected.length,
+        luma: Math.max(1, sum.luma / selected.length),
+      }
     },
     removeWordLineArtifacts(data: Uint8ClampedArray, width: number, height: number) {
       const components = [] as Array<{indexes: number[], area: number, minX: number, maxX: number, minY: number, maxY: number}>
