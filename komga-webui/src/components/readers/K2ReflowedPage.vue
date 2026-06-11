@@ -108,6 +108,14 @@
           :style="{width: `${item.width}px`, height: `${item.height}px`}"
           alt=""
         />
+        <img
+          v-else-if="item.type === 'image'"
+          :key="`image-${index}`"
+          :src="item.src"
+          class="k2-image"
+          :style="{width: `${item.width}px`, height: `${item.height}px`}"
+          alt=""
+        />
       </template>
     </div>
     <div
@@ -133,6 +141,14 @@
           :style="{width: `${item.width}px`, height: `${item.height}px`}"
           alt=""
         />
+        <img
+          v-else-if="item.type === 'image'"
+          :key="`measure-image-${index}`"
+          :src="item.src"
+          class="k2-image"
+          :style="{width: `${item.width}px`, height: `${item.height}px`}"
+          alt=""
+        />
       </template>
     </div>
   </div>
@@ -152,7 +168,8 @@ type WordLine = { column: Column, row: TextRow, words: WordBlock[] }
 type BreakItem = { type: 'break' }
 type IndentItem = { type: 'indent', width: number, sourceWidth: number }
 type WordItem = { type: 'word', src: string, width: number, height: number }
-type K2Item = BreakItem | IndentItem | WordItem
+type ImageItem = { type: 'image', src: string, x: number, y: number, w: number, h: number, width: number, height: number }
+type K2Item = BreakItem | IndentItem | WordItem | ImageItem
 type K2Settings = {
   textScale: number,
   maxColumns: number,
@@ -361,14 +378,14 @@ export default Vue.extend({
         const imageData = context.getImageData(0, 0, canvas.width, canvas.height)
         const rawInk = this.buildInkMap(imageData, canvas.width, canvas.height)
         const initialRoi = this.detectRoi(rawInk, canvas.width, canvas.height)
-        const imageRegions = this.detectImageRegions(imageData.data, canvas.width, canvas.height, initialRoi, this.clampNumber(this.threshold, 50, 230, DEFAULT_THRESHOLD))
+        const imageRegions = this.detectImageRegions(imageData.data, canvas.width, canvas.height, initialRoi, this.clampNumber(this.threshold, 50, 230, DEFAULT_THRESHOLD), rawInk)
         const ink = this.clearImageRegions(rawInk, canvas.width, canvas.height, imageRegions)
         const roi = this.detectRoi(ink, canvas.width, canvas.height)
         const columns = this.detectColumns(ink, canvas.width, canvas.height, roi)
         const lines = this.detectWordLines(ink, canvas.width, canvas.height, columns)
         if (requestId !== this.requestId) return
 
-        this.items = this.renderK2Items(canvas, lines)
+        this.items = this.renderK2Items(canvas, lines, imageRegions)
         this.repaginate()
       } catch (e) {
         if (requestId !== this.requestId) return
@@ -438,7 +455,7 @@ export default Vue.extend({
 
       return ink
     },
-    detectImageRegions(pixels: Uint8ClampedArray, width: number, height: number, roi: Roi, threshold: number): ImageRegion[] {
+    detectImageRegions(pixels: Uint8ClampedArray, width: number, height: number, roi: Roi, threshold: number, ink?: Uint8Array): ImageRegion[] {
       const tileSize = Math.max(12, Math.min(28, Math.round(Math.min(roi.w, roi.h) / 64)))
       const tileColumns = Math.ceil(roi.w / tileSize)
       const tileRows = Math.ceil(roi.h / tileSize)
@@ -467,7 +484,9 @@ export default Vue.extend({
         }
       }
 
-      return this.collectImageRegions(candidates, coloredTiles, denseTiles, texturedTiles, tileColumns, tileRows, tileSize, roi)
+      const tileRegions = this.collectImageRegions(candidates, coloredTiles, denseTiles, texturedTiles, tileColumns, tileRows, tileSize, roi)
+      const figureRegions = ink ? this.detectFigureLikeRegions(ink, width, height, roi) : []
+      return this.mergeImageRegions([...tileRegions, ...figureRegions])
     },
     imageTileMetrics(
       pixels: Uint8ClampedArray,
@@ -612,6 +631,87 @@ export default Vue.extend({
       const texturedGraphic = texturedRatio >= 0.42 && areaRatio >= 0.018 && fillRatio >= 0.22
 
       return spansTextColumn && (colorImage || denseGraphic || texturedGraphic)
+    },
+    detectFigureLikeRegions(ink: Uint8Array, width: number, height: number, roi: Roi): ImageRegion[] {
+      const rowThreshold = Math.max(2, Math.floor(roi.w * 0.004))
+      const maxBlankRun = Math.max(3, Math.floor(roi.h * 0.006))
+      const regions = [] as ImageRegion[]
+      let inRegion = false
+      let startY = roi.y
+      let blankRun = 0
+
+      for (let y = roi.y; y <= roi.y + roi.h; y++) {
+        const rowInk = y < roi.y + roi.h ? this.countInkInRow(ink, width, roi.x, roi.x + roi.w, y) : 0
+        const blank = y >= roi.y + roi.h || rowInk <= rowThreshold
+
+        if (!inRegion && !blank) {
+          inRegion = true
+          startY = y
+          blankRun = 0
+          continue
+        }
+
+        if (!inRegion) continue
+
+        if (blank) {
+          blankRun++
+          if (blankRun > maxBlankRun) {
+            const endY = y - blankRun + 1
+            const region = this.tightFigureRegion(ink, width, height, roi, startY, endY)
+            if (region && this.isLikelyFigureShape(region, roi)) regions.push(region)
+            inRegion = false
+            blankRun = 0
+          }
+        } else {
+          blankRun = 0
+        }
+      }
+
+      return regions
+    },
+    countInkInRow(ink: Uint8Array, width: number, xStart: number, xEnd: number, y: number): number {
+      let count = 0
+      const row = y * width
+      for (let x = xStart; x < xEnd; x++) {
+        if (ink[row + x]) count++
+      }
+      return count
+    },
+    tightFigureRegion(ink: Uint8Array, width: number, height: number, roi: Roi, yStart: number, yEnd: number): ImageRegion | undefined {
+      let minX = roi.x + roi.w
+      let maxX = roi.x
+      let minY = yEnd
+      let maxY = yStart
+
+      for (let y = Math.max(roi.y, yStart); y < Math.min(roi.y + roi.h, yEnd); y++) {
+        const row = y * width
+        for (let x = roi.x; x < roi.x + roi.w; x++) {
+          if (!ink[row + x]) continue
+          minX = Math.min(minX, x)
+          maxX = Math.max(maxX, x)
+          minY = Math.min(minY, y)
+          maxY = Math.max(maxY, y)
+        }
+      }
+
+      if (maxX < minX || maxY < minY) return undefined
+      const padding = Math.max(2, Math.floor(Math.min(width, height) * 0.003))
+      const left = Math.max(roi.x, minX - padding)
+      const top = Math.max(roi.y, minY - padding)
+      const right = Math.min(roi.x + roi.w, maxX + padding + 1)
+      const bottom = Math.min(roi.y + roi.h, maxY + padding + 1)
+      return {x: left, y: top, w: right - left, h: bottom - top}
+    },
+    isLikelyFigureShape(region: ImageRegion, roi: Roi): boolean {
+      const roiArea = Math.max(1, roi.w * roi.h)
+      const areaRatio = region.w * region.h / roiArea
+      const minWidth = Math.max(44, roi.w * 0.08)
+      const minHeight = Math.max(48, roi.h * 0.045)
+      const aspectRatio = region.w / Math.max(1, region.h)
+      return region.w >= minWidth &&
+        region.h >= minHeight &&
+        aspectRatio > 0.2 &&
+        areaRatio >= 0.008
     },
     mergeImageRegions(regions: ImageRegion[]): ImageRegion[] {
       if (regions.length <= 1) return regions
@@ -1003,7 +1103,7 @@ export default Vue.extend({
         h: bottom - top + 1,
       }
     },
-    renderK2Items(sourceCanvas: HTMLCanvasElement, lines: WordLine[]): K2Item[] {
+    renderK2Items(sourceCanvas: HTMLCanvasElement, lines: WordLine[], imageRegions: ImageRegion[] = []): K2Item[] {
       const sourceContext = sourceCanvas.getContext('2d')
       if (!sourceContext) return []
       const sliceCanvas = document.createElement('canvas')
@@ -1016,8 +1116,23 @@ export default Vue.extend({
       const maxLineWidth = Math.max(80, this.targetWidth - outputPadding * 2)
       let lineWidth = 0
       const items = [] as K2Item[]
+      const groups = [
+        ...lines.map((line, index) => ({kind: 'line' as const, y: line.row.start, line, index})),
+        ...imageRegions.map((region, index) => ({kind: 'image' as const, y: region.y, region, index})),
+      ].sort((a, b) => a.y - b.y || (a.kind === 'image' ? -1 : 1))
 
-      lines.forEach((line, index) => {
+      groups.forEach(group => {
+        if (group.kind === 'image') {
+          const item = this.renderImageItem(sourceCanvas, sliceCanvas, sliceContext, group.region)
+          if (!item) return
+          if (items.length > 0) items.push({type: 'break'})
+          items.push(item, {type: 'break'})
+          lineWidth = 0
+          return
+        }
+
+        const line = group.line
+        const index = group.index
         const startParagraph = this.isParagraphStart(line, lines[index - 1])
         if (items.length > 0 && startParagraph) {
           items.push({type: 'break'})
@@ -1057,6 +1172,28 @@ export default Vue.extend({
       })
 
       return items
+    },
+    renderImageItem(
+      sourceCanvas: HTMLCanvasElement,
+      sliceCanvas: HTMLCanvasElement,
+      sliceContext: CanvasRenderingContext2D,
+      region: ImageRegion,
+    ): ImageItem | undefined {
+      if (region.w < 2 || region.h < 2) return undefined
+      sliceCanvas.width = region.w
+      sliceCanvas.height = region.h
+      sliceContext.clearRect(0, 0, region.w, region.h)
+      sliceContext.fillStyle = this.pageBackground || '#fff'
+      sliceContext.fillRect(0, 0, region.w, region.h)
+      sliceContext.drawImage(sourceCanvas, region.x, region.y, region.w, region.h, 0, 0, region.w, region.h)
+      const scale = Math.min(1, Math.max(80, this.targetWidth - this.outputPadding * 2) / Math.max(1, region.w))
+      return {
+        ...region,
+        type: 'image',
+        src: sliceCanvas.toDataURL('image/png'),
+        width: Math.max(1, Math.round(region.w * scale)),
+        height: Math.max(1, Math.round(region.h * scale)),
+      }
     },
     isParagraphStart(line: WordLine, previousLine: WordLine | undefined): boolean {
       if (!previousLine) return true
@@ -1148,7 +1285,7 @@ export default Vue.extend({
           return
         }
         currentLine.push(item)
-        currentLineHeight = Math.max(currentLineHeight, item.type === 'word' ? item.height : 1)
+        currentLineHeight = Math.max(currentLineHeight, item.type === 'word' || item.type === 'image' ? item.height : 1)
       })
 
       pushLine()
@@ -1307,17 +1444,23 @@ export default Vue.extend({
       if (components.length <= 1) return
       const largestArea = Math.max(...components.map(component => component.area))
       const totalArea = components.reduce((sum, component) => sum + component.area, 0)
-      const edgeBand = Math.max(2, Math.floor(height * 0.18))
-      const maxLineHeight = Math.max(1, Math.floor(height * 0.16))
+      const edgeBand = Math.max(2, Math.floor(Math.min(width, height) * 0.12))
+      const maxLineThickness = Math.max(1, Math.floor(Math.min(width, height) * 0.14))
 
       components.forEach(component => {
         if (component.area === largestArea) return
         const componentWidth = component.maxX - component.minX + 1
         const componentHeight = component.maxY - component.minY + 1
         const nearHorizontalEdge = component.minY <= edgeBand || component.maxY >= height - 1 - edgeBand
-        const thinHorizontal = componentHeight <= maxLineHeight && componentWidth >= Math.max(3, componentHeight * 3)
-        const minorArtifact = component.area < largestArea * 0.25 && component.area < totalArea * 0.12
-        if (!nearHorizontalEdge || !thinHorizontal || !minorArtifact) return
+        const nearVerticalEdge = component.minX <= edgeBand || component.maxX >= width - 1 - edgeBand
+        const touchesHorizontalEdge = component.minY <= 1 || component.maxY >= height - 2
+        const touchesVerticalEdge = component.minX <= 1 || component.maxX >= width - 2
+        const thinHorizontal = componentHeight <= maxLineThickness && componentWidth >= Math.max(4, componentHeight * 4)
+        const thinVertical = componentWidth <= maxLineThickness && componentHeight >= Math.max(4, componentWidth * 4)
+        const edgeHorizontalArtifact = thinHorizontal && nearHorizontalEdge && (touchesHorizontalEdge || touchesVerticalEdge)
+        const edgeVerticalArtifact = thinVertical && nearVerticalEdge && (touchesVerticalEdge || touchesHorizontalEdge)
+        const minorArtifact = component.area < largestArea * 0.35 && component.area < totalArea * 0.16
+        if ((!edgeHorizontalArtifact && !edgeVerticalArtifact) || !minorArtifact) return
 
         component.indexes.forEach(index => {
           const offset = index * 4
@@ -1680,6 +1823,12 @@ export default Vue.extend({
 }
 
 .k2-word {
+  display: inline-block;
+  max-width: 100%;
+  object-fit: contain;
+}
+
+.k2-image {
   display: inline-block;
   max-width: 100%;
   object-fit: contain;
