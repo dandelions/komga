@@ -1042,7 +1042,9 @@ export default Vue.extend({
           sliceCanvas.height = word.h
           sliceContext.clearRect(0, 0, word.w, word.h)
           sliceContext.drawImage(sourceCanvas, word.x, word.y, word.w, word.h, 0, 0, word.w, word.h)
+          this.normalizeWordBackground(sliceContext, word.w, word.h)
           if (this.strokeStrength > 0) this.strengthenInk(sliceContext, word.w, word.h)
+          this.normalizeWordBackground(sliceContext, word.w, word.h)
 
           items.push({
             type: 'word',
@@ -1238,6 +1240,93 @@ export default Vue.extend({
     },
     scrollToTop() {
       this.$nextTick(() => window.scrollTo({top: 0, left: 0, behavior: 'auto'}))
+    },
+    normalizeWordBackground(context: CanvasRenderingContext2D, width: number, height: number) {
+      const threshold = Math.min(245, this.clampNumber(this.threshold, 50, 230, DEFAULT_THRESHOLD) + 18)
+      const imageData = context.getImageData(0, 0, width, height)
+      const data = imageData.data
+
+      for (let i = 0; i < width * height; i++) {
+        const offset = i * 4
+        const luma = data[offset + 3] === 0
+          ? 255
+          : 0.299 * data[offset] + 0.587 * data[offset + 1] + 0.114 * data[offset + 2]
+        const ink = luma < threshold
+        data[offset] = ink ? 0 : 255
+        data[offset + 1] = ink ? 0 : 255
+        data[offset + 2] = ink ? 0 : 255
+        data[offset + 3] = 255
+      }
+
+      this.removeOpaqueWordLineArtifacts(data, width, height)
+      context.putImageData(imageData, 0, 0)
+    },
+    removeOpaqueWordLineArtifacts(data: Uint8ClampedArray, width: number, height: number) {
+      const components = [] as Array<{indexes: number[], area: number, minX: number, maxX: number, minY: number, maxY: number}>
+      const visited = new Uint8Array(width * height)
+
+      for (let start = 0; start < width * height; start++) {
+        if (visited[start] || data[start * 4] !== 0) continue
+
+        const stack = [start]
+        const indexes = [] as number[]
+        let minX = width
+        let maxX = 0
+        let minY = height
+        let maxY = 0
+        visited[start] = 1
+
+        while (stack.length > 0) {
+          const current = stack.pop() as number
+          const y = Math.floor(current / width)
+          const x = current - y * width
+          indexes.push(current)
+          minX = Math.min(minX, x)
+          maxX = Math.max(maxX, x)
+          minY = Math.min(minY, y)
+          maxY = Math.max(maxY, y)
+
+          for (let dy = -1; dy <= 1; dy++) {
+            const ny = y + dy
+            if (ny < 0 || ny >= height) continue
+            for (let dx = -1; dx <= 1; dx++) {
+              if (dx === 0 && dy === 0) continue
+              const nx = x + dx
+              if (nx < 0 || nx >= width) continue
+              const next = ny * width + nx
+              if (visited[next] || data[next * 4] !== 0) continue
+              visited[next] = 1
+              stack.push(next)
+            }
+          }
+        }
+
+        components.push({indexes, area: indexes.length, minX, maxX, minY, maxY})
+      }
+
+      if (components.length <= 1) return
+      const largestArea = Math.max(...components.map(component => component.area))
+      const totalArea = components.reduce((sum, component) => sum + component.area, 0)
+      const edgeBand = Math.max(2, Math.floor(height * 0.18))
+      const maxLineHeight = Math.max(1, Math.floor(height * 0.16))
+
+      components.forEach(component => {
+        if (component.area === largestArea) return
+        const componentWidth = component.maxX - component.minX + 1
+        const componentHeight = component.maxY - component.minY + 1
+        const nearHorizontalEdge = component.minY <= edgeBand || component.maxY >= height - 1 - edgeBand
+        const thinHorizontal = componentHeight <= maxLineHeight && componentWidth >= Math.max(3, componentHeight * 3)
+        const minorArtifact = component.area < largestArea * 0.25 && component.area < totalArea * 0.12
+        if (!nearHorizontalEdge || !thinHorizontal || !minorArtifact) return
+
+        component.indexes.forEach(index => {
+          const offset = index * 4
+          data[offset] = 255
+          data[offset + 1] = 255
+          data[offset + 2] = 255
+          data[offset + 3] = 255
+        })
+      })
     },
     strengthenInk(context: CanvasRenderingContext2D, width: number, height: number) {
       const imageData = context.getImageData(0, 0, width, height)
