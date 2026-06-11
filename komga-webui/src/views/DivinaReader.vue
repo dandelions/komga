@@ -1575,19 +1575,26 @@ export default Vue.extend({
       }
     },
     async prepareReaderCropImage() {
-      this.revokeReaderCropImageUrl()
       const requestId = this.readerCropImageRequestId + 1
       this.readerCropImageRequestId = requestId
       const angle = this.readerSkewCorrection || 0
-      if (!angle || !this.currentPage?.url) return
+      if (!angle || !this.currentPage?.url) {
+        this.revokeReaderCropImageUrl()
+        return
+      }
 
       try {
         const image = await this.loadReaderCropImage(this.currentPage.url)
         if (requestId !== this.readerCropImageRequestId) return
         const canvas = this.skewCorrectedReaderCropCanvas(image, angle)
         const url = await this.readerCropCanvasObjectUrl(canvas)
-        if (requestId === this.readerCropImageRequestId && this.readerSkewCorrection === angle) this.readerCropImageUrl = url
-        else URL.revokeObjectURL(url)
+        if (requestId === this.readerCropImageRequestId && this.readerSkewCorrection === angle) {
+          const previousUrl = this.readerCropImageUrl
+          this.readerCropImageUrl = url
+          if (previousUrl && previousUrl !== url) URL.revokeObjectURL(previousUrl)
+        } else {
+          URL.revokeObjectURL(url)
+        }
       } catch (e) {
         if (requestId === this.readerCropImageRequestId) this.revokeReaderCropImageUrl()
       }

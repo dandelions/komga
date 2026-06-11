@@ -151,6 +151,24 @@
       class="crop-panel"
       @click.stop
     >
+      <div class="crop-toolbar">
+        <button type="button" class="reflow-control" @click="toggleCropMode">完成</button>
+        <span class="crop-toolbar-label">拖拽选择{{ pageParityShortLabel }}区域{{ activeCropRegion + 1 }}</span>
+        <label class="reflow-skew-control crop-skew-control">
+          <span>手动纠斜</span>
+          <button type="button" class="reflow-step-control" @click="adjustCropSkewCorrection(-0.5)">-</button>
+          <input
+            type="range"
+            min="-10"
+            max="10"
+            step="0.5"
+            :value="skewCorrection"
+            @input="setCropSkewCorrection"
+          />
+          <button type="button" class="reflow-step-control" @click="adjustCropSkewCorrection(0.5)">+</button>
+          <span class="reflow-font-value">{{ skewCorrectionLabel }}</span>
+        </label>
+      </div>
       <div v-if="cropWarning" class="crop-warning">{{ cropWarning }}</div>
       <div
         class="crop-stage"
@@ -400,6 +418,7 @@ export default Vue.extend({
       objectUrl: '',
       cropObjectUrl: '',
       cropObjectUrlSkewCorrection: 0,
+      cropImageRequestId: 0,
       requestId: 0,
       controlsCollapsed: true,
       imageSize: {w: 0, h: 0},
@@ -537,6 +556,10 @@ export default Vue.extend({
     options: {
       handler() {
         this.syncCropRoisFromOptions()
+        if (this.cropMode) {
+          this.ensureCropImage()
+          return
+        }
         this.reflow()
       },
       deep: true,
@@ -548,10 +571,12 @@ export default Vue.extend({
       this.setInitialVirtualPage()
     },
     cacheKey() {
+      if (this.cropMode) return
       this.reflow()
     },
     cachedItems: {
       handler() {
+        if (this.cropMode) return
         this.reflow()
       },
     },
@@ -963,31 +988,46 @@ export default Vue.extend({
         return item
       })
     },
-    async ensureCropImage() {
-      const skewCorrection = this.skewCorrection
+    async ensureCropImage(skewCorrection: number = this.skewCorrection) {
+      const normalizedSkewCorrection = this.normalizedSkewCorrection(skewCorrection)
+      const cropImageRequestId = this.cropImageRequestId + 1
+      this.cropImageRequestId = cropImageRequestId
       if (this.objectUrl && this.imageSize.w && this.imageSize.h) {
-        if (!skewCorrection) {
+        if (!normalizedSkewCorrection) {
           this.revokeCropObjectUrl()
           return
         }
-        if (this.cropObjectUrl && this.cropObjectUrlSkewCorrection === skewCorrection) return
+        if (this.cropObjectUrl && this.cropObjectUrlSkewCorrection === normalizedSkewCorrection) return
+        this.loading = true
+        try {
+          const image = await this.decodeImageUrl(this.objectUrl)
+          if (cropImageRequestId !== this.cropImageRequestId) return
+          await this.prepareCropObjectUrl(image, normalizedSkewCorrection, cropImageRequestId)
+        } finally {
+          if (cropImageRequestId === this.cropImageRequestId) this.loading = false
+        }
+        return
       }
       this.loading = true
       try {
         const image = await this.loadPageImage(this.page.url)
+        if (cropImageRequestId !== this.cropImageRequestId) return
         this.imageSize = {w: image.naturalWidth, h: image.naturalHeight}
-        await this.prepareCropObjectUrl(image, skewCorrection)
+        await this.prepareCropObjectUrl(image, normalizedSkewCorrection, cropImageRequestId)
       } finally {
-        this.loading = false
+        if (cropImageRequestId === this.cropImageRequestId) this.loading = false
       }
     },
     async loadPageImage(url: string): Promise<HTMLImageElement> {
-      this.revokeObjectUrl()
+      this.revokeObjectUrl(false)
       const response = await fetch(this.pageImageUrl(url), {credentials: 'include', cache: 'reload'})
       if (!response.ok) throw new Error(`Unable to load page: ${response.status}`)
       const blob = await response.blob()
       if (blob.type && !blob.type.startsWith('image/')) throw new Error(`Page response is not an image: ${blob.type}`)
       this.objectUrl = URL.createObjectURL(blob)
+      return this.decodeImageUrl(this.objectUrl)
+    },
+    decodeImageUrl(url: string): Promise<HTMLImageElement> {
       return new Promise((resolve, reject) => {
         const image = new Image()
         image.onload = () => {
@@ -998,15 +1038,14 @@ export default Vue.extend({
           }
         }
         image.onerror = () => reject(new Error('Unable to decode page image'))
-        image.src = this.objectUrl
+        image.src = url
       })
     },
     pageImageUrl(url: string): string {
       const separator = url.includes('?') ? '&' : '?'
       return `${url}${separator}contentNegotiation=false&reflowCacheBust=${Date.now()}`
     },
-    async prepareCropObjectUrl(image: HTMLImageElement, skewCorrection: number) {
-      this.revokeCropObjectUrl()
+    async prepareCropObjectUrl(image: HTMLImageElement, skewCorrection: number, cropImageRequestId: number = this.cropImageRequestId) {
       if (!skewCorrection) return
 
       const canvas = document.createElement('canvas')
@@ -1016,8 +1055,15 @@ export default Vue.extend({
       if (!context) return
       context.drawImage(image, 0, 0)
       const correctedCanvas = this.skewCorrectedCanvas(canvas, skewCorrection)
-      this.cropObjectUrl = await this.canvasObjectUrl(correctedCanvas)
-      this.cropObjectUrlSkewCorrection = skewCorrection
+      const url = await this.canvasObjectUrl(correctedCanvas)
+      if (cropImageRequestId === this.cropImageRequestId) {
+        const previousUrl = this.cropObjectUrl
+        this.cropObjectUrl = url
+        this.cropObjectUrlSkewCorrection = skewCorrection
+        if (previousUrl && previousUrl !== url) URL.revokeObjectURL(previousUrl)
+      } else {
+        URL.revokeObjectURL(url)
+      }
     },
     canvasObjectUrl(canvas: HTMLCanvasElement): Promise<string> {
       return new Promise((resolve, reject) => {
@@ -1085,12 +1131,13 @@ export default Vue.extend({
       context.drawImage(sourceCanvas, -sourceCanvas.width / 2, -sourceCanvas.height / 2)
       return correctedCanvas
     },
-    revokeObjectUrl() {
-      this.revokeCropObjectUrl()
+    revokeObjectUrl(cancelCropRequests: boolean = true) {
+      this.revokeCropObjectUrl(cancelCropRequests)
       if (this.objectUrl) URL.revokeObjectURL(this.objectUrl)
       this.objectUrl = ''
     },
-    revokeCropObjectUrl() {
+    revokeCropObjectUrl(cancelCropRequests: boolean = true) {
+      if (cancelCropRequests) this.cropImageRequestId += 1
       if (this.cropObjectUrl) URL.revokeObjectURL(this.cropObjectUrl)
       this.cropObjectUrl = ''
       this.cropObjectUrlSkewCorrection = 0
@@ -2507,6 +2554,18 @@ export default Vue.extend({
     adjustSkewCorrection(delta: number) {
       this.$emit('skew-correction-change', this.normalizedSkewCorrection(this.skewCorrection + delta))
     },
+    setCropSkewCorrection(event: Event) {
+      const target = event.target as HTMLInputElement
+      this.updateCropSkewCorrection(Number(target.value))
+    },
+    adjustCropSkewCorrection(delta: number) {
+      this.updateCropSkewCorrection(this.skewCorrection + delta)
+    },
+    updateCropSkewCorrection(value: number) {
+      const skewCorrection = this.normalizedSkewCorrection(value)
+      this.$emit('skew-correction-change', skewCorrection)
+      this.ensureCropImage(skewCorrection)
+    },
     setVerticalText(event: Event) {
       const target = event.target as HTMLSelectElement
       this.$emit('vertical-text-change', target.value === 'vertical')
@@ -3021,6 +3080,29 @@ export default Vue.extend({
   color: #92400e;
   font-size: 13px;
   font-weight: 600;
+}
+
+.crop-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #212121;
+}
+
+.crop-toolbar-label {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.crop-skew-control {
+  flex: 0 1 320px;
+  min-width: min(320px, 100%);
+}
+
+.reflowed-page-dark .crop-toolbar {
+  color: #eeeeee;
 }
 
 .crop-stage {
