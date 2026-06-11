@@ -171,6 +171,7 @@ export default Vue.extend({
     },
     skewCorrection() {
       this.revokeDeskewedPageUrls()
+      this.$nextTick(this.ensureLoadedDeskewedPageUrls)
     },
     carouselPage(val, old) {
       this.$debug('[watch:carouselPage', `old:${old}`, `new:${val}`)
@@ -349,6 +350,15 @@ export default Vue.extend({
       Object.values(this.deskewedPageUrls).forEach(url => URL.revokeObjectURL(url))
       this.deskewedPageUrls = {}
       this.deskewedPagePending = {}
+    },
+    ensureLoadedDeskewedPageUrls() {
+      if (!this.skewCorrection) return
+      const images = Array.from(this.$el.querySelectorAll('img[data-page-number]')) as HTMLImageElement[]
+      images.forEach(image => {
+        const pageNumber = Number(image.dataset.pageNumber)
+        const page = this.pages.find(x => x.number === pageNumber)
+        if (page && image.complete && image.naturalWidth > 0) this.ensureDeskewedPageUrl(page, {target: image} as unknown as Event)
+      })
     },
     imgClass(spread: PageDtoWithUrl[]): string {
       const double = spread.length > 1

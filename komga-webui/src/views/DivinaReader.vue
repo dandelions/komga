@@ -347,6 +347,24 @@
       <div class="reader-crop-toolbar">
         <v-btn small @click="cancelReaderCropMode">取消</v-btn>
         <span>拖拽选择阅读范围</span>
+        <div class="reader-crop-skew-control">
+          <span>手动纠斜</span>
+          <v-btn icon small dark @click="adjustReaderCropSkewCorrection(-0.5)">
+            <v-icon small>mdi-minus</v-icon>
+          </v-btn>
+          <input
+            type="range"
+            min="-10"
+            max="10"
+            step="0.5"
+            :value="readerSkewCorrection"
+            @input="setReaderCropSkewCorrection"
+          />
+          <v-btn icon small dark @click="adjustReaderCropSkewCorrection(0.5)">
+            <v-icon small>mdi-plus</v-icon>
+          </v-btn>
+          <span>{{ readerSkewCorrectionLabel }}</span>
+        </div>
       </div>
       <div
         class="reader-crop-stage"
@@ -925,6 +943,7 @@ export default Vue.extend({
       readerCropStart: {x: 0, y: 0},
       readerCropDraft: undefined as undefined | {x: number, y: number, w: number, h: number},
       readerCropImageUrl: '',
+      readerCropImageRequestId: 0,
       shortcuts: {} as any,
       notification: {
         enabled: false,
@@ -1382,6 +1401,15 @@ export default Vue.extend({
     adjustReaderSkewCorrection(delta: number) {
       this.readerSkewCorrection = this.normalizedReaderSkewCorrection(this.readerSkewCorrection + delta)
     },
+    adjustReaderCropSkewCorrection(delta: number) {
+      this.adjustReaderSkewCorrection(delta)
+      this.prepareReaderCropImage()
+    },
+    setReaderCropSkewCorrection(event: Event) {
+      const target = event.target as HTMLInputElement
+      this.readerSkewCorrection = this.normalizedReaderSkewCorrection(Number(target.value))
+      this.prepareReaderCropImage()
+    },
     normalizedReaderSkewCorrection(value: any): number {
       const numberValue = Number(value)
       if (!Number.isFinite(numberValue)) return 0
@@ -1542,15 +1570,20 @@ export default Vue.extend({
     },
     async prepareReaderCropImage() {
       this.revokeReaderCropImageUrl()
+      const requestId = this.readerCropImageRequestId + 1
+      this.readerCropImageRequestId = requestId
       const angle = this.readerSkewCorrection || 0
       if (!angle || !this.currentPage?.url) return
 
       try {
         const image = await this.loadReaderCropImage(this.currentPage.url)
+        if (requestId !== this.readerCropImageRequestId) return
         const canvas = this.skewCorrectedReaderCropCanvas(image, angle)
-        this.readerCropImageUrl = await this.readerCropCanvasObjectUrl(canvas)
+        const url = await this.readerCropCanvasObjectUrl(canvas)
+        if (requestId === this.readerCropImageRequestId && this.readerSkewCorrection === angle) this.readerCropImageUrl = url
+        else URL.revokeObjectURL(url)
       } catch (e) {
-        this.revokeReaderCropImageUrl()
+        if (requestId === this.readerCropImageRequestId) this.revokeReaderCropImageUrl()
       }
     },
     loadReaderCropImage(url: string): Promise<HTMLImageElement> {
@@ -1586,6 +1619,7 @@ export default Vue.extend({
       })
     },
     revokeReaderCropImageUrl() {
+      this.readerCropImageRequestId += 1
       if (this.readerCropImageUrl) URL.revokeObjectURL(this.readerCropImageUrl)
       this.readerCropImageUrl = ''
     },
@@ -2471,11 +2505,23 @@ export default Vue.extend({
 .reader-crop-toolbar {
   display: flex;
   align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
   gap: 12px;
   min-height: 36px;
   color: #fff;
   font-size: 13px;
   font-weight: 600;
+}
+
+.reader-crop-skew-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.reader-crop-skew-control input[type="range"] {
+  width: min(140px, 36vw);
 }
 
 .reader-crop-stage {
