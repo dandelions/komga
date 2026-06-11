@@ -1043,7 +1043,6 @@ export default Vue.extend({
           sliceContext.clearRect(0, 0, word.w, word.h)
           sliceContext.drawImage(sourceCanvas, word.x, word.y, word.w, word.h, 0, 0, word.w, word.h)
           if (this.strokeStrength > 0) this.strengthenInk(sliceContext, word.w, word.h)
-          this.transparentizeWordBackground(sliceContext, word.w, word.h)
 
           items.push({
             type: 'word',
@@ -1283,30 +1282,6 @@ export default Vue.extend({
             }
           }
         }
-      }
-
-      context.putImageData(imageData, 0, 0)
-    },
-    transparentizeWordBackground(context: CanvasRenderingContext2D, width: number, height: number) {
-      const threshold = Math.min(245, this.clampNumber(this.threshold, 50, 230, DEFAULT_THRESHOLD) + 18)
-      const imageData = context.getImageData(0, 0, width, height)
-      const data = imageData.data
-
-      for (let i = 0; i < width * height; i++) {
-        const offset = i * 4
-        if (data[offset + 3] === 0) continue
-
-        const luma = 0.299 * data[offset] + 0.587 * data[offset + 1] + 0.114 * data[offset + 2]
-        if (luma >= threshold) {
-          data[offset + 3] = 0
-          continue
-        }
-
-        const inkAlpha = Math.round((1 - luma / threshold) * 255 * 1.4)
-        data[offset] = 0
-        data[offset + 1] = 0
-        data[offset + 2] = 0
-        data[offset + 3] = Math.min(255, Math.max(data[offset + 3], inkAlpha))
       }
 
       context.putImageData(imageData, 0, 0)
