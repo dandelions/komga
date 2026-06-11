@@ -962,7 +962,7 @@ export default Vue.extend({
         cropRois: this.effectiveCropRois(this.pageParity),
         deskewDetectionVersion: 8,
         imageExclusionVersion: 2,
-        wordBlockTransparencyVersion: 1,
+        wordBlockTransparencyVersion: 2,
       })
     },
     emitReflowed() {
@@ -2471,7 +2471,71 @@ export default Vue.extend({
         data[offset + 3] = Math.min(255, Math.max(data[offset + 3], inkAlpha))
       }
 
+      this.removeWordBlockLineArtifacts(data, width, height)
       targetContext.putImageData(imageData, 0, 0)
+    },
+    removeWordBlockLineArtifacts(data: Uint8ClampedArray, width: number, height: number) {
+      const components = [] as Array<{indexes: number[], area: number, minX: number, maxX: number, minY: number, maxY: number}>
+      const visited = new Uint8Array(width * height)
+
+      for (let start = 0; start < width * height; start++) {
+        if (visited[start] || data[start * 4 + 3] === 0) continue
+
+        const stack = [start]
+        const indexes = [] as number[]
+        let minX = width
+        let maxX = 0
+        let minY = height
+        let maxY = 0
+        visited[start] = 1
+
+        while (stack.length > 0) {
+          const current = stack.pop() as number
+          const y = Math.floor(current / width)
+          const x = current - y * width
+          indexes.push(current)
+          minX = Math.min(minX, x)
+          maxX = Math.max(maxX, x)
+          minY = Math.min(minY, y)
+          maxY = Math.max(maxY, y)
+
+          for (let dy = -1; dy <= 1; dy++) {
+            const ny = y + dy
+            if (ny < 0 || ny >= height) continue
+            for (let dx = -1; dx <= 1; dx++) {
+              if (dx === 0 && dy === 0) continue
+              const nx = x + dx
+              if (nx < 0 || nx >= width) continue
+              const next = ny * width + nx
+              if (visited[next] || data[next * 4 + 3] === 0) continue
+              visited[next] = 1
+              stack.push(next)
+            }
+          }
+        }
+
+        components.push({indexes, area: indexes.length, minX, maxX, minY, maxY})
+      }
+
+      if (components.length <= 1) return
+      const largestArea = Math.max(...components.map(component => component.area))
+      const totalArea = components.reduce((sum, component) => sum + component.area, 0)
+      const edgeBand = Math.max(2, Math.floor(height * 0.18))
+      const maxLineHeight = Math.max(1, Math.floor(height * 0.16))
+
+      components.forEach(component => {
+        if (component.area === largestArea) return
+        const componentWidth = component.maxX - component.minX + 1
+        const componentHeight = component.maxY - component.minY + 1
+        const nearHorizontalEdge = component.minY <= edgeBand || component.maxY >= height - 1 - edgeBand
+        const thinHorizontal = componentHeight <= maxLineHeight && componentWidth >= Math.max(3, componentHeight * 3)
+        const minorArtifact = component.area < largestArea * 0.25 && component.area < totalArea * 0.12
+        if (!nearHorizontalEdge || !thinHorizontal || !minorArtifact) return
+
+        component.indexes.forEach(index => {
+          data[index * 4 + 3] = 0
+        })
+      })
     },
     expandedInkMask(mask: Uint8Array, sourceIndexes: number[], width: number, height: number): {mask: Uint8Array, indexes: number[]} {
       const expanded = new Uint8Array(mask)
