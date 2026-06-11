@@ -962,6 +962,7 @@ export default Vue.extend({
         cropRois: this.effectiveCropRois(this.pageParity),
         deskewDetectionVersion: 8,
         imageExclusionVersion: 2,
+        wordBlockTransparencyVersion: 1,
       })
     },
     emitReflowed() {
@@ -2242,6 +2243,7 @@ export default Vue.extend({
           sliceContext.clearRect(0, 0, renderBlock.w, renderBlock.h)
           sliceContext.drawImage(sourceCanvas, renderBlock.x, renderBlock.y, renderBlock.w, renderBlock.h, 0, 0, renderBlock.w, renderBlock.h)
           this.boldenSourceCanvas(sliceContext, renderBlock.w, renderBlock.h)
+          this.transparentizeWordBlockBackground(sliceContext, renderBlock.w, renderBlock.h)
           rendered.push({
             ...renderBlock,
             type: 'word',
@@ -2323,6 +2325,7 @@ export default Vue.extend({
             renderBlock.source.h,
           )
           this.boldenSourceCanvas(sliceContext, renderBlock.outputWidth, renderBlock.outputHeight)
+          this.transparentizeWordBlockBackground(sliceContext, renderBlock.outputWidth, renderBlock.outputHeight)
           rendered.push({
             x: block.x,
             y: block.y,
@@ -2442,6 +2445,30 @@ export default Vue.extend({
 
       if (fractional > 0) {
         this.applyFractionalInkExpansion(data, maskIndexes, width, height, fractional)
+      }
+
+      targetContext.putImageData(imageData, 0, 0)
+    },
+    transparentizeWordBlockBackground(targetContext: CanvasRenderingContext2D, width: number, height: number) {
+      const threshold = Math.min(245, this.clampNumber(this.options.threshold, 50, 230, THRESHOLD) + 18)
+      const imageData = targetContext.getImageData(0, 0, width, height)
+      const data = imageData.data
+
+      for (let i = 0; i < width * height; i++) {
+        const offset = i * 4
+        if (data[offset + 3] === 0) continue
+
+        const luma = 0.299 * data[offset] + 0.587 * data[offset + 1] + 0.114 * data[offset + 2]
+        if (luma >= threshold) {
+          data[offset + 3] = 0
+          continue
+        }
+
+        const inkAlpha = Math.round((1 - luma / threshold) * 255 * 1.4)
+        data[offset] = 0
+        data[offset + 1] = 0
+        data[offset + 2] = 0
+        data[offset + 3] = Math.min(255, Math.max(data[offset + 3], inkAlpha))
       }
 
       targetContext.putImageData(imageData, 0, 0)
