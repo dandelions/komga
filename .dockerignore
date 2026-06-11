@@ -1,0 +1,9 @@
+*
+!Dockerfile
+!komga/
+komga/*
+!komga/build/
+komga/build/*
+!komga/build/libs/
+komga/build/libs/*
+!komga/build/libs/komga-*.jar

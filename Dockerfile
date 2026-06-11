@@ -2,7 +2,7 @@
 FROM ubuntu:24.04
 
 # 1. 安装 locales 软件包并生成 UTF-8 语言包
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     locales \
     bash \
     curl \
