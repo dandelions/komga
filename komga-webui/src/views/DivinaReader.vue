@@ -318,6 +318,7 @@
           :image-filter="normalReaderImageFilter"
           :skew-correction="readerSkewCorrection"
           :crop-regions-by-parity="readerCropRegionsByParity"
+          :page-display-urls="readerDeskewedPageUrls"
           :active-crop-region="readerActiveCropRegion"
         @menu="toggleToolbars()"
         @jump-previous="jumpToPrevious()"
@@ -336,6 +337,7 @@
         :image-filter="normalReaderImageFilter"
         :skew-correction="readerSkewCorrection"
         :crop-regions-by-parity="readerCropRegionsByParity"
+        :page-display-urls="readerDeskewedPageUrls"
         :active-crop-region="readerActiveCropRegion"
         @menu="toggleToolbars()"
         @jump-previous="jumpToPrevious()"
@@ -944,6 +946,7 @@ export default Vue.extend({
       readerCropDraft: undefined as undefined | {x: number, y: number, w: number, h: number},
       readerCropImageUrl: '',
       readerCropImageRequestId: 0,
+      readerDeskewedPageUrls: {} as Record<number, string>,
       shortcuts: {} as any,
       notification: {
         enabled: false,
@@ -1036,6 +1039,7 @@ export default Vue.extend({
     document.documentElement.classList.remove('html-reader')
     this.clearReflowPrefetch()
     this.revokeReaderCropImageUrl()
+    this.revokeReaderDeskewedPageUrls()
 
     this.unlockOrientation()
     this.$vuetify.rtl = (this.$t('common.locale_rtl') === 'true')
@@ -1306,8 +1310,10 @@ export default Vue.extend({
       },
       set: function (skewCorrection: number): void {
         const normalized = this.normalizedReaderSkewCorrection(skewCorrection)
+        const changed = this.settings.skewCorrection !== normalized
         this.settings.skewCorrection = normalized
         this.$store.commit('setWebreaderSkewCorrection', normalized)
+        if (changed) this.revokeReaderDeskewedPageUrls()
       },
     },
     readerSkewCorrectionLabel(): string {
@@ -1520,14 +1526,14 @@ export default Vue.extend({
       this.readerCropMode = false
       this.readerCropDrawing = false
       this.readerCropDraft = undefined
-      this.revokeReaderCropImageUrl()
+      if (!this.promoteReaderCropImageUrl()) this.revokeReaderCropImageUrl()
     },
     clearReaderCropRegion() {
       this.setReaderCropRegion(this.readerCropPageParity, this.readerActiveCropRegion, null)
       this.readerCropMode = false
       this.readerCropDrawing = false
       this.readerCropDraft = undefined
-      this.revokeReaderCropImageUrl()
+      if (!this.promoteReaderCropImageUrl()) this.revokeReaderCropImageUrl()
     },
     startReaderCrop(event: PointerEvent) {
       const point = this.readerCropPoint(event)
@@ -1551,7 +1557,7 @@ export default Vue.extend({
         this.setReaderCropRegion(this.readerCropPageParity, this.readerActiveCropRegion, region)
         this.readerCropMode = false
         this.readerCropDraft = undefined
-        this.revokeReaderCropImageUrl()
+        if (!this.promoteReaderCropImageUrl()) this.revokeReaderCropImageUrl()
       }
       event.preventDefault()
     },
@@ -1622,6 +1628,22 @@ export default Vue.extend({
       this.readerCropImageRequestId += 1
       if (this.readerCropImageUrl) URL.revokeObjectURL(this.readerCropImageUrl)
       this.readerCropImageUrl = ''
+    },
+    promoteReaderCropImageUrl(): boolean {
+      if (!this.readerCropImageUrl || !this.currentPage?.number) return false
+      this.readerCropImageRequestId += 1
+      this.setReaderDeskewedPageUrl(this.currentPage.number, this.readerCropImageUrl)
+      this.readerCropImageUrl = ''
+      return true
+    },
+    setReaderDeskewedPageUrl(pageNumber: number, url: string) {
+      const previous = this.readerDeskewedPageUrls[pageNumber]
+      if (previous && previous !== url) URL.revokeObjectURL(previous)
+      this.$set(this.readerDeskewedPageUrls, pageNumber, url)
+    },
+    revokeReaderDeskewedPageUrls() {
+      Object.values(this.readerDeskewedPageUrls).forEach(url => URL.revokeObjectURL(url))
+      this.readerDeskewedPageUrls = {}
     },
     normalizedReaderCropRect(start: {x: number, y: number}, end: {x: number, y: number}): any {
       const left = Math.min(start.x, end.x)
@@ -1716,6 +1738,7 @@ export default Vue.extend({
       this.$debug('[setup]', `bookId:${bookId}`, `page:${page}`)
       this.reflowCache = {}
       this.clearReflowPrefetch()
+      this.revokeReaderDeskewedPageUrls()
       this.book = await this.$komgaBooks.getBook(bookId)
       if (!this.isPdf) this.exitAllReflowModes()
       this.series = await this.$komgaSeries.getOneSeries(this.book.seriesId)

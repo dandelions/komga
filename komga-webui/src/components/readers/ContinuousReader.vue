@@ -108,6 +108,10 @@ export default Vue.extend({
       type: Object as () => CropRegionsByParity,
       default: () => ({enabled: false}),
     },
+    pageDisplayUrls: {
+      type: Object as () => Record<number, string>,
+      default: () => ({}),
+    },
     activeCropRegion: {
       type: Number,
       default: 0,
@@ -218,7 +222,7 @@ export default Vue.extend({
       }
     },
     pageDisplayUrl(page: PageDtoWithUrl): string {
-      return this.deskewedPageUrls[page.number] || page.url
+      return this.pageDisplayUrls[page.number] || this.deskewedPageUrls[page.number] || page.url
     },
     pageStyle(page: PageDtoWithUrl, index: number): object {
       const crop = this.effectiveCropRegion(page.number)
@@ -272,7 +276,7 @@ export default Vue.extend({
     },
     async ensureDeskewedPageUrl(page: PageDtoWithUrl, event: Event) {
       const angle = this.skewCorrection || 0
-      if (!angle || this.deskewedPageUrls[page.number] || this.deskewedPagePending[page.number]) return
+      if (!angle || this.pageDisplayUrls[page.number] || this.deskewedPageUrls[page.number] || this.deskewedPagePending[page.number]) return
 
       const image = event.target as HTMLImageElement
       if (!image?.complete || image.naturalWidth <= 0 || image.currentSrc.startsWith('blob:')) return
