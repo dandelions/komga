@@ -291,10 +291,13 @@ export default Vue.extend({
       return `inset(${crop.y}% ${right}% ${bottom}% ${crop.x}%)`
     },
     effectiveCropRegion(pageNumber: number): CropRegion | undefined {
+      const index = this.activeCropRegion === 1 ? 1 : 0
+      return this.effectiveCropRegionForIndex(pageNumber, index)
+    },
+    effectiveCropRegionForIndex(pageNumber: number, index: number): CropRegion | undefined {
       const crops = this.cropRegionsByParity
       if (!crops?.enabled) return undefined
       const parity = pageNumber % 2 === 0 ? 'even' : 'odd'
-      const index = this.activeCropRegion === 1 ? 1 : 0
       return this.normalizedCropRegion(crops.regions?.[parity]?.[index] || (index === 0 ? crops[parity] : undefined)) ||
         this.normalizedCropRegion(crops.regions?.[parity === 'odd' ? 'even' : 'odd']?.[index])
     },
@@ -403,20 +406,39 @@ export default Vue.extend({
       if (this.vertical) this.next()
     },
     prev() {
+      if (this.activeCropRegion === 1) {
+        this.$emit('update-active-crop-region', 0)
+        return
+      }
       if (this.canPrev) {
         this.pendingScrollPosition = 'bottom'
+        const previousPageNumber = this.spreadPageNumber(this.carouselPage - 1)
+        if (previousPageNumber && this.effectiveCropRegionForIndex(previousPageNumber, 1)) {
+          this.$emit('update-active-crop-region', 1)
+        }
         this.carouselPage--
       } else {
         this.$emit('jump-previous')
       }
     },
     next() {
+      if (this.activeCropRegion === 0 && this.effectiveCropRegionForIndex(this.page, 1)) {
+        this.$emit('update-active-crop-region', 1)
+        return
+      }
+      if (this.activeCropRegion === 1) this.$emit('update-active-crop-region', 0)
       if (this.canNext) {
         this.pendingScrollPosition = 'top'
         this.carouselPage++
       } else {
         this.$emit('jump-next')
       }
+    },
+    spreadPageNumber(spreadIndex: number): number | undefined {
+      const spread = this.spreads[spreadIndex]
+      if (!spread?.length) return undefined
+      const currentPage = spread.length == 2 && spread[1].mediaType ? spread[1] : spread[0]
+      return currentPage?.number
     },
     scrollToPageEdge(position: 'top' | 'bottom') {
       const scrollToEdge = () => {
