@@ -1146,20 +1146,21 @@ export default Vue.extend({
         }
 
         line.words.forEach(word => {
-          const scaledWidth = Math.max(1, Math.round(word.w * scale))
-          const scaledHeight = Math.max(1, Math.round(word.h * scale))
+          const renderWord = this.paddedWordBlock(word, sourceCanvas.width, sourceCanvas.height)
+          const scaledWidth = Math.max(1, Math.round(renderWord.w * scale))
+          const scaledHeight = Math.max(1, Math.round(renderWord.h * scale))
           if (lineWidth > 0 && lineWidth + scaledWidth + wordGap > maxLineWidth) {
             items.push({type: 'break'})
             lineWidth = 0
           }
 
-          sliceCanvas.width = word.w
-          sliceCanvas.height = word.h
-          sliceContext.clearRect(0, 0, word.w, word.h)
-          sliceContext.drawImage(sourceCanvas, word.x, word.y, word.w, word.h, 0, 0, word.w, word.h)
-          this.normalizeWordBackground(sliceContext, word.w, word.h)
-          if (this.strokeStrength > 0) this.strengthenInk(sliceContext, word.w, word.h)
-          this.normalizeWordBackground(sliceContext, word.w, word.h)
+          sliceCanvas.width = renderWord.w
+          sliceCanvas.height = renderWord.h
+          sliceContext.clearRect(0, 0, renderWord.w, renderWord.h)
+          sliceContext.drawImage(sourceCanvas, renderWord.x, renderWord.y, renderWord.w, renderWord.h, 0, 0, renderWord.w, renderWord.h)
+          this.normalizeWordBackground(sliceContext, renderWord.w, renderWord.h)
+          if (this.strokeStrength > 0) this.strengthenInk(sliceContext, renderWord.w, renderWord.h)
+          this.normalizeWordBackground(sliceContext, renderWord.w, renderWord.h)
 
           items.push({
             type: 'word',
@@ -1378,6 +1379,20 @@ export default Vue.extend({
     scrollToTop() {
       this.$nextTick(() => window.scrollTo({top: 0, left: 0, behavior: 'auto'}))
     },
+    paddedWordBlock(word: WordBlock, sourceWidth: number, sourceHeight: number): WordBlock {
+      const paddingX = Math.max(2, Math.min(6, Math.round(word.h * 0.1)))
+      const paddingY = Math.max(2, Math.min(5, Math.round(word.h * 0.08)))
+      const x = Math.max(0, word.x - paddingX)
+      const y = Math.max(0, word.y - paddingY)
+      const right = Math.min(sourceWidth, word.x + word.w + paddingX)
+      const bottom = Math.min(sourceHeight, word.y + word.h + paddingY)
+      return {
+        x,
+        y,
+        w: Math.max(1, right - x),
+        h: Math.max(1, bottom - y),
+      }
+    },
     normalizeWordBackground(context: CanvasRenderingContext2D, width: number, height: number) {
       const threshold = Math.min(245, this.clampNumber(this.threshold, 50, 230, DEFAULT_THRESHOLD) + 18)
       const imageData = context.getImageData(0, 0, width, height)
@@ -1395,8 +1410,46 @@ export default Vue.extend({
         data[offset + 3] = 255
       }
 
+      this.removeWordBlockEdgeArtifacts(data, width, height)
       this.removeOpaqueWordLineArtifacts(data, width, height)
       context.putImageData(imageData, 0, 0)
+    },
+    removeWordBlockEdgeArtifacts(data: Uint8ClampedArray, width: number, height: number) {
+      const edgeBand = Math.max(1, Math.min(4, Math.floor(Math.min(width, height) * 0.08)))
+      const minRowInk = Math.max(2, Math.floor(width * 0.18))
+      const minColumnInk = Math.max(2, Math.floor(height * 0.18))
+
+      for (let i = 0; i < edgeBand; i++) {
+        this.clearEdgeRowIfDense(data, width, height, i, minRowInk)
+        this.clearEdgeRowIfDense(data, width, height, height - 1 - i, minRowInk)
+        this.clearEdgeColumnIfDense(data, width, height, i, minColumnInk)
+        this.clearEdgeColumnIfDense(data, width, height, width - 1 - i, minColumnInk)
+      }
+    },
+    clearEdgeRowIfDense(data: Uint8ClampedArray, width: number, height: number, y: number, minInk: number) {
+      if (y < 0 || y >= height) return
+      let ink = 0
+      for (let x = 0; x < width; x++) {
+        if (data[(y * width + x) * 4] === 0) ink++
+      }
+      if (ink < minInk) return
+      for (let x = 0; x < width; x++) this.clearWordBlockPixel(data, y * width + x)
+    },
+    clearEdgeColumnIfDense(data: Uint8ClampedArray, width: number, height: number, x: number, minInk: number) {
+      if (x < 0 || x >= width) return
+      let ink = 0
+      for (let y = 0; y < height; y++) {
+        if (data[(y * width + x) * 4] === 0) ink++
+      }
+      if (ink < minInk) return
+      for (let y = 0; y < height; y++) this.clearWordBlockPixel(data, y * width + x)
+    },
+    clearWordBlockPixel(data: Uint8ClampedArray, index: number) {
+      const offset = index * 4
+      data[offset] = 255
+      data[offset + 1] = 255
+      data[offset + 2] = 255
+      data[offset + 3] = 255
     },
     removeOpaqueWordLineArtifacts(data: Uint8ClampedArray, width: number, height: number) {
       const components = [] as Array<{indexes: number[], area: number, minX: number, maxX: number, minY: number, maxY: number}>
@@ -1459,16 +1512,12 @@ export default Vue.extend({
         const thinVertical = componentWidth <= maxLineThickness && componentHeight >= Math.max(4, componentWidth * 4)
         const edgeHorizontalArtifact = thinHorizontal && nearHorizontalEdge && (touchesHorizontalEdge || touchesVerticalEdge)
         const edgeVerticalArtifact = thinVertical && nearVerticalEdge && (touchesVerticalEdge || touchesHorizontalEdge)
+        const dominantEdgeHorizontal = edgeHorizontalArtifact && componentWidth >= Math.max(6, width * 0.32)
+        const dominantEdgeVertical = edgeVerticalArtifact && componentHeight >= Math.max(6, height * 0.32)
         const minorArtifact = component.area < largestArea * 0.35 && component.area < totalArea * 0.16
-        if ((!edgeHorizontalArtifact && !edgeVerticalArtifact) || !minorArtifact) return
+        if ((!edgeHorizontalArtifact && !edgeVerticalArtifact) || (!minorArtifact && !dominantEdgeHorizontal && !dominantEdgeVertical)) return
 
-        component.indexes.forEach(index => {
-          const offset = index * 4
-          data[offset] = 255
-          data[offset + 1] = 255
-          data[offset + 2] = 255
-          data[offset + 3] = 255
-        })
+        component.indexes.forEach(index => this.clearWordBlockPixel(data, index))
       })
     },
     strengthenInk(context: CanvasRenderingContext2D, width: number, height: number) {

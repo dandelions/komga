@@ -991,7 +991,7 @@ export default Vue.extend({
         cropRois: this.effectiveCropRois(this.pageParity),
         deskewDetectionVersion: 8,
         imageExclusionVersion: 3,
-        wordBlockOpaqueNormalizationVersion: 2,
+        wordBlockOpaqueNormalizationVersion: 3,
       })
     },
     emitReflowed() {
@@ -2374,6 +2374,7 @@ export default Vue.extend({
             this.expandShortHorizontalGlyphBlock(block, glyphHeight, sourceCanvas.height),
             glyphHeight,
             sourceCanvas.width,
+            sourceCanvas.height,
           )
           sliceCanvas.width = renderBlock.w
           sliceCanvas.height = renderBlock.h
@@ -2434,18 +2435,26 @@ export default Vue.extend({
         h: Math.min(sourceHeight - y, targetHeight),
       }
     },
-    padHorizontalGlyphBlock(block: WordBlock, glyphHeight: number, sourceWidth: number): WordBlock {
+    padHorizontalGlyphBlock(block: WordBlock, glyphHeight: number, sourceWidth: number, sourceHeight: number): WordBlock {
       const padding = this.horizontalGlyphSidePadding(glyphHeight)
+      const verticalPadding = this.horizontalGlyphVerticalPadding(glyphHeight)
       const x = Math.max(0, block.x - padding)
       const right = Math.min(sourceWidth, block.x + block.w + padding)
+      const y = Math.max(0, block.y - verticalPadding)
+      const bottom = Math.min(sourceHeight, block.y + block.h + verticalPadding)
       return {
         ...block,
         x,
+        y,
         w: Math.max(1, right - x),
+        h: Math.max(1, bottom - y),
       }
     },
     horizontalGlyphSidePadding(glyphHeight: number): number {
       return Math.max(2, Math.min(6, Math.round(glyphHeight * 0.1)))
+    },
+    horizontalGlyphVerticalPadding(glyphHeight: number): number {
+      return Math.max(2, Math.min(5, Math.round(glyphHeight * 0.08)))
     },
     renderVerticalReflowItems(
       sourceCanvas: HTMLCanvasElement,
@@ -2607,8 +2616,46 @@ export default Vue.extend({
         data[offset + 3] = 255
       }
 
+      this.removeWordBlockEdgeArtifacts(data, width, height)
       this.removeOpaqueWordLineArtifacts(data, width, height)
       targetContext.putImageData(imageData, 0, 0)
+    },
+    removeWordBlockEdgeArtifacts(data: Uint8ClampedArray, width: number, height: number) {
+      const edgeBand = Math.max(1, Math.min(4, Math.floor(Math.min(width, height) * 0.08)))
+      const minRowInk = Math.max(2, Math.floor(width * 0.18))
+      const minColumnInk = Math.max(2, Math.floor(height * 0.18))
+
+      for (let i = 0; i < edgeBand; i++) {
+        this.clearEdgeRowIfDense(data, width, height, i, minRowInk)
+        this.clearEdgeRowIfDense(data, width, height, height - 1 - i, minRowInk)
+        this.clearEdgeColumnIfDense(data, width, height, i, minColumnInk)
+        this.clearEdgeColumnIfDense(data, width, height, width - 1 - i, minColumnInk)
+      }
+    },
+    clearEdgeRowIfDense(data: Uint8ClampedArray, width: number, height: number, y: number, minInk: number) {
+      if (y < 0 || y >= height) return
+      let ink = 0
+      for (let x = 0; x < width; x++) {
+        if (data[(y * width + x) * 4] === 0) ink++
+      }
+      if (ink < minInk) return
+      for (let x = 0; x < width; x++) this.clearWordBlockPixel(data, y * width + x)
+    },
+    clearEdgeColumnIfDense(data: Uint8ClampedArray, width: number, height: number, x: number, minInk: number) {
+      if (x < 0 || x >= width) return
+      let ink = 0
+      for (let y = 0; y < height; y++) {
+        if (data[(y * width + x) * 4] === 0) ink++
+      }
+      if (ink < minInk) return
+      for (let y = 0; y < height; y++) this.clearWordBlockPixel(data, y * width + x)
+    },
+    clearWordBlockPixel(data: Uint8ClampedArray, index: number) {
+      const offset = index * 4
+      data[offset] = 255
+      data[offset + 1] = 255
+      data[offset + 2] = 255
+      data[offset + 3] = 255
     },
     removeOpaqueWordLineArtifacts(data: Uint8ClampedArray, width: number, height: number) {
       const components = [] as Array<{indexes: number[], area: number, minX: number, maxX: number, minY: number, maxY: number}>
@@ -2671,16 +2718,12 @@ export default Vue.extend({
         const thinVertical = componentWidth <= maxLineThickness && componentHeight >= Math.max(4, componentWidth * 4)
         const edgeHorizontalArtifact = thinHorizontal && nearHorizontalEdge && (touchesHorizontalEdge || touchesVerticalEdge)
         const edgeVerticalArtifact = thinVertical && nearVerticalEdge && (touchesVerticalEdge || touchesHorizontalEdge)
+        const dominantEdgeHorizontal = edgeHorizontalArtifact && componentWidth >= Math.max(6, width * 0.32)
+        const dominantEdgeVertical = edgeVerticalArtifact && componentHeight >= Math.max(6, height * 0.32)
         const minorArtifact = component.area < largestArea * 0.35 && component.area < totalArea * 0.16
-        if ((!edgeHorizontalArtifact && !edgeVerticalArtifact) || !minorArtifact) return
+        if ((!edgeHorizontalArtifact && !edgeVerticalArtifact) || (!minorArtifact && !dominantEdgeHorizontal && !dominantEdgeVertical)) return
 
-        component.indexes.forEach(index => {
-          const offset = index * 4
-          data[offset] = 255
-          data[offset + 1] = 255
-          data[offset + 2] = 255
-          data[offset + 3] = 255
-        })
+        component.indexes.forEach(index => this.clearWordBlockPixel(data, index))
       })
     },
     boldenSourceCanvas(targetContext: CanvasRenderingContext2D, width: number, height: number) {
