@@ -176,10 +176,20 @@ export default Vue.extend({
         case ' ':
         case 'PageDown':
         case 'ArrowDown':
+          if (this.cropNavigationEnabled()) {
+            this.next()
+            e.preventDefault()
+            return
+          }
           if (!this.canNext) this.$emit('jump-next')
           break
         case 'PageUp':
         case 'ArrowUp':
+          if (this.cropNavigationEnabled()) {
+            this.prev()
+            e.preventDefault()
+            return
+          }
           if (!this.canPrev) this.$emit('jump-previous')
           break
       }
@@ -254,10 +264,13 @@ export default Vue.extend({
       return `inset(${crop.y}% ${right}% ${bottom}% ${crop.x}%)`
     },
     effectiveCropRegion(pageNumber: number): CropRegion | undefined {
+      const index = this.activeCropRegion === 1 ? 1 : 0
+      return this.effectiveCropRegionForIndex(pageNumber, index)
+    },
+    effectiveCropRegionForIndex(pageNumber: number, index: number): CropRegion | undefined {
       const crops = this.cropRegionsByParity
       if (!crops?.enabled) return undefined
       const parity = pageNumber % 2 === 0 ? 'even' : 'odd'
-      const index = this.activeCropRegion === 1 ? 1 : 0
       return this.normalizedCropRegion(crops.regions?.[parity]?.[index] || (index === 0 ? crops[parity] : undefined)) ||
         this.normalizedCropRegion(crops.regions?.[parity === 'odd' ? 'even' : 'odd']?.[index])
     },
@@ -331,6 +344,7 @@ export default Vue.extend({
       this.$emit('menu')
     },
     prev() {
+      if (this.cropPrevious()) return
       if (this.canPrev) {
         const step = this.$vuetify.breakpoint.height * 0.95
         this.$vuetify.goTo(this.offsetTop - step, this.goToOptions)
@@ -339,12 +353,61 @@ export default Vue.extend({
       }
     },
     next() {
+      if (this.cropNext()) return
       if (this.canNext) {
         const step = this.$vuetify.breakpoint.height * 0.95
         this.$vuetify.goTo(this.offsetTop + step, this.goToOptions)
       } else {
         this.$emit('jump-next')
       }
+    },
+    cropNavigationEnabled(): boolean {
+      const pageNumber = this.currentPage || this.page
+      return !!this.cropRegionsByParity?.enabled && (
+        !!this.effectiveCropRegionForIndex(pageNumber, 0) ||
+        !!this.effectiveCropRegionForIndex(pageNumber, 1)
+      )
+    },
+    cropPrevious(): boolean {
+      if (!this.cropNavigationEnabled()) return false
+      const pageNumber = this.currentPage || this.page
+      if (this.activeCropRegion === 1) {
+        this.$emit('update-active-crop-region', 0)
+        this.scrollToPage(pageNumber)
+        return true
+      }
+      if (pageNumber > 1) {
+        const previousPageNumber = pageNumber - 1
+        this.$emit('update-active-crop-region', this.effectiveCropRegionForIndex(previousPageNumber, 1) ? 1 : 0)
+        this.$emit('update:page', previousPageNumber)
+        this.scrollToPage(previousPageNumber)
+        return true
+      }
+      this.$emit('jump-previous')
+      return true
+    },
+    cropNext(): boolean {
+      if (!this.cropNavigationEnabled()) return false
+      const pageNumber = this.currentPage || this.page
+      if (this.activeCropRegion === 0 && this.effectiveCropRegionForIndex(pageNumber, 1)) {
+        this.$emit('update-active-crop-region', 1)
+        this.scrollToPage(pageNumber)
+        return true
+      }
+      if (this.activeCropRegion === 1) this.$emit('update-active-crop-region', 0)
+      if (pageNumber < this.pages.length) {
+        const nextPageNumber = pageNumber + 1
+        this.$emit('update:page', nextPageNumber)
+        this.scrollToPage(nextPageNumber)
+        return true
+      }
+      this.$emit('jump-next')
+      return true
+    },
+    scrollToPage(pageNumber: number) {
+      this.$nextTick(() => {
+        this.$vuetify.goTo(`#page${pageNumber}`, {duration: 0})
+      })
     },
   },
 })

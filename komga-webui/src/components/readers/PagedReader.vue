@@ -408,13 +408,16 @@ export default Vue.extend({
     prev() {
       if (this.activeCropRegion === 1) {
         this.$emit('update-active-crop-region', 0)
+        this.scrollToPageEdge('top')
         return
       }
       if (this.canPrev) {
-        this.pendingScrollPosition = 'bottom'
         const previousPageNumber = this.spreadPageNumber(this.carouselPage - 1)
         if (previousPageNumber && this.effectiveCropRegionForIndex(previousPageNumber, 1)) {
           this.$emit('update-active-crop-region', 1)
+          this.pendingScrollPosition = 'top'
+        } else {
+          this.pendingScrollPosition = 'bottom'
         }
         this.carouselPage--
       } else {
@@ -422,8 +425,10 @@ export default Vue.extend({
       }
     },
     next() {
-      if (this.activeCropRegion === 0 && this.effectiveCropRegionForIndex(this.page, 1)) {
+      const currentPageNumber = this.spreadPageNumber(this.carouselPage) || this.page
+      if (this.activeCropRegion === 0 && this.effectiveCropRegionForIndex(currentPageNumber, 1)) {
         this.$emit('update-active-crop-region', 1)
+        this.scrollToPageEdge('top')
         return
       }
       if (this.activeCropRegion === 1) this.$emit('update-active-crop-region', 0)
