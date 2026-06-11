@@ -99,6 +99,20 @@
         </label>
         <div class="reflow-action-controls">
           <span class="reflow-parity-label">{{ pageParityLabel }}</span>
+          <label class="reflow-skew-control">
+            <span>手动纠斜</span>
+            <button type="button" class="reflow-step-control" @click="adjustSkewCorrection(-0.5)">-</button>
+            <input
+              type="range"
+              min="-10"
+              max="10"
+              step="0.5"
+              :value="skewCorrection"
+              @input="setSkewCorrection"
+            />
+            <button type="button" class="reflow-step-control" @click="adjustSkewCorrection(0.5)">+</button>
+            <span class="reflow-font-value">{{ skewCorrectionLabel }}</span>
+          </label>
           <div class="reflow-region-controls">
             <button
               type="button"
@@ -117,20 +131,6 @@
               区域 2
             </button>
           </div>
-          <label class="reflow-skew-control">
-            <span>手动纠斜</span>
-            <button type="button" class="reflow-step-control" @click="adjustSkewCorrection(-0.5)">-</button>
-            <input
-              type="range"
-              min="-10"
-              max="10"
-              step="0.5"
-              :value="skewCorrection"
-              @input="setSkewCorrection"
-            />
-            <button type="button" class="reflow-step-control" @click="adjustSkewCorrection(0.5)">+</button>
-            <span class="reflow-font-value">{{ skewCorrectionLabel }}</span>
-          </label>
           <button type="button" class="reflow-control" @click="toggleCropMode">
             {{ selectAreaLabel }}
           </button>
@@ -160,9 +160,9 @@
         @pointercancel.stop="cancelDraftCrop"
       >
         <img
-          v-if="objectUrl"
+          v-if="cropImageUrl"
           ref="cropImage"
-          :src="objectUrl"
+          :src="cropImageUrl"
           class="crop-image"
           alt=""
           draggable="false"
@@ -398,6 +398,8 @@ export default Vue.extend({
       pageBackground: '#fff',
       lastDetectionKey: '',
       objectUrl: '',
+      cropObjectUrl: '',
+      cropObjectUrlSkewCorrection: 0,
       requestId: 0,
       controlsCollapsed: true,
       imageSize: {w: 0, h: 0},
@@ -497,6 +499,9 @@ export default Vue.extend({
     },
     cropRoi(): Roi | undefined {
       return this.effectiveCropRoi(this.pageParity, this.activeCropRegion)
+    },
+    cropImageUrl(): string {
+      return this.cropObjectUrl || this.objectUrl
     },
     activeRoi(): Roi | undefined {
       return this.draftRoi || this.cropRoi
@@ -611,12 +616,13 @@ export default Vue.extend({
         if (!context) throw new Error('Canvas is unavailable')
         context.drawImage(image, 0, 0)
         this.pageBackground = this.detectPageBackground(context, canvas.width, canvas.height)
+        const skewCorrection = this.skewCorrection
+        const deskewedCanvas = skewCorrection === 0 ? canvas : this.skewCorrectedCanvas(canvas, skewCorrection)
         const cropRois = this.reflowCropRois()
         const regionItems = [] as ReflowItem[][]
         for (const roi of cropRois) {
-          const regionSource = this.reflowRegionSource(canvas, roi)
-          const skewCorrection = this.skewCorrection
-          const sourceCanvas = skewCorrection === 0 ? regionSource.canvas : this.skewCorrectedCanvas(regionSource.canvas, skewCorrection)
+          const regionSource = this.reflowRegionSource(deskewedCanvas, roi)
+          const sourceCanvas = regionSource.canvas
           const sourceContext = sourceCanvas.getContext('2d')
           if (!sourceContext) throw new Error('Canvas is unavailable')
           const imageData = sourceContext.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height)
@@ -929,7 +935,7 @@ export default Vue.extend({
         marginBottom: this.options.marginBottom,
         marginLeft: this.options.marginLeft,
         cropRois: this.effectiveCropRois(this.pageParity),
-        deskewDetectionVersion: 7,
+        deskewDetectionVersion: 8,
         imageExclusionVersion: 2,
       })
     },
@@ -958,11 +964,19 @@ export default Vue.extend({
       })
     },
     async ensureCropImage() {
-      if (this.objectUrl && this.imageSize.w && this.imageSize.h) return
+      const skewCorrection = this.skewCorrection
+      if (this.objectUrl && this.imageSize.w && this.imageSize.h) {
+        if (!skewCorrection) {
+          this.revokeCropObjectUrl()
+          return
+        }
+        if (this.cropObjectUrl && this.cropObjectUrlSkewCorrection === skewCorrection) return
+      }
       this.loading = true
       try {
         const image = await this.loadPageImage(this.page.url)
         this.imageSize = {w: image.naturalWidth, h: image.naturalHeight}
+        await this.prepareCropObjectUrl(image, skewCorrection)
       } finally {
         this.loading = false
       }
@@ -990,6 +1004,28 @@ export default Vue.extend({
     pageImageUrl(url: string): string {
       const separator = url.includes('?') ? '&' : '?'
       return `${url}${separator}contentNegotiation=false&reflowCacheBust=${Date.now()}`
+    },
+    async prepareCropObjectUrl(image: HTMLImageElement, skewCorrection: number) {
+      this.revokeCropObjectUrl()
+      if (!skewCorrection) return
+
+      const canvas = document.createElement('canvas')
+      canvas.width = image.naturalWidth
+      canvas.height = image.naturalHeight
+      const context = canvas.getContext('2d')
+      if (!context) return
+      context.drawImage(image, 0, 0)
+      const correctedCanvas = this.skewCorrectedCanvas(canvas, skewCorrection)
+      this.cropObjectUrl = await this.canvasObjectUrl(correctedCanvas)
+      this.cropObjectUrlSkewCorrection = skewCorrection
+    },
+    canvasObjectUrl(canvas: HTMLCanvasElement): Promise<string> {
+      return new Promise((resolve, reject) => {
+        canvas.toBlob(blob => {
+          if (blob) resolve(URL.createObjectURL(blob))
+          else reject(new Error('Unable to encode deskewed crop image'))
+        }, 'image/jpeg', 0.95)
+      })
     },
     reflowRegionSource(sourceCanvas: HTMLCanvasElement, cropRoi?: Roi): ReflowRegionSource {
       if (!cropRoi) return {canvas: sourceCanvas}
@@ -1050,8 +1086,14 @@ export default Vue.extend({
       return correctedCanvas
     },
     revokeObjectUrl() {
+      this.revokeCropObjectUrl()
       if (this.objectUrl) URL.revokeObjectURL(this.objectUrl)
       this.objectUrl = ''
+    },
+    revokeCropObjectUrl() {
+      if (this.cropObjectUrl) URL.revokeObjectURL(this.cropObjectUrl)
+      this.cropObjectUrl = ''
+      this.cropObjectUrlSkewCorrection = 0
     },
     detectWordLines(imageData: ImageData, width: number, height: number, cropRoi?: Roi): WordLine[] {
       const pixels = imageData.data

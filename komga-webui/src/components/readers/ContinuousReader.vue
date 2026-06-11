@@ -6,12 +6,13 @@
       <img v-for="(page, i) in pages"
            :key="`page${i}`"
            :alt="`Page ${page.number}`"
-           :src="shouldLoad(i) ? page.url : undefined"
+           :src="shouldLoad(i) ? pageDisplayUrl(page) : undefined"
            :height="calcHeight(page)"
            :width="calcWidth(page)"
            :id="`page${page.number}`"
            :data-page-number="page.number"
            :style="pageStyle(page, i)"
+           @load="ensureDeskewedPageUrl(page, $event)"
            v-intersect="onIntersect"
       />
     </div>
@@ -66,6 +67,8 @@ export default Vue.extend({
       totalHeight: 1000,
       currentPage: 1,
       seen: [] as boolean[],
+      deskewedPageUrls: {} as Record<number, string>,
+      deskewedPagePending: {} as Record<number, boolean>,
     }
   },
   props: {
@@ -114,9 +117,13 @@ export default Vue.extend({
     pages: {
       handler(val) {
         this.seen = new Array(val.length).fill(false)
+        this.revokeDeskewedPageUrls()
         if (this.page === 1) window.scrollTo(0, 0)
       },
       immediate: true,
+    },
+    skewCorrection() {
+      this.revokeDeskewedPageUrls()
     },
     page: {
       handler(val) {
@@ -134,6 +141,7 @@ export default Vue.extend({
   },
   destroyed() {
     window.removeEventListener('keydown', this.keyPressed)
+    this.revokeDeskewedPageUrls()
   },
   mounted() {
     if (this.page != this.currentPage) {
@@ -208,18 +216,20 @@ export default Vue.extend({
           return undefined
       }
     },
+    pageDisplayUrl(page: PageDtoWithUrl): string {
+      return this.deskewedPageUrls[page.number] || page.url
+    },
     pageStyle(page: PageDtoWithUrl, index: number): object {
-      const angle = this.skewCorrection || 0
       const crop = this.effectiveCropRegion(page.number)
       return {
         margin: `${index === 0 ? 0 : this.pageMargin}px auto`,
         filter: this.imageFilter,
         clipPath: this.cropClipPath(crop),
-        transform: this.imageTransform(angle, crop),
+        transform: this.imageTransform(crop),
         transformOrigin: 'center center',
       }
     },
-    imageTransform(angle: number, crop: CropRegion | undefined): string | undefined {
+    imageTransform(crop: CropRegion | undefined): string | undefined {
       const transforms = [] as string[]
       if (crop) {
         const scaleX = 100 / crop.w
@@ -230,8 +240,6 @@ export default Vue.extend({
         transforms.push(`translate(${translateX.toFixed(2)}%, ${translateY.toFixed(2)}%)`)
         transforms.push(`scale(${scale.toFixed(3)})`)
       }
-      const deskewTransform = this.deskewTransform(angle)
-      if (deskewTransform) transforms.push(deskewTransform)
       return transforms.join(' ') || undefined
     },
     cropClipPath(crop: CropRegion | undefined): string | undefined {
@@ -261,10 +269,49 @@ export default Vue.extend({
       if (!Number.isFinite(numberValue)) return fallback
       return Math.max(0, Math.min(100, numberValue))
     },
-    deskewTransform(angle: number): string | undefined {
-      if (!angle) return undefined
-      const scale = Math.max(0.9, 1 - Math.abs(angle) * 0.01)
-      return `rotate(${angle}deg) scale(${scale.toFixed(3)})`
+    async ensureDeskewedPageUrl(page: PageDtoWithUrl, event: Event) {
+      const angle = this.skewCorrection || 0
+      if (!angle || this.deskewedPageUrls[page.number] || this.deskewedPagePending[page.number]) return
+
+      const image = event.target as HTMLImageElement
+      if (!image?.complete || image.naturalWidth <= 0 || image.currentSrc.startsWith('blob:')) return
+
+      this.$set(this.deskewedPagePending, page.number, true)
+      try {
+        const canvas = this.skewCorrectedCanvas(image, angle)
+        const url = await this.canvasObjectUrl(canvas)
+        if (this.skewCorrection === angle) this.$set(this.deskewedPageUrls, page.number, url)
+        else URL.revokeObjectURL(url)
+      } catch (e) {
+      } finally {
+        this.$delete(this.deskewedPagePending, page.number)
+      }
+    },
+    skewCorrectedCanvas(image: HTMLImageElement, degrees: number): HTMLCanvasElement {
+      const canvas = document.createElement('canvas')
+      canvas.width = image.naturalWidth
+      canvas.height = image.naturalHeight
+      const context = canvas.getContext('2d')
+      if (!context) return canvas
+      context.fillStyle = '#fff'
+      context.fillRect(0, 0, canvas.width, canvas.height)
+      context.translate(canvas.width / 2, canvas.height / 2)
+      context.rotate(degrees * Math.PI / 180)
+      context.drawImage(image, -image.naturalWidth / 2, -image.naturalHeight / 2)
+      return canvas
+    },
+    canvasObjectUrl(canvas: HTMLCanvasElement): Promise<string> {
+      return new Promise((resolve, reject) => {
+        canvas.toBlob(blob => {
+          if (blob) resolve(URL.createObjectURL(blob))
+          else reject(new Error('Unable to encode deskewed page'))
+        }, 'image/jpeg', 0.95)
+      })
+    },
+    revokeDeskewedPageUrls() {
+      Object.values(this.deskewedPageUrls).forEach(url => URL.revokeObjectURL(url))
+      this.deskewedPageUrls = {}
+      this.deskewedPagePending = {}
     },
     centerClick() {
       this.$emit('menu')

@@ -357,7 +357,7 @@
       >
         <img
           ref="readerCropImage"
-          :src="currentPage.url"
+          :src="readerCropImageSrc"
           class="reader-crop-image"
           alt=""
           draggable="false"
@@ -475,9 +475,6 @@
               />
             </v-list-item>
             <v-list-item v-if="!activeReflowMode">
-              <settings-switch v-model="readerCropEnabled" label="截取区域"/>
-            </v-list-item>
-            <v-list-item v-if="!activeReflowMode && readerCropEnabled">
               <v-slider
                 v-model="readerSkewCorrection"
                 label="手动纠斜"
@@ -499,6 +496,9 @@
                   </v-btn>
                 </template>
               </v-slider>
+            </v-list-item>
+            <v-list-item v-if="!activeReflowMode">
+              <settings-switch v-model="readerCropEnabled" label="截取区域"/>
             </v-list-item>
             <v-list-item v-if="!activeReflowMode && readerCropEnabled">
               <span class="mr-2">{{ readerCropPageParityLabel }}</span>
@@ -924,6 +924,7 @@ export default Vue.extend({
       readerActiveCropRegion: 0,
       readerCropStart: {x: 0, y: 0},
       readerCropDraft: undefined as undefined | {x: number, y: number, w: number, h: number},
+      readerCropImageUrl: '',
       shortcuts: {} as any,
       notification: {
         enabled: false,
@@ -1015,6 +1016,7 @@ export default Vue.extend({
   destroyed() {
     document.documentElement.classList.remove('html-reader')
     this.clearReflowPrefetch()
+    this.revokeReaderCropImageUrl()
 
     this.unlockOrientation()
     this.$vuetify.rtl = (this.$t('common.locale_rtl') === 'true')
@@ -1142,6 +1144,9 @@ export default Vue.extend({
     readerCropPageParityLabel(): string {
       return this.readerCropPageParity === 'even' ? '偶数页' : '奇数页'
     },
+    readerCropImageSrc(): string {
+      return this.readerCropImageUrl || this.currentPage?.url || ''
+    },
     readerCropActiveRect(): object | undefined {
       const region = this.readerCropDraft || this.effectiveReaderCropRegion(this.readerCropPageParity, this.readerActiveCropRegion)
       if (!region) return undefined
@@ -1197,7 +1202,7 @@ export default Vue.extend({
         marginBottom: this.reflowSettings.marginBottom,
         marginLeft: this.reflowSettings.marginLeft,
         cropRoisByParity: this.reflowSettings.cropRoisByParity,
-        deskewDetectionVersion: 7,
+        deskewDetectionVersion: 8,
         imageExclusionVersion: 2,
       })
     },
@@ -1474,9 +1479,10 @@ export default Vue.extend({
       this.readerCropDraft = undefined
       this.readerCropDrawing = false
     },
-    startReaderCropMode() {
+    async startReaderCropMode() {
       if (!this.currentPage?.url) return
       this.showSettings = false
+      await this.prepareReaderCropImage()
       this.readerCropMode = true
       this.readerCropDrawing = false
       const current = this.effectiveReaderCropRegion(this.readerCropPageParity, this.readerActiveCropRegion)
@@ -1486,12 +1492,14 @@ export default Vue.extend({
       this.readerCropMode = false
       this.readerCropDrawing = false
       this.readerCropDraft = undefined
+      this.revokeReaderCropImageUrl()
     },
     clearReaderCropRegion() {
       this.setReaderCropRegion(this.readerCropPageParity, this.readerActiveCropRegion, null)
       this.readerCropMode = false
       this.readerCropDrawing = false
       this.readerCropDraft = undefined
+      this.revokeReaderCropImageUrl()
     },
     startReaderCrop(event: PointerEvent) {
       const point = this.readerCropPoint(event)
@@ -1515,6 +1523,7 @@ export default Vue.extend({
         this.setReaderCropRegion(this.readerCropPageParity, this.readerActiveCropRegion, region)
         this.readerCropMode = false
         this.readerCropDraft = undefined
+        this.revokeReaderCropImageUrl()
       }
       event.preventDefault()
     },
@@ -1530,6 +1539,55 @@ export default Vue.extend({
         x: this.clampReaderCropNumber((event.clientX - rect.left) * 100 / rect.width, 0),
         y: this.clampReaderCropNumber((event.clientY - rect.top) * 100 / rect.height, 0),
       }
+    },
+    async prepareReaderCropImage() {
+      this.revokeReaderCropImageUrl()
+      const angle = this.readerSkewCorrection || 0
+      if (!angle || !this.currentPage?.url) return
+
+      try {
+        const image = await this.loadReaderCropImage(this.currentPage.url)
+        const canvas = this.skewCorrectedReaderCropCanvas(image, angle)
+        this.readerCropImageUrl = await this.readerCropCanvasObjectUrl(canvas)
+      } catch (e) {
+        this.revokeReaderCropImageUrl()
+      }
+    },
+    loadReaderCropImage(url: string): Promise<HTMLImageElement> {
+      return new Promise((resolve, reject) => {
+        const image = new Image()
+        image.onload = () => {
+          if (image.naturalWidth > 0 && image.naturalHeight > 0) resolve(image)
+          else reject(new Error('Decoded image is empty'))
+        }
+        image.onerror = () => reject(new Error('Unable to decode page image'))
+        image.src = url
+      })
+    },
+    skewCorrectedReaderCropCanvas(image: HTMLImageElement, degrees: number): HTMLCanvasElement {
+      const canvas = document.createElement('canvas')
+      canvas.width = image.naturalWidth
+      canvas.height = image.naturalHeight
+      const context = canvas.getContext('2d')
+      if (!context) return canvas
+      context.fillStyle = '#fff'
+      context.fillRect(0, 0, canvas.width, canvas.height)
+      context.translate(canvas.width / 2, canvas.height / 2)
+      context.rotate(degrees * Math.PI / 180)
+      context.drawImage(image, -image.naturalWidth / 2, -image.naturalHeight / 2)
+      return canvas
+    },
+    readerCropCanvasObjectUrl(canvas: HTMLCanvasElement): Promise<string> {
+      return new Promise((resolve, reject) => {
+        canvas.toBlob(blob => {
+          if (blob) resolve(URL.createObjectURL(blob))
+          else reject(new Error('Unable to encode deskewed crop image'))
+        }, 'image/jpeg', 0.95)
+      })
+    },
+    revokeReaderCropImageUrl() {
+      if (this.readerCropImageUrl) URL.revokeObjectURL(this.readerCropImageUrl)
+      this.readerCropImageUrl = ''
     },
     normalizedReaderCropRect(start: {x: number, y: number}, end: {x: number, y: number}): any {
       const left = Math.min(start.x, end.x)
