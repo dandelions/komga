@@ -113,7 +113,6 @@ export default Vue.extend({
       pendingScrollPosition: 'top' as 'top' | 'bottom',
       deskewedPageUrls: {} as Record<number, string>,
       deskewedPagePending: {} as Record<number, boolean>,
-      restoringCarouselPage: false,
     }
   },
   props: {
@@ -180,13 +179,13 @@ export default Vue.extend({
     },
     carouselPage(val, old) {
       this.$debug('[watch:carouselPage', `old:${old}`, `new:${val}`)
-      if (this.restoringCarouselPage) {
-        this.restoringCarouselPage = false
-        this.emitCarouselPage()
-        return
+      if (this.carouselPage >= 0 && this.carouselPage < this.spreads.length && this.spreads.length > 0) {
+        const currentSpread = this.spreads[this.carouselPage]
+        const currentPage = currentSpread.length == 2 && currentSpread[1].mediaType ? currentSpread[1] : currentSpread[0]
+        this.$emit('update:page', currentPage.number)
+      } else {
+        this.$emit('update:page', 1)
       }
-      if (this.interceptCropCarouselChange(val, old)) return
-      this.emitCarouselPage()
     },
     page(val, old) {
       this.$debug('[watch:page]', `old:${old}`, `new:${val}`)
@@ -257,51 +256,6 @@ export default Vue.extend({
     },
   },
   methods: {
-    emitCarouselPage() {
-      if (this.carouselPage >= 0 && this.carouselPage < this.spreads.length && this.spreads.length > 0) {
-        const currentSpread = this.spreads[this.carouselPage]
-        const currentPage = currentSpread.length == 2 && currentSpread[1].mediaType ? currentSpread[1] : currentSpread[0]
-        this.$emit('update:page', currentPage.number)
-      } else {
-        this.$emit('update:page', 1)
-      }
-    },
-    interceptCropCarouselChange(val: number, old: number): boolean {
-      if (!this.cropRegionsByParity?.enabled || old === undefined || val === old) return false
-      const goingForward = val > old
-      const goingBackward = val < old
-
-      if (goingForward) {
-        const currentPageNumber = this.spreadPageNumber(old)
-        if (this.activeCropRegion === 0 && currentPageNumber && this.effectiveCropRegionForIndex(currentPageNumber, 1)) {
-          this.restoreCarouselPage(old)
-          this.$emit('update-active-crop-region', 1)
-          this.scrollToPageEdge('top')
-          return true
-        }
-        if (this.activeCropRegion === 1) this.$emit('update-active-crop-region', 0)
-      }
-
-      if (goingBackward) {
-        if (this.activeCropRegion === 1) {
-          this.restoreCarouselPage(old)
-          this.$emit('update-active-crop-region', 0)
-          this.scrollToPageEdge('top')
-          return true
-        }
-        const targetPageNumber = this.spreadPageNumber(val)
-        if (this.activeCropRegion === 0 && targetPageNumber && this.effectiveCropRegionForIndex(targetPageNumber, 1)) {
-          this.$emit('update-active-crop-region', 1)
-          this.pendingScrollPosition = 'top'
-        }
-      }
-
-      return false
-    },
-    restoreCarouselPage(spreadIndex: number) {
-      this.restoringCarouselPage = true
-      this.carouselPage = spreadIndex
-    },
     keyPressed(e: KeyboardEvent) {
       this.shortcuts[e.key]?.execute(this)
     },
@@ -337,13 +291,10 @@ export default Vue.extend({
       return `inset(${crop.y}% ${right}% ${bottom}% ${crop.x}%)`
     },
     effectiveCropRegion(pageNumber: number): CropRegion | undefined {
-      const index = this.activeCropRegion === 1 ? 1 : 0
-      return this.effectiveCropRegionForIndex(pageNumber, index)
-    },
-    effectiveCropRegionForIndex(pageNumber: number, index: number): CropRegion | undefined {
       const crops = this.cropRegionsByParity
       if (!crops?.enabled) return undefined
       const parity = pageNumber % 2 === 0 ? 'even' : 'odd'
+      const index = this.activeCropRegion === 1 ? 1 : 0
       return this.normalizedCropRegion(crops.regions?.[parity]?.[index] || (index === 0 ? crops[parity] : undefined)) ||
         this.normalizedCropRegion(crops.regions?.[parity === 'odd' ? 'even' : 'odd']?.[index])
     },
@@ -452,44 +403,20 @@ export default Vue.extend({
       if (this.vertical) this.next()
     },
     prev() {
-      if (this.activeCropRegion === 1) {
-        this.$emit('update-active-crop-region', 0)
-        this.scrollToPageEdge('top')
-        return
-      }
       if (this.canPrev) {
-        const previousPageNumber = this.spreadPageNumber(this.carouselPage - 1)
-        if (previousPageNumber && this.effectiveCropRegionForIndex(previousPageNumber, 1)) {
-          this.$emit('update-active-crop-region', 1)
-          this.pendingScrollPosition = 'top'
-        } else {
-          this.pendingScrollPosition = 'bottom'
-        }
+        this.pendingScrollPosition = 'bottom'
         this.carouselPage--
       } else {
         this.$emit('jump-previous')
       }
     },
     next() {
-      const currentPageNumber = this.spreadPageNumber(this.carouselPage) || this.page
-      if (this.activeCropRegion === 0 && this.effectiveCropRegionForIndex(currentPageNumber, 1)) {
-        this.$emit('update-active-crop-region', 1)
-        this.scrollToPageEdge('top')
-        return
-      }
-      if (this.activeCropRegion === 1) this.$emit('update-active-crop-region', 0)
       if (this.canNext) {
         this.pendingScrollPosition = 'top'
         this.carouselPage++
       } else {
         this.$emit('jump-next')
       }
-    },
-    spreadPageNumber(spreadIndex: number): number | undefined {
-      const spread = this.spreads[spreadIndex]
-      if (!spread?.length) return undefined
-      const currentPage = spread.length == 2 && spread[1].mediaType ? spread[1] : spread[0]
-      return currentPage?.number
     },
     scrollToPageEdge(position: 'top' | 'bottom') {
       const scrollToEdge = () => {

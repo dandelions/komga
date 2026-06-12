@@ -108,14 +108,6 @@
           :style="{width: `${item.width}px`, height: `${item.height}px`}"
           alt=""
         />
-        <img
-          v-else-if="item.type === 'image'"
-          :key="`image-${index}`"
-          :src="item.src"
-          class="k2-image"
-          :style="{width: `${item.width}px`, height: `${item.height}px`}"
-          alt=""
-        />
       </template>
     </div>
     <div
@@ -141,14 +133,6 @@
           :style="{width: `${item.width}px`, height: `${item.height}px`}"
           alt=""
         />
-        <img
-          v-else-if="item.type === 'image'"
-          :key="`measure-image-${index}`"
-          :src="item.src"
-          class="k2-image"
-          :style="{width: `${item.width}px`, height: `${item.height}px`}"
-          alt=""
-        />
       </template>
     </div>
   </div>
@@ -168,8 +152,7 @@ type WordLine = { column: Column, row: TextRow, words: WordBlock[] }
 type BreakItem = { type: 'break' }
 type IndentItem = { type: 'indent', width: number, sourceWidth: number }
 type WordItem = { type: 'word', src: string, width: number, height: number }
-type ImageItem = { type: 'image', src: string, x: number, y: number, w: number, h: number, width: number, height: number }
-type K2Item = BreakItem | IndentItem | WordItem | ImageItem
+type K2Item = BreakItem | IndentItem | WordItem
 type K2Settings = {
   textScale: number,
   maxColumns: number,
@@ -378,14 +361,14 @@ export default Vue.extend({
         const imageData = context.getImageData(0, 0, canvas.width, canvas.height)
         const rawInk = this.buildInkMap(imageData, canvas.width, canvas.height)
         const initialRoi = this.detectRoi(rawInk, canvas.width, canvas.height)
-        const imageRegions = this.detectImageRegions(imageData.data, canvas.width, canvas.height, initialRoi, this.clampNumber(this.threshold, 50, 230, DEFAULT_THRESHOLD), rawInk)
+        const imageRegions = this.detectImageRegions(imageData.data, canvas.width, canvas.height, initialRoi, this.clampNumber(this.threshold, 50, 230, DEFAULT_THRESHOLD))
         const ink = this.clearImageRegions(rawInk, canvas.width, canvas.height, imageRegions)
         const roi = this.detectRoi(ink, canvas.width, canvas.height)
         const columns = this.detectColumns(ink, canvas.width, canvas.height, roi)
         const lines = this.detectWordLines(ink, canvas.width, canvas.height, columns)
         if (requestId !== this.requestId) return
 
-        this.items = this.renderK2Items(canvas, lines, imageRegions)
+        this.items = this.renderK2Items(canvas, lines)
         this.repaginate()
       } catch (e) {
         if (requestId !== this.requestId) return
@@ -455,7 +438,7 @@ export default Vue.extend({
 
       return ink
     },
-    detectImageRegions(pixels: Uint8ClampedArray, width: number, height: number, roi: Roi, threshold: number, ink?: Uint8Array): ImageRegion[] {
+    detectImageRegions(pixels: Uint8ClampedArray, width: number, height: number, roi: Roi, threshold: number): ImageRegion[] {
       const tileSize = Math.max(12, Math.min(28, Math.round(Math.min(roi.w, roi.h) / 64)))
       const tileColumns = Math.ceil(roi.w / tileSize)
       const tileRows = Math.ceil(roi.h / tileSize)
@@ -484,9 +467,7 @@ export default Vue.extend({
         }
       }
 
-      const tileRegions = this.collectImageRegions(candidates, coloredTiles, denseTiles, texturedTiles, tileColumns, tileRows, tileSize, roi)
-      const figureRegions = ink ? this.detectFigureLikeRegions(ink, width, height, roi) : []
-      return this.mergeImageRegions([...tileRegions, ...figureRegions])
+      return this.collectImageRegions(candidates, coloredTiles, denseTiles, texturedTiles, tileColumns, tileRows, tileSize, roi)
     },
     imageTileMetrics(
       pixels: Uint8ClampedArray,
@@ -631,87 +612,6 @@ export default Vue.extend({
       const texturedGraphic = texturedRatio >= 0.42 && areaRatio >= 0.018 && fillRatio >= 0.22
 
       return spansTextColumn && (colorImage || denseGraphic || texturedGraphic)
-    },
-    detectFigureLikeRegions(ink: Uint8Array, width: number, height: number, roi: Roi): ImageRegion[] {
-      const rowThreshold = Math.max(2, Math.floor(roi.w * 0.004))
-      const maxBlankRun = Math.max(3, Math.floor(roi.h * 0.006))
-      const regions = [] as ImageRegion[]
-      let inRegion = false
-      let startY = roi.y
-      let blankRun = 0
-
-      for (let y = roi.y; y <= roi.y + roi.h; y++) {
-        const rowInk = y < roi.y + roi.h ? this.countInkInRow(ink, width, roi.x, roi.x + roi.w, y) : 0
-        const blank = y >= roi.y + roi.h || rowInk <= rowThreshold
-
-        if (!inRegion && !blank) {
-          inRegion = true
-          startY = y
-          blankRun = 0
-          continue
-        }
-
-        if (!inRegion) continue
-
-        if (blank) {
-          blankRun++
-          if (blankRun > maxBlankRun) {
-            const endY = y - blankRun + 1
-            const region = this.tightFigureRegion(ink, width, height, roi, startY, endY)
-            if (region && this.isLikelyFigureShape(region, roi)) regions.push(region)
-            inRegion = false
-            blankRun = 0
-          }
-        } else {
-          blankRun = 0
-        }
-      }
-
-      return regions
-    },
-    countInkInRow(ink: Uint8Array, width: number, xStart: number, xEnd: number, y: number): number {
-      let count = 0
-      const row = y * width
-      for (let x = xStart; x < xEnd; x++) {
-        if (ink[row + x]) count++
-      }
-      return count
-    },
-    tightFigureRegion(ink: Uint8Array, width: number, height: number, roi: Roi, yStart: number, yEnd: number): ImageRegion | undefined {
-      let minX = roi.x + roi.w
-      let maxX = roi.x
-      let minY = yEnd
-      let maxY = yStart
-
-      for (let y = Math.max(roi.y, yStart); y < Math.min(roi.y + roi.h, yEnd); y++) {
-        const row = y * width
-        for (let x = roi.x; x < roi.x + roi.w; x++) {
-          if (!ink[row + x]) continue
-          minX = Math.min(minX, x)
-          maxX = Math.max(maxX, x)
-          minY = Math.min(minY, y)
-          maxY = Math.max(maxY, y)
-        }
-      }
-
-      if (maxX < minX || maxY < minY) return undefined
-      const padding = Math.max(2, Math.floor(Math.min(width, height) * 0.003))
-      const left = Math.max(roi.x, minX - padding)
-      const top = Math.max(roi.y, minY - padding)
-      const right = Math.min(roi.x + roi.w, maxX + padding + 1)
-      const bottom = Math.min(roi.y + roi.h, maxY + padding + 1)
-      return {x: left, y: top, w: right - left, h: bottom - top}
-    },
-    isLikelyFigureShape(region: ImageRegion, roi: Roi): boolean {
-      const roiArea = Math.max(1, roi.w * roi.h)
-      const areaRatio = region.w * region.h / roiArea
-      const minWidth = Math.max(44, roi.w * 0.08)
-      const minHeight = Math.max(48, roi.h * 0.045)
-      const aspectRatio = region.w / Math.max(1, region.h)
-      return region.w >= minWidth &&
-        region.h >= minHeight &&
-        aspectRatio > 0.2 &&
-        areaRatio >= 0.008
     },
     mergeImageRegions(regions: ImageRegion[]): ImageRegion[] {
       if (regions.length <= 1) return regions
@@ -1103,7 +1003,7 @@ export default Vue.extend({
         h: bottom - top + 1,
       }
     },
-    renderK2Items(sourceCanvas: HTMLCanvasElement, lines: WordLine[], imageRegions: ImageRegion[] = []): K2Item[] {
+    renderK2Items(sourceCanvas: HTMLCanvasElement, lines: WordLine[]): K2Item[] {
       const sourceContext = sourceCanvas.getContext('2d')
       if (!sourceContext) return []
       const sliceCanvas = document.createElement('canvas')
@@ -1116,23 +1016,8 @@ export default Vue.extend({
       const maxLineWidth = Math.max(80, this.targetWidth - outputPadding * 2)
       let lineWidth = 0
       const items = [] as K2Item[]
-      const groups = [
-        ...lines.map((line, index) => ({kind: 'line' as const, y: line.row.start, line, index})),
-        ...imageRegions.map((region, index) => ({kind: 'image' as const, y: region.y, region, index})),
-      ].sort((a, b) => a.y - b.y || (a.kind === 'image' ? -1 : 1))
 
-      groups.forEach(group => {
-        if (group.kind === 'image') {
-          const item = this.renderImageItem(sourceCanvas, sliceCanvas, sliceContext, group.region)
-          if (!item) return
-          if (items.length > 0) items.push({type: 'break'})
-          items.push(item, {type: 'break'})
-          lineWidth = 0
-          return
-        }
-
-        const line = group.line
-        const index = group.index
+      lines.forEach((line, index) => {
         const startParagraph = this.isParagraphStart(line, lines[index - 1])
         if (items.length > 0 && startParagraph) {
           items.push({type: 'break'})
@@ -1146,21 +1031,18 @@ export default Vue.extend({
         }
 
         line.words.forEach(word => {
-          const renderWord = this.paddedWordBlock(word, sourceCanvas.width, sourceCanvas.height)
-          const scaledWidth = Math.max(1, Math.round(renderWord.w * scale))
-          const scaledHeight = Math.max(1, Math.round(renderWord.h * scale))
+          const scaledWidth = Math.max(1, Math.round(word.w * scale))
+          const scaledHeight = Math.max(1, Math.round(word.h * scale))
           if (lineWidth > 0 && lineWidth + scaledWidth + wordGap > maxLineWidth) {
             items.push({type: 'break'})
             lineWidth = 0
           }
 
-          sliceCanvas.width = renderWord.w
-          sliceCanvas.height = renderWord.h
-          sliceContext.clearRect(0, 0, renderWord.w, renderWord.h)
-          sliceContext.drawImage(sourceCanvas, renderWord.x, renderWord.y, renderWord.w, renderWord.h, 0, 0, renderWord.w, renderWord.h)
-          this.normalizeWordBackground(sliceContext, renderWord.w, renderWord.h)
-          if (this.strokeStrength > 0) this.strengthenInk(sliceContext, renderWord.w, renderWord.h)
-          this.normalizeWordBackground(sliceContext, renderWord.w, renderWord.h)
+          sliceCanvas.width = word.w
+          sliceCanvas.height = word.h
+          sliceContext.clearRect(0, 0, word.w, word.h)
+          sliceContext.drawImage(sourceCanvas, word.x, word.y, word.w, word.h, 0, 0, word.w, word.h)
+          if (this.strokeStrength > 0) this.strengthenInk(sliceContext, word.w, word.h)
 
           items.push({
             type: 'word',
@@ -1173,28 +1055,6 @@ export default Vue.extend({
       })
 
       return items
-    },
-    renderImageItem(
-      sourceCanvas: HTMLCanvasElement,
-      sliceCanvas: HTMLCanvasElement,
-      sliceContext: CanvasRenderingContext2D,
-      region: ImageRegion,
-    ): ImageItem | undefined {
-      if (region.w < 2 || region.h < 2) return undefined
-      sliceCanvas.width = region.w
-      sliceCanvas.height = region.h
-      sliceContext.clearRect(0, 0, region.w, region.h)
-      sliceContext.fillStyle = this.pageBackground || '#fff'
-      sliceContext.fillRect(0, 0, region.w, region.h)
-      sliceContext.drawImage(sourceCanvas, region.x, region.y, region.w, region.h, 0, 0, region.w, region.h)
-      const scale = Math.min(1, Math.max(80, this.targetWidth - this.outputPadding * 2) / Math.max(1, region.w))
-      return {
-        ...region,
-        type: 'image',
-        src: sliceCanvas.toDataURL('image/png'),
-        width: Math.max(1, Math.round(region.w * scale)),
-        height: Math.max(1, Math.round(region.h * scale)),
-      }
     },
     isParagraphStart(line: WordLine, previousLine: WordLine | undefined): boolean {
       if (!previousLine) return true
@@ -1286,7 +1146,7 @@ export default Vue.extend({
           return
         }
         currentLine.push(item)
-        currentLineHeight = Math.max(currentLineHeight, item.type === 'word' || item.type === 'image' ? item.height : 1)
+        currentLineHeight = Math.max(currentLineHeight, item.type === 'word' ? item.height : 1)
       })
 
       pushLine()
@@ -1378,147 +1238,6 @@ export default Vue.extend({
     },
     scrollToTop() {
       this.$nextTick(() => window.scrollTo({top: 0, left: 0, behavior: 'auto'}))
-    },
-    paddedWordBlock(word: WordBlock, sourceWidth: number, sourceHeight: number): WordBlock {
-      const paddingX = Math.max(2, Math.min(6, Math.round(word.h * 0.1)))
-      const paddingY = Math.max(2, Math.min(5, Math.round(word.h * 0.08)))
-      const x = Math.max(0, word.x - paddingX)
-      const y = Math.max(0, word.y - paddingY)
-      const right = Math.min(sourceWidth, word.x + word.w + paddingX)
-      const bottom = Math.min(sourceHeight, word.y + word.h + paddingY)
-      return {
-        x,
-        y,
-        w: Math.max(1, right - x),
-        h: Math.max(1, bottom - y),
-      }
-    },
-    normalizeWordBackground(context: CanvasRenderingContext2D, width: number, height: number) {
-      const threshold = Math.min(245, this.clampNumber(this.threshold, 50, 230, DEFAULT_THRESHOLD) + 18)
-      const imageData = context.getImageData(0, 0, width, height)
-      const data = imageData.data
-
-      for (let i = 0; i < width * height; i++) {
-        const offset = i * 4
-        const luma = data[offset + 3] === 0
-          ? 255
-          : 0.299 * data[offset] + 0.587 * data[offset + 1] + 0.114 * data[offset + 2]
-        const ink = luma < threshold
-        data[offset] = ink ? 0 : 255
-        data[offset + 1] = ink ? 0 : 255
-        data[offset + 2] = ink ? 0 : 255
-        data[offset + 3] = 255
-      }
-
-      this.removeWordBlockEdgeArtifacts(data, width, height)
-      this.removeOpaqueWordLineArtifacts(data, width, height)
-      context.putImageData(imageData, 0, 0)
-    },
-    removeWordBlockEdgeArtifacts(data: Uint8ClampedArray, width: number, height: number) {
-      const edgeBand = Math.max(1, Math.min(4, Math.floor(Math.min(width, height) * 0.08)))
-      const minRowInk = Math.max(2, Math.floor(width * 0.18))
-      const minColumnInk = Math.max(2, Math.floor(height * 0.18))
-
-      for (let i = 0; i < edgeBand; i++) {
-        this.clearEdgeRowIfDense(data, width, height, i, minRowInk)
-        this.clearEdgeRowIfDense(data, width, height, height - 1 - i, minRowInk)
-        this.clearEdgeColumnIfDense(data, width, height, i, minColumnInk)
-        this.clearEdgeColumnIfDense(data, width, height, width - 1 - i, minColumnInk)
-      }
-    },
-    clearEdgeRowIfDense(data: Uint8ClampedArray, width: number, height: number, y: number, minInk: number) {
-      if (y < 0 || y >= height) return
-      let ink = 0
-      for (let x = 0; x < width; x++) {
-        if (data[(y * width + x) * 4] === 0) ink++
-      }
-      if (ink < minInk) return
-      for (let x = 0; x < width; x++) this.clearWordBlockPixel(data, y * width + x)
-    },
-    clearEdgeColumnIfDense(data: Uint8ClampedArray, width: number, height: number, x: number, minInk: number) {
-      if (x < 0 || x >= width) return
-      let ink = 0
-      for (let y = 0; y < height; y++) {
-        if (data[(y * width + x) * 4] === 0) ink++
-      }
-      if (ink < minInk) return
-      for (let y = 0; y < height; y++) this.clearWordBlockPixel(data, y * width + x)
-    },
-    clearWordBlockPixel(data: Uint8ClampedArray, index: number) {
-      const offset = index * 4
-      data[offset] = 255
-      data[offset + 1] = 255
-      data[offset + 2] = 255
-      data[offset + 3] = 255
-    },
-    removeOpaqueWordLineArtifacts(data: Uint8ClampedArray, width: number, height: number) {
-      const components = [] as Array<{indexes: number[], area: number, minX: number, maxX: number, minY: number, maxY: number}>
-      const visited = new Uint8Array(width * height)
-
-      for (let start = 0; start < width * height; start++) {
-        if (visited[start] || data[start * 4] !== 0) continue
-
-        const stack = [start]
-        const indexes = [] as number[]
-        let minX = width
-        let maxX = 0
-        let minY = height
-        let maxY = 0
-        visited[start] = 1
-
-        while (stack.length > 0) {
-          const current = stack.pop() as number
-          const y = Math.floor(current / width)
-          const x = current - y * width
-          indexes.push(current)
-          minX = Math.min(minX, x)
-          maxX = Math.max(maxX, x)
-          minY = Math.min(minY, y)
-          maxY = Math.max(maxY, y)
-
-          for (let dy = -1; dy <= 1; dy++) {
-            const ny = y + dy
-            if (ny < 0 || ny >= height) continue
-            for (let dx = -1; dx <= 1; dx++) {
-              if (dx === 0 && dy === 0) continue
-              const nx = x + dx
-              if (nx < 0 || nx >= width) continue
-              const next = ny * width + nx
-              if (visited[next] || data[next * 4] !== 0) continue
-              visited[next] = 1
-              stack.push(next)
-            }
-          }
-        }
-
-        components.push({indexes, area: indexes.length, minX, maxX, minY, maxY})
-      }
-
-      if (components.length <= 1) return
-      const largestArea = Math.max(...components.map(component => component.area))
-      const totalArea = components.reduce((sum, component) => sum + component.area, 0)
-      const edgeBand = Math.max(2, Math.floor(Math.min(width, height) * 0.12))
-      const maxLineThickness = Math.max(1, Math.floor(Math.min(width, height) * 0.14))
-
-      components.forEach(component => {
-        if (component.area === largestArea) return
-        const componentWidth = component.maxX - component.minX + 1
-        const componentHeight = component.maxY - component.minY + 1
-        const nearHorizontalEdge = component.minY <= edgeBand || component.maxY >= height - 1 - edgeBand
-        const nearVerticalEdge = component.minX <= edgeBand || component.maxX >= width - 1 - edgeBand
-        const touchesHorizontalEdge = component.minY <= 1 || component.maxY >= height - 2
-        const touchesVerticalEdge = component.minX <= 1 || component.maxX >= width - 2
-        const thinHorizontal = componentHeight <= maxLineThickness && componentWidth >= Math.max(4, componentHeight * 4)
-        const thinVertical = componentWidth <= maxLineThickness && componentHeight >= Math.max(4, componentWidth * 4)
-        const edgeHorizontalArtifact = thinHorizontal && nearHorizontalEdge && (touchesHorizontalEdge || touchesVerticalEdge)
-        const edgeVerticalArtifact = thinVertical && nearVerticalEdge && (touchesVerticalEdge || touchesHorizontalEdge)
-        const dominantEdgeHorizontal = edgeHorizontalArtifact && componentWidth >= Math.max(6, width * 0.32)
-        const dominantEdgeVertical = edgeVerticalArtifact && componentHeight >= Math.max(6, height * 0.32)
-        const minorArtifact = component.area < largestArea * 0.35 && component.area < totalArea * 0.16
-        if ((!edgeHorizontalArtifact && !edgeVerticalArtifact) || (!minorArtifact && !dominantEdgeHorizontal && !dominantEdgeVertical)) return
-
-        component.indexes.forEach(index => this.clearWordBlockPixel(data, index))
-      })
     },
     strengthenInk(context: CanvasRenderingContext2D, width: number, height: number) {
       const imageData = context.getImageData(0, 0, width, height)
@@ -1872,12 +1591,6 @@ export default Vue.extend({
 }
 
 .k2-word {
-  display: inline-block;
-  max-width: 100%;
-  object-fit: contain;
-}
-
-.k2-image {
   display: inline-block;
   max-width: 100%;
   object-fit: contain;

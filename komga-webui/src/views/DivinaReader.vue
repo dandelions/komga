@@ -310,18 +310,16 @@
       <continuous-reader
         v-else-if="continuousReader"
         :pages="pages"
-        :page="page"
-        :animations="animations"
-        :scale="continuousScale"
-        :sidePadding="sidePadding"
-        :page-margin="pageMargin"
-        :image-filter="normalReaderImageFilter"
-        :skew-correction="readerSkewCorrection"
-        :crop-regions-by-parity="readerCropRegionsByParity"
-        :page-display-urls="readerDeskewedPageUrls"
-        :active-crop-region="readerActiveCropRegion"
-        @update:page="updateNormalReaderPage"
-        @update-active-crop-region="setReaderActiveCropRegion"
+        :page.sync="page"
+          :animations="animations"
+          :scale="continuousScale"
+          :sidePadding="sidePadding"
+          :page-margin="pageMargin"
+          :image-filter="normalReaderImageFilter"
+          :skew-correction="readerSkewCorrection"
+          :crop-regions-by-parity="readerCropRegionsByParity"
+          :page-display-urls="readerDeskewedPageUrls"
+          :active-crop-region="readerActiveCropRegion"
         @menu="toggleToolbars()"
         @jump-previous="jumpToPrevious()"
         @jump-next="jumpToNext()"
@@ -330,7 +328,7 @@
       <paged-reader
         v-else
         :pages="pages"
-        :page="page"
+        :page.sync="page"
         :reading-direction="readingDirection"
         :page-layout="pageLayout"
         :scale="scale"
@@ -341,8 +339,6 @@
         :crop-regions-by-parity="readerCropRegionsByParity"
         :page-display-urls="readerDeskewedPageUrls"
         :active-crop-region="readerActiveCropRegion"
-        @update:page="updateNormalReaderPage"
-        @update-active-crop-region="setReaderActiveCropRegion"
         @menu="toggleToolbars()"
         @jump-previous="jumpToPrevious()"
         @jump-next="jumpToNext()"
@@ -526,8 +522,8 @@
             </v-list-item>
             <v-list-item v-if="!activeReflowMode && readerCropEnabled">
               <span class="mr-2">{{ readerCropPageParityLabel }}</span>
-              <v-btn small class="mr-1" :color="readerCropEditRegion === 0 ? 'primary' : undefined" @click="setReaderCropEditRegion(0)">区域 1</v-btn>
-              <v-btn small class="mr-2" :color="readerCropEditRegion === 1 ? 'primary' : undefined" @click="setReaderCropEditRegion(1)">区域 2</v-btn>
+              <v-btn small class="mr-1" :color="readerActiveCropRegion === 0 ? 'primary' : undefined" @click="setReaderActiveCropRegion(0)">区域 1</v-btn>
+              <v-btn small class="mr-2" :color="readerActiveCropRegion === 1 ? 'primary' : undefined" @click="setReaderActiveCropRegion(1)">区域 2</v-btn>
               <v-btn small class="mr-2" @click="startReaderCropMode">设置截取区域</v-btn>
               <v-btn small text @click="clearReaderCropRegion">清除</v-btn>
             </v-list-item>
@@ -814,79 +810,6 @@ const REFLOW_SETTINGS_STORAGE_PREFIX = 'komga.pdfReflowSettings.'
 const REFLOW_CACHE_RADIUS = 4
 const REFLOW_PREFETCH_DELAY_MS = 150
 
-function defaultReaderCropRegionsByParity(enabled: boolean = false): any {
-  return {
-    enabled,
-    odd: null,
-    even: null,
-    regions: {
-      odd: [null, null],
-      even: [null, null],
-    },
-    explicit: {
-      odd: false,
-      even: false,
-    },
-    explicitRegions: {
-      odd: [false, false],
-      even: [false, false],
-    },
-  }
-}
-
-function defaultReaderSettings(): any {
-  return {
-    strokeStrength: 0,
-    skewCorrection: 0,
-    cropRegionsByParity: defaultReaderCropRegionsByParity(false),
-  }
-}
-
-function defaultReflowSettings(): any {
-  return {
-    autoCropBorder: true,
-    textScale: 40,
-    columnCount: 1,
-    skewCorrection: 0,
-    threshold: 185,
-    columnGap: 15,
-    wordGap: 3,
-    strokeStrength: 0.1,
-    blockSpacing: 6,
-    verticalText: false,
-    verticalDirection: 'rtl',
-    marginTop: 0,
-    marginRight: 0,
-    marginBottom: 0,
-    marginLeft: 0,
-    cropRoisByParity: {
-      odd: null,
-      even: null,
-      regions: {
-        odd: [null, null],
-        even: [null, null],
-      },
-      explicit: {
-        odd: false,
-        even: false,
-      },
-      explicitRegions: {
-        odd: [false, false],
-        even: [false, false],
-      },
-    },
-    k2Settings: {
-      textScale: 80,
-      maxColumns: 2,
-      threshold: 185,
-      strokeStrength: 0.8,
-      wordGap: 3,
-      outputPadding: 16,
-    },
-    readerSettings: defaultReaderSettings(),
-  }
-}
-
 export default Vue.extend({
   name: 'DivinaReader',
   components: {
@@ -943,7 +866,47 @@ export default Vue.extend({
       reflowCache: {} as Record<string, any>,
       reflowPrefetchPage: 0,
       reflowPrefetchTimer: undefined as number | undefined,
-      reflowSettings: defaultReflowSettings(),
+      reflowSettings: {
+        autoCropBorder: true,
+        textScale: 40,
+        columnCount: 1,
+        skewCorrection: 0,
+        threshold: 185,
+        columnGap: 15,
+        wordGap: 3,
+        strokeStrength: 0.1,
+        blockSpacing: 6,
+        verticalText: false,
+        verticalDirection: 'rtl',
+        marginTop: 0,
+        marginRight: 0,
+        marginBottom: 0,
+        marginLeft: 0,
+        cropRoisByParity: {
+          odd: null,
+          even: null,
+          regions: {
+            odd: [null, null],
+            even: [null, null],
+          },
+          explicit: {
+            odd: false,
+            even: false,
+          },
+          explicitRegions: {
+            odd: [false, false],
+            even: [false, false],
+          },
+        },
+        k2Settings: {
+          textScale: 80,
+          maxColumns: 2,
+          threshold: 185,
+          strokeStrength: 0.8,
+          wordGap: 3,
+          outputPadding: 16,
+        },
+      },
       goToPage: 1,
       settings: {
         pageLayout: PagedReaderLayout.SINGLE_PAGE,
@@ -958,12 +921,27 @@ export default Vue.extend({
         backgroundColor: 'black',
         strokeStrength: 0,
         skewCorrection: 0,
-        cropRegionsByParity: defaultReaderCropRegionsByParity(false),
+        cropRegionsByParity: {
+          enabled: false,
+          odd: null,
+          even: null,
+          regions: {
+            odd: [null, null],
+            even: [null, null],
+          },
+          explicit: {
+            odd: false,
+            even: false,
+          },
+          explicitRegions: {
+            odd: [false, false],
+            even: [false, false],
+          },
+        },
       },
       readerCropMode: false,
       readerCropDrawing: false,
       readerActiveCropRegion: 0,
-      readerCropEditRegion: 0,
       readerCropStart: {x: 0, y: 0},
       readerCropDraft: undefined as undefined | {x: number, y: number, w: number, h: number},
       readerCropImageUrl: '',
@@ -1047,6 +1025,11 @@ export default Vue.extend({
     this.sidePadding = this.$store.state.persistedState.webreader.continuous.padding
     this.pageMargin = this.$store.state.persistedState.webreader.continuous.margin
     this.backgroundColor = this.$store.state.persistedState.webreader.background
+    this.readerStrokeStrength = this.$store.state.persistedState.webreader.strokeStrength
+    this.readerSkewCorrection = this.normalizedReaderSkewCorrection(this.$store.state.persistedState.webreader.skewCorrection)
+    this.readerCropRegionsByParity = this.$store.state.persistedState.webreader.cropRegionsByParity ||
+      this.$store.state.persistedState.webreader.cropRegion ||
+      this.readerCropRegionsByParity
     this.reflowSettingsBookId = this.bookId
     this.loadReflowSettings(this.bookId)
 
@@ -1188,7 +1171,7 @@ export default Vue.extend({
       return this.readerCropImageUrl || this.currentPage?.url || ''
     },
     readerCropActiveRect(): object | undefined {
-      const region = this.readerCropDraft || this.effectiveReaderCropRegion(this.readerCropPageParity, this.readerCropEditRegion)
+      const region = this.readerCropDraft || this.effectiveReaderCropRegion(this.readerCropPageParity, this.readerActiveCropRegion)
       if (!region) return undefined
       return {
         left: `${region.x}%`,
@@ -1244,7 +1227,6 @@ export default Vue.extend({
         cropRoisByParity: this.reflowSettings.cropRoisByParity,
         deskewDetectionVersion: 8,
         imageExclusionVersion: 2,
-        wordBlockOpaqueNormalizationVersion: 3,
       })
     },
 
@@ -1314,23 +1296,23 @@ export default Vue.extend({
     },
     readerStrokeStrength: {
       get: function (): number {
-        return this.reflowSettings.readerSettings?.strokeStrength ?? 0
+        return this.settings.strokeStrength
       },
       set: function (strokeStrength: number): void {
         const normalized = Math.round(Math.max(0, Math.min(3, Number(strokeStrength) || 0)) * 10) / 10
-        this.ensureReaderSettings()
-        this.$set(this.reflowSettings.readerSettings, 'strokeStrength', normalized)
+        this.settings.strokeStrength = normalized
+        this.$store.commit('setWebreaderStrokeStrength', normalized)
       },
     },
     readerSkewCorrection: {
       get: function (): number {
-        return this.reflowSettings.readerSettings?.skewCorrection ?? 0
+        return this.settings.skewCorrection
       },
       set: function (skewCorrection: number): void {
         const normalized = this.normalizedReaderSkewCorrection(skewCorrection)
-        this.ensureReaderSettings()
-        const changed = this.reflowSettings.readerSettings.skewCorrection !== normalized
-        this.$set(this.reflowSettings.readerSettings, 'skewCorrection', normalized)
+        const changed = this.settings.skewCorrection !== normalized
+        this.settings.skewCorrection = normalized
+        this.$store.commit('setWebreaderSkewCorrection', normalized)
         if (changed) this.revokeReaderDeskewedPageUrls()
       },
     },
@@ -1340,12 +1322,12 @@ export default Vue.extend({
     },
     readerCropRegionsByParity: {
       get: function (): any {
-        return this.normalizedReaderCropRegionsByParity(this.reflowSettings.readerSettings?.cropRegionsByParity)
+        return this.normalizedReaderCropRegionsByParity(this.settings.cropRegionsByParity)
       },
       set: function (cropRegionsByParity: any): void {
         const normalized = this.normalizedReaderCropRegionsByParity(cropRegionsByParity)
-        this.ensureReaderSettings()
-        this.$set(this.reflowSettings.readerSettings, 'cropRegionsByParity', normalized)
+        this.$set(this.settings, 'cropRegionsByParity', normalized)
+        this.$store.commit('setWebreaderCropRegionsByParity', normalized)
       },
     },
     readerCropEnabled: {
@@ -1355,7 +1337,7 @@ export default Vue.extend({
       set: function (enabled: boolean): void {
         const current = this.readerCropRegionsByParity
         this.readerCropRegionsByParity = {...current, enabled}
-        const hasSavedRegion = !!this.effectiveReaderCropRegion(this.readerCropPageParity, this.readerCropEditRegion)
+        const hasSavedRegion = !!this.effectiveReaderCropRegion(this.readerCropPageParity, this.readerActiveCropRegion)
         if (enabled && !hasSavedRegion) this.$nextTick(() => this.startReaderCropMode())
       },
     },
@@ -1404,11 +1386,22 @@ export default Vue.extend({
   },
   methods: {
     emptyReaderCropRegionsByParity(enabled: boolean = false): any {
-      return defaultReaderCropRegionsByParity(enabled)
-    },
-    ensureReaderSettings() {
-      if (!this.reflowSettings.readerSettings) {
-        this.$set(this.reflowSettings, 'readerSettings', defaultReaderSettings())
+      return {
+        enabled,
+        odd: null,
+        even: null,
+        regions: {
+          odd: [null, null],
+          even: [null, null],
+        },
+        explicit: {
+          odd: false,
+          even: false,
+        },
+        explicitRegions: {
+          odd: [false, false],
+          even: [false, false],
+        },
       }
     },
     adjustReaderSkewCorrection(delta: number) {
@@ -1479,6 +1472,7 @@ export default Vue.extend({
         this.normalizedReaderCropRegionValue(regions[0]) || this.normalizedReaderCropRegionValue(value?.[parity]),
         this.normalizedReaderCropRegionValue(regions[1]),
       ]
+      if (normalized[0] && normalized[1] && this.readerCropRegionsOverlap(normalized[0], normalized[1])) normalized[1] = null
       return normalized
     },
     normalizedReaderCropExplicitArray(value: any, parity: 'odd' | 'even', regions: Array<any | null>): boolean[] {
@@ -1514,48 +1508,8 @@ export default Vue.extend({
       const fallbackParity = parity === 'odd' ? 'even' : 'odd'
       return regions.regions?.[fallbackParity]?.[regionIndex] || undefined
     },
-    updateNormalReaderPage(page: number) {
-      const targetPage = Math.round(Number(page))
-      if (!Number.isFinite(targetPage) || targetPage < 1 || targetPage > this.pagesCount) return
-
-      if (this.interceptReaderCropPageChange(targetPage)) return
-      this.goTo(targetPage)
-    },
-    interceptReaderCropPageChange(targetPage: number): boolean {
-      if (this.activeReflowMode || this.readerCropMode || !this.readerCropRegionsByParity.enabled) return false
-      if (!this.page || targetPage === this.page || Math.abs(targetPage - this.page) > 2) return false
-
-      if (targetPage > this.page && this.readerActiveCropRegion === 0 && this.hasReaderCropRegion(this.page, 1)) {
-        this.setReaderActiveCropRegion(1)
-        return true
-      }
-
-      if (targetPage > this.page && this.readerActiveCropRegion === 1) {
-        this.setReaderActiveCropRegion(0)
-        return false
-      }
-
-      if (targetPage < this.page && this.readerActiveCropRegion === 1) {
-        this.setReaderActiveCropRegion(0)
-        return true
-      }
-
-      if (targetPage < this.page && this.readerActiveCropRegion === 0 && this.hasReaderCropRegion(targetPage, 1)) {
-        this.setReaderActiveCropRegion(1)
-        return false
-      }
-
-      return false
-    },
-    hasReaderCropRegion(page: number, regionIndex: number): boolean {
-      const parity = page % 2 === 0 ? 'even' : 'odd'
-      return !!this.effectiveReaderCropRegion(parity, regionIndex)
-    },
     setReaderActiveCropRegion(region: number) {
       this.readerActiveCropRegion = region === 1 ? 1 : 0
-    },
-    setReaderCropEditRegion(region: number) {
-      this.readerCropEditRegion = region === 1 ? 1 : 0
       this.readerCropDraft = undefined
       this.readerCropDrawing = false
     },
@@ -1565,7 +1519,7 @@ export default Vue.extend({
       await this.prepareReaderCropImage()
       this.readerCropMode = true
       this.readerCropDrawing = false
-      const current = this.effectiveReaderCropRegion(this.readerCropPageParity, this.readerCropEditRegion)
+      const current = this.effectiveReaderCropRegion(this.readerCropPageParity, this.readerActiveCropRegion)
       this.readerCropDraft = current ? {...current} : undefined
     },
     cancelReaderCropMode() {
@@ -1575,7 +1529,7 @@ export default Vue.extend({
       if (!this.promoteReaderCropImageUrl()) this.revokeReaderCropImageUrl()
     },
     clearReaderCropRegion() {
-      this.setReaderCropRegion(this.readerCropPageParity, this.readerCropEditRegion, null)
+      this.setReaderCropRegion(this.readerCropPageParity, this.readerActiveCropRegion, null)
       this.readerCropMode = false
       this.readerCropDrawing = false
       this.readerCropDraft = undefined
@@ -1600,8 +1554,7 @@ export default Vue.extend({
       this.readerCropDrawing = false
       const region = this.normalizedReaderCropRect(this.readerCropStart, this.readerCropPoint(event))
       if (region.w >= 5 && region.h >= 5) {
-        this.setReaderCropRegion(this.readerCropPageParity, this.readerCropEditRegion, region)
-        if (this.readerCropEditRegion === 1 && this.hasReaderCropRegion(this.page, 0)) this.setReaderActiveCropRegion(0)
+        this.setReaderCropRegion(this.readerCropPageParity, this.readerActiveCropRegion, region)
         this.readerCropMode = false
         this.readerCropDraft = undefined
         if (!this.promoteReaderCropImageUrl()) this.revokeReaderCropImageUrl()
@@ -2037,9 +1990,6 @@ export default Vue.extend({
       if (!bookId) return
       this.loadingReflowSettings = true
       try {
-        this.reflowSettings = defaultReflowSettings()
-        this.revokeReaderDeskewedPageUrls()
-        this.revokeReaderCropImageUrl()
         const serverSettings = this.readServerReflowSettings()[bookId]
         const raw = serverSettings ? JSON.stringify(serverSettings) : window.localStorage.getItem(this.reflowSettingsStorageKey(bookId))
         if (raw) Object.assign(this.reflowSettings, this.normalizedReflowSettings(JSON.parse(raw)))
@@ -2100,15 +2050,6 @@ export default Vue.extend({
         marginLeft: this.clampReflowNumber(settings.marginLeft, 0, 45, this.reflowSettings.marginLeft),
         cropRoisByParity: this.normalizedReflowCropRois(settings.cropRoisByParity),
         k2Settings: this.normalizedK2ReflowSettings(settings.k2Settings),
-        readerSettings: this.normalizedReaderSettings(settings.readerSettings),
-      }
-    },
-    normalizedReaderSettings(settings: Record<string, any> = {}): Record<string, any> {
-      settings = settings || {}
-      return {
-        strokeStrength: Math.round(this.clampReflowNumber(settings.strokeStrength, 0, 3, 0) * 10) / 10,
-        skewCorrection: this.normalizedReaderSkewCorrection(settings.skewCorrection),
-        cropRegionsByParity: this.normalizedReaderCropRegionsByParity(settings.cropRegionsByParity),
       }
     },
     normalizedK2ReflowSettings(settings: Record<string, any> = {}): Record<string, any> {
