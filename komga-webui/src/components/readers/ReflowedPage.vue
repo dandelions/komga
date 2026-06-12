@@ -765,24 +765,27 @@ export default Vue.extend({
       const canvas = this.$refs.reflowCanvas as HTMLCanvasElement | undefined
       if (!canvas || this.loading || this.error || this.cropMode || this.reflowItems.length === 0 || this.renderCanvases.length === 0) return
 
-      const width = Math.max(1, Math.round(this.targetWidth || canvas.clientWidth || 1))
+      const width = Math.max(1, Math.round(canvas.getBoundingClientRect().width || canvas.clientWidth || this.targetWidth || 1))
       const height = Math.max(1, Math.round(this.pageContentHeight()))
-      if (canvas.width !== width) canvas.width = width
-      if (canvas.height !== height) canvas.height = height
+      const pixelRatio = this.canvasPixelRatio()
+      const pixelWidth = Math.max(1, Math.round(width * pixelRatio))
+      const pixelHeight = Math.max(1, Math.round(height * pixelRatio))
+      if (canvas.width !== pixelWidth) canvas.width = pixelWidth
+      if (canvas.height !== pixelHeight) canvas.height = pixelHeight
 
       const context = this.canvasContext(canvas, true)
       if (!context) return
-      context.setTransform(1, 0, 0, 1, 0, 0)
+      context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0)
       context.clearRect(0, 0, width, height)
       context.fillStyle = this.pageBackground || '#fff'
       context.fillRect(0, 0, width, height)
-      context.imageSmoothingEnabled = true
-      context.imageSmoothingQuality = 'high'
+      context.imageSmoothingEnabled = false
 
       if (this.verticalText) this.drawVerticalPageItems(context, this.visibleItems, width, height)
       else this.drawHorizontalPageItems(context, this.visibleItems, width, height)
-
-      this.boldenSourceCanvas(context, width, height)
+    },
+    canvasPixelRatio(): number {
+      return Math.max(1, Math.min(2, window.devicePixelRatio || 1))
     },
     drawHorizontalPageItems(context: CanvasRenderingContext2D, items: ReflowItem[], canvasWidth: number, canvasHeight: number) {
       const padding = 16
@@ -896,24 +899,56 @@ export default Vue.extend({
     ) {
       const sourceCanvas = this.renderCanvases[item.sourceIndex]
       if (!sourceCanvas) return
-      const scaleX = width / Math.max(1, item.w)
-      const scaleY = height / Math.max(1, item.h)
+      const scale = Math.min(width / Math.max(1, item.w), height / Math.max(1, item.h))
+      const drawX = x + item.sourceOffsetX * scale
+      const drawY = y + item.sourceOffsetY * scale
+      const drawWidth = item.sourceW * scale
+      const drawHeight = item.sourceH * scale
       context.fillStyle = this.pageBackground || '#fff'
       context.fillRect(x, y, width, height)
-      context.drawImage(
-        sourceCanvas,
-        item.sourceX,
-        item.sourceY,
-        item.sourceW,
-        item.sourceH,
-        x + item.sourceOffsetX * scaleX,
-        y + item.sourceOffsetY * scaleY,
-        item.sourceW * scaleX,
-        item.sourceH * scaleY,
-      )
+      this.drawSourceImageWithStroke(context, sourceCanvas, item.sourceX, item.sourceY, item.sourceW, item.sourceH, drawX, drawY, drawWidth, drawHeight)
+    },
+    drawSourceImageWithStroke(
+      context: CanvasRenderingContext2D,
+      sourceCanvas: HTMLCanvasElement,
+      sourceX: number,
+      sourceY: number,
+      sourceW: number,
+      sourceH: number,
+      x: number,
+      y: number,
+      width: number,
+      height: number,
+    ) {
+      const offsets = this.strokeDrawOffsets()
+      if (offsets.length > 0) {
+        context.save()
+        context.globalCompositeOperation = 'multiply'
+        offsets.forEach(offset => {
+          context.drawImage(sourceCanvas, sourceX, sourceY, sourceW, sourceH, x + offset.x, y + offset.y, width, height)
+        })
+        context.restore()
+      }
+      context.drawImage(sourceCanvas, sourceX, sourceY, sourceW, sourceH, x, y, width, height)
+    },
+    strokeDrawOffsets(): Array<{x: number, y: number}> {
+      const strength = this.strokeStrength
+      if (strength <= 0.15) return []
+      const offset = Math.min(1.2, Math.max(0.25, strength * 0.28))
+      const offsets = [
+        {x: offset, y: 0},
+        {x: -offset, y: 0},
+      ]
+      if (strength >= 1.2) {
+        offsets.push({x: 0, y: offset}, {x: 0, y: -offset})
+      }
+      if (strength >= 2.2) {
+        offsets.push({x: offset, y: offset}, {x: -offset, y: offset}, {x: offset, y: -offset}, {x: -offset, y: -offset})
+      }
+      return offsets
     },
     wordDisplayWidth(item: RenderedWordBlock): number {
-      return Math.max(1, Math.round(item.w * this.textScale()))
+      return Math.max(1, item.w * this.textScale())
     },
     wordDisplayHeight(item: RenderedWordBlock): number {
       return Math.max(1, item.height)

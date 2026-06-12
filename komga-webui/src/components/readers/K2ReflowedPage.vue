@@ -1076,8 +1076,8 @@ export default Vue.extend({
         }
 
         line.words.forEach(word => {
-          const scaledWidth = Math.max(1, Math.round(word.w * scale))
-          const scaledHeight = Math.max(1, Math.round(word.h * scale))
+          const scaledWidth = Math.max(1, word.w * scale)
+          const scaledHeight = Math.max(1, word.h * scale)
           if (lineWidth > 0 && lineWidth + scaledWidth + wordGap > maxLineWidth) {
             items.push({type: 'break'})
             lineWidth = 0
@@ -1135,21 +1135,25 @@ export default Vue.extend({
       const canvas = this.$refs.k2Canvas as HTMLCanvasElement | undefined
       if (!canvas || this.loading || this.error || this.cropMode || this.items.length === 0 || !this.renderCanvas) return
 
-      const width = Math.max(1, Math.round(this.targetWidth || canvas.clientWidth || 1))
+      const width = Math.max(1, Math.round(canvas.getBoundingClientRect().width || canvas.clientWidth || this.targetWidth || 1))
       const height = Math.max(1, Math.round(this.pageContentHeight()))
-      if (canvas.width !== width) canvas.width = width
-      if (canvas.height !== height) canvas.height = height
+      const pixelRatio = this.canvasPixelRatio()
+      const pixelWidth = Math.max(1, Math.round(width * pixelRatio))
+      const pixelHeight = Math.max(1, Math.round(height * pixelRatio))
+      if (canvas.width !== pixelWidth) canvas.width = pixelWidth
+      if (canvas.height !== pixelHeight) canvas.height = pixelHeight
 
       const context = this.canvasContext(canvas, true)
       if (!context) return
-      context.setTransform(1, 0, 0, 1, 0, 0)
+      context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0)
       context.clearRect(0, 0, width, height)
       context.fillStyle = this.pageBackground || '#fff'
       context.fillRect(0, 0, width, height)
-      context.imageSmoothingEnabled = true
-      context.imageSmoothingQuality = 'high'
+      context.imageSmoothingEnabled = false
       this.drawK2PageItems(context, this.visibleItems, width, height)
-      if (this.strokeStrength > 0) this.strengthenInk(context, width, height)
+    },
+    canvasPixelRatio(): number {
+      return Math.max(1, Math.min(2, window.devicePixelRatio || 1))
     },
     drawK2PageItems(context: CanvasRenderingContext2D, items: K2Item[], canvasWidth: number, canvasHeight: number) {
       const padding = OUTPUT_PADDING
@@ -1203,9 +1207,53 @@ export default Vue.extend({
     },
     drawK2Word(context: CanvasRenderingContext2D, item: WordItem, x: number, y: number) {
       if (!this.renderCanvas) return
+      const scale = Math.min(item.width / Math.max(1, item.w), item.height / Math.max(1, item.h))
+      const drawWidth = item.w * scale
+      const drawHeight = item.h * scale
+      const drawX = x + (item.width - drawWidth) / 2
+      const drawY = y + (item.height - drawHeight) / 2
       context.fillStyle = this.pageBackground || '#fff'
       context.fillRect(x, y, item.width, item.height)
-      context.drawImage(this.renderCanvas, item.x, item.y, item.w, item.h, x, y, item.width, item.height)
+      this.drawSourceImageWithStroke(context, this.renderCanvas, item.x, item.y, item.w, item.h, drawX, drawY, drawWidth, drawHeight)
+    },
+    drawSourceImageWithStroke(
+      context: CanvasRenderingContext2D,
+      sourceCanvas: HTMLCanvasElement,
+      sourceX: number,
+      sourceY: number,
+      sourceW: number,
+      sourceH: number,
+      x: number,
+      y: number,
+      width: number,
+      height: number,
+    ) {
+      const offsets = this.strokeDrawOffsets()
+      if (offsets.length > 0) {
+        context.save()
+        context.globalCompositeOperation = 'multiply'
+        offsets.forEach(offset => {
+          context.drawImage(sourceCanvas, sourceX, sourceY, sourceW, sourceH, x + offset.x, y + offset.y, width, height)
+        })
+        context.restore()
+      }
+      context.drawImage(sourceCanvas, sourceX, sourceY, sourceW, sourceH, x, y, width, height)
+    },
+    strokeDrawOffsets(): Array<{x: number, y: number}> {
+      const strength = this.clampNumber(this.strokeStrength, 0, 3, 0)
+      if (strength <= 0.05) return []
+      const offset = Math.min(1.2, Math.max(0.25, strength * 0.28))
+      const offsets = [
+        {x: offset, y: 0},
+        {x: -offset, y: 0},
+      ]
+      if (strength >= 1.2) {
+        offsets.push({x: 0, y: offset}, {x: 0, y: -offset})
+      }
+      if (strength >= 2.2) {
+        offsets.push({x: offset, y: offset}, {x: -offset, y: offset}, {x: offset, y: -offset}, {x: -offset, y: -offset})
+      }
+      return offsets
     },
     repaginate(resetPage: boolean = true) {
       this.updateViewportMetrics()
