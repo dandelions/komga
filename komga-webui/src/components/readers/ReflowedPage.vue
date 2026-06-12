@@ -202,12 +202,27 @@
     </div>
     <div v-else class="reflow-wrapper" :class="{'vertical-reflow-wrapper': verticalText}" :style="reflowWrapperStyle">
       <div v-if="reflowItems.length === 0" class="reflow-status">No text blocks detected</div>
-      <canvas
-        v-show="reflowItems.length > 0"
-        ref="reflowCanvas"
-        class="reflow-canvas"
-        :style="reflowCanvasStyle"
-      />
+      <template v-for="(item, i) in visibleItems">
+        <span
+          v-if="item.type === 'break'"
+          :key="`break-${i}`"
+          class="line-break"
+        />
+        <span
+          v-else-if="item.type === 'indent'"
+          :key="`indent-${i}`"
+          class="line-indent"
+          :style="indentStyle(item)"
+        />
+        <img
+          v-else-if="item.type === 'word' && item.src"
+          :key="`word-${i}`"
+          :src="item.src"
+          class="word-block"
+          :style="wordBlockStyle(item)"
+          alt=""
+        />
+      </template>
     </div>
     <div
       v-if="reflowItems.length > 0"
@@ -229,11 +244,13 @@
           class="line-indent"
           :style="indentStyle(item)"
         />
-        <span
-          v-else-if="item.type === 'word'"
+        <img
+          v-else-if="item.type === 'word' && item.src"
           :key="`measure-word-${i}`"
+          :src="item.src"
           class="word-block"
           :style="wordBlockStyle(item)"
+          alt=""
         />
       </template>
     </div>
@@ -299,13 +316,7 @@ type ImageRegion = Roi
 
 type RenderedWordBlock = WordBlock & {
   type: 'word',
-  sourceIndex: number,
-  sourceX: number,
-  sourceY: number,
-  sourceW: number,
-  sourceH: number,
-  sourceOffsetX: number,
-  sourceOffsetY: number,
+  src: string,
   height: number,
 }
 
@@ -337,7 +348,6 @@ type ReflowCachePayload = {
   pageNumber: number,
   cacheKey: string,
   items: ReflowItem[],
-  renderCanvases: HTMLCanvasElement[],
   pageBackground: string,
 }
 
@@ -388,10 +398,6 @@ export default Vue.extend({
       type: String,
       default: '',
     },
-    cachedRenderCanvases: {
-      type: Array as () => HTMLCanvasElement[] | undefined,
-      default: undefined,
-    },
     cacheKey: {
       type: String,
       default: '',
@@ -411,7 +417,6 @@ export default Vue.extend({
       error: false,
       errorMessage: '',
       reflowItems: [] as ReflowItem[],
-      renderCanvases: [] as HTMLCanvasElement[],
       pages: [] as ReflowItem[][],
       virtualPageIndex: 0,
       viewportHeight: 0,
@@ -490,13 +495,6 @@ export default Vue.extend({
         alignContent: 'flex-start',
         paddingLeft: `${this.horizontalContentPadding()}px`,
         paddingRight: `${this.horizontalContentPadding()}px`,
-      }
-    },
-    reflowCanvasStyle(): object {
-      return {
-        width: '100%',
-        height: `${this.pageContentHeight()}px`,
-        backgroundColor: this.pageBackground,
       }
     },
     measureWrapperStyle(): object {
@@ -593,17 +591,10 @@ export default Vue.extend({
         this.reflow()
       },
     },
-    virtualPageIndex() {
-      this.schedulePageCanvasRender()
-    },
-    pages() {
-      this.schedulePageCanvasRender()
-    },
     controlsCollapsed() {
       this.$nextTick(() => {
         this.updateViewportMetrics()
         this.repaginate(false)
-        this.schedulePageCanvasRender()
       })
     },
   },
@@ -614,7 +605,6 @@ export default Vue.extend({
     this.$nextTick(() => {
       this.updateViewportMetrics()
       this.repaginate(false)
-      this.schedulePageCanvasRender()
     })
   },
   destroyed() {
@@ -647,10 +637,9 @@ export default Vue.extend({
       this.errorMessage = ''
       const detectionKey = this.reflowDetectionKey()
 
-      if (Array.isArray(this.cachedItems) && Array.isArray(this.cachedRenderCanvases) && this.cachedRenderCanvases.length > 0) {
+      if (Array.isArray(this.cachedItems)) {
         this.revokeObjectUrl()
         this.reflowItems = this.cachedItems
-        this.renderCanvases = this.cachedRenderCanvases
         this.pageBackground = this.cachedPageBackground || '#fff'
         this.repaginate()
         this.lastDetectionKey = detectionKey
@@ -668,7 +657,6 @@ export default Vue.extend({
 
       this.loading = true
       this.reflowItems = []
-      this.renderCanvases = []
 
       try {
         const image = await this.loadPageImage(this.page.url, requestId)
@@ -685,12 +673,9 @@ export default Vue.extend({
         const deskewedCanvas = skewCorrection === 0 ? canvas : this.skewCorrectedCanvas(canvas, skewCorrection)
         const cropRois = this.reflowCropRois()
         const regionItems = [] as ReflowItem[][]
-        const renderCanvases = [] as HTMLCanvasElement[]
         for (const roi of cropRois) {
           const regionSource = this.reflowRegionSource(deskewedCanvas, roi)
           const sourceCanvas = regionSource.canvas
-          const sourceIndex = renderCanvases.length
-          renderCanvases.push(sourceCanvas)
           const detectionSource = this.detectionCanvasSource(sourceCanvas)
           const detectionContext = this.canvasContext(detectionSource.canvas, true)
           if (!detectionContext) throw new Error('Canvas is unavailable')
@@ -700,10 +685,9 @@ export default Vue.extend({
             : undefined
           const detectedLines = this.detectWordLines(imageData, detectionSource.canvas.width, detectionSource.canvas.height, detectionRoi)
           const lines = this.scaleWordLines(detectedLines, detectionSource.scale, sourceCanvas.width, sourceCanvas.height)
-          regionItems.push(this.renderReflowItems(sourceCanvas, lines, sourceIndex))
+          regionItems.push(this.renderReflowItems(sourceCanvas, lines))
         }
         if (requestId !== this.requestId) return
-        this.renderCanvases = renderCanvases
         this.reflowItems = this.joinRegionReflowItems(regionItems)
         this.repaginate()
         this.lastDetectionKey = detectionKey
@@ -770,201 +754,6 @@ export default Vue.extend({
           this.virtualPageIndex = this.clampNumber(this.virtualPageIndex, 0, Math.max(0, this.pages.length - 1), 0)
         }
       })
-    },
-    schedulePageCanvasRender() {
-      this.$nextTick(() => this.renderVisiblePageCanvas())
-    },
-    renderVisiblePageCanvas() {
-      const canvas = this.$refs.reflowCanvas as HTMLCanvasElement | undefined
-      if (!canvas || this.loading || this.error || this.cropMode || this.reflowItems.length === 0 || this.renderCanvases.length === 0) return
-
-      const width = Math.max(1, Math.round(canvas.getBoundingClientRect().width || canvas.clientWidth || this.targetWidth || 1))
-      const height = Math.max(1, Math.round(this.pageContentHeight()))
-      const pixelRatio = this.canvasPixelRatio()
-      const pixelWidth = Math.max(1, Math.round(width * pixelRatio))
-      const pixelHeight = Math.max(1, Math.round(height * pixelRatio))
-      if (canvas.width !== pixelWidth) canvas.width = pixelWidth
-      if (canvas.height !== pixelHeight) canvas.height = pixelHeight
-
-      const context = this.canvasContext(canvas, true)
-      if (!context) return
-      context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0)
-      context.clearRect(0, 0, width, height)
-      context.fillStyle = this.pageBackground || '#fff'
-      context.fillRect(0, 0, width, height)
-      context.imageSmoothingEnabled = false
-
-      if (this.verticalText) this.drawVerticalPageItems(context, this.visibleItems, width, height)
-      else this.drawHorizontalPageItems(context, this.visibleItems, width, height)
-    },
-    canvasPixelRatio(): number {
-      return Math.max(1, Math.min(2, window.devicePixelRatio || 1))
-    },
-    drawHorizontalPageItems(context: CanvasRenderingContext2D, items: ReflowItem[], canvasWidth: number, canvasHeight: number) {
-      const padding = 16
-      const contentWidth = Math.max(1, canvasWidth - padding * 2)
-      const rowGap = Math.max(0, Math.round(this.blockSpacing * 1.5))
-      const columnGap = Math.max(0, this.blockSpacing)
-      const lineItems = [] as Array<{item: RenderedWordBlock | LineIndentItem, width: number, height: number}>
-      let lineWidth = 0
-      let lineHeight = 0
-      let y = padding
-
-      const flushLine = () => {
-        if (lineItems.length === 0) return
-        if (y > canvasHeight - padding) {
-          lineItems.length = 0
-          lineWidth = 0
-          lineHeight = 0
-          return
-        }
-        let x = padding
-        lineItems.forEach(entry => {
-          if (entry.item.type === 'word') {
-            this.drawReflowWord(context, entry.item, x, y + lineHeight - entry.height, entry.width, entry.height)
-          }
-          x += entry.width + columnGap
-        })
-        y += lineHeight + rowGap
-        lineItems.length = 0
-        lineWidth = 0
-        lineHeight = 0
-      }
-
-      const appendItem = (item: RenderedWordBlock | LineIndentItem, width: number, height: number) => {
-        const nextWidth = lineItems.length > 0 ? lineWidth + columnGap + width : width
-        if (lineItems.length > 0 && nextWidth > contentWidth) flushLine()
-        lineItems.push({item, width, height})
-        lineWidth = lineItems.length > 1 ? lineWidth + columnGap + width : width
-        lineHeight = Math.max(lineHeight, height)
-      }
-
-      items.forEach(item => {
-        if (item.type === 'break') {
-          flushLine()
-          return
-        }
-        if (item.type === 'indent') {
-          appendItem(item, item.width, 1)
-          return
-        }
-        appendItem(item, this.wordDisplayWidth(item), this.wordDisplayHeight(item))
-      })
-      flushLine()
-    },
-    drawVerticalPageItems(context: CanvasRenderingContext2D, items: ReflowItem[], canvasWidth: number, canvasHeight: number) {
-      const paddingTop = 16
-      const paddingBottom = 16
-      const horizontalPadding = this.horizontalContentPadding()
-      const contentHeight = Math.max(1, canvasHeight - paddingTop - paddingBottom)
-      const columnGap = Math.max(0, this.blockSpacing)
-      const rowGap = Math.max(0, Math.round(this.blockSpacing * 1.5))
-      const columnItems = [] as Array<{item: RenderedWordBlock | LineIndentItem, width: number, height: number}>
-      let columnWidth = 0
-      let columnHeight = 0
-      let x = this.verticalDirection === 'rtl' ? canvasWidth - horizontalPadding : horizontalPadding
-
-      const flushColumn = () => {
-        if (columnItems.length === 0) return
-        if (this.verticalDirection === 'rtl') x -= columnWidth
-        let y = paddingTop
-        columnItems.forEach(entry => {
-          if (entry.item.type === 'word') {
-            this.drawReflowWord(context, entry.item, x + (columnWidth - entry.width) / 2, y, entry.width, entry.height)
-          }
-          y += entry.height + rowGap
-        })
-        if (this.verticalDirection === 'rtl') x -= columnGap
-        else x += columnWidth + columnGap
-        columnItems.length = 0
-        columnWidth = 0
-        columnHeight = 0
-      }
-
-      const appendItem = (item: RenderedWordBlock | LineIndentItem, width: number, height: number) => {
-        const nextHeight = columnItems.length > 0 ? columnHeight + rowGap + height : height
-        if (columnItems.length > 0 && nextHeight > contentHeight) flushColumn()
-        columnItems.push({item, width, height})
-        columnWidth = Math.max(columnWidth, width)
-        columnHeight = columnItems.length > 1 ? columnHeight + rowGap + height : height
-      }
-
-      items.forEach(item => {
-        if (item.type === 'break') {
-          flushColumn()
-          return
-        }
-        if (item.type === 'indent') {
-          appendItem(item, 1, item.width)
-          return
-        }
-        appendItem(item, this.wordDisplayWidth(item), this.wordDisplayHeight(item))
-      })
-      flushColumn()
-    },
-    drawReflowWord(
-      context: CanvasRenderingContext2D,
-      item: RenderedWordBlock,
-      x: number,
-      y: number,
-      width: number,
-      height: number,
-    ) {
-      const sourceCanvas = this.renderCanvases[item.sourceIndex]
-      if (!sourceCanvas) return
-      const scale = Math.min(width / Math.max(1, item.w), height / Math.max(1, item.h))
-      const drawX = x + item.sourceOffsetX * scale
-      const drawY = y + item.sourceOffsetY * scale
-      const drawWidth = item.sourceW * scale
-      const drawHeight = item.sourceH * scale
-      context.fillStyle = this.pageBackground || '#fff'
-      context.fillRect(x, y, width, height)
-      this.drawSourceImageWithStroke(context, sourceCanvas, item.sourceX, item.sourceY, item.sourceW, item.sourceH, drawX, drawY, drawWidth, drawHeight)
-    },
-    drawSourceImageWithStroke(
-      context: CanvasRenderingContext2D,
-      sourceCanvas: HTMLCanvasElement,
-      sourceX: number,
-      sourceY: number,
-      sourceW: number,
-      sourceH: number,
-      x: number,
-      y: number,
-      width: number,
-      height: number,
-    ) {
-      const offsets = this.strokeDrawOffsets()
-      if (offsets.length > 0) {
-        context.save()
-        context.globalCompositeOperation = 'multiply'
-        offsets.forEach(offset => {
-          context.drawImage(sourceCanvas, sourceX, sourceY, sourceW, sourceH, x + offset.x, y + offset.y, width, height)
-        })
-        context.restore()
-      }
-      context.drawImage(sourceCanvas, sourceX, sourceY, sourceW, sourceH, x, y, width, height)
-    },
-    strokeDrawOffsets(): Array<{x: number, y: number}> {
-      const strength = this.strokeStrength
-      if (strength <= 0.15) return []
-      const offset = Math.min(1.2, Math.max(0.25, strength * 0.28))
-      const offsets = [
-        {x: offset, y: 0},
-        {x: -offset, y: 0},
-      ]
-      if (strength >= 1.2) {
-        offsets.push({x: 0, y: offset}, {x: 0, y: -offset})
-      }
-      if (strength >= 2.2) {
-        offsets.push({x: offset, y: offset}, {x: -offset, y: offset}, {x: offset, y: -offset}, {x: -offset, y: -offset})
-      }
-      return offsets
-    },
-    wordDisplayWidth(item: RenderedWordBlock): number {
-      return Math.max(1, item.w * this.textScale())
-    },
-    wordDisplayHeight(item: RenderedWordBlock): number {
-      return Math.max(1, item.height)
     },
     setInitialVirtualPage() {
       if (this.pages.length === 0) {
@@ -1167,8 +956,8 @@ export default Vue.extend({
     },
     wordBlockStyle(item: RenderedWordBlock): object {
       return {
-        width: `${this.wordDisplayWidth(item)}px`,
-        height: `${this.wordDisplayHeight(item)}px`,
+        width: `${Math.max(1, Math.round(item.w * this.textScale()))}px`,
+        height: `${item.height}px`,
       }
     },
     indentStyle(item: LineIndentItem): object {
@@ -1214,7 +1003,6 @@ export default Vue.extend({
         pageNumber: this.page.number,
         cacheKey: this.cacheKey,
         items: this.reflowItems,
-        renderCanvases: this.renderCanvases,
         pageBackground: this.pageBackground,
       } as ReflowCachePayload)
     },
@@ -1224,7 +1012,6 @@ export default Vue.extend({
         pageNumber: this.page.number,
         cacheKey: this.cacheKey,
         items: this.reflowItems,
-        renderCanvases: this.renderCanvases,
         pageBackground: this.pageBackground,
       }
     },
@@ -2538,12 +2325,15 @@ export default Vue.extend({
       const longVerticalRule = block.w <= 3 && block.h >= Math.max(48, glyphHeight * 2.2)
       return longHorizontalRule || longVerticalRule
     },
-    renderReflowItems(sourceCanvas: HTMLCanvasElement, lines: WordLine[], sourceIndex: number): ReflowItem[] {
+    renderReflowItems(sourceCanvas: HTMLCanvasElement, lines: WordLine[]): ReflowItem[] {
       const sourceContext = this.canvasContext(sourceCanvas)
       if (!sourceContext) return []
       const rendered = [] as ReflowItem[]
+      const sliceCanvas = document.createElement('canvas')
+      const sliceContext = this.canvasContext(sliceCanvas, true)
+      if (!sliceContext) return []
 
-      if (this.verticalText) return this.renderVerticalReflowItems(sourceCanvas, lines, sourceIndex)
+      if (this.verticalText) return this.renderVerticalReflowItems(sourceCanvas, sliceCanvas, sliceContext, lines)
 
       const glyphHeight = this.horizontalGlyphSourceHeight(lines)
       lines.forEach((line, index) => {
@@ -2559,16 +2349,15 @@ export default Vue.extend({
             glyphHeight,
             sourceCanvas.width,
           )
+          sliceCanvas.width = renderBlock.w
+          sliceCanvas.height = renderBlock.h
+          sliceContext.clearRect(0, 0, renderBlock.w, renderBlock.h)
+          sliceContext.drawImage(sourceCanvas, renderBlock.x, renderBlock.y, renderBlock.w, renderBlock.h, 0, 0, renderBlock.w, renderBlock.h)
+          this.boldenSourceCanvas(sliceContext, renderBlock.w, renderBlock.h)
           rendered.push({
             ...renderBlock,
             type: 'word',
-            sourceIndex,
-            sourceX: renderBlock.x,
-            sourceY: renderBlock.y,
-            sourceW: renderBlock.w,
-            sourceH: renderBlock.h,
-            sourceOffsetX: 0,
-            sourceOffsetY: 0,
+            src: sliceCanvas.toDataURL('image/png'),
             height: renderBlock.h * this.textScale(),
           })
         })
@@ -2611,8 +2400,9 @@ export default Vue.extend({
     },
     renderVerticalReflowItems(
       sourceCanvas: HTMLCanvasElement,
+      sliceCanvas: HTMLCanvasElement,
+      sliceContext: CanvasRenderingContext2D,
       lines: WordLine[],
-      sourceIndex: number,
     ): ReflowItem[] {
       const rendered = [] as ReflowItem[]
 
@@ -2628,19 +2418,30 @@ export default Vue.extend({
         line.words.forEach(block => {
           if (block.w < 2 || block.h < 2 || this.isRuleLikeBlock(block)) return
           const renderBlock = this.paddedVerticalGlyphBlock(block, sourceCanvas.width, sourceCanvas.height)
+          sliceCanvas.width = renderBlock.outputWidth
+          sliceCanvas.height = renderBlock.outputHeight
+          sliceContext.clearRect(0, 0, renderBlock.outputWidth, renderBlock.outputHeight)
+          sliceContext.fillStyle = this.pageBackground || '#fff'
+          sliceContext.fillRect(0, 0, renderBlock.outputWidth, renderBlock.outputHeight)
+          sliceContext.drawImage(
+            sourceCanvas,
+            renderBlock.source.x,
+            renderBlock.source.y,
+            renderBlock.source.w,
+            renderBlock.source.h,
+            renderBlock.offsetX,
+            renderBlock.offsetY,
+            renderBlock.source.w,
+            renderBlock.source.h,
+          )
+          this.boldenSourceCanvas(sliceContext, renderBlock.outputWidth, renderBlock.outputHeight)
           rendered.push({
             x: block.x,
             y: block.y,
             w: renderBlock.outputWidth,
             h: renderBlock.outputHeight,
             type: 'word',
-            sourceIndex,
-            sourceX: renderBlock.source.x,
-            sourceY: renderBlock.source.y,
-            sourceW: renderBlock.source.w,
-            sourceH: renderBlock.source.h,
-            sourceOffsetX: renderBlock.offsetX,
-            sourceOffsetY: renderBlock.offsetY,
+            src: sliceCanvas.toDataURL('image/png'),
             height: renderBlock.outputHeight * this.textScale(),
           })
         })
@@ -3035,7 +2836,7 @@ export default Vue.extend({
 .reflow-wrapper {
   width: 100%;
   min-height: 100vh;
-  padding: 0;
+  padding: 16px;
   box-sizing: border-box;
   display: flex;
   flex-direction: row;
@@ -3088,12 +2889,6 @@ export default Vue.extend({
   height: auto;
   max-width: 100%;
   object-fit: contain;
-}
-
-.reflow-canvas {
-  display: block;
-  flex: 0 0 100%;
-  max-width: 100%;
 }
 
 .line-break {
