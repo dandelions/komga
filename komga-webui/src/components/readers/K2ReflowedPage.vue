@@ -207,7 +207,10 @@ export default Vue.extend({
     pageBackground: '#fff',
     imageSize: {w: 0, h: 0},
     requestId: 0,
+    reflowRunning: false,
+    reflowPending: false,
     objectUrl: '',
+    objectUrlSource: '',
     controlsCollapsed: true,
     cropMode: false,
     drawingCrop: false,
@@ -338,6 +341,23 @@ export default Vue.extend({
       } as K2Settings)
     },
     async reflow() {
+      if (this.reflowRunning) {
+        this.reflowPending = true
+        this.requestId += 1
+        return
+      }
+
+      this.reflowRunning = true
+      try {
+        do {
+          this.reflowPending = false
+          await this.runReflow()
+        } while (this.reflowPending)
+      } finally {
+        this.reflowRunning = false
+      }
+    },
+    async runReflow() {
       const requestId = this.requestId + 1
       this.requestId = requestId
       this.loading = true
@@ -346,14 +366,14 @@ export default Vue.extend({
       this.items = []
 
       try {
-        const image = await this.loadPageImage(this.page.url)
+        const image = await this.loadPageImage(this.page.url, requestId)
         if (requestId !== this.requestId) return
         this.imageSize = {w: image.naturalWidth, h: image.naturalHeight}
 
         const canvas = document.createElement('canvas')
         canvas.width = image.naturalWidth
         canvas.height = image.naturalHeight
-        const context = canvas.getContext('2d')
+        const context = this.canvasContext(canvas, true)
         if (!context) throw new Error('Canvas is unavailable')
         context.drawImage(image, 0, 0)
         this.pageBackground = this.detectPageBackground(context, canvas.width, canvas.height)
@@ -401,28 +421,51 @@ export default Vue.extend({
         this.loading = false
       }
     },
-    async loadPageImage(url: string): Promise<HTMLImageElement> {
-      this.revokeObjectUrl()
-      const separator = url.includes('?') ? '&' : '?'
-      const response = await fetch(`${url}${separator}contentNegotiation=false&k2ReflowCacheBust=${Date.now()}`, {
-        credentials: 'include',
-        cache: 'reload',
-      })
+    async loadPageImage(url: string, requestId?: number): Promise<HTMLImageElement> {
+      const sourceUrl = this.pageImageUrl(url)
+      if (this.objectUrl && this.objectUrlSource === sourceUrl) return this.decodeImageUrl(this.objectUrl)
+
+      const response = await fetch(sourceUrl, {credentials: 'include'})
       if (!response.ok) throw new Error(`Unable to load page: ${response.status}`)
       const blob = await response.blob()
       if (blob.type && !blob.type.startsWith('image/')) throw new Error(`Page response is not an image: ${blob.type}`)
-      this.objectUrl = URL.createObjectURL(blob)
-
+      const nextObjectUrl = URL.createObjectURL(blob)
+      try {
+        const image = await this.decodeImageUrl(nextObjectUrl)
+        if (requestId !== undefined && requestId !== this.requestId) {
+          URL.revokeObjectURL(nextObjectUrl)
+          return image
+        }
+        const previousObjectUrl = this.objectUrl
+        this.objectUrl = nextObjectUrl
+        this.objectUrlSource = sourceUrl
+        if (previousObjectUrl && previousObjectUrl !== nextObjectUrl) URL.revokeObjectURL(previousObjectUrl)
+        return image
+      } catch (e) {
+        URL.revokeObjectURL(nextObjectUrl)
+        throw e
+      }
+    },
+    decodeImageUrl(url: string): Promise<HTMLImageElement> {
       return new Promise((resolve, reject) => {
         const image = new Image()
         image.onload = () => image.naturalWidth && image.naturalHeight ? resolve(image) : reject(new Error('Decoded image is empty'))
         image.onerror = () => reject(new Error('Unable to decode page image'))
-        image.src = this.objectUrl
+        image.src = url
       })
+    },
+    pageImageUrl(url: string): string {
+      const separator = url.includes('?') ? '&' : '?'
+      return `${url}${separator}contentNegotiation=false`
+    },
+    canvasContext(canvas: HTMLCanvasElement, willReadFrequently: boolean = false): CanvasRenderingContext2D | null {
+      if (willReadFrequently) return canvas.getContext('2d', {willReadFrequently: true})
+      return canvas.getContext('2d')
     },
     revokeObjectUrl() {
       if (this.objectUrl) URL.revokeObjectURL(this.objectUrl)
       this.objectUrl = ''
+      this.objectUrlSource = ''
     },
     buildInkMap(imageData: ImageData, width: number, height: number): Uint8Array {
       const pixels = imageData.data
@@ -1004,10 +1047,10 @@ export default Vue.extend({
       }
     },
     renderK2Items(sourceCanvas: HTMLCanvasElement, lines: WordLine[]): K2Item[] {
-      const sourceContext = sourceCanvas.getContext('2d')
+      const sourceContext = this.canvasContext(sourceCanvas)
       if (!sourceContext) return []
       const sliceCanvas = document.createElement('canvas')
-      const sliceContext = sliceCanvas.getContext('2d')
+      const sliceContext = this.canvasContext(sliceCanvas, true)
       if (!sliceContext) return []
 
       const scale = this.textScalePercent / 100

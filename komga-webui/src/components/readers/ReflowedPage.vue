@@ -416,10 +416,13 @@ export default Vue.extend({
       pageBackground: '#fff',
       lastDetectionKey: '',
       objectUrl: '',
+      objectUrlSource: '',
       cropObjectUrl: '',
       cropObjectUrlSkewCorrection: 0,
       cropImageRequestId: 0,
       requestId: 0,
+      reflowRunning: false,
+      reflowPending: false,
       controlsCollapsed: true,
       imageSize: {w: 0, h: 0},
       cropMode: false,
@@ -603,6 +606,23 @@ export default Vue.extend({
   },
   methods: {
     async reflow() {
+      if (this.reflowRunning) {
+        this.reflowPending = true
+        this.requestId += 1
+        return
+      }
+
+      this.reflowRunning = true
+      try {
+        do {
+          this.reflowPending = false
+          await this.runReflow()
+        } while (this.reflowPending)
+      } finally {
+        this.reflowRunning = false
+      }
+    },
+    async runReflow() {
       const requestId = this.requestId + 1
       this.requestId = requestId
       this.error = false
@@ -631,13 +651,13 @@ export default Vue.extend({
       this.reflowItems = []
 
       try {
-        const image = await this.loadPageImage(this.page.url)
+        const image = await this.loadPageImage(this.page.url, requestId)
         if (requestId !== this.requestId) return
         this.imageSize = {w: image.naturalWidth, h: image.naturalHeight}
         const canvas = document.createElement('canvas')
         canvas.width = image.naturalWidth
         canvas.height = image.naturalHeight
-        const context = canvas.getContext('2d')
+        const context = this.canvasContext(canvas, true)
         if (!context) throw new Error('Canvas is unavailable')
         context.drawImage(image, 0, 0)
         this.pageBackground = this.detectPageBackground(context, canvas.width, canvas.height)
@@ -648,7 +668,7 @@ export default Vue.extend({
         for (const roi of cropRois) {
           const regionSource = this.reflowRegionSource(deskewedCanvas, roi)
           const sourceCanvas = regionSource.canvas
-          const sourceContext = sourceCanvas.getContext('2d')
+          const sourceContext = this.canvasContext(sourceCanvas, true)
           if (!sourceContext) throw new Error('Canvas is unavailable')
           const imageData = sourceContext.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height)
           const lines = this.detectWordLines(imageData, sourceCanvas.width, sourceCanvas.height, regionSource.detectionRoi)
@@ -1018,14 +1038,31 @@ export default Vue.extend({
         if (cropImageRequestId === this.cropImageRequestId) this.loading = false
       }
     },
-    async loadPageImage(url: string): Promise<HTMLImageElement> {
-      this.revokeObjectUrl(false)
-      const response = await fetch(this.pageImageUrl(url), {credentials: 'include', cache: 'reload'})
+    async loadPageImage(url: string, requestId?: number): Promise<HTMLImageElement> {
+      const sourceUrl = this.pageImageUrl(url)
+      if (this.objectUrl && this.objectUrlSource === sourceUrl) return this.decodeImageUrl(this.objectUrl)
+
+      const response = await fetch(sourceUrl, {credentials: 'include'})
       if (!response.ok) throw new Error(`Unable to load page: ${response.status}`)
       const blob = await response.blob()
       if (blob.type && !blob.type.startsWith('image/')) throw new Error(`Page response is not an image: ${blob.type}`)
-      this.objectUrl = URL.createObjectURL(blob)
-      return this.decodeImageUrl(this.objectUrl)
+      const nextObjectUrl = URL.createObjectURL(blob)
+      try {
+        const image = await this.decodeImageUrl(nextObjectUrl)
+        if (requestId !== undefined && requestId !== this.requestId) {
+          URL.revokeObjectURL(nextObjectUrl)
+          return image
+        }
+        const previousObjectUrl = this.objectUrl
+        this.revokeCropObjectUrl(false)
+        this.objectUrl = nextObjectUrl
+        this.objectUrlSource = sourceUrl
+        if (previousObjectUrl && previousObjectUrl !== nextObjectUrl) URL.revokeObjectURL(previousObjectUrl)
+        return image
+      } catch (e) {
+        URL.revokeObjectURL(nextObjectUrl)
+        throw e
+      }
     },
     decodeImageUrl(url: string): Promise<HTMLImageElement> {
       return new Promise((resolve, reject) => {
@@ -1043,7 +1080,11 @@ export default Vue.extend({
     },
     pageImageUrl(url: string): string {
       const separator = url.includes('?') ? '&' : '?'
-      return `${url}${separator}contentNegotiation=false&reflowCacheBust=${Date.now()}`
+      return `${url}${separator}contentNegotiation=false`
+    },
+    canvasContext(canvas: HTMLCanvasElement, willReadFrequently: boolean = false): CanvasRenderingContext2D | null {
+      if (willReadFrequently) return canvas.getContext('2d', {willReadFrequently: true})
+      return canvas.getContext('2d')
     },
     async prepareCropObjectUrl(image: HTMLImageElement, skewCorrection: number, cropImageRequestId: number = this.cropImageRequestId) {
       if (!skewCorrection) return
@@ -1051,7 +1092,7 @@ export default Vue.extend({
       const canvas = document.createElement('canvas')
       canvas.width = image.naturalWidth
       canvas.height = image.naturalHeight
-      const context = canvas.getContext('2d')
+      const context = this.canvasContext(canvas)
       if (!context) return
       context.drawImage(image, 0, 0)
       const correctedCanvas = this.skewCorrectedCanvas(canvas, skewCorrection)
@@ -1080,7 +1121,7 @@ export default Vue.extend({
       const canvas = document.createElement('canvas')
       canvas.width = roi.w
       canvas.height = roi.h
-      const context = canvas.getContext('2d')
+      const context = this.canvasContext(canvas, true)
       if (!context) return {canvas: sourceCanvas}
       context.fillStyle = this.pageBackground || '#fff'
       context.fillRect(0, 0, canvas.width, canvas.height)
@@ -1122,7 +1163,7 @@ export default Vue.extend({
       const correctedCanvas = document.createElement('canvas')
       correctedCanvas.width = sourceCanvas.width
       correctedCanvas.height = sourceCanvas.height
-      const context = correctedCanvas.getContext('2d')
+      const context = this.canvasContext(correctedCanvas, true)
       if (!context) return sourceCanvas
       context.fillStyle = this.pageBackground || '#fff'
       context.fillRect(0, 0, correctedCanvas.width, correctedCanvas.height)
@@ -1135,6 +1176,7 @@ export default Vue.extend({
       this.revokeCropObjectUrl(cancelCropRequests)
       if (this.objectUrl) URL.revokeObjectURL(this.objectUrl)
       this.objectUrl = ''
+      this.objectUrlSource = ''
     },
     revokeCropObjectUrl(cancelCropRequests: boolean = true) {
       if (cancelCropRequests) this.cropImageRequestId += 1
@@ -2214,11 +2256,11 @@ export default Vue.extend({
       return longHorizontalRule || longVerticalRule
     },
     renderReflowItems(sourceCanvas: HTMLCanvasElement, lines: WordLine[]): ReflowItem[] {
-      const sourceContext = sourceCanvas.getContext('2d')
+      const sourceContext = this.canvasContext(sourceCanvas)
       if (!sourceContext) return []
       const rendered = [] as ReflowItem[]
       const sliceCanvas = document.createElement('canvas')
-      const sliceContext = sliceCanvas.getContext('2d')
+      const sliceContext = this.canvasContext(sliceCanvas, true)
       if (!sliceContext) return []
 
       if (this.verticalText) return this.renderVerticalReflowItems(sourceCanvas, sliceCanvas, sliceContext, lines)
