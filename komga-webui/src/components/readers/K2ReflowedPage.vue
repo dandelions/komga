@@ -148,6 +148,7 @@ type K2Settings = {
   wordGap: number,
   outputPadding: number,
 }
+type DetectionCanvasSource = { canvas: HTMLCanvasElement, scale: number }
 
 const DEFAULT_THRESHOLD = 185
 const DEFAULT_TEXT_SCALE = 80
@@ -157,6 +158,9 @@ const MIN_CROP_SIZE = 15
 const K2_CONTROLS_HEIGHT = 48
 const VIEWPORT_PAGE_BUFFER = 40
 const OUTPUT_PADDING = 16
+const DETECTION_MAX_SIDE = 1800
+const DETECTION_MAX_PIXELS = 2000000
+const DETECTION_MIN_SCALE = 0.28
 
 export default Vue.extend({
   name: 'K2ReflowedPage',
@@ -382,14 +386,18 @@ export default Vue.extend({
         context.drawImage(image, 0, 0)
         this.pageBackground = this.detectPageBackground(context, canvas.width, canvas.height)
 
-        const imageData = context.getImageData(0, 0, canvas.width, canvas.height)
-        const rawInk = this.buildInkMap(imageData, canvas.width, canvas.height)
-        const initialRoi = this.detectRoi(rawInk, canvas.width, canvas.height)
-        const imageRegions = this.detectImageRegions(imageData.data, canvas.width, canvas.height, initialRoi, this.clampNumber(this.threshold, 50, 230, DEFAULT_THRESHOLD))
-        const ink = this.clearImageRegions(rawInk, canvas.width, canvas.height, imageRegions)
-        const roi = this.detectRoi(ink, canvas.width, canvas.height)
-        const columns = this.detectColumns(ink, canvas.width, canvas.height, roi)
-        const lines = this.detectWordLines(ink, canvas.width, canvas.height, columns)
+        const detectionSource = this.detectionCanvasSource(canvas)
+        const detectionContext = this.canvasContext(detectionSource.canvas, true)
+        if (!detectionContext) throw new Error('Canvas is unavailable')
+        const imageData = detectionContext.getImageData(0, 0, detectionSource.canvas.width, detectionSource.canvas.height)
+        const rawInk = this.buildInkMap(imageData, detectionSource.canvas.width, detectionSource.canvas.height)
+        const initialRoi = this.detectRoi(rawInk, detectionSource.canvas.width, detectionSource.canvas.height, detectionSource.scale)
+        const imageRegions = this.detectImageRegions(imageData.data, detectionSource.canvas.width, detectionSource.canvas.height, initialRoi, this.clampNumber(this.threshold, 50, 230, DEFAULT_THRESHOLD))
+        const ink = this.clearImageRegions(rawInk, detectionSource.canvas.width, detectionSource.canvas.height, imageRegions)
+        const roi = this.detectRoi(ink, detectionSource.canvas.width, detectionSource.canvas.height, detectionSource.scale)
+        const columns = this.detectColumns(ink, detectionSource.canvas.width, detectionSource.canvas.height, roi)
+        const detectedLines = this.detectWordLines(ink, detectionSource.canvas.width, detectionSource.canvas.height, columns)
+        const lines = this.scaleWordLines(detectedLines, detectionSource.scale, canvas.width, canvas.height)
         if (requestId !== this.requestId) return
 
         this.renderCanvas = canvas
@@ -466,6 +474,61 @@ export default Vue.extend({
     canvasContext(canvas: HTMLCanvasElement, willReadFrequently: boolean = false): CanvasRenderingContext2D | null {
       if (willReadFrequently) return canvas.getContext('2d', {willReadFrequently: true})
       return canvas.getContext('2d')
+    },
+    detectionCanvasSource(sourceCanvas: HTMLCanvasElement): DetectionCanvasSource {
+      const scale = this.detectionScale(sourceCanvas.width, sourceCanvas.height)
+      if (scale >= 0.995) return {canvas: sourceCanvas, scale: 1}
+
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.max(1, Math.round(sourceCanvas.width * scale))
+      canvas.height = Math.max(1, Math.round(sourceCanvas.height * scale))
+      const context = this.canvasContext(canvas, true)
+      if (!context) return {canvas: sourceCanvas, scale: 1}
+      context.imageSmoothingEnabled = true
+      context.imageSmoothingQuality = 'high'
+      context.fillStyle = this.pageBackground || '#fff'
+      context.fillRect(0, 0, canvas.width, canvas.height)
+      context.drawImage(sourceCanvas, 0, 0, sourceCanvas.width, sourceCanvas.height, 0, 0, canvas.width, canvas.height)
+      return {canvas, scale}
+    },
+    detectionScale(width: number, height: number): number {
+      const maxSideScale = DETECTION_MAX_SIDE / Math.max(width, height)
+      const maxPixelScale = Math.sqrt(DETECTION_MAX_PIXELS / Math.max(1, width * height))
+      return Math.min(1, Math.max(DETECTION_MIN_SCALE, Math.min(maxSideScale, maxPixelScale)))
+    },
+    scaleRoi(roi: Roi, scale: number, width: number, height: number): Roi {
+      if (scale === 1) return this.clampRoi(roi, width, height)
+      const x = Math.floor(roi.x * scale)
+      const y = Math.floor(roi.y * scale)
+      const right = Math.ceil((roi.x + roi.w) * scale)
+      const bottom = Math.ceil((roi.y + roi.h) * scale)
+      return this.clampRoi({x, y, w: right - x, h: bottom - y}, width, height)
+    },
+    scaleWordLines(lines: WordLine[], scale: number, width: number, height: number): WordLine[] {
+      if (scale === 1) return lines
+      return lines.map(line => ({
+        column: this.scaleColumn(line.column, scale, width, height),
+        row: {
+          start: this.clampNumber(Math.floor(line.row.start / scale), 0, Math.max(0, height - 1), 0),
+          end: this.clampNumber(Math.ceil(line.row.end / scale), 1, height, height),
+          rowInk: [],
+        },
+        words: line.words.map(word => this.scaleWordBlock(word, scale, width, height)),
+      }))
+    },
+    scaleColumn(column: Column, scale: number, width: number, height: number): Column {
+      return {
+        start: this.clampNumber(Math.floor(column.start / scale), 0, Math.max(0, width - 1), 0),
+        end: this.clampNumber(Math.ceil(column.end / scale), 1, width, width),
+        roi: this.scaleWordBlock(column.roi, scale, width, height),
+      }
+    },
+    scaleWordBlock(block: WordBlock, scale: number, width: number, height: number): WordBlock {
+      const x = this.clampNumber(Math.floor(block.x / scale), 0, Math.max(0, width - 1), 0)
+      const y = this.clampNumber(Math.floor(block.y / scale), 0, Math.max(0, height - 1), 0)
+      const right = this.clampNumber(Math.ceil((block.x + block.w) / scale), x + 1, width, width)
+      const bottom = this.clampNumber(Math.ceil((block.y + block.h) / scale), y + 1, height, height)
+      return {x, y, w: right - x, h: bottom - y}
     },
     revokeObjectUrl() {
       if (this.objectUrl) URL.revokeObjectURL(this.objectUrl)
@@ -738,8 +801,8 @@ export default Vue.extend({
     hasInk(ink: Uint8Array, width: number, height: number, x: number, y: number): boolean {
       return x >= 0 && x < width && y >= 0 && y < height && ink[y * width + x] === 1
     },
-    detectRoi(ink: Uint8Array, width: number, height: number): Roi {
-      if (this.cropRoi) return this.clampRoi(this.cropRoi, width, height)
+    detectRoi(ink: Uint8Array, width: number, height: number, coordinateScale: number = 1): Roi {
+      if (this.cropRoi) return this.scaleRoi(this.cropRoi, coordinateScale, width, height)
       return this.detectContentRoi(ink, width, height)
     },
     syncCropRoisFromProps() {

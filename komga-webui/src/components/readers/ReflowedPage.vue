@@ -346,6 +346,11 @@ type ReflowRegionSource = {
   detectionRoi?: Roi,
 }
 
+type DetectionCanvasSource = {
+  canvas: HTMLCanvasElement,
+  scale: number,
+}
+
 const THRESHOLD = 185
 const COLUMN_GAP = 15
 const WORD_GAP = 3
@@ -356,6 +361,9 @@ const MIN_INDENT = 8
 const REFLOW_CONTROLS_HEIGHT = 48
 const VIEWPORT_PAGE_BUFFER = 40
 const SPLIT_GUARD_BAND = 5
+const DETECTION_MAX_SIDE = 1800
+const DETECTION_MAX_PIXELS = 2000000
+const DETECTION_MIN_SCALE = 0.28
 
 export default Vue.extend({
   name: 'ReflowedPage',
@@ -683,10 +691,15 @@ export default Vue.extend({
           const sourceCanvas = regionSource.canvas
           const sourceIndex = renderCanvases.length
           renderCanvases.push(sourceCanvas)
-          const sourceContext = this.canvasContext(sourceCanvas, true)
-          if (!sourceContext) throw new Error('Canvas is unavailable')
-          const imageData = sourceContext.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height)
-          const lines = this.detectWordLines(imageData, sourceCanvas.width, sourceCanvas.height, regionSource.detectionRoi)
+          const detectionSource = this.detectionCanvasSource(sourceCanvas)
+          const detectionContext = this.canvasContext(detectionSource.canvas, true)
+          if (!detectionContext) throw new Error('Canvas is unavailable')
+          const imageData = detectionContext.getImageData(0, 0, detectionSource.canvas.width, detectionSource.canvas.height)
+          const detectionRoi = regionSource.detectionRoi
+            ? this.scaleRoi(regionSource.detectionRoi, detectionSource.scale, detectionSource.canvas.width, detectionSource.canvas.height)
+            : undefined
+          const detectedLines = this.detectWordLines(imageData, detectionSource.canvas.width, detectionSource.canvas.height, detectionRoi)
+          const lines = this.scaleWordLines(detectedLines, detectionSource.scale, sourceCanvas.width, sourceCanvas.height)
           regionItems.push(this.renderReflowItems(sourceCanvas, lines, sourceIndex))
         }
         if (requestId !== this.requestId) return
@@ -1191,8 +1204,9 @@ export default Vue.extend({
         marginBottom: this.options.marginBottom,
         marginLeft: this.options.marginLeft,
         cropRois: this.effectiveCropRois(this.pageParity),
-        deskewDetectionVersion: 8,
+        deskewDetectionVersion: 9,
         imageExclusionVersion: 2,
+        detectionScaleVersion: 1,
       })
     },
     emitReflowed() {
@@ -1298,6 +1312,62 @@ export default Vue.extend({
     canvasContext(canvas: HTMLCanvasElement, willReadFrequently: boolean = false): CanvasRenderingContext2D | null {
       if (willReadFrequently) return canvas.getContext('2d', {willReadFrequently: true})
       return canvas.getContext('2d')
+    },
+    detectionCanvasSource(sourceCanvas: HTMLCanvasElement): DetectionCanvasSource {
+      const scale = this.detectionScale(sourceCanvas.width, sourceCanvas.height)
+      if (scale >= 0.995) return {canvas: sourceCanvas, scale: 1}
+
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.max(1, Math.round(sourceCanvas.width * scale))
+      canvas.height = Math.max(1, Math.round(sourceCanvas.height * scale))
+      const context = this.canvasContext(canvas, true)
+      if (!context) return {canvas: sourceCanvas, scale: 1}
+      context.imageSmoothingEnabled = true
+      context.imageSmoothingQuality = 'high'
+      context.fillStyle = this.pageBackground || '#fff'
+      context.fillRect(0, 0, canvas.width, canvas.height)
+      context.drawImage(sourceCanvas, 0, 0, sourceCanvas.width, sourceCanvas.height, 0, 0, canvas.width, canvas.height)
+      return {canvas, scale}
+    },
+    detectionScale(width: number, height: number): number {
+      const maxSideScale = DETECTION_MAX_SIDE / Math.max(width, height)
+      const maxPixelScale = Math.sqrt(DETECTION_MAX_PIXELS / Math.max(1, width * height))
+      return Math.min(1, Math.max(DETECTION_MIN_SCALE, Math.min(maxSideScale, maxPixelScale)))
+    },
+    scaleRoi(roi: Roi, scale: number, width: number, height: number): Roi {
+      if (scale === 1) return this.clampRoi(roi, width, height)
+      const x = Math.floor(roi.x * scale)
+      const y = Math.floor(roi.y * scale)
+      const right = Math.ceil((roi.x + roi.w) * scale)
+      const bottom = Math.ceil((roi.y + roi.h) * scale)
+      return this.clampRoi({x, y, w: right - x, h: bottom - y}, width, height)
+    },
+    scaleWordLines(lines: WordLine[], scale: number, width: number, height: number): WordLine[] {
+      if (scale === 1) return lines
+      return lines.map(line => ({
+        column: this.scaleColumn(line.column, scale, width),
+        line: this.scaleLine(line.line, scale, height),
+        words: line.words.map(word => this.scaleWordBlock(word, scale, width, height)),
+      }))
+    },
+    scaleColumn(column: Column, scale: number, width: number): Column {
+      return {
+        start: this.clampNumber(Math.floor(column.start / scale), 0, Math.max(0, width - 1), 0),
+        end: this.clampNumber(Math.ceil(column.end / scale), 1, width, width),
+      }
+    },
+    scaleLine(line: Line, scale: number, height: number): Line {
+      return {
+        start: this.clampNumber(Math.floor(line.start / scale), 0, Math.max(0, height - 1), 0),
+        end: this.clampNumber(Math.ceil(line.end / scale), 1, height, height),
+      }
+    },
+    scaleWordBlock(block: WordBlock, scale: number, width: number, height: number): WordBlock {
+      const x = this.clampNumber(Math.floor(block.x / scale), 0, Math.max(0, width - 1), 0)
+      const y = this.clampNumber(Math.floor(block.y / scale), 0, Math.max(0, height - 1), 0)
+      const right = this.clampNumber(Math.ceil((block.x + block.w) / scale), x + 1, width, width)
+      const bottom = this.clampNumber(Math.ceil((block.y + block.h) / scale), y + 1, height, height)
+      return {x, y, w: right - x, h: bottom - y}
     },
     async prepareCropObjectUrl(image: HTMLImageElement, skewCorrection: number, cropImageRequestId: number = this.cropImageRequestId) {
       if (!skewCorrection) return
