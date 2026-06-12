@@ -310,7 +310,7 @@
       <continuous-reader
         v-else-if="continuousReader"
         :pages="pages"
-        :page.sync="page"
+        :page="page"
         :animations="animations"
         :scale="continuousScale"
         :sidePadding="sidePadding"
@@ -320,6 +320,7 @@
         :crop-regions-by-parity="readerCropRegionsByParity"
         :page-display-urls="readerDeskewedPageUrls"
         :active-crop-region="readerActiveCropRegion"
+        @update:page="updateNormalReaderPage"
         @update-active-crop-region="setReaderActiveCropRegion"
         @menu="toggleToolbars()"
         @jump-previous="jumpToPrevious()"
@@ -329,7 +330,7 @@
       <paged-reader
         v-else
         :pages="pages"
-        :page.sync="page"
+        :page="page"
         :reading-direction="readingDirection"
         :page-layout="pageLayout"
         :scale="scale"
@@ -340,6 +341,7 @@
         :crop-regions-by-parity="readerCropRegionsByParity"
         :page-display-urls="readerDeskewedPageUrls"
         :active-crop-region="readerActiveCropRegion"
+        @update:page="updateNormalReaderPage"
         @update-active-crop-region="setReaderActiveCropRegion"
         @menu="toggleToolbars()"
         @jump-previous="jumpToPrevious()"
@@ -1477,7 +1479,6 @@ export default Vue.extend({
         this.normalizedReaderCropRegionValue(regions[0]) || this.normalizedReaderCropRegionValue(value?.[parity]),
         this.normalizedReaderCropRegionValue(regions[1]),
       ]
-      if (normalized[0] && normalized[1] && this.readerCropRegionsOverlap(normalized[0], normalized[1])) normalized[1] = null
       return normalized
     },
     normalizedReaderCropExplicitArray(value: any, parity: 'odd' | 'even', regions: Array<any | null>): boolean[] {
@@ -1512,6 +1513,43 @@ export default Vue.extend({
       if (current) return current
       const fallbackParity = parity === 'odd' ? 'even' : 'odd'
       return regions.regions?.[fallbackParity]?.[regionIndex] || undefined
+    },
+    updateNormalReaderPage(page: number) {
+      const targetPage = Math.round(Number(page))
+      if (!Number.isFinite(targetPage) || targetPage < 1 || targetPage > this.pagesCount) return
+
+      if (this.interceptReaderCropPageChange(targetPage)) return
+      this.goTo(targetPage)
+    },
+    interceptReaderCropPageChange(targetPage: number): boolean {
+      if (this.activeReflowMode || this.readerCropMode || !this.readerCropRegionsByParity.enabled) return false
+      if (!this.page || targetPage === this.page || Math.abs(targetPage - this.page) > 2) return false
+
+      if (targetPage > this.page && this.readerActiveCropRegion === 0 && this.hasReaderCropRegion(this.page, 1)) {
+        this.setReaderActiveCropRegion(1)
+        return true
+      }
+
+      if (targetPage > this.page && this.readerActiveCropRegion === 1) {
+        this.setReaderActiveCropRegion(0)
+        return false
+      }
+
+      if (targetPage < this.page && this.readerActiveCropRegion === 1) {
+        this.setReaderActiveCropRegion(0)
+        return true
+      }
+
+      if (targetPage < this.page && this.readerActiveCropRegion === 0 && this.hasReaderCropRegion(targetPage, 1)) {
+        this.setReaderActiveCropRegion(1)
+        return false
+      }
+
+      return false
+    },
+    hasReaderCropRegion(page: number, regionIndex: number): boolean {
+      const parity = page % 2 === 0 ? 'even' : 'odd'
+      return !!this.effectiveReaderCropRegion(parity, regionIndex)
     },
     setReaderActiveCropRegion(region: number) {
       this.readerActiveCropRegion = region === 1 ? 1 : 0
