@@ -92,23 +92,12 @@
     </div>
     <div v-else class="k2-output" :style="k2OutputStyle">
       <div v-if="items.length === 0" class="k2-status">No text blocks detected</div>
-      <template v-for="(item, index) in visibleItems">
-        <span v-if="item.type === 'break'" :key="`break-${index}`" class="k2-break"/>
-        <span
-          v-else-if="item.type === 'indent'"
-          :key="`indent-${index}`"
-          class="k2-indent"
-          :style="`width: ${item.width}px`"
-        />
-        <img
-          v-else-if="item.type === 'word'"
-          :key="`word-${index}`"
-          :src="item.src"
-          class="k2-word"
-          :style="{width: `${item.width}px`, height: `${item.height}px`}"
-          alt=""
-        />
-      </template>
+      <canvas
+        v-show="items.length > 0"
+        ref="k2Canvas"
+        class="k2-canvas"
+        :style="k2CanvasStyle"
+      />
     </div>
     <div
       v-if="items.length > 0"
@@ -125,13 +114,11 @@
           class="k2-indent"
           :style="`width: ${item.width}px`"
         />
-        <img
+        <span
           v-else-if="item.type === 'word'"
           :key="`measure-word-${index}`"
-          :src="item.src"
           class="k2-word"
           :style="{width: `${item.width}px`, height: `${item.height}px`}"
-          alt=""
         />
       </template>
     </div>
@@ -151,7 +138,7 @@ type ImageRegion = Roi
 type WordLine = { column: Column, row: TextRow, words: WordBlock[] }
 type BreakItem = { type: 'break' }
 type IndentItem = { type: 'indent', width: number, sourceWidth: number }
-type WordItem = { type: 'word', src: string, width: number, height: number }
+type WordItem = { type: 'word', x: number, y: number, w: number, h: number, width: number, height: number }
 type K2Item = BreakItem | IndentItem | WordItem
 type K2Settings = {
   textScale: number,
@@ -200,6 +187,7 @@ export default Vue.extend({
     error: false,
     errorMessage: '',
     items: [] as K2Item[],
+    renderCanvas: undefined as HTMLCanvasElement | undefined,
     pages: [] as K2Item[][],
     virtualPageIndex: 0,
     viewportHeight: 0,
@@ -255,7 +243,14 @@ export default Vue.extend({
       this.$nextTick(() => {
         this.updateViewportMetrics()
         this.repaginate(false)
+        this.schedulePageCanvasRender()
       })
+    },
+    virtualPageIndex() {
+      this.schedulePageCanvasRender()
+    },
+    pages() {
+      this.schedulePageCanvasRender()
     },
     settings: {
       handler() {
@@ -273,6 +268,13 @@ export default Vue.extend({
       return {
         height: `${this.pageContentHeight()}px`,
         minHeight: `${this.pageContentHeight()}px`,
+        backgroundColor: this.pageBackground,
+      }
+    },
+    k2CanvasStyle(): object {
+      return {
+        width: '100%',
+        height: `${this.pageContentHeight()}px`,
         backgroundColor: this.pageBackground,
       }
     },
@@ -314,6 +316,7 @@ export default Vue.extend({
     this.$nextTick(() => {
       this.updateViewportMetrics()
       this.repaginate(false)
+      this.schedulePageCanvasRender()
     })
   },
   destroyed() {
@@ -364,6 +367,7 @@ export default Vue.extend({
       this.error = false
       this.errorMessage = ''
       this.items = []
+      this.renderCanvas = undefined
 
       try {
         const image = await this.loadPageImage(this.page.url, requestId)
@@ -388,6 +392,7 @@ export default Vue.extend({
         const lines = this.detectWordLines(ink, canvas.width, canvas.height, columns)
         if (requestId !== this.requestId) return
 
+        this.renderCanvas = canvas
         this.items = this.renderK2Items(canvas, lines)
         this.repaginate()
       } catch (e) {
@@ -1049,9 +1054,6 @@ export default Vue.extend({
     renderK2Items(sourceCanvas: HTMLCanvasElement, lines: WordLine[]): K2Item[] {
       const sourceContext = this.canvasContext(sourceCanvas)
       if (!sourceContext) return []
-      const sliceCanvas = document.createElement('canvas')
-      const sliceContext = this.canvasContext(sliceCanvas, true)
-      if (!sliceContext) return []
 
       const scale = this.textScalePercent / 100
       const wordGap = Math.round(this.clampNumber(this.wordGap, 1, 30, DEFAULT_WORD_GAP))
@@ -1081,15 +1083,12 @@ export default Vue.extend({
             lineWidth = 0
           }
 
-          sliceCanvas.width = word.w
-          sliceCanvas.height = word.h
-          sliceContext.clearRect(0, 0, word.w, word.h)
-          sliceContext.drawImage(sourceCanvas, word.x, word.y, word.w, word.h, 0, 0, word.w, word.h)
-          if (this.strokeStrength > 0) this.strengthenInk(sliceContext, word.w, word.h)
-
           items.push({
             type: 'word',
-            src: sliceCanvas.toDataURL('image/png'),
+            x: word.x,
+            y: word.y,
+            w: word.w,
+            h: word.h,
             width: scaledWidth,
             height: scaledHeight,
           })
@@ -1128,6 +1127,85 @@ export default Vue.extend({
     scaledIndentWidth(sourceWidth: number): number {
       const maxIndent = Math.max(0, (this.targetWidth - OUTPUT_PADDING * 2) * 0.45)
       return Math.min(maxIndent, sourceWidth * this.textScalePercent / 100)
+    },
+    schedulePageCanvasRender() {
+      this.$nextTick(() => this.renderVisiblePageCanvas())
+    },
+    renderVisiblePageCanvas() {
+      const canvas = this.$refs.k2Canvas as HTMLCanvasElement | undefined
+      if (!canvas || this.loading || this.error || this.cropMode || this.items.length === 0 || !this.renderCanvas) return
+
+      const width = Math.max(1, Math.round(this.targetWidth || canvas.clientWidth || 1))
+      const height = Math.max(1, Math.round(this.pageContentHeight()))
+      if (canvas.width !== width) canvas.width = width
+      if (canvas.height !== height) canvas.height = height
+
+      const context = this.canvasContext(canvas, true)
+      if (!context) return
+      context.setTransform(1, 0, 0, 1, 0, 0)
+      context.clearRect(0, 0, width, height)
+      context.fillStyle = this.pageBackground || '#fff'
+      context.fillRect(0, 0, width, height)
+      context.imageSmoothingEnabled = true
+      context.imageSmoothingQuality = 'high'
+      this.drawK2PageItems(context, this.visibleItems, width, height)
+      if (this.strokeStrength > 0) this.strengthenInk(context, width, height)
+    },
+    drawK2PageItems(context: CanvasRenderingContext2D, items: K2Item[], canvasWidth: number, canvasHeight: number) {
+      const padding = OUTPUT_PADDING
+      const contentWidth = Math.max(1, canvasWidth - padding * 2)
+      const rowGap = 5
+      const columnGap = 3
+      const lineItems = [] as Array<{item: WordItem | IndentItem, width: number, height: number}>
+      let lineWidth = 0
+      let lineHeight = 0
+      let y = padding
+
+      const flushLine = () => {
+        if (lineItems.length === 0) return
+        if (y > canvasHeight - padding) {
+          lineItems.length = 0
+          lineWidth = 0
+          lineHeight = 0
+          return
+        }
+        let x = padding
+        lineItems.forEach(entry => {
+          if (entry.item.type === 'word') this.drawK2Word(context, entry.item, x, y + lineHeight - entry.height)
+          x += entry.width + columnGap
+        })
+        y += lineHeight + rowGap
+        lineItems.length = 0
+        lineWidth = 0
+        lineHeight = 0
+      }
+
+      const appendItem = (item: WordItem | IndentItem, width: number, height: number) => {
+        const nextWidth = lineItems.length > 0 ? lineWidth + columnGap + width : width
+        if (lineItems.length > 0 && nextWidth > contentWidth) flushLine()
+        lineItems.push({item, width, height})
+        lineWidth = lineItems.length > 1 ? lineWidth + columnGap + width : width
+        lineHeight = Math.max(lineHeight, height)
+      }
+
+      items.forEach(item => {
+        if (item.type === 'break') {
+          flushLine()
+          return
+        }
+        if (item.type === 'indent') {
+          appendItem(item, item.width, 1)
+          return
+        }
+        appendItem(item, item.width, item.height)
+      })
+      flushLine()
+    },
+    drawK2Word(context: CanvasRenderingContext2D, item: WordItem, x: number, y: number) {
+      if (!this.renderCanvas) return
+      context.fillStyle = this.pageBackground || '#fff'
+      context.fillRect(x, y, item.width, item.height)
+      context.drawImage(this.renderCanvas, item.x, item.y, item.w, item.h, x, y, item.width, item.height)
     },
     repaginate(resetPage: boolean = true) {
       this.updateViewportMetrics()
@@ -1605,7 +1683,7 @@ export default Vue.extend({
 
 .k2-output {
   width: 100%;
-  padding: 16px;
+  padding: 0;
   box-sizing: border-box;
   display: flex;
   flex-wrap: wrap;
@@ -1637,6 +1715,12 @@ export default Vue.extend({
   display: inline-block;
   max-width: 100%;
   object-fit: contain;
+}
+
+.k2-canvas {
+  display: block;
+  flex: 0 0 100%;
+  max-width: 100%;
 }
 
 .k2-indent {

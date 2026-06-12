@@ -259,6 +259,7 @@
           :options="reflowOptions"
           :cached-items="cachedReflowItems(currentPage)"
           :cached-page-background="cachedReflowBackground(currentPage)"
+          :cached-render-canvases="cachedReflowCanvases(currentPage)"
           :cache-key="reflowCacheKey"
           :start-at-end="reflowStartAtEnd"
           @text-scale-change="setReflowTextScale"
@@ -285,6 +286,7 @@
           :options="reflowOptions"
           :cached-items="cachedReflowItems(prefetchReflowPage)"
           :cached-page-background="cachedReflowBackground(prefetchReflowPage)"
+          :cached-render-canvases="cachedReflowCanvases(prefetchReflowPage)"
           :cache-key="reflowCacheKey"
           preload
           @reflowed="cacheReflowPage"
@@ -2278,10 +2280,15 @@ export default Vue.extend({
       const entry = this.cachedReflowEntry(page)
       return Array.isArray(entry) ? '' : entry?.pageBackground || ''
     },
-    cacheReflowPage(payload: {pageNumber: number, cacheKey: string, items: any[], pageBackground?: string}) {
+    cachedReflowCanvases(page: PageDtoWithUrl | undefined): HTMLCanvasElement[] | undefined {
+      const entry = this.cachedReflowEntry(page)
+      return Array.isArray(entry) ? undefined : entry?.renderCanvases
+    },
+    cacheReflowPage(payload: {pageNumber: number, cacheKey: string, items: any[], renderCanvases?: HTMLCanvasElement[], pageBackground?: string}) {
       if (payload.cacheKey !== this.reflowCacheKey) return
       this.$set(this.reflowCache, this.reflowCacheEntryKey(payload.pageNumber, payload.cacheKey), {
         items: payload.items,
+        renderCanvases: payload.renderCanvases || [],
         pageBackground: payload.pageBackground || '',
       })
       this.pruneReflowCache()
