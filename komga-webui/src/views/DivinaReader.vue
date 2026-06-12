@@ -524,8 +524,8 @@
             </v-list-item>
             <v-list-item v-if="!activeReflowMode && readerCropEnabled">
               <span class="mr-2">{{ readerCropPageParityLabel }}</span>
-              <v-btn small class="mr-1" :color="readerActiveCropRegion === 0 ? 'primary' : undefined" @click="setReaderActiveCropRegion(0)">区域 1</v-btn>
-              <v-btn small class="mr-2" :color="readerActiveCropRegion === 1 ? 'primary' : undefined" @click="setReaderActiveCropRegion(1)">区域 2</v-btn>
+              <v-btn small class="mr-1" :color="readerCropEditRegion === 0 ? 'primary' : undefined" @click="setReaderCropEditRegion(0)">区域 1</v-btn>
+              <v-btn small class="mr-2" :color="readerCropEditRegion === 1 ? 'primary' : undefined" @click="setReaderCropEditRegion(1)">区域 2</v-btn>
               <v-btn small class="mr-2" @click="startReaderCropMode">设置截取区域</v-btn>
               <v-btn small text @click="clearReaderCropRegion">清除</v-btn>
             </v-list-item>
@@ -961,6 +961,7 @@ export default Vue.extend({
       readerCropMode: false,
       readerCropDrawing: false,
       readerActiveCropRegion: 0,
+      readerCropEditRegion: 0,
       readerCropStart: {x: 0, y: 0},
       readerCropDraft: undefined as undefined | {x: number, y: number, w: number, h: number},
       readerCropImageUrl: '',
@@ -1185,7 +1186,7 @@ export default Vue.extend({
       return this.readerCropImageUrl || this.currentPage?.url || ''
     },
     readerCropActiveRect(): object | undefined {
-      const region = this.readerCropDraft || this.effectiveReaderCropRegion(this.readerCropPageParity, this.readerActiveCropRegion)
+      const region = this.readerCropDraft || this.effectiveReaderCropRegion(this.readerCropPageParity, this.readerCropEditRegion)
       if (!region) return undefined
       return {
         left: `${region.x}%`,
@@ -1352,7 +1353,7 @@ export default Vue.extend({
       set: function (enabled: boolean): void {
         const current = this.readerCropRegionsByParity
         this.readerCropRegionsByParity = {...current, enabled}
-        const hasSavedRegion = !!this.effectiveReaderCropRegion(this.readerCropPageParity, this.readerActiveCropRegion)
+        const hasSavedRegion = !!this.effectiveReaderCropRegion(this.readerCropPageParity, this.readerCropEditRegion)
         if (enabled && !hasSavedRegion) this.$nextTick(() => this.startReaderCropMode())
       },
     },
@@ -1514,6 +1515,9 @@ export default Vue.extend({
     },
     setReaderActiveCropRegion(region: number) {
       this.readerActiveCropRegion = region === 1 ? 1 : 0
+    },
+    setReaderCropEditRegion(region: number) {
+      this.readerCropEditRegion = region === 1 ? 1 : 0
       this.readerCropDraft = undefined
       this.readerCropDrawing = false
     },
@@ -1523,7 +1527,7 @@ export default Vue.extend({
       await this.prepareReaderCropImage()
       this.readerCropMode = true
       this.readerCropDrawing = false
-      const current = this.effectiveReaderCropRegion(this.readerCropPageParity, this.readerActiveCropRegion)
+      const current = this.effectiveReaderCropRegion(this.readerCropPageParity, this.readerCropEditRegion)
       this.readerCropDraft = current ? {...current} : undefined
     },
     cancelReaderCropMode() {
@@ -1533,7 +1537,7 @@ export default Vue.extend({
       if (!this.promoteReaderCropImageUrl()) this.revokeReaderCropImageUrl()
     },
     clearReaderCropRegion() {
-      this.setReaderCropRegion(this.readerCropPageParity, this.readerActiveCropRegion, null)
+      this.setReaderCropRegion(this.readerCropPageParity, this.readerCropEditRegion, null)
       this.readerCropMode = false
       this.readerCropDrawing = false
       this.readerCropDraft = undefined
@@ -1558,7 +1562,7 @@ export default Vue.extend({
       this.readerCropDrawing = false
       const region = this.normalizedReaderCropRect(this.readerCropStart, this.readerCropPoint(event))
       if (region.w >= 5 && region.h >= 5) {
-        this.setReaderCropRegion(this.readerCropPageParity, this.readerActiveCropRegion, region)
+        this.setReaderCropRegion(this.readerCropPageParity, this.readerCropEditRegion, region)
         this.readerCropMode = false
         this.readerCropDraft = undefined
         if (!this.promoteReaderCropImageUrl()) this.revokeReaderCropImageUrl()
