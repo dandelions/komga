@@ -1,5 +1,5 @@
 <template>
-  <div class="reflowed-page" :class="{'reflowed-page-dark': $vuetify.theme.dark}">
+  <div class="reflowed-page" :class="{'reflowed-page-dark': $vuetify.theme.dark || nightDisplay}">
     <div v-if="!preload" ref="reflowControls" class="reflow-controls" @click.stop>
       <div class="reflow-top-controls">
         <button
@@ -402,6 +402,10 @@ export default Vue.extend({
       type: String,
       default: '',
     },
+    nightDisplay: {
+      type: Boolean,
+      default: false,
+    },
     preload: {
       type: Boolean,
       default: false,
@@ -484,7 +488,7 @@ export default Vue.extend({
         rowGap: `${Math.round(this.blockSpacing * 1.5)}px`,
         height: `${this.pageContentHeight()}px`,
         minHeight: `${this.pageContentHeight()}px`,
-        backgroundColor: this.pageBackground,
+        backgroundColor: this.wordOutputBackground(),
       }
       if (!this.verticalText) return style
       return {
@@ -582,6 +586,10 @@ export default Vue.extend({
       this.setInitialVirtualPage()
     },
     cacheKey() {
+      if (this.cropMode) return
+      this.reflow()
+    },
+    nightDisplay() {
       if (this.cropMode) return
       this.reflow()
     },
@@ -993,9 +1001,11 @@ export default Vue.extend({
         marginBottom: this.options.marginBottom,
         marginLeft: this.options.marginLeft,
         cropRois: this.effectiveCropRois(this.pageParity),
+        nightDisplay: this.nightDisplay,
         deskewDetectionVersion: 9,
         imageExclusionVersion: 2,
         detectionScaleVersion: 1,
+        darkWordRenderVersion: 1,
       })
     },
     emitReflowed() {
@@ -1099,6 +1109,133 @@ export default Vue.extend({
     canvasContext(canvas: HTMLCanvasElement, willReadFrequently: boolean = false): CanvasRenderingContext2D | null {
       if (willReadFrequently) return canvas.getContext('2d', {willReadFrequently: true})
       return canvas.getContext('2d')
+    },
+    wordOutputBackground(): string {
+      return this.nightDisplay ? '#000' : this.pageBackground || '#fff'
+    },
+    fillWordSliceBackground(context: CanvasRenderingContext2D, width: number, height: number) {
+      context.fillStyle = this.pageBackground || '#fff'
+      context.fillRect(0, 0, width, height)
+    },
+    finishWordSlice(context: CanvasRenderingContext2D, width: number, height: number) {
+      if (!this.nightDisplay) return
+
+      const imageData = context.getImageData(0, 0, width, height)
+      const data = imageData.data
+      const threshold = Math.min(245, this.clampNumber(this.options.threshold, 50, 230, THRESHOLD) + 18)
+      const sourceDark = this.sourceBackgroundLuma() < 128
+      const edgeRows = this.lineLikeEdgeRows(data, width, height, threshold, sourceDark)
+      const edgeColumns = this.lineLikeEdgeColumns(data, width, height, threshold, sourceDark)
+
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const offset = (y * width + x) * 4
+          if (edgeRows.has(y) || edgeColumns.has(x) || data[offset + 3] === 0) {
+            this.setDarkBackgroundPixel(data, offset)
+            continue
+          }
+
+          const luma = this.pixelLuma(data, offset)
+          const foreground = this.darkForegroundAmount(luma, threshold, sourceDark)
+          const value = Math.round(255 * foreground)
+          data[offset] = value
+          data[offset + 1] = value
+          data[offset + 2] = value
+          data[offset + 3] = 255
+        }
+      }
+
+      context.putImageData(imageData, 0, 0)
+    },
+    lineLikeEdgeRows(data: Uint8ClampedArray, width: number, height: number, threshold: number, sourceDark: boolean): Set<number> {
+      const rows = new Set<number>()
+      if (width < 8 || height < 8) return rows
+      const edgeBand = Math.min(2, Math.floor(height / 4))
+      for (let i = 0; i < edgeBand; i++) {
+        if (this.isLineLikeEdge(data, width, height, i, true, threshold, sourceDark)) rows.add(i)
+        const bottom = height - 1 - i
+        if (this.isLineLikeEdge(data, width, height, bottom, true, threshold, sourceDark)) rows.add(bottom)
+      }
+      return rows
+    },
+    lineLikeEdgeColumns(data: Uint8ClampedArray, width: number, height: number, threshold: number, sourceDark: boolean): Set<number> {
+      const columns = new Set<number>()
+      if (width < 8 || height < 8) return columns
+      const edgeBand = Math.min(2, Math.floor(width / 4))
+      for (let i = 0; i < edgeBand; i++) {
+        if (this.isLineLikeEdge(data, width, height, i, false, threshold, sourceDark)) columns.add(i)
+        const right = width - 1 - i
+        if (this.isLineLikeEdge(data, width, height, right, false, threshold, sourceDark)) columns.add(right)
+      }
+      return columns
+    },
+    isLineLikeEdge(data: Uint8ClampedArray, width: number, height: number, index: number, horizontal: boolean, threshold: number, sourceDark: boolean): boolean {
+      const length = horizontal ? width : height
+      let count = 0
+      let run = 0
+      let longestRun = 0
+      for (let i = 0; i < length; i++) {
+        const x = horizontal ? i : index
+        const y = horizontal ? index : i
+        const offset = (y * width + x) * 4
+        if (this.isForegroundPixel(data, offset, threshold, sourceDark)) {
+          count++
+          run++
+          longestRun = Math.max(longestRun, run)
+        } else {
+          run = 0
+        }
+      }
+      return longestRun >= Math.max(8, Math.floor(length * 0.7)) || count >= Math.floor(length * 0.8)
+    },
+    isForegroundPixel(data: Uint8ClampedArray, offset: number, threshold: number, sourceDark: boolean): boolean {
+      if (data[offset + 3] === 0) return false
+      const luma = this.pixelLuma(data, offset)
+      return sourceDark ? luma > threshold : luma < threshold
+    },
+    pixelLuma(data: Uint8ClampedArray, offset: number): number {
+      return 0.299 * data[offset] + 0.587 * data[offset + 1] + 0.114 * data[offset + 2]
+    },
+    darkForegroundAmount(luma: number, threshold: number, sourceDark: boolean): number {
+      if (sourceDark) {
+        if (luma <= threshold) return 0
+        return Math.pow((luma - threshold) / Math.max(1, 255 - threshold), 0.7)
+      }
+      if (luma >= threshold) return 0
+      return Math.pow((threshold - luma) / Math.max(1, threshold), 0.7)
+    },
+    setDarkBackgroundPixel(data: Uint8ClampedArray, offset: number) {
+      data[offset] = 0
+      data[offset + 1] = 0
+      data[offset + 2] = 0
+      data[offset + 3] = 255
+    },
+    sourceBackgroundLuma(): number {
+      const color = this.parseColor(this.pageBackground)
+      if (!color) return 255
+      return 0.299 * color.r + 0.587 * color.g + 0.114 * color.b
+    },
+    parseColor(color: string): {r: number, g: number, b: number} | undefined {
+      const normalized = (color || '').trim().toLowerCase()
+      if (normalized === 'white') return {r: 255, g: 255, b: 255}
+      if (normalized === 'black') return {r: 0, g: 0, b: 0}
+      const rgbMatch = normalized.match(/^rgba?\((\d+),\s*(\d+),\s*(\d+)/)
+      if (rgbMatch) return {r: Number(rgbMatch[1]), g: Number(rgbMatch[2]), b: Number(rgbMatch[3])}
+      const hexMatch = normalized.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/)
+      if (!hexMatch) return undefined
+      const hex = hexMatch[1]
+      if (hex.length === 3) {
+        return {
+          r: parseInt(hex[0] + hex[0], 16),
+          g: parseInt(hex[1] + hex[1], 16),
+          b: parseInt(hex[2] + hex[2], 16),
+        }
+      }
+      return {
+        r: parseInt(hex.slice(0, 2), 16),
+        g: parseInt(hex.slice(2, 4), 16),
+        b: parseInt(hex.slice(4, 6), 16),
+      }
     },
     detectionCanvasSource(sourceCanvas: HTMLCanvasElement): DetectionCanvasSource {
       const scale = this.detectionScale(sourceCanvas.width, sourceCanvas.height)
@@ -2351,9 +2488,10 @@ export default Vue.extend({
           )
           sliceCanvas.width = renderBlock.w
           sliceCanvas.height = renderBlock.h
-          sliceContext.clearRect(0, 0, renderBlock.w, renderBlock.h)
+          this.fillWordSliceBackground(sliceContext, renderBlock.w, renderBlock.h)
           sliceContext.drawImage(sourceCanvas, renderBlock.x, renderBlock.y, renderBlock.w, renderBlock.h, 0, 0, renderBlock.w, renderBlock.h)
           this.boldenSourceCanvas(sliceContext, renderBlock.w, renderBlock.h)
+          this.finishWordSlice(sliceContext, renderBlock.w, renderBlock.h)
           rendered.push({
             ...renderBlock,
             type: 'word',
@@ -2420,9 +2558,7 @@ export default Vue.extend({
           const renderBlock = this.paddedVerticalGlyphBlock(block, sourceCanvas.width, sourceCanvas.height)
           sliceCanvas.width = renderBlock.outputWidth
           sliceCanvas.height = renderBlock.outputHeight
-          sliceContext.clearRect(0, 0, renderBlock.outputWidth, renderBlock.outputHeight)
-          sliceContext.fillStyle = this.pageBackground || '#fff'
-          sliceContext.fillRect(0, 0, renderBlock.outputWidth, renderBlock.outputHeight)
+          this.fillWordSliceBackground(sliceContext, renderBlock.outputWidth, renderBlock.outputHeight)
           sliceContext.drawImage(
             sourceCanvas,
             renderBlock.source.x,
@@ -2435,6 +2571,7 @@ export default Vue.extend({
             renderBlock.source.h,
           )
           this.boldenSourceCanvas(sliceContext, renderBlock.outputWidth, renderBlock.outputHeight)
+          this.finishWordSlice(sliceContext, renderBlock.outputWidth, renderBlock.outputHeight)
           rendered.push({
             x: block.x,
             y: block.y,

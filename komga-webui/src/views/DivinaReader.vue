@@ -220,6 +220,7 @@
           :start-at-end="k2ReflowStartAtEnd"
           :crop-rois-by-parity="reflowSettings.cropRoisByParity"
           :settings="reflowSettings.k2Settings"
+          :night-display="nightDisplay"
           @exit-k2-reflow="exitK2ReflowMode"
           @source-previous="k2SourcePreviousPage"
           @source-next="k2SourceNextPage"
@@ -260,6 +261,7 @@
           :cached-items="cachedReflowItems(currentPage)"
           :cached-page-background="cachedReflowBackground(currentPage)"
           :cache-key="reflowCacheKey"
+          :night-display="nightDisplay"
           :start-at-end="reflowStartAtEnd"
           @text-scale-change="setReflowTextScale"
           @column-count-change="setReflowColumnCount"
@@ -286,6 +288,7 @@
           :cached-items="cachedReflowItems(prefetchReflowPage)"
           :cached-page-background="cachedReflowBackground(prefetchReflowPage)"
           :cache-key="reflowCacheKey"
+          :night-display="nightDisplay"
           preload
           @reflowed="cacheReflowPage"
         />
@@ -1225,9 +1228,11 @@ export default Vue.extend({
         marginBottom: this.reflowSettings.marginBottom,
         marginLeft: this.reflowSettings.marginLeft,
         cropRoisByParity: this.reflowSettings.cropRoisByParity,
+        nightDisplay: this.nightDisplay,
         deskewDetectionVersion: 9,
         imageExclusionVersion: 2,
         detectionScaleVersion: 1,
+        darkWordRenderVersion: 1,
       })
     },
 
@@ -2597,14 +2602,7 @@ export default Vue.extend({
 
 .reader-night-mode {
   --reflow-text-background: #000;
-  --reflow-text-filter: invert(1) grayscale(1) contrast(1.08);
-}
-
-@media (prefers-color-scheme: dark) {
-  .reader-shell {
-    --reflow-text-background: #000;
-    --reflow-text-filter: invert(1) grayscale(1) contrast(1.08);
-  }
+  --reflow-text-filter: none;
 }
 
 .reader-night-mode .reader-frame img:not(.word-block):not(.k2-word),
@@ -2614,7 +2612,7 @@ export default Vue.extend({
 
 .reader-frame .reflow-wrapper,
 .reader-frame .k2-output {
-  background: var(--reflow-text-background) !important;
+  background: var(--reflow-text-background);
 }
 
 .reader-frame img.word-block,
