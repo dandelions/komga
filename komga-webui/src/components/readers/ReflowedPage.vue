@@ -20,6 +20,10 @@
             <v-icon small>mdi-exit-to-app</v-icon>
             <span>退出重排</span>
           </button>
+          <button type="button" class="reflow-control reflow-nav-control reflow-apply-control" @click="applyReflowSettings">
+            <v-icon small>mdi-refresh</v-icon>
+            <span>重排</span>
+          </button>
         </div>
         <button
           type="button"
@@ -48,21 +52,21 @@
         </label>
         <label class="reflow-column-control">
           <span>排列模式</span>
-          <select :value="verticalText ? 'vertical' : 'horizontal'" @change="setVerticalText">
+          <select :value="controlVerticalText ? 'vertical' : 'horizontal'" @change="setVerticalText">
             <option value="horizontal">横排</option>
             <option value="vertical">竖排</option>
           </select>
         </label>
-        <label v-if="verticalText" class="reflow-column-control">
+        <label v-if="controlVerticalText" class="reflow-column-control">
           <span>方向</span>
-          <select :value="verticalDirection" @change="setVerticalDirection">
+          <select :value="controlVerticalDirection" @change="setVerticalDirection">
             <option value="rtl">右到左</option>
             <option value="ltr">左到右</option>
           </select>
         </label>
         <label class="reflow-column-control">
           <span>列数</span>
-          <select :value="columnCount" @change="setColumnCount">
+          <select :value="controlColumnCount" @change="setColumnCount">
             <option value="1">1</option>
             <option value="2">2</option>
             <option value="3">3</option>
@@ -77,11 +81,11 @@
             min="0.1"
             max="3"
             step="0.1"
-            :value="strokeStrength"
+            :value="controlStrokeStrength"
             @input="setStrokeStrength"
           />
           <button type="button" class="reflow-step-control" @click="adjustStrokeStrength(0.1)">+</button>
-          <span class="reflow-font-value">{{ strokeStrength }}</span>
+          <span class="reflow-font-value">{{ controlStrokeStrength }}</span>
         </label>
         <label class="reflow-spacing-control">
           <span>字体间隔</span>
@@ -91,11 +95,11 @@
             min="0"
             max="24"
             step="1"
-            :value="blockSpacing"
+            :value="controlBlockSpacing"
             @input="setBlockSpacing"
           />
           <button type="button" class="reflow-step-control" @click="adjustBlockSpacing(1)">+</button>
-          <span class="reflow-font-value">{{ blockSpacing }}</span>
+          <span class="reflow-font-value">{{ controlBlockSpacing }}</span>
         </label>
         <div class="reflow-action-controls">
           <span class="reflow-parity-label">{{ pageParityLabel }}</span>
@@ -107,11 +111,11 @@
               min="-10"
               max="10"
               step="0.5"
-              :value="skewCorrection"
+              :value="controlSkewCorrection"
               @input="setSkewCorrection"
             />
             <button type="button" class="reflow-step-control" @click="adjustSkewCorrection(0.5)">+</button>
-            <span class="reflow-font-value">{{ skewCorrectionLabel }}</span>
+            <span class="reflow-font-value">{{ controlSkewCorrectionLabel }}</span>
           </label>
           <div class="reflow-region-controls">
             <button
@@ -162,11 +166,11 @@
             min="-10"
             max="10"
             step="0.5"
-            :value="skewCorrection"
+            :value="controlSkewCorrection"
             @input="setCropSkewCorrection"
           />
           <button type="button" class="reflow-step-control" @click="adjustCropSkewCorrection(0.5)">+</button>
-          <span class="reflow-font-value">{{ skewCorrectionLabel }}</span>
+          <span class="reflow-font-value">{{ controlSkewCorrectionLabel }}</span>
         </label>
       </div>
       <div v-if="cropWarning" class="crop-warning">{{ cropWarning }}</div>
@@ -361,6 +365,17 @@ type DetectionCanvasSource = {
   scale: number,
 }
 
+type ReflowOptionsSnapshot = {
+  textScale: number,
+  columnCount: number,
+  skewCorrection: number,
+  verticalText: boolean,
+  verticalDirection: VerticalDirection,
+  strokeStrength: number,
+  blockSpacing: number,
+  cropRoisKey: string,
+}
+
 const THRESHOLD = 185
 const COLUMN_GAP = 15
 const WORD_GAP = 3
@@ -451,6 +466,13 @@ export default Vue.extend({
         even: [false, false],
       } as Record<PageParity, boolean[]>,
       draftRoi: undefined as Roi | undefined,
+      pendingColumnCount: 1,
+      pendingSkewCorrection: 0,
+      pendingVerticalText: false,
+      pendingVerticalDirection: 'rtl' as VerticalDirection,
+      pendingStrokeStrength: 0.1,
+      pendingBlockSpacing: 6,
+      optionsSnapshot: undefined as ReflowOptionsSnapshot | undefined,
     }
   },
   computed: {
@@ -481,6 +503,28 @@ export default Vue.extend({
     },
     blockSpacing(): number {
       return this.clampNumber(this.options.blockSpacing, 0, 24, 6)
+    },
+    controlColumnCount(): number {
+      return Math.round(this.clampNumber(this.pendingColumnCount, 1, 4, 1))
+    },
+    controlSkewCorrection(): number {
+      return this.normalizedSkewCorrection(this.pendingSkewCorrection)
+    },
+    controlSkewCorrectionLabel(): string {
+      const prefix = this.controlSkewCorrection > 0 ? '+' : ''
+      return `${prefix}${this.controlSkewCorrection.toFixed(1)}°`
+    },
+    controlVerticalText(): boolean {
+      return this.pendingVerticalText === true
+    },
+    controlVerticalDirection(): VerticalDirection {
+      return this.pendingVerticalDirection === 'ltr' ? 'ltr' : 'rtl'
+    },
+    controlStrokeStrength(): number {
+      return this.roundStrokeStrength(this.pendingStrokeStrength)
+    },
+    controlBlockSpacing(): number {
+      return this.clampNumber(this.pendingBlockSpacing, 0, 24, 6)
     },
     reflowWrapperStyle(): object {
       const style = {
@@ -559,6 +603,7 @@ export default Vue.extend({
   watch: {
     page: {
       handler() {
+        this.syncPendingOptionsFromProps(true)
         this.syncCropRoisFromOptions()
         this.draftRoi = undefined
         this.drawingCrop = false
@@ -570,12 +615,8 @@ export default Vue.extend({
     },
     options: {
       handler() {
-        this.syncCropRoisFromOptions()
-        if (this.cropMode) {
-          this.ensureCropImage()
-          return
-        }
-        this.reflow()
+        this.syncPendingOptionsFromProps()
+        if (this.cropMode) this.ensureCropImage(this.controlSkewCorrection)
       },
       deep: true,
     },
@@ -621,6 +662,30 @@ export default Vue.extend({
     this.revokeObjectUrl()
   },
   methods: {
+    syncPendingOptionsFromProps(force: boolean = false) {
+      const snapshot = this.optionsSnapshotFromProps()
+      const previous = this.optionsSnapshot
+      if (force || !previous || snapshot.columnCount !== previous.columnCount) this.pendingColumnCount = snapshot.columnCount
+      if (force || !previous || snapshot.skewCorrection !== previous.skewCorrection) this.pendingSkewCorrection = snapshot.skewCorrection
+      if (force || !previous || snapshot.verticalText !== previous.verticalText) this.pendingVerticalText = snapshot.verticalText
+      if (force || !previous || snapshot.verticalDirection !== previous.verticalDirection) this.pendingVerticalDirection = snapshot.verticalDirection
+      if (force || !previous || snapshot.strokeStrength !== previous.strokeStrength) this.pendingStrokeStrength = snapshot.strokeStrength
+      if (force || !previous || snapshot.blockSpacing !== previous.blockSpacing) this.pendingBlockSpacing = snapshot.blockSpacing
+      if (force || !previous || snapshot.cropRoisKey !== previous.cropRoisKey) this.syncCropRoisFromOptions()
+      this.optionsSnapshot = snapshot
+    },
+    optionsSnapshotFromProps(): ReflowOptionsSnapshot {
+      return {
+        textScale: this.clampNumber(this.options.textScale, 10, 140, WORD_SCALE * 100),
+        columnCount: Math.round(this.clampNumber(this.options.columnCount, 1, 4, 1)),
+        skewCorrection: this.normalizedSkewCorrection(this.options.skewCorrection),
+        verticalText: this.options.verticalText === true,
+        verticalDirection: this.options.verticalDirection === 'ltr' ? 'ltr' : 'rtl',
+        strokeStrength: this.roundStrokeStrength(this.options.strokeStrength),
+        blockSpacing: this.clampNumber(this.options.blockSpacing, 0, 24, 6),
+        cropRoisKey: JSON.stringify(this.options.cropRoisByParity || {}),
+      }
+    },
     async reflow() {
       if (this.reflowRunning) {
         this.reflowPending = true
@@ -1032,7 +1097,7 @@ export default Vue.extend({
         return item
       })
     },
-    async ensureCropImage(skewCorrection: number = this.skewCorrection) {
+    async ensureCropImage(skewCorrection: number = this.controlSkewCorrection) {
       const normalizedSkewCorrection = this.normalizedSkewCorrection(skewCorrection)
       const cropImageRequestId = this.cropImageRequestId + 1
       this.cropImageRequestId = cropImageRequestId
@@ -2794,48 +2859,61 @@ export default Vue.extend({
     },
     setColumnCount(event: Event) {
       const target = event.target as HTMLSelectElement
-      this.$emit('column-count-change', Math.round(this.clampNumber(Number(target.value), 1, 4, 1)))
+      this.pendingColumnCount = Math.round(this.clampNumber(Number(target.value), 1, 4, 1))
     },
     setSkewCorrection(event: Event) {
       const target = event.target as HTMLInputElement
-      this.$emit('skew-correction-change', this.normalizedSkewCorrection(Number(target.value)))
+      this.pendingSkewCorrection = this.normalizedSkewCorrection(Number(target.value))
     },
     adjustSkewCorrection(delta: number) {
-      this.$emit('skew-correction-change', this.normalizedSkewCorrection(this.skewCorrection + delta))
+      this.pendingSkewCorrection = this.normalizedSkewCorrection(this.controlSkewCorrection + delta)
     },
     setCropSkewCorrection(event: Event) {
       const target = event.target as HTMLInputElement
       this.updateCropSkewCorrection(Number(target.value))
     },
     adjustCropSkewCorrection(delta: number) {
-      this.updateCropSkewCorrection(this.skewCorrection + delta)
+      this.updateCropSkewCorrection(this.controlSkewCorrection + delta)
     },
     updateCropSkewCorrection(value: number) {
       const skewCorrection = this.normalizedSkewCorrection(value)
-      this.$emit('skew-correction-change', skewCorrection)
+      this.pendingSkewCorrection = skewCorrection
       this.ensureCropImage(skewCorrection)
     },
     setVerticalText(event: Event) {
       const target = event.target as HTMLSelectElement
-      this.$emit('vertical-text-change', target.value === 'vertical')
+      this.pendingVerticalText = target.value === 'vertical'
     },
     setVerticalDirection(event: Event) {
       const target = event.target as HTMLSelectElement
-      this.$emit('vertical-direction-change', target.value === 'ltr' ? 'ltr' : 'rtl')
+      this.pendingVerticalDirection = target.value === 'ltr' ? 'ltr' : 'rtl'
     },
     setStrokeStrength(event: Event) {
       const target = event.target as HTMLInputElement
-      this.$emit('stroke-strength-change', this.roundStrokeStrength(Number(target.value)))
+      this.pendingStrokeStrength = this.roundStrokeStrength(Number(target.value))
     },
     adjustStrokeStrength(delta: number) {
-      this.$emit('stroke-strength-change', this.roundStrokeStrength(this.strokeStrength + delta))
+      this.pendingStrokeStrength = this.roundStrokeStrength(this.controlStrokeStrength + delta)
     },
     setBlockSpacing(event: Event) {
       const target = event.target as HTMLInputElement
-      this.$emit('block-spacing-change', this.clampNumber(Number(target.value), 0, 24, 6))
+      this.pendingBlockSpacing = this.clampNumber(Number(target.value), 0, 24, 6)
     },
     adjustBlockSpacing(delta: number) {
-      this.$emit('block-spacing-change', this.clampNumber(this.blockSpacing + delta, 0, 24, 6))
+      this.pendingBlockSpacing = this.clampNumber(this.controlBlockSpacing + delta, 0, 24, 6)
+    },
+    applyReflowSettings() {
+      const previousCacheKey = this.cacheKey
+      this.$emit('column-count-change', this.controlColumnCount)
+      this.$emit('skew-correction-change', this.controlSkewCorrection)
+      this.$emit('vertical-text-change', this.controlVerticalText)
+      this.$emit('vertical-direction-change', this.controlVerticalDirection)
+      this.$emit('stroke-strength-change', this.controlStrokeStrength)
+      this.$emit('block-spacing-change', this.controlBlockSpacing)
+      this.$emit('crop-rois-change', this.cropRoisPayload())
+      this.$nextTick(() => {
+        if (!this.cropMode && this.cacheKey === previousCacheKey) this.reflow()
+      })
     },
     roundStrokeStrength(value: number): number {
       return Math.round(this.clampNumber(value, 0.1, 3, 0.1) * 10) / 10
@@ -2878,7 +2956,6 @@ export default Vue.extend({
       this.cropWarning = ''
       this.cropMode = false
       this.$emit('crop-mode-change', false)
-      this.reflow()
     },
     startCrop(event: PointerEvent) {
       if (!this.cropMode || !this.imageSize.w || !this.imageSize.h) return
@@ -2909,7 +2986,6 @@ export default Vue.extend({
         this.setCurrentCropRoi(roi)
         this.cropMode = false
         this.$emit('crop-mode-change', false)
-        this.reflow()
       }
       event.preventDefault()
     },
@@ -2957,7 +3033,6 @@ export default Vue.extend({
       explicit[this.activeCropRegion] = !!roi
       this.$set(this.cropRoisByParity, this.pageParity, rois)
       this.$set(this.explicitCropRoisByParity, this.pageParity, explicit)
-      this.$emit('crop-rois-change', this.cropRoisPayload())
     },
   },
 })

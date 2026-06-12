@@ -52,6 +52,9 @@
       <button type="button" class="k2-action" @click="$emit('show-pdf-toc')">
         {{ $t('browse_book.pdf_toc') }}
       </button>
+      <button type="button" class="k2-action k2-apply-action" @click="applyK2Reflow">
+        重排
+      </button>
       <button type="button" class="k2-action k2-collapse-action" @click="controlsCollapsed = !controlsCollapsed">
         {{ controlsCollapsed ? 'Show controls' : 'Hide controls' }}
       </button>
@@ -151,7 +154,7 @@ type ImageRegion = Roi
 type WordLine = { column: Column, row: TextRow, words: WordBlock[] }
 type BreakItem = { type: 'break' }
 type IndentItem = { type: 'indent', width: number, sourceWidth: number }
-type WordItem = { type: 'word', src: string, width: number, height: number }
+type WordItem = { type: 'word', src: string, sourceWidth: number, sourceHeight: number, width: number, height: number }
 type K2Item = BreakItem | IndentItem | WordItem
 type K2Settings = {
   textScale: number,
@@ -255,7 +258,6 @@ export default Vue.extend({
     cropRoisByParity: {
       handler() {
         this.syncCropRoisFromProps()
-        this.reflow()
       },
       deep: true,
     },
@@ -1289,6 +1291,8 @@ export default Vue.extend({
           items.push({
             type: 'word',
             src: sliceCanvas.toDataURL('image/png'),
+            sourceWidth: word.w,
+            sourceHeight: word.h,
             width: scaledWidth,
             height: scaledHeight,
           })
@@ -1537,47 +1541,71 @@ export default Vue.extend({
     },
     setTextScale(event: Event) {
       const target = event.target as HTMLInputElement
+      const previousTextScale = this.textScalePercent
       this.textScalePercent = this.clampNumber(Number(target.value), 20, 160, DEFAULT_TEXT_SCALE)
       this.emitSettingsChange()
-      this.reflow()
+      this.rescaleTextItems(previousTextScale)
     },
     adjustTextScale(delta: number) {
+      const previousTextScale = this.textScalePercent
       this.textScalePercent = this.clampNumber(this.textScalePercent + delta, 20, 160, DEFAULT_TEXT_SCALE)
       this.emitSettingsChange()
-      this.reflow()
+      this.rescaleTextItems(previousTextScale)
     },
     setMaxColumns(event: Event) {
       const target = event.target as HTMLSelectElement
       this.maxColumns = Math.round(this.clampNumber(Number(target.value), 1, 4, 2))
       this.emitSettingsChange()
-      this.reflow()
     },
     setThreshold(event: Event) {
       const target = event.target as HTMLInputElement
       this.threshold = this.clampNumber(Number(target.value), 50, 230, DEFAULT_THRESHOLD)
       this.emitSettingsChange()
-      this.reflow()
     },
     setStrokeStrength(event: Event) {
       const target = event.target as HTMLInputElement
       this.strokeStrength = Math.round(this.clampNumber(Number(target.value), 0, 3, 0.8) * 10) / 10
       this.emitSettingsChange()
-      this.reflow()
     },
     adjustStrokeStrength(delta: number) {
       this.strokeStrength = Math.round(this.clampNumber(this.strokeStrength + delta, 0, 3, 0.8) * 10) / 10
       this.emitSettingsChange()
-      this.reflow()
     },
     setWordGap(event: Event) {
       const target = event.target as HTMLInputElement
       this.wordGap = Math.round(this.clampNumber(Number(target.value), 1, 30, DEFAULT_WORD_GAP))
       this.emitSettingsChange()
-      this.reflow()
     },
     setOutputPadding(event: Event) {
       const target = event.target as HTMLInputElement
       this.outputPadding = Math.round(this.clampNumber(Number(target.value), 0, 48, DEFAULT_OUTPUT_PADDING))
+      this.emitSettingsChange()
+    },
+    rescaleTextItems(previousTextScale: number) {
+      if (this.items.length === 0 || previousTextScale <= 0) {
+        this.reflow()
+        return
+      }
+      const scale = this.textScalePercent / 100
+      const previousScale = previousTextScale / 100
+      this.items = this.items.map(item => {
+        if (item.type === 'word') {
+          const sourceWidth = item.sourceWidth || Math.max(1, item.width / previousScale)
+          const sourceHeight = item.sourceHeight || Math.max(1, item.height / previousScale)
+          return {
+            ...item,
+            sourceWidth,
+            sourceHeight,
+            width: Math.max(1, Math.round(sourceWidth * scale)),
+            height: Math.max(1, Math.round(sourceHeight * scale)),
+          }
+        }
+        if (item.type === 'indent') return {...item, width: this.scaledIndentWidth(item.sourceWidth)}
+        return item
+      })
+      this.repaginate(false)
+    },
+    applyK2Reflow() {
       this.emitSettingsChange()
       this.reflow()
     },
@@ -1611,7 +1639,6 @@ export default Vue.extend({
       this.drawingCrop = false
       this.cropMode = false
       this.$emit('crop-mode-change', false)
-      this.reflow()
     },
     startCrop(event: PointerEvent) {
       if (!this.cropMode || !this.imageSize.w || !this.imageSize.h) return
@@ -1636,7 +1663,6 @@ export default Vue.extend({
         this.setCurrentCropRoi(roi)
         this.cropMode = false
         this.$emit('crop-mode-change', false)
-        this.reflow()
       }
       event.preventDefault()
     },
