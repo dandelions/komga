@@ -1601,6 +1601,7 @@ export default Vue.extend({
       const region = this.normalizedReaderCropRect(this.readerCropStart, this.readerCropPoint(event))
       if (region.w >= 5 && region.h >= 5) {
         this.setReaderCropRegion(this.readerCropPageParity, this.readerCropEditRegion, region)
+        if (this.readerCropEditRegion === 1 && this.hasReaderCropRegion(this.page, 0)) this.setReaderActiveCropRegion(0)
         this.readerCropMode = false
         this.readerCropDraft = undefined
         if (!this.promoteReaderCropImageUrl()) this.revokeReaderCropImageUrl()
