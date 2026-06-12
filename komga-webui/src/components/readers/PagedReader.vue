@@ -290,13 +290,46 @@ export default Vue.extend({
       const bottom = Math.max(0, 100 - crop.y - crop.h)
       return `inset(${crop.y}% ${right}% ${bottom}% ${crop.x}%)`
     },
-    effectiveCropRegion(pageNumber: number): CropRegion | undefined {
+    effectiveCropRegion(pageNumber: number, regionIndex: number = this.activeCropRegion): CropRegion | undefined {
       const crops = this.cropRegionsByParity
       if (!crops?.enabled) return undefined
       const parity = pageNumber % 2 === 0 ? 'even' : 'odd'
-      const index = this.activeCropRegion === 1 ? 1 : 0
+      const index = regionIndex === 1 ? 1 : 0
       return this.normalizedCropRegion(crops.regions?.[parity]?.[index] || (index === 0 ? crops[parity] : undefined)) ||
         this.normalizedCropRegion(crops.regions?.[parity === 'odd' ? 'even' : 'odd']?.[index])
+    },
+    cropRegionIndexes(pageNumber: number): number[] {
+      if (!this.cropRegionsByParity?.enabled) return []
+      return [0, 1].filter(index => !!this.effectiveCropRegion(pageNumber, index))
+    },
+    spreadPageNumber(spread: PageDtoWithUrl[] | undefined): number | undefined {
+      if (!spread || spread.length === 0) return undefined
+      const currentPage = spread.length == 2 && spread[1].mediaType ? spread[1] : spread[0]
+      return currentPage?.number
+    },
+    currentSpreadPageNumber(): number | undefined {
+      return this.spreadPageNumber(this.spreads[this.carouselPage])
+    },
+    firstCropRegionIndex(pageNumber: number | undefined): number {
+      if (!pageNumber) return 0
+      return this.cropRegionIndexes(pageNumber)[0] ?? 0
+    },
+    lastCropRegionIndex(pageNumber: number | undefined): number {
+      if (!pageNumber) return 0
+      const indexes = this.cropRegionIndexes(pageNumber)
+      return indexes[indexes.length - 1] ?? 0
+    },
+    nextCropRegionIndex(pageNumber: number | undefined): number | undefined {
+      if (!pageNumber) return undefined
+      return this.cropRegionIndexes(pageNumber).find(index => index > this.activeCropRegion)
+    },
+    previousCropRegionIndex(pageNumber: number | undefined): number | undefined {
+      if (!pageNumber) return undefined
+      return this.cropRegionIndexes(pageNumber).reverse().find(index => index < this.activeCropRegion)
+    },
+    setActiveCropRegion(regionIndex: number) {
+      const normalized = regionIndex === 1 ? 1 : 0
+      if (normalized !== this.activeCropRegion) this.$emit('update:active-crop-region', normalized)
     },
     normalizedCropRegion(crop: CropRegion | null | undefined): CropRegion | undefined {
       if (!crop) return undefined
@@ -403,16 +436,34 @@ export default Vue.extend({
       if (this.vertical) this.next()
     },
     prev() {
+      const pageNumber = this.currentSpreadPageNumber()
+      const previousRegion = this.previousCropRegionIndex(pageNumber)
+      if (previousRegion !== undefined) {
+        this.pendingScrollPosition = 'bottom'
+        this.setActiveCropRegion(previousRegion)
+        this.scrollToPageEdge('bottom')
+        return
+      }
       if (this.canPrev) {
         this.pendingScrollPosition = 'bottom'
+        this.setActiveCropRegion(this.lastCropRegionIndex(this.spreadPageNumber(this.spreads[this.carouselPage - 1])))
         this.carouselPage--
       } else {
         this.$emit('jump-previous')
       }
     },
     next() {
+      const pageNumber = this.currentSpreadPageNumber()
+      const nextRegion = this.nextCropRegionIndex(pageNumber)
+      if (nextRegion !== undefined) {
+        this.pendingScrollPosition = 'top'
+        this.setActiveCropRegion(nextRegion)
+        this.scrollToPageEdge('top')
+        return
+      }
       if (this.canNext) {
         this.pendingScrollPosition = 'top'
+        this.setActiveCropRegion(this.firstCropRegionIndex(this.spreadPageNumber(this.spreads[this.carouselPage + 1])))
         this.carouselPage++
       } else {
         this.$emit('jump-next')

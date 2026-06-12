@@ -342,6 +342,7 @@
         :crop-regions-by-parity="readerCropRegionsByParity"
         :page-display-urls="readerDeskewedPageUrls"
         :active-crop-region="readerActiveCropRegion"
+        @update:active-crop-region="setReaderActiveCropRegion"
         @menu="toggleToolbars()"
         @jump-previous="jumpToPrevious()"
         @jump-next="jumpToNext()"
