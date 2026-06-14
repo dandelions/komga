@@ -132,12 +132,15 @@
          style="left: 50%;position: fixed;color: #000;height: 24px;background: #d3d3d33b; width: 150px;transform: translate(-50%, 0); display: block"
          :style="`top: ${showToolbars ? 48 : 0}px`"
          :class="settings.navigationButtons ? '' : 'hidden'"
+         @click.capture="previousEpubPageControl"
       >
         <v-icon style="left: calc(50% - 12px); position: relative;">mdi-chevron-up</v-icon>
       </a>
       <a id="next-chapter" rel="next" role="button" aria-labelledby="next-label"
          :class="settings.navigationButtons ? '' : 'hidden'"
-         style="bottom: 0;left: 50%;position: fixed;color: #000;height: 24px;background: #d3d3d33b; width: 150px;transform: translate(-50%, 0); display: block">
+         style="bottom: 0;left: 50%;position: fixed;color: #000;height: 24px;background: #d3d3d33b; width: 150px;transform: translate(-50%, 0); display: block"
+         @click.capture="nextEpubPageControl"
+      >
         <v-icon style="left: calc(50% - 12px);position: relative;">mdi-chevron-down</v-icon>
       </a>
     </div>
@@ -146,6 +149,7 @@
       <a rel="prev" class="disabled" role="button" aria-labelledby="previous-label"
          style="top: 50%;left:0;position: fixed;height: 100px;background: #d3d3d33b;"
          :class="settings.navigationButtons ? '' : 'hidden'"
+         @click.capture="previousEpubPageControl"
       >
         <v-icon style="top: calc(50% - 12px);
                         position: relative;">mdi-chevron-left
@@ -154,6 +158,7 @@
       <a rel="next" class="disabled" role="button" aria-labelledby="next-label"
          style="top: 50%;right:0;position: fixed;height: 100px;background: #d3d3d33b;"
          :class="settings.navigationButtons ? '' : 'hidden'"
+         @click.capture="nextEpubPageControl"
       >
         <v-icon style="top: calc(50% - 12px);position: relative;">mdi-chevron-right</v-icon>
       </a>
@@ -768,8 +773,8 @@ export default Vue.extend({
         }
       } else {
         if (this.settings.navigationClick) {
-          if (x < this.$vuetify.breakpoint.width / 4) return this.isRtl ? this.d2Reader.nextPage() : this.d2Reader.previousPage()
-          if (x > this.$vuetify.breakpoint.width * .75) return this.isRtl ? this.d2Reader.previousPage() : this.d2Reader.nextPage()
+          if (x < this.$vuetify.breakpoint.width / 4) return this.isRtl ? this.nextEpubPage() : this.previousEpubPage()
+          if (x > this.$vuetify.breakpoint.width * .75) return this.isRtl ? this.previousEpubPage() : this.nextEpubPage()
         }
       }
       this.toggleToolbars()
@@ -980,7 +985,7 @@ export default Vue.extend({
 
       this.epubIframeEnhancementObserver = new MutationObserver(() => this.scheduleEpubIframeEnhancements(false))
       this.epubIframeEnhancementObserver.observe(wrapper, {childList: true, subtree: true})
-      this.scheduleEpubIframeEnhancements(true)
+      this.scheduleEpubIframeEnhancements(false)
     },
     stopEpubIframeEnhancements() {
       if (this.epubIframeEnhancementObserver) {
@@ -1092,6 +1097,61 @@ export default Vue.extend({
 
       if (style.textContent !== config.css) style.textContent = config.css
       html.setAttribute('data-komga-custom-style', 'on')
+    },
+    nextEpubPageControl(event: MouseEvent) {
+      if (this.tryMoveVerticalEpubPage(1)) this.stopEpubPageEvent(event)
+    },
+    previousEpubPageControl(event: MouseEvent) {
+      if (this.tryMoveVerticalEpubPage(-1)) this.stopEpubPageEvent(event)
+    },
+    nextEpubPage() {
+      if (!this.tryMoveVerticalEpubPage(1)) this.d2Reader.nextPage()
+    },
+    previousEpubPage() {
+      if (!this.tryMoveVerticalEpubPage(-1)) this.d2Reader.previousPage()
+    },
+    stopEpubPageEvent(event: MouseEvent) {
+      event.preventDefault()
+      event.stopPropagation()
+      event.stopImmediatePropagation()
+    },
+    tryMoveVerticalEpubPage(direction: 1 | -1): boolean {
+      if (this.verticalScroll) return false
+
+      const iframe = document.querySelector<HTMLIFrameElement>('#iframe-wrapper iframe')
+      const doc = iframe?.contentDocument
+      const html = doc?.documentElement
+      const view = iframe?.contentWindow || doc?.defaultView
+      const mode = html?.getAttribute('data-komga-writing-mode') || (doc && view ? this.detectEpubVerticalWritingMode(doc, view) : '')
+      if (!doc || !html || mode.indexOf('vertical') !== 0) return false
+
+      const scroller = doc.scrollingElement as HTMLElement | null
+      if (!scroller) return false
+
+      const pageWidth = Math.max(1, scroller.clientWidth || iframe?.clientWidth || this.$vuetify.breakpoint.width)
+      const maxOffset = Math.max(0, scroller.scrollWidth - scroller.clientWidth)
+      if (maxOffset <= 1) return false
+
+      const pageDirection = mode.indexOf('vertical-rl') === 0 ? -1 : 1
+      const current = scroller.scrollLeft
+      const target = this.clampVerticalEpubScrollLeft(current + (pageWidth * direction * pageDirection), pageDirection, maxOffset)
+      if (Math.abs(target - current) <= 1) return false
+
+      scroller.scrollLeft = target
+      if (Math.abs(scroller.scrollLeft - current) <= 1) return false
+
+      this.updateVerticalEpubPosition(scroller, pageWidth, maxOffset)
+      return true
+    },
+    clampVerticalEpubScrollLeft(value: number, pageDirection: number, maxOffset: number): number {
+      if (pageDirection < 0) return Math.max(-maxOffset, Math.min(0, value))
+      return Math.max(0, Math.min(maxOffset, value))
+    },
+    updateVerticalEpubPosition(scroller: HTMLElement, pageWidth: number, maxOffset: number) {
+      const pageCount = Math.max(1, Math.ceil(maxOffset / pageWidth) + 1)
+      const page = Math.min(pageCount, Math.ceil(Math.abs(scroller.scrollLeft) / pageWidth) + 1)
+      this.progressionPage = page
+      this.progressionPageCount = pageCount
     },
     appearanceClass(suffix?: string): string {
       let c = this.appearance.replace('readium-', '').replace('-on', '').replace('default', 'day')

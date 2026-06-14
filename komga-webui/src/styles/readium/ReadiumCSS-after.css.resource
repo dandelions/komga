@@ -226,15 +226,20 @@ body {
 :root[data-komga-writing-mode] {
   writing-mode: var(--KOMGA__writingMode) !important;
   text-orientation: mixed;
+  width: auto !important;
+  max-width: none !important;
+  min-width: 100% !important;
   overflow: hidden;
 }
 
 :root[data-komga-writing-mode] body {
   writing-mode: inherit;
   text-orientation: inherit;
-  width: auto !important;
+  width: max-content !important;
+  min-width: 100% !important;
   max-width: none !important;
   height: 100vh !important;
+  min-height: 100vh !important;
   max-height: 100vh !important;
   margin: 0 auto !important;
   padding: calc(var(--RS__pageGutter) * var(--USER__pageMargins, 1)) 0 !important;
