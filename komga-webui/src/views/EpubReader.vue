@@ -367,6 +367,7 @@ import {debounce} from 'lodash'
 import {CLIENT_SETTING, ClientSettingUserUpdateDto, ClientSettingsEpubCustomStyle} from '@/types/komga-clientsettings'
 
 const EPUB_CUSTOM_STYLE_WINDOW_KEY = '__KOMGA_EPUB_CUSTOM_STYLE__'
+const EPUB_CUSTOM_STYLE_ID = 'komga-epub-custom-style'
 
 export default Vue.extend({
   name: 'EpubReader',
@@ -483,6 +484,8 @@ export default Vue.extend({
       epubCustomStyleEnabled: false,
       epubCustomStyleCss: '',
       epubCustomStyleSaving: false,
+      epubIframeEnhancementObserver: undefined as MutationObserver | undefined,
+      epubIframeEnhancementTimers: [] as number[],
     }
   },
   created() {
@@ -490,7 +493,8 @@ export default Vue.extend({
     if (screenfull.isEnabled) screenfull.on('change', this.fullscreenChanged)
   },
   beforeDestroy() {
-    this.d2Reader.stop()
+    this.stopEpubIframeEnhancements()
+    this.d2Reader?.stop?.()
   },
   destroyed() {
     delete (window as any)[EPUB_CUSTOM_STYLE_WINDOW_KEY]
@@ -520,7 +524,8 @@ export default Vue.extend({
       // route update means either:
       // - going to previous/next book, in this case the query.page is not set, so it will default to first page
       // - pressing the back button of the browser and navigating to the previous book, in this case the query.page is set, so we honor it
-      this.d2Reader.stop()
+      this.stopEpubIframeEnhancements()
+      this.d2Reader?.stop?.()
       this.setup(to.params.bookId, Number(to.query.page))
     }
     next()
@@ -828,9 +833,7 @@ export default Vue.extend({
           {type: 'style', url: new URL('../styles/r2d2bc/popup.css.resource', import.meta.url).toString()},
           {type: 'style', url: new URL('../styles/r2d2bc/popover.css.resource', import.meta.url).toString()},
           {type: 'style', url: new URL('../styles/r2d2bc/style.css.resource', import.meta.url).toString()},
-          {type: 'script', url: new URL('../styles/readium/komga-vertical-writing.js.resource', import.meta.url).toString()},
           ...fontFamiliesInjectables,
-          {type: 'script', url: new URL('../styles/readium/komga-custom-style.js.resource', import.meta.url).toString()},
         ],
         requestConfig: {
           credentials: 'include',
@@ -876,7 +879,7 @@ export default Vue.extend({
       this.tocs.toc = this.d2Reader.tableOfContents
       this.tocs.landmarks = this.d2Reader.landmarks
       this.tocs.pageList = this.d2Reader.pageList
-      this.$nextTick(() => this.applyEpubCustomStyleToIframes(false))
+      this.$nextTick(() => this.startEpubIframeEnhancements())
 
       if (this.alwaysFullscreen) this.enterFullscreen()
 
@@ -912,6 +915,7 @@ export default Vue.extend({
 
       this.markProgress(location)
       this.currentLocation = location
+      this.scheduleEpubIframeEnhancements(false)
       return new Promise(function (resolve, _) {
         resolve(location)
       })
@@ -962,22 +966,132 @@ export default Vue.extend({
         }
         await this.$komgaSettings.updateClientSettingUser(update)
         await this.$store.dispatch('getClientSettingsUser')
-        await this.applyEpubCustomStyleToIframes()
+        await this.applyEpubIframeEnhancements()
         this.sendNotification(this.$t('epubreader.settings.custom_style_saved').toString())
       } finally {
         this.epubCustomStyleSaving = false
       }
     },
-    async applyEpubCustomStyleToIframes(reflow: boolean = true) {
+    startEpubIframeEnhancements() {
+      this.stopEpubIframeEnhancements()
+
+      const wrapper = document.getElementById('iframe-wrapper')
+      if (!wrapper) return
+
+      this.epubIframeEnhancementObserver = new MutationObserver(() => this.scheduleEpubIframeEnhancements(false))
+      this.epubIframeEnhancementObserver.observe(wrapper, {childList: true, subtree: true})
+      this.scheduleEpubIframeEnhancements(true)
+    },
+    stopEpubIframeEnhancements() {
+      if (this.epubIframeEnhancementObserver) {
+        this.epubIframeEnhancementObserver.disconnect()
+        this.epubIframeEnhancementObserver = undefined
+      }
+      this.clearEpubIframeEnhancementTimers()
+    },
+    clearEpubIframeEnhancementTimers() {
+      this.epubIframeEnhancementTimers.forEach(timer => window.clearTimeout(timer))
+      this.epubIframeEnhancementTimers = []
+    },
+    scheduleEpubIframeEnhancements(reflow: boolean = false) {
+      this.clearEpubIframeEnhancementTimers()
+      this.applyEpubIframeEnhancements(reflow)
+
+      ;[100, 300, 700, 1200].forEach(delay => {
+        const timer = window.setTimeout(() => {
+          this.epubIframeEnhancementTimers = this.epubIframeEnhancementTimers.filter(x => x !== timer)
+          this.applyEpubIframeEnhancements(false)
+        }, delay)
+        this.epubIframeEnhancementTimers.push(timer)
+      })
+    },
+    async applyEpubIframeEnhancements(reflow: boolean = true) {
       this.publishEpubCustomStyle()
       document.querySelectorAll<HTMLIFrameElement>('#iframe-wrapper iframe').forEach(iframe => {
-        try {
-          const apply = (iframe.contentWindow as any)?.__KOMGA_APPLY_EPUB_CUSTOM_STYLE__
-          if (typeof apply === 'function') apply()
-        } catch (e) {
-        }
+        this.bindEpubIframeEnhancement(iframe)
+        this.applyEpubEnhancementsToIframe(iframe)
       })
       if (reflow && this.d2Reader?.applyUserSettings) await this.d2Reader.applyUserSettings({})
+    },
+    bindEpubIframeEnhancement(iframe: HTMLIFrameElement) {
+      if (iframe.dataset.komgaEpubEnhancementBound === 'true') return
+
+      iframe.dataset.komgaEpubEnhancementBound = 'true'
+      iframe.addEventListener('load', () => this.scheduleEpubIframeEnhancements(false))
+    },
+    applyEpubEnhancementsToIframe(iframe: HTMLIFrameElement) {
+      try {
+        const doc = iframe.contentDocument
+        const view = iframe.contentWindow || doc?.defaultView
+        if (!doc?.documentElement || !view) return
+
+        this.applyEpubVerticalWritingMode(doc, view)
+        this.applyEpubCustomStyleToDocument(doc)
+      } catch (e) {
+      }
+    },
+    applyEpubVerticalWritingMode(doc: Document, view: Window) {
+      const mode = this.detectEpubVerticalWritingMode(doc, view)
+      const html = doc.documentElement
+
+      if (!mode) {
+        html.removeAttribute('data-komga-writing-mode')
+        html.style.removeProperty('--KOMGA__writingMode')
+        return
+      }
+
+      html.setAttribute('data-komga-writing-mode', mode)
+      html.style.setProperty('--KOMGA__writingMode', mode)
+    },
+    detectEpubVerticalWritingMode(doc: Document, view: Window): string {
+      const selectors = [
+        'main',
+        'article',
+        'section',
+        '[style*="writing-mode"]',
+        '[style*="-webkit-writing-mode"]',
+        '[class*="vertical"]',
+        '[class*="tcy"]',
+        '[class*="vrtl"]',
+      ]
+      const candidates = [
+        doc.documentElement,
+        doc.body,
+        ...selectors.map(selector => doc.querySelector(selector)),
+      ]
+
+      for (const candidate of candidates) {
+        const mode = this.computedEpubWritingMode(candidate, view)
+        if (mode) return mode
+      }
+
+      return ''
+    },
+    computedEpubWritingMode(element: Element | null, view: Window): string {
+      if (!element) return ''
+      const mode = view.getComputedStyle(element).writingMode || ''
+      return mode.indexOf('vertical') === 0 ? mode : ''
+    },
+    applyEpubCustomStyleToDocument(doc: Document) {
+      const config = (window as any)[EPUB_CUSTOM_STYLE_WINDOW_KEY] as ClientSettingsEpubCustomStyle | undefined
+      const html = doc.documentElement
+      const existing = doc.getElementById(EPUB_CUSTOM_STYLE_ID)
+
+      if (!config?.enabled || !config.css) {
+        if (existing?.parentNode) existing.parentNode.removeChild(existing)
+        html.removeAttribute('data-komga-custom-style')
+        return
+      }
+
+      const style = existing || doc.createElement('style')
+      if (!existing) {
+        style.id = EPUB_CUSTOM_STYLE_ID
+        style.setAttribute('type', 'text/css')
+        ;(doc.head || html).appendChild(style)
+      }
+
+      if (style.textContent !== config.css) style.textContent = config.css
+      html.setAttribute('data-komga-custom-style', 'on')
     },
     appearanceClass(suffix?: string): string {
       let c = this.appearance.replace('readium-', '').replace('-on', '').replace('default', 'day')
