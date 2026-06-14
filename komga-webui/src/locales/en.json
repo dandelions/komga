@@ -782,6 +782,10 @@
         "buttons": "Buttons",
         "click": "Click / Tap"
       },
+      "chinese_conversion": "Chinese conversion",
+      "chinese_conversion_none": "No conversion",
+      "chinese_conversion_simplified": "Simplified",
+      "chinese_conversion_traditional": "Traditional",
       "custom_style": "Custom style",
       "custom_style_css": "CSS",
       "custom_style_disable_original": "Disable EPUB publisher styles",

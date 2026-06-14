@@ -306,6 +306,14 @@
             </v-list-item>
 
             <v-list-item>
+              <settings-select
+                :items="epubChineseConversionOptions"
+                v-model="epubCustomStyleChineseConversion"
+                :label="$t('epubreader.settings.chinese_conversion')"
+              />
+            </v-list-item>
+
+            <v-list-item>
               <v-textarea
                 v-model="epubCustomStyleCss"
                 :label="$t('epubreader.settings.custom_style_css')"
@@ -376,12 +384,51 @@ import {getBookReadRouteFromMedia} from '@/functions/book-format'
 import SettingsSelect from '@/components/SettingsSelect.vue'
 import {createR2Progression, r2ProgressionToReadingPosition} from '@/functions/readium'
 import {debounce} from 'lodash'
-import {CLIENT_SETTING, ClientSettingUserUpdateDto, ClientSettingsEpubCustomStyle} from '@/types/komga-clientsettings'
+import OpenCC, {ConverterFunction} from 'opencc-js'
+import {
+  CLIENT_SETTING,
+  ClientSettingUserUpdateDto,
+  ClientSettingsEpubChineseConversion,
+  ClientSettingsEpubCustomStyle,
+} from '@/types/komga-clientsettings'
 
 const EPUB_CUSTOM_STYLE_WINDOW_KEY = '__KOMGA_EPUB_CUSTOM_STYLE__'
 const EPUB_CUSTOM_STYLE_ID = 'komga-epub-custom-style'
 const EPUB_AUTHOR_STYLE_DISABLED_ATTR = 'komgaAuthorStyleDisabled'
 const EPUB_AUTHOR_STYLE_ORIGINAL_MEDIA_ATTR = 'komgaOriginalMedia'
+const EPUB_AUTHOR_INLINE_STYLE_DISABLED_ATTR = 'komgaAuthorInlineStyleDisabled'
+const EPUB_AUTHOR_ORIGINAL_INLINE_STYLE_ATTR = 'komgaOriginalInlineStyle'
+const EPUB_AUTHOR_IMAGE_SIZE_DISABLED_ATTR = 'komgaAuthorImageSizeDisabled'
+const EPUB_AUTHOR_ORIGINAL_WIDTH_ATTR = 'komgaOriginalWidth'
+const EPUB_AUTHOR_ORIGINAL_HEIGHT_ATTR = 'komgaOriginalHeight'
+const EPUB_CHINESE_TEXT_ORIGINALS = new WeakMap<Text, string>()
+const EPUB_CHINESE_CONVERTERS = {} as Partial<Record<Exclude<ClientSettingsEpubChineseConversion, 'none'>, ConverterFunction>>
+const EPUB_CHINESE_TEXT_PATTERN = /[\u3400-\u9fff\uf900-\ufaff]/
+const EPUB_AUTHOR_INLINE_STYLE_PROPERTIES = [
+  'font-size',
+  'font-family',
+  'line-height',
+  'letter-spacing',
+  'word-spacing',
+  'color',
+  'background',
+  'background-color',
+]
+const EPUB_CHINESE_CONVERSION_SKIP_SELECTOR = [
+  'script',
+  'style',
+  'textarea',
+  'input',
+  'select',
+  'option',
+  'code',
+  'pre',
+  'kbd',
+  'samp',
+  'svg',
+  'math',
+  '.ignore-opencc',
+].join(',')
 const READIUM_CSS_BEFORE_URL = new URL('../styles/readium/ReadiumCSS-before.css.resource', import.meta.url).toString()
 const READIUM_CSS_DEFAULT_URL = new URL('../styles/readium/ReadiumCSS-default.css.resource', import.meta.url).toString()
 const READIUM_CSS_AFTER_URL = new URL('../styles/readium/ReadiumCSS-after.css.resource', import.meta.url).toString()
@@ -489,6 +536,11 @@ export default Vue.extend({
         {text: this.$t('epubreader.settings.navigation_options.click').toString(), value: 'click'},
         {text: this.$t('epubreader.settings.navigation_options.both').toString(), value: 'buttonclick'},
       ],
+      epubChineseConversionOptions: [
+        {text: this.$t('epubreader.settings.chinese_conversion_none').toString(), value: 'none'},
+        {text: this.$t('epubreader.settings.chinese_conversion_simplified').toString(), value: 'simplified'},
+        {text: this.$t('epubreader.settings.chinese_conversion_traditional').toString(), value: 'traditional'},
+      ],
       tocs: {
         toc: undefined as unknown as TocEntry[],
         landmarks: undefined as unknown as TocEntry[],
@@ -511,6 +563,7 @@ export default Vue.extend({
       fixedLayout: false,
       epubCustomStyleEnabled: false,
       epubCustomStyleDisableOriginalStyle: false,
+      epubCustomStyleChineseConversion: 'none' as ClientSettingsEpubChineseConversion,
       epubCustomStyleCss: '',
       epubCustomStyleSaving: false,
       epubIframeEnhancementObserver: undefined as MutationObserver | undefined,
@@ -971,6 +1024,7 @@ export default Vue.extend({
       const config = this.getEpubCustomStyles()[bookId]
       this.epubCustomStyleEnabled = config?.enabled || false
       this.epubCustomStyleDisableOriginalStyle = config?.disableOriginalStyle || false
+      this.epubCustomStyleChineseConversion = config?.chineseConversion || 'none'
       this.epubCustomStyleCss = config?.css || ''
       this.publishEpubCustomStyle()
     },
@@ -979,6 +1033,7 @@ export default Vue.extend({
       target[EPUB_CUSTOM_STYLE_WINDOW_KEY] = {
         enabled: this.epubCustomStyleEnabled,
         disableOriginalStyle: this.epubCustomStyleDisableOriginalStyle,
+        chineseConversion: this.epubCustomStyleChineseConversion,
         css: this.epubCustomStyleCss,
       } as ClientSettingsEpubCustomStyle
     },
@@ -989,6 +1044,7 @@ export default Vue.extend({
         all[this.bookId] = {
           enabled: this.epubCustomStyleEnabled,
           disableOriginalStyle: this.epubCustomStyleDisableOriginalStyle,
+          chineseConversion: this.epubCustomStyleChineseConversion,
           css: this.epubCustomStyleCss,
         }
 
@@ -1059,6 +1115,7 @@ export default Vue.extend({
 
         this.applyEpubVerticalWritingMode(doc, view)
         this.applyEpubAuthorStylePreference(doc)
+        this.applyEpubChineseConversion(doc)
         this.applyEpubCustomStyleToDocument(doc)
       } catch (e) {
       }
@@ -1140,6 +1197,19 @@ export default Vue.extend({
         else this.restoreEpubStyleElement(element)
       })
 
+      doc.body?.querySelectorAll<HTMLElement>(
+        [
+          '[style]',
+          'img[width]',
+          'img[height]',
+          '[data-komga-author-inline-style-disabled]',
+          '[data-komga-author-image-size-disabled]',
+        ].join(','),
+      ).forEach(element => {
+        if (disableOriginalStyle) this.disableEpubInlineAuthorStyle(element)
+        else this.restoreEpubInlineAuthorStyle(element)
+      })
+
       if (disableOriginalStyle) doc.documentElement.setAttribute('data-komga-author-style-disabled', 'on')
       else doc.documentElement.removeAttribute('data-komga-author-style-disabled')
     },
@@ -1176,6 +1246,132 @@ export default Vue.extend({
       delete element.dataset[EPUB_AUTHOR_STYLE_DISABLED_ATTR]
       delete element.dataset[EPUB_AUTHOR_STYLE_ORIGINAL_MEDIA_ATTR]
     },
+    disableEpubInlineAuthorStyle(element: HTMLElement) {
+      const originalStyle = element.getAttribute('style')
+      if (originalStyle && element.dataset[EPUB_AUTHOR_INLINE_STYLE_DISABLED_ATTR] !== 'true') {
+        element.dataset[EPUB_AUTHOR_ORIGINAL_INLINE_STYLE_ATTR] = originalStyle
+      }
+
+      if (originalStyle) {
+        EPUB_AUTHOR_INLINE_STYLE_PROPERTIES.forEach(property => element.style.removeProperty(property))
+        if (!element.getAttribute('style')?.trim()) element.removeAttribute('style')
+        element.dataset[EPUB_AUTHOR_INLINE_STYLE_DISABLED_ATTR] = 'true'
+      }
+
+      if (this.isEpubImageElement(element) && this.shouldDisableEpubImageSize(element)) {
+        const image = element as HTMLImageElement
+        if (image.dataset[EPUB_AUTHOR_IMAGE_SIZE_DISABLED_ATTR] !== 'true') {
+          image.dataset[EPUB_AUTHOR_ORIGINAL_WIDTH_ATTR] = image.getAttribute('width') || ''
+          image.dataset[EPUB_AUTHOR_ORIGINAL_HEIGHT_ATTR] = image.getAttribute('height') || ''
+        }
+
+        image.removeAttribute('width')
+        image.removeAttribute('height')
+        image.style.removeProperty('width')
+        image.style.removeProperty('height')
+        if (!image.getAttribute('style')?.trim()) image.removeAttribute('style')
+        image.dataset[EPUB_AUTHOR_IMAGE_SIZE_DISABLED_ATTR] = 'true'
+      }
+    },
+    restoreEpubInlineAuthorStyle(element: HTMLElement) {
+      if (element.dataset[EPUB_AUTHOR_INLINE_STYLE_DISABLED_ATTR] === 'true') {
+        const originalStyle = element.dataset[EPUB_AUTHOR_ORIGINAL_INLINE_STYLE_ATTR]
+        if (originalStyle) element.setAttribute('style', originalStyle)
+        else element.removeAttribute('style')
+
+        delete element.dataset[EPUB_AUTHOR_INLINE_STYLE_DISABLED_ATTR]
+        delete element.dataset[EPUB_AUTHOR_ORIGINAL_INLINE_STYLE_ATTR]
+      }
+
+      if (this.isEpubImageElement(element) && element.dataset[EPUB_AUTHOR_IMAGE_SIZE_DISABLED_ATTR] === 'true') {
+        const image = element as HTMLImageElement
+        const originalWidth = image.dataset[EPUB_AUTHOR_ORIGINAL_WIDTH_ATTR]
+        const originalHeight = image.dataset[EPUB_AUTHOR_ORIGINAL_HEIGHT_ATTR]
+        if (originalWidth) image.setAttribute('width', originalWidth)
+        else image.removeAttribute('width')
+        if (originalHeight) image.setAttribute('height', originalHeight)
+        else image.removeAttribute('height')
+
+        delete image.dataset[EPUB_AUTHOR_IMAGE_SIZE_DISABLED_ATTR]
+        delete image.dataset[EPUB_AUTHOR_ORIGINAL_WIDTH_ATTR]
+        delete image.dataset[EPUB_AUTHOR_ORIGINAL_HEIGHT_ATTR]
+      }
+    },
+    shouldDisableEpubImageSize(element: HTMLImageElement): boolean {
+      const width = this.parseEpubImageSize(element.getAttribute('width'))
+      const height = this.parseEpubImageSize(element.getAttribute('height'))
+      const styleWidth = this.parseEpubImageSize(element.style.width)
+      const styleHeight = this.parseEpubImageSize(element.style.height)
+      const size = Math.max(width, height, styleWidth, styleHeight)
+      return size > 0 && size <= 80
+    },
+    isEpubImageElement(element: HTMLElement): boolean {
+      return element.tagName.toLowerCase() === 'img'
+    },
+    parseEpubImageSize(value: string | null): number {
+      if (!value) return 0
+      const match = value.trim().match(/^(\d+(?:\.\d+)?)(?:px)?$/i)
+      return match ? Number(match[1]) : 0
+    },
+    applyEpubChineseConversion(doc: Document) {
+      const config = (window as any)[EPUB_CUSTOM_STYLE_WINDOW_KEY] as ClientSettingsEpubCustomStyle | undefined
+      const mode = config?.chineseConversion || 'none'
+      const root = doc.body
+      if (!root) return
+
+      const converter = this.getEpubChineseConverter(mode)
+      const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+      const nodes = [] as Text[]
+      let node = walker.nextNode()
+      while (node) {
+        nodes.push(node as Text)
+        node = walker.nextNode()
+      }
+
+      nodes.forEach(textNode => this.applyEpubChineseConversionToTextNode(textNode, converter))
+      doc.documentElement.setAttribute('data-komga-chinese-conversion', mode)
+    },
+    getEpubChineseConverter(mode: ClientSettingsEpubChineseConversion): ConverterFunction | undefined {
+      if (mode === 'none') return undefined
+      if (!EPUB_CHINESE_CONVERTERS[mode]) {
+        EPUB_CHINESE_CONVERTERS[mode] = mode === 'simplified'
+          ? OpenCC.Converter({from: 't', to: 'cn'})
+          : OpenCC.Converter({from: 'cn', to: 'tw'})
+      }
+      return EPUB_CHINESE_CONVERTERS[mode]
+    },
+    applyEpubChineseConversionToTextNode(textNode: Text, converter?: ConverterFunction) {
+      if (!this.shouldConvertEpubChineseTextNode(textNode)) {
+        const original = EPUB_CHINESE_TEXT_ORIGINALS.get(textNode)
+        if (original !== undefined) {
+          textNode.nodeValue = original
+          EPUB_CHINESE_TEXT_ORIGINALS.delete(textNode)
+        }
+        return
+      }
+
+      const current = textNode.nodeValue || ''
+      const original = EPUB_CHINESE_TEXT_ORIGINALS.get(textNode) || current
+      if (!converter) {
+        if (EPUB_CHINESE_TEXT_ORIGINALS.has(textNode)) {
+          textNode.nodeValue = original
+          EPUB_CHINESE_TEXT_ORIGINALS.delete(textNode)
+        }
+        return
+      }
+
+      if (!EPUB_CHINESE_TEXT_ORIGINALS.has(textNode)) EPUB_CHINESE_TEXT_ORIGINALS.set(textNode, original)
+      const converted = converter(original)
+      if (converted !== current) textNode.nodeValue = converted
+    },
+    shouldConvertEpubChineseTextNode(textNode: Text): boolean {
+      const value = textNode.nodeValue
+      if (!value || !EPUB_CHINESE_TEXT_PATTERN.test(value)) return false
+
+      const parent = textNode.parentElement
+      if (!parent) return false
+      return !parent.closest(EPUB_CHINESE_CONVERSION_SKIP_SELECTOR)
+    },
     nextEpubPageControl(event: MouseEvent) {
       if (this.tryMoveVerticalEpubPage(1)) this.stopEpubPageEvent(event)
     },
@@ -1206,28 +1402,42 @@ export default Vue.extend({
       const scroller = doc.scrollingElement as HTMLElement | null
       if (!scroller) return false
 
-      const pageWidth = Math.max(1, scroller.clientWidth || iframe?.clientWidth || this.$vuetify.breakpoint.width)
+      const pageStep = this.getVerticalEpubPageStep(scroller, doc, iframe)
       const maxOffset = Math.max(0, scroller.scrollWidth - scroller.clientWidth)
       if (maxOffset <= 1) return false
 
       const pageDirection = mode.indexOf('vertical-rl') === 0 ? -1 : 1
       const current = scroller.scrollLeft
-      const target = this.clampVerticalEpubScrollLeft(current + (pageWidth * direction * pageDirection), pageDirection, maxOffset)
+      const target = this.clampVerticalEpubScrollLeft(current + (pageStep * direction * pageDirection), pageDirection, maxOffset)
       if (Math.abs(target - current) <= 1) return false
 
       scroller.scrollLeft = target
       if (Math.abs(scroller.scrollLeft - current) <= 1) return false
 
-      this.updateVerticalEpubPosition(scroller, pageWidth, maxOffset)
+      this.updateVerticalEpubPosition(scroller, pageStep, maxOffset)
       return true
+    },
+    getVerticalEpubPageStep(scroller: HTMLElement, doc: Document, iframe?: HTMLIFrameElement): number {
+      const pageWidth = Math.max(1, scroller.clientWidth || iframe?.clientWidth || this.$vuetify.breakpoint.width)
+      const bodyStyle = doc.defaultView?.getComputedStyle(doc.body)
+      const htmlStyle = doc.defaultView?.getComputedStyle(doc.documentElement)
+      const fontSize = this.parseCssPixelValue(bodyStyle?.fontSize) || this.parseCssPixelValue(htmlStyle?.fontSize) || 16
+      const lineHeight = this.parseCssPixelValue(bodyStyle?.lineHeight) || fontSize * 1.5
+      const overlap = Math.ceil(Math.max(fontSize, lineHeight))
+      return Math.max(Math.floor(pageWidth * 0.6), pageWidth - overlap)
+    },
+    parseCssPixelValue(value?: string): number {
+      if (!value) return 0
+      const parsed = Number.parseFloat(value)
+      return Number.isFinite(parsed) ? parsed : 0
     },
     clampVerticalEpubScrollLeft(value: number, pageDirection: number, maxOffset: number): number {
       if (pageDirection < 0) return Math.max(-maxOffset, Math.min(0, value))
       return Math.max(0, Math.min(maxOffset, value))
     },
-    updateVerticalEpubPosition(scroller: HTMLElement, pageWidth: number, maxOffset: number) {
-      const pageCount = Math.max(1, Math.ceil(maxOffset / pageWidth) + 1)
-      const page = Math.min(pageCount, Math.ceil(Math.abs(scroller.scrollLeft) / pageWidth) + 1)
+    updateVerticalEpubPosition(scroller: HTMLElement, pageStep: number, maxOffset: number) {
+      const pageCount = Math.max(1, Math.ceil(maxOffset / pageStep) + 1)
+      const page = Math.min(pageCount, Math.ceil(Math.abs(scroller.scrollLeft) / pageStep) + 1)
       this.progressionPage = page
       this.progressionPageCount = pageCount
     },

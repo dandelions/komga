@@ -28,7 +28,10 @@ export interface ClientSettingsEpubCustomStyle {
   enabled: boolean,
   css: string,
   disableOriginalStyle?: boolean,
+  chineseConversion?: ClientSettingsEpubChineseConversion,
 }
+
+export type ClientSettingsEpubChineseConversion = 'none' | 'simplified' | 'traditional'
 
 export interface ClientSettingLibrary {
   unpinned?: boolean,

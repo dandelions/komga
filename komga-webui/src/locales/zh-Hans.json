@@ -782,6 +782,10 @@
         "buttons": "按钮图标",
         "click": "单击 / 点击"
       },
+      "chinese_conversion": "繁简转换",
+      "chinese_conversion_none": "不转换",
+      "chinese_conversion_simplified": "转为简体",
+      "chinese_conversion_traditional": "转为繁体",
       "custom_style": "自定义样式",
       "custom_style_css": "CSS 样式",
       "custom_style_disable_original": "禁用 EPUB 原样式",
