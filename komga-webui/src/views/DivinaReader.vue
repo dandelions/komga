@@ -272,6 +272,7 @@
           @block-spacing-change="setReflowBlockSpacing"
           @crop-mode-change="setReflowCropMode"
           @crop-rois-change="setReflowCropRois"
+          @force-reflow="forceCurrentReflow"
           @exit-reflow="exitReflowMode"
           @reflowed="cacheReflowPage"
           @source-previous="reflowSourcePreviousPage"
@@ -2301,6 +2302,22 @@ export default Vue.extend({
     },
     reflowCacheEntryKey(pageNumber: number, cacheKey: string): string {
       return `${pageNumber}|${cacheKey}`
+    },
+    clearReflowCacheForPage(pageNumber: number) {
+      Object.keys(this.reflowCache).forEach(key => {
+        const separator = key.indexOf('|')
+        const cachedPageNumber = Number(key.substring(0, separator))
+        if (cachedPageNumber === pageNumber) this.$delete(this.reflowCache, key)
+      })
+    },
+    forceCurrentReflow() {
+      this.clearReflowPrefetch()
+      this.reflowPrefetchPage = 0
+      if (this.currentPage?.number) this.clearReflowCacheForPage(this.currentPage.number)
+      this.$nextTick(() => {
+        const reflow = this.$refs.reflowedPage as any
+        reflow?.forceReflow?.()
+      })
     },
     pruneReflowCache() {
       Object.keys(this.reflowCache).forEach(key => {

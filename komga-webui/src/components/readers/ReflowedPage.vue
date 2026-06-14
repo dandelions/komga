@@ -473,6 +473,7 @@ export default Vue.extend({
       pendingStrokeStrength: 0.1,
       pendingBlockSpacing: 6,
       optionsSnapshot: undefined as ReflowOptionsSnapshot | undefined,
+      forceReflowOnce: false,
     }
   },
   computed: {
@@ -709,8 +710,10 @@ export default Vue.extend({
       this.error = false
       this.errorMessage = ''
       const detectionKey = this.reflowDetectionKey()
+      const forceReflow = this.forceReflowOnce
+      this.forceReflowOnce = false
 
-      if (Array.isArray(this.cachedItems)) {
+      if (!forceReflow && Array.isArray(this.cachedItems)) {
         this.revokeObjectUrl()
         this.reflowItems = this.cachedItems
         this.pageBackground = this.cachedPageBackground || '#fff'
@@ -720,7 +723,7 @@ export default Vue.extend({
         return
       }
 
-      if (this.lastDetectionKey === detectionKey && this.reflowItems.length > 0) {
+      if (!forceReflow && this.lastDetectionKey === detectionKey && this.reflowItems.length > 0) {
         this.rescaleReflowItems()
         this.repaginate()
         this.emitReflowed()
@@ -2903,7 +2906,6 @@ export default Vue.extend({
       this.pendingBlockSpacing = this.clampNumber(this.controlBlockSpacing + delta, 0, 24, 6)
     },
     applyReflowSettings() {
-      const previousCacheKey = this.cacheKey
       this.$emit('column-count-change', this.controlColumnCount)
       this.$emit('skew-correction-change', this.controlSkewCorrection)
       this.$emit('vertical-text-change', this.controlVerticalText)
@@ -2911,9 +2913,15 @@ export default Vue.extend({
       this.$emit('stroke-strength-change', this.controlStrokeStrength)
       this.$emit('block-spacing-change', this.controlBlockSpacing)
       this.$emit('crop-rois-change', this.cropRoisPayload())
-      this.$nextTick(() => {
-        if (!this.cropMode && this.cacheKey === previousCacheKey) this.reflow()
-      })
+      this.$emit('force-reflow')
+    },
+    forceReflow() {
+      if (this.cropMode) return
+      this.forceReflowOnce = true
+      this.lastDetectionKey = ''
+      this.reflowItems = []
+      this.pages = []
+      this.reflow()
     },
     roundStrokeStrength(value: number): number {
       return Math.round(this.clampNumber(value, 0.1, 3, 0.1) * 10) / 10
