@@ -282,6 +282,39 @@
                 tick-size="3"
               />
             </v-list-item>
+
+            <v-divider/>
+            <v-subheader class="font-weight-black text-h6">{{ $t('epubreader.settings.custom_style') }}</v-subheader>
+
+            <v-list-item>
+              <settings-switch
+                v-model="epubCustomStyleEnabled"
+                :label="$t('epubreader.settings.custom_style_enabled')"
+              />
+            </v-list-item>
+
+            <v-list-item>
+              <v-textarea
+                v-model="epubCustomStyleCss"
+                :label="$t('epubreader.settings.custom_style_css')"
+                auto-grow
+                outlined
+                rows="6"
+                spellcheck="false"
+                class="epub-custom-style-editor"
+              />
+            </v-list-item>
+
+            <v-list-item class="justify-end">
+              <v-btn
+                color="primary"
+                depressed
+                :loading="epubCustomStyleSaving"
+                @click="saveEpubCustomStyle"
+              >
+                {{ $t('epubreader.settings.custom_style_save') }}
+              </v-btn>
+            </v-list-item>
           </v-list>
         </v-card-text>
       </v-card>
@@ -331,6 +364,9 @@ import {getBookReadRouteFromMedia} from '@/functions/book-format'
 import SettingsSelect from '@/components/SettingsSelect.vue'
 import {createR2Progression, r2ProgressionToReadingPosition} from '@/functions/readium'
 import {debounce} from 'lodash'
+import {CLIENT_SETTING, ClientSettingUserUpdateDto, ClientSettingsEpubCustomStyle} from '@/types/komga-clientsettings'
+
+const EPUB_CUSTOM_STYLE_WINDOW_KEY = '__KOMGA_EPUB_CUSTOM_STYLE__'
 
 export default Vue.extend({
   name: 'EpubReader',
@@ -444,6 +480,9 @@ export default Vue.extend({
       progressionPageCount: undefined as number,
       effectiveDirection: 'ltr',
       fixedLayout: false,
+      epubCustomStyleEnabled: false,
+      epubCustomStyleCss: '',
+      epubCustomStyleSaving: false,
     }
   },
   created() {
@@ -454,6 +493,7 @@ export default Vue.extend({
     this.d2Reader.stop()
   },
   destroyed() {
+    delete (window as any)[EPUB_CUSTOM_STYLE_WINDOW_KEY]
     this.$vuetify.rtl = (this.$t('common.locale_rtl') === 'true')
     if (screenfull.isEnabled) {
       screenfull.off('change', this.fullscreenChanged)
@@ -732,6 +772,7 @@ export default Vue.extend({
     async setup(bookId: string) {
       this.book = await this.$komgaBooks.getBook(bookId)
       this.series = await this.$komgaSeries.getOneSeries(this.book.seriesId)
+      await this.loadEpubCustomStyle(bookId)
 
       const progression = await this.$komgaBooks.getProgression(bookId)
       const initialLocation = r2ProgressionToReadingPosition(progression, bookId)
@@ -762,7 +803,7 @@ export default Vue.extend({
       }))
 
       this.d2Reader = await D2Reader.load({
-        url: new URL(bookManifestUrl(this.bookId)),
+        url: new URL(bookManifestUrl(bookId)),
         userSettings: this.settings,
         storageType: 'memory',
         lastReadingPosition: initialLocation,
@@ -789,6 +830,7 @@ export default Vue.extend({
           {type: 'style', url: new URL('../styles/r2d2bc/style.css.resource', import.meta.url).toString()},
           {type: 'script', url: new URL('../styles/readium/komga-vertical-writing.js.resource', import.meta.url).toString()},
           ...fontFamiliesInjectables,
+          {type: 'script', url: new URL('../styles/readium/komga-custom-style.js.resource', import.meta.url).toString()},
         ],
         requestConfig: {
           credentials: 'include',
@@ -817,7 +859,7 @@ export default Vue.extend({
           enableConsumption: false,
         },
         services: {
-          positions: new URL(bookPositionsUrl(this.bookId)),
+          positions: new URL(bookPositionsUrl(bookId)),
         },
         api: {
           updateCurrentLocation: this.updateCurrentLocation,
@@ -834,6 +876,7 @@ export default Vue.extend({
       this.tocs.toc = this.d2Reader.tableOfContents
       this.tocs.landmarks = this.d2Reader.landmarks
       this.tocs.pageList = this.d2Reader.pageList
+      this.$nextTick(() => this.applyEpubCustomStyleToIframes(false))
 
       if (this.alwaysFullscreen) this.enterFullscreen()
 
@@ -882,6 +925,59 @@ export default Vue.extend({
     },
     updateDirection(dir: string) {
       this.effectiveDirection = dir
+    },
+    getEpubCustomStyles(): Record<string, ClientSettingsEpubCustomStyle> {
+      try {
+        return JSON.parse(this.$store.state.komgaSettings.clientSettingsUser[CLIENT_SETTING.WEBUI_EPUB_CUSTOM_STYLES]?.value) || {}
+      } catch (e) {
+        return {}
+      }
+    },
+    async loadEpubCustomStyle(bookId: string) {
+      await this.$store.dispatch('getClientSettingsUser')
+      const config = this.getEpubCustomStyles()[bookId]
+      this.epubCustomStyleEnabled = config?.enabled || false
+      this.epubCustomStyleCss = config?.css || ''
+      this.publishEpubCustomStyle()
+    },
+    publishEpubCustomStyle() {
+      const target = window as any
+      target[EPUB_CUSTOM_STYLE_WINDOW_KEY] = {
+        enabled: this.epubCustomStyleEnabled,
+        css: this.epubCustomStyleCss,
+      } as ClientSettingsEpubCustomStyle
+    },
+    async saveEpubCustomStyle() {
+      this.epubCustomStyleSaving = true
+      try {
+        const all = this.getEpubCustomStyles()
+        all[this.bookId] = {
+          enabled: this.epubCustomStyleEnabled,
+          css: this.epubCustomStyleCss,
+        }
+
+        const update = {} as Record<string, ClientSettingUserUpdateDto>
+        update[CLIENT_SETTING.WEBUI_EPUB_CUSTOM_STYLES] = {
+          value: JSON.stringify(all),
+        }
+        await this.$komgaSettings.updateClientSettingUser(update)
+        await this.$store.dispatch('getClientSettingsUser')
+        await this.applyEpubCustomStyleToIframes()
+        this.sendNotification(this.$t('epubreader.settings.custom_style_saved').toString())
+      } finally {
+        this.epubCustomStyleSaving = false
+      }
+    },
+    async applyEpubCustomStyleToIframes(reflow: boolean = true) {
+      this.publishEpubCustomStyle()
+      document.querySelectorAll<HTMLIFrameElement>('#iframe-wrapper iframe').forEach(iframe => {
+        try {
+          const apply = (iframe.contentWindow as any)?.__KOMGA_APPLY_EPUB_CUSTOM_STYLE__
+          if (typeof apply === 'function') apply()
+        } catch (e) {
+        }
+      })
+      if (reflow && this.d2Reader?.applyUserSettings) await this.d2Reader.applyUserSettings({})
     },
     appearanceClass(suffix?: string): string {
       let c = this.appearance.replace('readium-', '').replace('-on', '').replace('default', 'day')

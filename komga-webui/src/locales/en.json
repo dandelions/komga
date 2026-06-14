@@ -782,6 +782,11 @@
         "buttons": "Buttons",
         "click": "Click / Tap"
       },
+      "custom_style": "Custom style",
+      "custom_style_css": "CSS",
+      "custom_style_enabled": "Use custom style",
+      "custom_style_save": "Save style",
+      "custom_style_saved": "Custom style saved",
       "page_margins": "Page margins",
       "viewing_theme": "Viewing theme"
     },

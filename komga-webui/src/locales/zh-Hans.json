@@ -782,6 +782,11 @@
         "buttons": "按钮图标",
         "click": "单击 / 点击"
       },
+      "custom_style": "自定义样式",
+      "custom_style_css": "CSS 样式",
+      "custom_style_enabled": "使用自定义样式",
+      "custom_style_save": "保存样式",
+      "custom_style_saved": "自定义样式已保存",
       "page_margins": "页边距",
       "viewing_theme": "查看主题"
     },
