@@ -34,6 +34,15 @@ module.exports = {
             filename: 'css/[hash].css[query]',
           },
         },
+        {
+          test: [
+            /readium\/.*\.js.resource$/,
+          ],
+          type: 'asset/resource',
+          generator: {
+            filename: 'js/[hash].js[query]',
+          },
+        },
       ],
     },
   },

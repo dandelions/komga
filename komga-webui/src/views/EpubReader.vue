@@ -787,6 +787,7 @@ export default Vue.extend({
           {type: 'style', url: new URL('../styles/r2d2bc/popup.css.resource', import.meta.url).toString()},
           {type: 'style', url: new URL('../styles/r2d2bc/popover.css.resource', import.meta.url).toString()},
           {type: 'style', url: new URL('../styles/r2d2bc/style.css.resource', import.meta.url).toString()},
+          {type: 'script', url: new URL('../styles/readium/komga-vertical-writing.js.resource', import.meta.url).toString()},
           ...fontFamiliesInjectables,
         ],
         requestConfig: {
