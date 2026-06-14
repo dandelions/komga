@@ -27,6 +27,7 @@ export enum CLIENT_SETTING {
 export interface ClientSettingsEpubCustomStyle {
   enabled: boolean,
   css: string,
+  disableOriginalStyle?: boolean,
 }
 
 export interface ClientSettingLibrary {

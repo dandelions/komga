@@ -299,6 +299,13 @@
             </v-list-item>
 
             <v-list-item>
+              <settings-switch
+                v-model="epubCustomStyleDisableOriginalStyle"
+                :label="$t('epubreader.settings.custom_style_disable_original')"
+              />
+            </v-list-item>
+
+            <v-list-item>
               <v-textarea
                 v-model="epubCustomStyleCss"
                 :label="$t('epubreader.settings.custom_style_css')"
@@ -373,6 +380,22 @@ import {CLIENT_SETTING, ClientSettingUserUpdateDto, ClientSettingsEpubCustomStyl
 
 const EPUB_CUSTOM_STYLE_WINDOW_KEY = '__KOMGA_EPUB_CUSTOM_STYLE__'
 const EPUB_CUSTOM_STYLE_ID = 'komga-epub-custom-style'
+const EPUB_AUTHOR_STYLE_DISABLED_ATTR = 'komgaAuthorStyleDisabled'
+const EPUB_AUTHOR_STYLE_ORIGINAL_MEDIA_ATTR = 'komgaOriginalMedia'
+const READIUM_CSS_BEFORE_URL = new URL('../styles/readium/ReadiumCSS-before.css.resource', import.meta.url).toString()
+const READIUM_CSS_DEFAULT_URL = new URL('../styles/readium/ReadiumCSS-default.css.resource', import.meta.url).toString()
+const READIUM_CSS_AFTER_URL = new URL('../styles/readium/ReadiumCSS-after.css.resource', import.meta.url).toString()
+const R2D2BC_POPUP_CSS_URL = new URL('../styles/r2d2bc/popup.css.resource', import.meta.url).toString()
+const R2D2BC_POPOVER_CSS_URL = new URL('../styles/r2d2bc/popover.css.resource', import.meta.url).toString()
+const R2D2BC_STYLE_CSS_URL = new URL('../styles/r2d2bc/style.css.resource', import.meta.url).toString()
+const EPUB_READER_STYLE_URLS = [
+  READIUM_CSS_BEFORE_URL,
+  READIUM_CSS_DEFAULT_URL,
+  READIUM_CSS_AFTER_URL,
+  R2D2BC_POPUP_CSS_URL,
+  R2D2BC_POPOVER_CSS_URL,
+  R2D2BC_STYLE_CSS_URL,
+]
 
 export default Vue.extend({
   name: 'EpubReader',
@@ -487,6 +510,7 @@ export default Vue.extend({
       effectiveDirection: 'ltr',
       fixedLayout: false,
       epubCustomStyleEnabled: false,
+      epubCustomStyleDisableOriginalStyle: false,
       epubCustomStyleCss: '',
       epubCustomStyleSaving: false,
       epubIframeEnhancementObserver: undefined as MutationObserver | undefined,
@@ -822,22 +846,22 @@ export default Vue.extend({
           // we use a different extension so that the css-loader rule is not used (see vue.config.js)
           {
             type: 'style',
-            url: new URL('../styles/readium/ReadiumCSS-before.css.resource', import.meta.url).toString(),
+            url: READIUM_CSS_BEFORE_URL,
             r2before: true,
           },
           {
             type: 'style',
-            url: new URL('../styles/readium/ReadiumCSS-default.css.resource', import.meta.url).toString(),
+            url: READIUM_CSS_DEFAULT_URL,
             r2default: true,
           },
           {
             type: 'style',
-            url: new URL('../styles/readium/ReadiumCSS-after.css.resource', import.meta.url).toString(),
+            url: READIUM_CSS_AFTER_URL,
             r2after: true,
           },
-          {type: 'style', url: new URL('../styles/r2d2bc/popup.css.resource', import.meta.url).toString()},
-          {type: 'style', url: new URL('../styles/r2d2bc/popover.css.resource', import.meta.url).toString()},
-          {type: 'style', url: new URL('../styles/r2d2bc/style.css.resource', import.meta.url).toString()},
+          {type: 'style', url: R2D2BC_POPUP_CSS_URL},
+          {type: 'style', url: R2D2BC_POPOVER_CSS_URL},
+          {type: 'style', url: R2D2BC_STYLE_CSS_URL},
           ...fontFamiliesInjectables,
         ],
         requestConfig: {
@@ -946,6 +970,7 @@ export default Vue.extend({
       await this.$store.dispatch('getClientSettingsUser')
       const config = this.getEpubCustomStyles()[bookId]
       this.epubCustomStyleEnabled = config?.enabled || false
+      this.epubCustomStyleDisableOriginalStyle = config?.disableOriginalStyle || false
       this.epubCustomStyleCss = config?.css || ''
       this.publishEpubCustomStyle()
     },
@@ -953,6 +978,7 @@ export default Vue.extend({
       const target = window as any
       target[EPUB_CUSTOM_STYLE_WINDOW_KEY] = {
         enabled: this.epubCustomStyleEnabled,
+        disableOriginalStyle: this.epubCustomStyleDisableOriginalStyle,
         css: this.epubCustomStyleCss,
       } as ClientSettingsEpubCustomStyle
     },
@@ -962,6 +988,7 @@ export default Vue.extend({
         const all = this.getEpubCustomStyles()
         all[this.bookId] = {
           enabled: this.epubCustomStyleEnabled,
+          disableOriginalStyle: this.epubCustomStyleDisableOriginalStyle,
           css: this.epubCustomStyleCss,
         }
 
@@ -1031,6 +1058,7 @@ export default Vue.extend({
         if (!doc?.documentElement || !view) return
 
         this.applyEpubVerticalWritingMode(doc, view)
+        this.applyEpubAuthorStylePreference(doc)
         this.applyEpubCustomStyleToDocument(doc)
       } catch (e) {
       }
@@ -1097,6 +1125,56 @@ export default Vue.extend({
 
       if (style.textContent !== config.css) style.textContent = config.css
       html.setAttribute('data-komga-custom-style', 'on')
+    },
+    applyEpubAuthorStylePreference(doc: Document) {
+      const config = (window as any)[EPUB_CUSTOM_STYLE_WINDOW_KEY] as ClientSettingsEpubCustomStyle | undefined
+      const disableOriginalStyle = config?.disableOriginalStyle || false
+
+      doc.head?.querySelectorAll<HTMLElement>('link[rel~="stylesheet"], style').forEach(element => {
+        if (this.shouldPreserveEpubStyleElement(element)) {
+          this.restoreEpubStyleElement(element)
+          return
+        }
+
+        if (disableOriginalStyle) this.disableEpubStyleElement(element)
+        else this.restoreEpubStyleElement(element)
+      })
+
+      if (disableOriginalStyle) doc.documentElement.setAttribute('data-komga-author-style-disabled', 'on')
+      else doc.documentElement.removeAttribute('data-komga-author-style-disabled')
+    },
+    shouldPreserveEpubStyleElement(element: HTMLElement): boolean {
+      if (element.id === EPUB_CUSTOM_STYLE_ID) return true
+
+      if (element.tagName.toLowerCase() !== 'link') return false
+
+      const href = (element as HTMLLinkElement).href
+      return EPUB_READER_STYLE_URLS.some(url => this.sameEpubStyleUrl(href, url)) || href.includes('/api/v1/fonts/resource/')
+    },
+    sameEpubStyleUrl(href: string, target: string): boolean {
+      try {
+        return new URL(href, window.location.href).href === new URL(target, window.location.href).href
+      } catch (e) {
+        return href === target
+      }
+    },
+    disableEpubStyleElement(element: HTMLElement) {
+      if (element.dataset[EPUB_AUTHOR_STYLE_DISABLED_ATTR] !== 'true') {
+        element.dataset[EPUB_AUTHOR_STYLE_ORIGINAL_MEDIA_ATTR] = element.getAttribute('media') || ''
+      }
+
+      element.dataset[EPUB_AUTHOR_STYLE_DISABLED_ATTR] = 'true'
+      element.setAttribute('media', 'not all')
+    },
+    restoreEpubStyleElement(element: HTMLElement) {
+      if (element.dataset[EPUB_AUTHOR_STYLE_DISABLED_ATTR] !== 'true') return
+
+      const originalMedia = element.dataset[EPUB_AUTHOR_STYLE_ORIGINAL_MEDIA_ATTR]
+      if (originalMedia) element.setAttribute('media', originalMedia)
+      else element.removeAttribute('media')
+
+      delete element.dataset[EPUB_AUTHOR_STYLE_DISABLED_ATTR]
+      delete element.dataset[EPUB_AUTHOR_STYLE_ORIGINAL_MEDIA_ATTR]
     },
     nextEpubPageControl(event: MouseEvent) {
       if (this.tryMoveVerticalEpubPage(1)) this.stopEpubPageEvent(event)

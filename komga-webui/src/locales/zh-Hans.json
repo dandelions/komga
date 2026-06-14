@@ -784,6 +784,7 @@
       },
       "custom_style": "自定义样式",
       "custom_style_css": "CSS 样式",
+      "custom_style_disable_original": "禁用 EPUB 原样式",
       "custom_style_enabled": "使用自定义样式",
       "custom_style_save": "保存样式",
       "custom_style_saved": "自定义样式已保存",

@@ -784,6 +784,7 @@
       },
       "custom_style": "Custom style",
       "custom_style_css": "CSS",
+      "custom_style_disable_original": "Disable EPUB publisher styles",
       "custom_style_enabled": "Use custom style",
       "custom_style_save": "Save style",
       "custom_style_saved": "Custom style saved",
