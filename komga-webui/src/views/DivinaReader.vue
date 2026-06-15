@@ -313,6 +313,7 @@
 
       <continuous-reader
         v-else-if="continuousReader"
+        :key="`continuous-reader-${readerViewKey}`"
         :pages="pages"
         :page.sync="page"
           :animations="animations"
@@ -331,6 +332,7 @@
 
       <paged-reader
         v-else
+        :key="`paged-reader-${readerViewKey}`"
         ref="pagedReader"
         :pages="pages"
         :page.sync="page"
@@ -354,6 +356,7 @@
     <div v-if="readerCropMode" class="reader-crop-panel" @click.stop>
       <div class="reader-crop-toolbar">
         <v-btn small @click="cancelReaderCropMode">取消</v-btn>
+        <v-btn small color="primary" :disabled="!readerCropCanComplete" @click="completeReaderCropMode">完成</v-btn>
         <span>拖拽选择阅读范围</span>
         <div class="reader-crop-skew-control">
           <span>手动纠斜</span>
@@ -953,6 +956,7 @@ export default Vue.extend({
       readerCropImageUrl: '',
       readerCropImageRequestId: 0,
       readerDeskewedPageUrls: {} as Record<number, string>,
+      readerViewKey: 0,
       shortcuts: {} as any,
       notification: {
         enabled: false,
@@ -1185,6 +1189,9 @@ export default Vue.extend({
         width: `${region.w}%`,
         height: `${region.h}%`,
       }
+    },
+    readerCropCanComplete(): boolean {
+      return !!(this.readerCropDraft || this.effectiveReaderCropRegion(this.readerCropPageParity, this.readerActiveCropRegion))
     },
     normalReaderImageFilter(): string {
       const filters = []
@@ -1536,6 +1543,17 @@ export default Vue.extend({
       this.readerCropDraft = undefined
       if (!this.promoteReaderCropImageUrl()) this.revokeReaderCropImageUrl()
     },
+    completeReaderCropMode() {
+      const pageNumber = this.currentPage?.number
+      const region = this.readerCropDraft || this.effectiveReaderCropRegion(this.readerCropPageParity, this.readerActiveCropRegion)
+      if (region) this.setReaderCropRegion(this.readerCropPageParity, this.readerActiveCropRegion, region)
+      this.readerCropMode = false
+      this.readerCropDrawing = false
+      this.readerCropDraft = undefined
+      if (!this.promoteReaderCropImageUrl()) this.revokeReaderCropImageUrl()
+      this.resetReaderCropNavigation(pageNumber)
+      this.refreshReaderView()
+    },
     clearReaderCropRegion() {
       this.setReaderCropRegion(this.readerCropPageParity, this.readerActiveCropRegion, null)
       this.readerCropMode = false
@@ -1562,12 +1580,7 @@ export default Vue.extend({
       this.readerCropDrawing = false
       const region = this.normalizedReaderCropRect(this.readerCropStart, this.readerCropPoint(event))
       if (region.w >= 5 && region.h >= 5) {
-        const pageNumber = this.currentPage?.number
-        this.setReaderCropRegion(this.readerCropPageParity, this.readerActiveCropRegion, region)
-        this.readerCropMode = false
-        this.readerCropDraft = undefined
-        if (!this.promoteReaderCropImageUrl()) this.revokeReaderCropImageUrl()
-        this.resetReaderCropNavigation(pageNumber)
+        this.readerCropDraft = region
       }
       event.preventDefault()
     },
@@ -1707,6 +1720,9 @@ export default Vue.extend({
         const reader = this.$refs.pagedReader as any
         reader?.refreshCropNavigation?.(pageNumber)
       })
+    },
+    refreshReaderView() {
+      this.readerViewKey += 1
     },
     readerCropRegionsOverlap(a: any, b: any): boolean {
       return a.x < b.x + b.w &&
