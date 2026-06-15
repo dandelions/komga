@@ -204,7 +204,7 @@ export default Vue.extend({
     },
     cropRegionsByParity: {
       handler() {
-        this.ensureActiveCropRegionForPage(this.currentSpreadPageNumber() || this.page)
+        this.refreshCropNavigation(this.currentSpreadPageNumber() || this.page)
       },
       deep: true,
     },
@@ -280,6 +280,10 @@ export default Vue.extend({
       this.spreads = buildSpreads(this.pages, this.effectivePageLayout)
       if (currentPage) this.carouselPage = this.toSpreadIndex(currentPage)
       else this.carouselPage = 0
+    },
+    refreshCropNavigation(currentPage: number | undefined = this.page) {
+      this.rebuildSpreads(currentPage)
+      this.ensureActiveCropRegionForPage(currentPage)
     },
     pageDisplayUrl(page: PageDtoWithUrl): string {
       return this.pageDisplayUrls[page.number] || this.deskewedPageUrls[page.number] || page.url

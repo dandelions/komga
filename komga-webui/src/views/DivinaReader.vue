@@ -331,6 +331,7 @@
 
       <paged-reader
         v-else
+        ref="pagedReader"
         :pages="pages"
         :page.sync="page"
         :reading-direction="readingDirection"
@@ -1561,10 +1562,12 @@ export default Vue.extend({
       this.readerCropDrawing = false
       const region = this.normalizedReaderCropRect(this.readerCropStart, this.readerCropPoint(event))
       if (region.w >= 5 && region.h >= 5) {
+        const pageNumber = this.currentPage?.number
         this.setReaderCropRegion(this.readerCropPageParity, this.readerActiveCropRegion, region)
         this.readerCropMode = false
         this.readerCropDraft = undefined
         if (!this.promoteReaderCropImageUrl()) this.revokeReaderCropImageUrl()
+        this.resetReaderCropNavigation(pageNumber)
       }
       event.preventDefault()
     },
@@ -1697,6 +1700,13 @@ export default Vue.extend({
       }
       const hasAnyRegion = !!regions.odd[0] || !!regions.odd[1] || !!regions.even[0] || !!regions.even[1]
       this.readerCropRegionsByParity = hasAnyRegion ? next : this.emptyReaderCropRegionsByParity(false)
+    },
+    resetReaderCropNavigation(pageNumber: number | undefined = this.currentPage?.number) {
+      this.setReaderActiveCropRegion(0)
+      this.$nextTick(() => {
+        const reader = this.$refs.pagedReader as any
+        reader?.refreshCropNavigation?.(pageNumber)
+      })
     },
     readerCropRegionsOverlap(a: any, b: any): boolean {
       return a.x < b.x + b.w &&
