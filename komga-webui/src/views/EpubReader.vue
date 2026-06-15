@@ -1444,7 +1444,7 @@ export default Vue.extend({
       const mode = doc.documentElement.getAttribute('data-komga-writing-mode') || ''
       const {maskWidth} = this.getVerticalEpubPaginationMetrics(scroller, doc, iframe || undefined, mode)
       doc.documentElement.style.setProperty('--KOMGA__verticalPageMask', `${maskWidth}px`)
-      this.updateEpubVerticalPageMask(doc, mode, maskWidth)
+      this.removeEpubVerticalPageMask(doc)
     },
     getVerticalEpubPaginationMetrics(scroller: HTMLElement, doc: Document, iframe?: HTMLIFrameElement, mode?: string): { pageStep: number, maskWidth: number } {
       const pageWidth = Math.max(1, scroller.clientWidth || iframe?.clientWidth || this.$vuetify.breakpoint.width)

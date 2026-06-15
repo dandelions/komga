@@ -247,10 +247,14 @@ body {
 
 :root[data-komga-writing-mode="vertical-rl"]:not([style*="readium-scroll-on"]) body {
   padding-left: var(--KOMGA__verticalPageMask, 0px) !important;
+  transform: translateX(calc(-1 * var(--KOMGA__verticalPageMask, 0px))) !important;
+  transform-origin: top left !important;
 }
 
 :root[data-komga-writing-mode="vertical-lr"]:not([style*="readium-scroll-on"]) body {
   padding-right: var(--KOMGA__verticalPageMask, 0px) !important;
+  transform: translateX(var(--KOMGA__verticalPageMask, 0px)) !important;
+  transform-origin: top left !important;
 }
 
 :root[data-komga-writing-mode][style*="readium-scroll-on"] {
