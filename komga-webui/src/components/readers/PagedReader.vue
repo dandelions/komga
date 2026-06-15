@@ -167,8 +167,8 @@ export default Vue.extend({
   },
   watch: {
     pages: {
-      handler(val) {
-        this.spreads = buildSpreads(val, this.pageLayout)
+      handler() {
+        this.rebuildSpreads(this.page)
         this.revokeDeskewedPageUrls()
       },
       immediate: true,
@@ -192,16 +192,21 @@ export default Vue.extend({
       const spreadIndex = this.toSpreadIndex(val)
       this.$debug('[watch:page]', `toSpreadIndex:${spreadIndex}`)
       this.carouselPage = spreadIndex
+      this.ensureActiveCropRegionForPage(val)
       this.scrollToPageEdge(this.pendingScrollPosition)
       this.pendingScrollPosition = 'top'
     },
-    pageLayout: {
-      handler(val) {
-        const current = this.page
-        this.spreads = buildSpreads(this.pages, val)
-        this.carouselPage = this.toSpreadIndex(current)
+    effectivePageLayout: {
+      handler() {
+        this.rebuildSpreads(this.page)
       },
       immediate: true,
+    },
+    cropRegionsByParity: {
+      handler() {
+        this.ensureActiveCropRegionForPage(this.currentSpreadPageNumber() || this.page)
+      },
+      deep: true,
     },
   },
   created() {
@@ -245,8 +250,20 @@ export default Vue.extend({
     canNext(): boolean {
       return this.currentSlide < this.slidesCount
     },
+    cropNavigationEnabled(): boolean {
+      const crops = this.cropRegionsByParity
+      if (!crops?.enabled) return false
+      return (['odd', 'even'] as PageParity[]).some(parity =>
+        [0, 1].some(index =>
+          !!this.normalizedCropRegion(crops.regions?.[parity]?.[index] || (index === 0 ? crops[parity] : undefined)),
+        ),
+      )
+    },
+    effectivePageLayout(): PagedReaderLayout {
+      return this.cropNavigationEnabled ? PagedReaderLayout.SINGLE_PAGE : this.pageLayout
+    },
     isDoublePages(): boolean {
-      return this.pageLayout === PagedReaderLayout.DOUBLE_PAGES || this.pageLayout === PagedReaderLayout.DOUBLE_NO_COVER
+      return this.effectivePageLayout === PagedReaderLayout.DOUBLE_PAGES || this.effectivePageLayout === PagedReaderLayout.DOUBLE_NO_COVER
     },
     pageContainerClass(): string {
       return this.topAlignedPage ? 'justify-start' : 'justify-center'
@@ -258,6 +275,11 @@ export default Vue.extend({
   methods: {
     keyPressed(e: KeyboardEvent) {
       this.shortcuts[e.key]?.execute(this)
+    },
+    rebuildSpreads(currentPage: number | undefined) {
+      this.spreads = buildSpreads(this.pages, this.effectivePageLayout)
+      if (currentPage) this.carouselPage = this.toSpreadIndex(currentPage)
+      else this.carouselPage = 0
     },
     pageDisplayUrl(page: PageDtoWithUrl): string {
       return this.pageDisplayUrls[page.number] || this.deskewedPageUrls[page.number] || page.url
@@ -330,6 +352,10 @@ export default Vue.extend({
     setActiveCropRegion(regionIndex: number) {
       const normalized = regionIndex === 1 ? 1 : 0
       if (normalized !== this.activeCropRegion) this.$emit('update:active-crop-region', normalized)
+    },
+    ensureActiveCropRegionForPage(pageNumber: number | undefined) {
+      if (!pageNumber || this.effectiveCropRegion(pageNumber, this.activeCropRegion)) return
+      this.setActiveCropRegion(this.firstCropRegionIndex(pageNumber))
     },
     normalizedCropRegion(crop: CropRegion | null | undefined): CropRegion | undefined {
       if (!crop) return undefined
@@ -502,6 +528,7 @@ export default Vue.extend({
     },
     toSpreadIndex(i: number): number {
       this.$debug('[toSpreadIndex]', `i:${i}`, `isDoublePages:${this.isDoublePages}`)
+      if (!Number.isFinite(i)) return 0
       if (this.spreads.length > 0) {
         if (this.isDoublePages) {
           for (let j = 0; j < this.spreads.length; j++) {

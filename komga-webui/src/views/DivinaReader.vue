@@ -1480,7 +1480,6 @@ export default Vue.extend({
         this.normalizedReaderCropRegionValue(regions[0]) || this.normalizedReaderCropRegionValue(value?.[parity]),
         this.normalizedReaderCropRegionValue(regions[1]),
       ]
-      if (normalized[0] && normalized[1] && this.readerCropRegionsOverlap(normalized[0], normalized[1])) normalized[1] = null
       return normalized
     },
     normalizedReaderCropExplicitArray(value: any, parity: 'odd' | 'even', regions: Array<any | null>): boolean[] {
