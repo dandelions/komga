@@ -245,6 +245,33 @@ body {
   padding: calc(var(--RS__pageGutter) * var(--USER__pageMargins, 1)) 0 !important;
 }
 
+:root[data-komga-writing-mode]:not([style*="readium-scroll-on"])::after {
+  content: "";
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  width: var(--KOMGA__verticalPageMask, 0px);
+  background: var(--RS__backgroundColor, #FFFFFF);
+  pointer-events: none;
+  z-index: 2147483647;
+}
+
+:root[data-komga-writing-mode="vertical-rl"]:not([style*="readium-scroll-on"])::after {
+  left: 0;
+}
+
+:root[data-komga-writing-mode="vertical-rl"]:not([style*="readium-scroll-on"]) body {
+  padding-left: var(--KOMGA__verticalPageMask, 0px) !important;
+}
+
+:root[data-komga-writing-mode="vertical-lr"]:not([style*="readium-scroll-on"])::after {
+  right: 0;
+}
+
+:root[data-komga-writing-mode="vertical-lr"]:not([style*="readium-scroll-on"]) body {
+  padding-right: var(--KOMGA__verticalPageMask, 0px) !important;
+}
+
 :root[data-komga-writing-mode][style*="readium-scroll-on"] {
   overflow-x: auto;
   overflow-y: hidden;

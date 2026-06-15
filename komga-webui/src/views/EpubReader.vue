@@ -1127,11 +1127,13 @@ export default Vue.extend({
       if (!mode) {
         html.removeAttribute('data-komga-writing-mode')
         html.style.removeProperty('--KOMGA__writingMode')
+        html.style.removeProperty('--KOMGA__verticalPageMask')
         return
       }
 
       html.setAttribute('data-komga-writing-mode', mode)
       html.style.setProperty('--KOMGA__writingMode', mode)
+      this.updateEpubVerticalPaginationMetrics(doc)
     },
     detectEpubVerticalWritingMode(doc: Document, view: Window): string {
       const selectors = [
@@ -1402,13 +1404,17 @@ export default Vue.extend({
       const scroller = doc.scrollingElement as HTMLElement | null
       if (!scroller) return false
 
-      const pageStep = this.getVerticalEpubPageStep(scroller, doc, iframe)
+      const {pageStep} = this.getVerticalEpubPaginationMetrics(scroller, doc, iframe)
       const maxOffset = Math.max(0, scroller.scrollWidth - scroller.clientWidth)
       if (maxOffset <= 1) return false
 
       const pageDirection = mode.indexOf('vertical-rl') === 0 ? -1 : 1
       const current = scroller.scrollLeft
-      const target = this.clampVerticalEpubScrollLeft(current + (pageStep * direction * pageDirection), pageDirection, maxOffset)
+      const target = this.clampVerticalEpubScrollLeft(
+        this.snapVerticalEpubScrollLeft(current + (pageStep * direction * pageDirection), pageDirection, pageStep),
+        pageDirection,
+        maxOffset,
+      )
       if (Math.abs(target - current) <= 1) return false
 
       scroller.scrollLeft = target
@@ -1417,19 +1423,35 @@ export default Vue.extend({
       this.updateVerticalEpubPosition(scroller, pageStep, maxOffset)
       return true
     },
-    getVerticalEpubPageStep(scroller: HTMLElement, doc: Document, iframe?: HTMLIFrameElement): number {
+    updateEpubVerticalPaginationMetrics(doc: Document) {
+      const scroller = doc.scrollingElement as HTMLElement | null
+      if (!scroller) return
+
+      const iframe = doc.defaultView?.frameElement as HTMLIFrameElement | null
+      const {maskWidth} = this.getVerticalEpubPaginationMetrics(scroller, doc, iframe || undefined)
+      doc.documentElement.style.setProperty('--KOMGA__verticalPageMask', `${maskWidth}px`)
+    },
+    getVerticalEpubPaginationMetrics(scroller: HTMLElement, doc: Document, iframe?: HTMLIFrameElement): { pageStep: number, maskWidth: number } {
       const pageWidth = Math.max(1, scroller.clientWidth || iframe?.clientWidth || this.$vuetify.breakpoint.width)
       const bodyStyle = doc.defaultView?.getComputedStyle(doc.body)
       const htmlStyle = doc.defaultView?.getComputedStyle(doc.documentElement)
       const fontSize = this.parseCssPixelValue(bodyStyle?.fontSize) || this.parseCssPixelValue(htmlStyle?.fontSize) || 16
       const lineHeight = this.parseCssPixelValue(bodyStyle?.lineHeight) || fontSize * 1.5
-      const overlap = Math.ceil(Math.max(fontSize, lineHeight))
-      return Math.max(Math.floor(pageWidth * 0.6), pageWidth - overlap)
+      const lineAdvance = Math.max(1, Math.ceil(Math.max(fontSize, lineHeight)))
+      const pageColumns = Math.max(1, Math.floor(pageWidth / lineAdvance))
+      const pageStep = Math.min(pageWidth, pageColumns * lineAdvance)
+      const maskWidth = Math.max(0, pageWidth - pageStep)
+      return {pageStep, maskWidth}
     },
     parseCssPixelValue(value?: string): number {
       if (!value) return 0
       const parsed = Number.parseFloat(value)
       return Number.isFinite(parsed) ? parsed : 0
+    },
+    snapVerticalEpubScrollLeft(value: number, pageDirection: number, pageStep: number): number {
+      if (pageStep <= 1) return value
+      const snapped = Math.round(Math.abs(value) / pageStep) * pageStep
+      return pageDirection < 0 ? -snapped : snapped
     },
     clampVerticalEpubScrollLeft(value: number, pageDirection: number, maxOffset: number): number {
       if (pageDirection < 0) return Math.max(-maxOffset, Math.min(0, value))
