@@ -80,6 +80,14 @@ jobs:
           # 如果项目中没有现成 Dockerfile，可以通过 build-args 或直接在代码仓库创建
           file: ./Dockerfile
 
+      - name: Prepare release artifacts
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          mkdir -p release-artifacts
+          jar_file="$(find komga/build/libs -maxdepth 1 -type f -name 'komga-*.jar' ! -name '*-plain.jar' | head -n 1)"
+          test -n "$jar_file"
+          cp "$jar_file" "release-artifacts/komga-${GITHUB_REF_NAME#v}.jar"
+
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
@@ -87,6 +95,7 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
           generate_release_notes: true
+          files: release-artifacts/*.jar
           body: |
             Docker image:
             - `ghcr.io/${{ github.repository }}:${{ github.ref_name }}`
