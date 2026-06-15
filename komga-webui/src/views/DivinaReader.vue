@@ -816,8 +816,66 @@ import {flattenToc} from '@/functions/toc'
 import {CLIENT_SETTING, ClientSettingUserUpdateDto} from '@/types/komga-clientsettings'
 
 const REFLOW_SETTINGS_STORAGE_PREFIX = 'komga.pdfReflowSettings.'
+const READER_IMAGE_SETTINGS_STORAGE_PREFIX = 'komga.readerImageSettings.'
 const REFLOW_CACHE_RADIUS = 4
 const REFLOW_PREFETCH_DELAY_MS = 150
+
+function defaultCropRegionsByParity(enabled: boolean = false): any {
+  return {
+    enabled,
+    odd: null,
+    even: null,
+    regions: {
+      odd: [null, null],
+      even: [null, null],
+    },
+    explicit: {
+      odd: false,
+      even: false,
+    },
+    explicitRegions: {
+      odd: [false, false],
+      even: [false, false],
+    },
+  }
+}
+
+function defaultReflowSettings(): any {
+  return {
+    autoCropBorder: true,
+    textScale: 40,
+    columnCount: 1,
+    skewCorrection: 0,
+    threshold: 185,
+    columnGap: 15,
+    wordGap: 3,
+    strokeStrength: 0.1,
+    blockSpacing: 6,
+    verticalText: false,
+    verticalDirection: 'rtl',
+    marginTop: 0,
+    marginRight: 0,
+    marginBottom: 0,
+    marginLeft: 0,
+    cropRoisByParity: defaultCropRegionsByParity(false),
+    k2Settings: {
+      textScale: 80,
+      maxColumns: 2,
+      threshold: 185,
+      strokeStrength: 0.8,
+      wordGap: 3,
+      outputPadding: 16,
+    },
+  }
+}
+
+function defaultReaderImageSettings(): any {
+  return {
+    strokeStrength: 0,
+    skewCorrection: 0,
+    cropRegionsByParity: defaultCropRegionsByParity(false),
+  }
+}
 
 export default Vue.extend({
   name: 'DivinaReader',
@@ -872,50 +930,13 @@ export default Vue.extend({
       reflowSettingsBookId: '',
       loadingReflowSettings: false,
       saveReflowSettingsServerDebounced: undefined as undefined | (() => void),
+      readerImageSettingsBookId: '',
+      loadingReaderImageSettings: false,
+      saveReaderImageSettingsServerDebounced: undefined as undefined | ((bookId?: string, settings?: Record<string, any>) => void),
       reflowCache: {} as Record<string, any>,
       reflowPrefetchPage: 0,
       reflowPrefetchTimer: undefined as number | undefined,
-      reflowSettings: {
-        autoCropBorder: true,
-        textScale: 40,
-        columnCount: 1,
-        skewCorrection: 0,
-        threshold: 185,
-        columnGap: 15,
-        wordGap: 3,
-        strokeStrength: 0.1,
-        blockSpacing: 6,
-        verticalText: false,
-        verticalDirection: 'rtl',
-        marginTop: 0,
-        marginRight: 0,
-        marginBottom: 0,
-        marginLeft: 0,
-        cropRoisByParity: {
-          odd: null,
-          even: null,
-          regions: {
-            odd: [null, null],
-            even: [null, null],
-          },
-          explicit: {
-            odd: false,
-            even: false,
-          },
-          explicitRegions: {
-            odd: [false, false],
-            even: [false, false],
-          },
-        },
-        k2Settings: {
-          textScale: 80,
-          maxColumns: 2,
-          threshold: 185,
-          strokeStrength: 0.8,
-          wordGap: 3,
-          outputPadding: 16,
-        },
-      },
+      reflowSettings: defaultReflowSettings(),
       goToPage: 1,
       settings: {
         pageLayout: PagedReaderLayout.SINGLE_PAGE,
@@ -930,23 +951,7 @@ export default Vue.extend({
         backgroundColor: 'black',
         strokeStrength: 0,
         skewCorrection: 0,
-        cropRegionsByParity: {
-          enabled: false,
-          odd: null,
-          even: null,
-          regions: {
-            odd: [null, null],
-            even: [null, null],
-          },
-          explicit: {
-            odd: false,
-            even: false,
-          },
-          explicitRegions: {
-            odd: [false, false],
-            even: [false, false],
-          },
-        },
+        cropRegionsByParity: defaultCropRegionsByParity(false),
       },
       readerCropMode: false,
       readerCropDrawing: false,
@@ -1017,6 +1022,7 @@ export default Vue.extend({
     })
     this.shortcuts = this.$_.keyBy([...shortcutsSettings, ...shortcutsSettingsPaged, ...shortcutsSettingsContinuous, ...shortcutsMenus, ...shortcutsAll], x => x.key)
     this.saveReflowSettingsServerDebounced = debounce(() => this.saveReflowSettingsServer(), 700)
+    this.saveReaderImageSettingsServerDebounced = debounce((bookId?: string, settings?: Record<string, any>) => this.saveReaderImageSettingsServer(bookId, settings), 700)
     window.addEventListener('keydown', this.keyPressed)
     if (screenfull.isEnabled) screenfull.on('change', this.fullscreenChanged)
   },
@@ -1035,11 +1041,8 @@ export default Vue.extend({
     this.sidePadding = this.$store.state.persistedState.webreader.continuous.padding
     this.pageMargin = this.$store.state.persistedState.webreader.continuous.margin
     this.backgroundColor = this.$store.state.persistedState.webreader.background
-    this.readerStrokeStrength = this.$store.state.persistedState.webreader.strokeStrength
-    this.readerSkewCorrection = this.normalizedReaderSkewCorrection(this.$store.state.persistedState.webreader.skewCorrection)
-    this.readerCropRegionsByParity = this.$store.state.persistedState.webreader.cropRegionsByParity ||
-      this.$store.state.persistedState.webreader.cropRegion ||
-      this.readerCropRegionsByParity
+    this.readerImageSettingsBookId = this.bookId
+    this.loadReaderImageSettings(this.bookId)
     this.reflowSettingsBookId = this.bookId
     this.loadReflowSettings(this.bookId)
 
@@ -1071,6 +1074,8 @@ export default Vue.extend({
       // - going to previous/next book, in this case the query.page is not set, so it will default to first page
       // - pressing the back button of the browser and navigating to the previous book, in this case the query.page is set, so we honor it
       this.$debug('[beforeRouteUpdate]', 'to.query:', to.query)
+      this.readerImageSettingsBookId = to.params.bookId
+      this.loadReaderImageSettings(to.params.bookId)
       this.reflowSettingsBookId = to.params.bookId
       this.loadReflowSettings(to.params.bookId)
       this.setup(to.params.bookId, Number(to.query.page))
@@ -1317,7 +1322,7 @@ export default Vue.extend({
       set: function (strokeStrength: number): void {
         const normalized = Math.round(Math.max(0, Math.min(3, Number(strokeStrength) || 0)) * 10) / 10
         this.settings.strokeStrength = normalized
-        this.$store.commit('setWebreaderStrokeStrength', normalized)
+        this.saveReaderImageSettings()
       },
     },
     readerSkewCorrection: {
@@ -1328,7 +1333,7 @@ export default Vue.extend({
         const normalized = this.normalizedReaderSkewCorrection(skewCorrection)
         const changed = this.settings.skewCorrection !== normalized
         this.settings.skewCorrection = normalized
-        this.$store.commit('setWebreaderSkewCorrection', normalized)
+        this.saveReaderImageSettings()
         if (changed) this.revokeReaderDeskewedPageUrls()
       },
     },
@@ -1343,7 +1348,7 @@ export default Vue.extend({
       set: function (cropRegionsByParity: any): void {
         const normalized = this.normalizedReaderCropRegionsByParity(cropRegionsByParity)
         this.$set(this.settings, 'cropRegionsByParity', normalized)
-        this.$store.commit('setWebreaderCropRegionsByParity', normalized)
+        this.saveReaderImageSettings()
       },
     },
     readerCropEnabled: {
@@ -1402,22 +1407,79 @@ export default Vue.extend({
   },
   methods: {
     emptyReaderCropRegionsByParity(enabled: boolean = false): any {
+      return defaultCropRegionsByParity(enabled)
+    },
+    readerImageSettingsStorageKey(bookId: string = this.readerImageSettingsBookId || this.bookId): string {
+      return `${READER_IMAGE_SETTINGS_STORAGE_PREFIX}${bookId}`
+    },
+    loadReaderImageSettings(bookId: string = this.bookId) {
+      if (!bookId) return
+      this.loadingReaderImageSettings = true
+      try {
+        const defaults = defaultReaderImageSettings()
+        let loaded = {} as Record<string, any>
+        const serverSettings = this.readServerReaderImageSettings()[bookId]
+        const raw = serverSettings ? JSON.stringify(serverSettings) : window.localStorage.getItem(this.readerImageSettingsStorageKey(bookId))
+        if (raw) loaded = JSON.parse(raw)
+        this.applyReaderImageSettings(this.normalizedReaderImageSettings({...defaults, ...loaded}))
+      } catch (e) {
+        this.applyReaderImageSettings(defaultReaderImageSettings())
+        this.$debug('Unable to load reader image settings', e)
+      } finally {
+        this.$nextTick(() => this.loadingReaderImageSettings = false)
+      }
+    },
+    applyReaderImageSettings(settings: Record<string, any>) {
+      const normalized = this.normalizedReaderImageSettings(settings)
+      const previousSkew = this.settings.skewCorrection
+      this.settings.strokeStrength = normalized.strokeStrength
+      this.settings.skewCorrection = normalized.skewCorrection
+      this.$set(this.settings, 'cropRegionsByParity', normalized.cropRegionsByParity)
+      if (previousSkew !== normalized.skewCorrection) this.revokeReaderDeskewedPageUrls()
+      this.readerCropMode = false
+      this.readerCropDraft = undefined
+      this.readerCropDrawing = false
+      this.readerActiveCropRegion = 0
+      this.readerViewKey += 1
+    },
+    normalizedReaderImageSettings(settings: Record<string, any> = {}): Record<string, any> {
+      settings = settings || {}
       return {
-        enabled,
-        odd: null,
-        even: null,
-        regions: {
-          odd: [null, null],
-          even: [null, null],
-        },
-        explicit: {
-          odd: false,
-          even: false,
-        },
-        explicitRegions: {
-          odd: [false, false],
-          even: [false, false],
-        },
+        strokeStrength: Math.round(Math.max(0, Math.min(3, Number(settings.strokeStrength) || 0)) * 10) / 10,
+        skewCorrection: this.normalizedReaderSkewCorrection(settings.skewCorrection),
+        cropRegionsByParity: this.normalizedReaderCropRegionsByParity(settings.cropRegionsByParity),
+      }
+    },
+    saveReaderImageSettings() {
+      if (!this.bookId || this.loadingReaderImageSettings) return
+      const settings = this.normalizedReaderImageSettings(this.settings)
+      try {
+        window.localStorage.setItem(this.readerImageSettingsStorageKey(), JSON.stringify(settings))
+      } catch (e) {
+        this.$debug('Unable to save reader image settings', e)
+      }
+      this.saveReaderImageSettingsServerDebounced?.(this.bookId, settings)
+    },
+    async saveReaderImageSettingsServer(bookId: string = this.readerImageSettingsBookId || this.bookId, settings: Record<string, any> = this.normalizedReaderImageSettings(this.settings)) {
+      if (!bookId) return
+      try {
+        const all = this.readServerReaderImageSettings()
+        all[bookId] = this.normalizedReaderImageSettings(settings)
+        const newSettings = {} as Record<string, ClientSettingUserUpdateDto>
+        newSettings[CLIENT_SETTING.WEBUI_READER_IMAGE_SETTINGS] = {
+          value: JSON.stringify(all),
+        }
+        await this.$komgaSettings.updateClientSettingUser(newSettings)
+        await this.$store.dispatch('getClientSettingsUser')
+      } catch (e) {
+        this.$debug('Unable to save reader image settings on server', e)
+      }
+    },
+    readServerReaderImageSettings(): Record<string, any> {
+      try {
+        return JSON.parse(this.$store.state.komgaSettings.clientSettingsUser[CLIENT_SETTING.WEBUI_READER_IMAGE_SETTINGS]?.value) || {}
+      } catch (e) {
+        return {}
       }
     },
     adjustReaderSkewCorrection(delta: number) {
@@ -2023,10 +2085,14 @@ export default Vue.extend({
       if (!bookId) return
       this.loadingReflowSettings = true
       try {
+        const defaults = defaultReflowSettings()
+        let loaded = {} as Record<string, any>
         const serverSettings = this.readServerReflowSettings()[bookId]
         const raw = serverSettings ? JSON.stringify(serverSettings) : window.localStorage.getItem(this.reflowSettingsStorageKey(bookId))
-        if (raw) Object.assign(this.reflowSettings, this.normalizedReflowSettings(JSON.parse(raw)))
+        if (raw) loaded = JSON.parse(raw)
+        this.reflowSettings = this.normalizedReflowSettings({...defaults, ...loaded})
       } catch (e) {
+        this.reflowSettings = defaultReflowSettings()
         this.$debug('Unable to load PDF reflow settings', e)
       } finally {
         this.$nextTick(() => this.loadingReflowSettings = false)

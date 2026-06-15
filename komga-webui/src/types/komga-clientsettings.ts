@@ -21,6 +21,7 @@ export enum CLIENT_SETTING {
   WEBUI_SERIES_GROUPS = 'webui.series_groups',
   WEBUI_RECOMMENDED = 'webui.recommended',
   WEBUI_PDF_REFLOW_SETTINGS = 'webui.pdf_reflow_settings',
+  WEBUI_READER_IMAGE_SETTINGS = 'webui.reader_image_settings',
   WEBUI_EPUB_CUSTOM_STYLES = 'webui.epub_custom_styles',
 }
 
