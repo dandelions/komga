@@ -401,6 +401,7 @@ const EPUB_AUTHOR_ORIGINAL_INLINE_STYLE_ATTR = 'komgaOriginalInlineStyle'
 const EPUB_AUTHOR_IMAGE_SIZE_DISABLED_ATTR = 'komgaAuthorImageSizeDisabled'
 const EPUB_AUTHOR_ORIGINAL_WIDTH_ATTR = 'komgaOriginalWidth'
 const EPUB_AUTHOR_ORIGINAL_HEIGHT_ATTR = 'komgaOriginalHeight'
+const EPUB_VERTICAL_PAGE_MASK_ID = 'komga-epub-vertical-page-mask'
 const EPUB_CHINESE_TEXT_ORIGINALS = new WeakMap<Text, string>()
 const EPUB_CHINESE_CONVERTERS = {} as Partial<Record<Exclude<ClientSettingsEpubChineseConversion, 'none'>, ConverterFunction>>
 const EPUB_CHINESE_TEXT_PATTERN = /[\u3400-\u9fff\uf900-\ufaff]/
@@ -1117,6 +1118,9 @@ export default Vue.extend({
         this.applyEpubAuthorStylePreference(doc)
         this.applyEpubChineseConversion(doc)
         this.applyEpubCustomStyleToDocument(doc)
+        if ((doc.documentElement.getAttribute('data-komga-writing-mode') || '').indexOf('vertical') === 0) {
+          this.updateEpubVerticalPaginationMetrics(doc)
+        }
       } catch (e) {
       }
     },
@@ -1128,6 +1132,7 @@ export default Vue.extend({
         html.removeAttribute('data-komga-writing-mode')
         html.style.removeProperty('--KOMGA__writingMode')
         html.style.removeProperty('--KOMGA__verticalPageMask')
+        this.removeEpubVerticalPageMask(doc)
         return
       }
 
@@ -1249,6 +1254,8 @@ export default Vue.extend({
       delete element.dataset[EPUB_AUTHOR_STYLE_ORIGINAL_MEDIA_ATTR]
     },
     disableEpubInlineAuthorStyle(element: HTMLElement) {
+      if (this.isKomgaEpubReaderElement(element)) return
+
       const originalStyle = element.getAttribute('style')
       if (originalStyle && element.dataset[EPUB_AUTHOR_INLINE_STYLE_DISABLED_ATTR] !== 'true') {
         element.dataset[EPUB_AUTHOR_ORIGINAL_INLINE_STYLE_ATTR] = originalStyle
@@ -1276,6 +1283,8 @@ export default Vue.extend({
       }
     },
     restoreEpubInlineAuthorStyle(element: HTMLElement) {
+      if (this.isKomgaEpubReaderElement(element)) return
+
       if (element.dataset[EPUB_AUTHOR_INLINE_STYLE_DISABLED_ATTR] === 'true') {
         const originalStyle = element.dataset[EPUB_AUTHOR_ORIGINAL_INLINE_STYLE_ATTR]
         if (originalStyle) element.setAttribute('style', originalStyle)
@@ -1309,6 +1318,9 @@ export default Vue.extend({
     },
     isEpubImageElement(element: HTMLElement): boolean {
       return element.tagName.toLowerCase() === 'img'
+    },
+    isKomgaEpubReaderElement(element: HTMLElement): boolean {
+      return element.id === EPUB_VERTICAL_PAGE_MASK_ID
     },
     parseEpubImageSize(value: string | null): number {
       if (!value) return 0
@@ -1420,6 +1432,7 @@ export default Vue.extend({
       scroller.scrollLeft = target
       if (Math.abs(scroller.scrollLeft - current) <= 1) return false
 
+      this.updateEpubVerticalPaginationMetrics(doc)
       this.updateVerticalEpubPosition(scroller, pageStep, maxOffset)
       return true
     },
@@ -1428,20 +1441,154 @@ export default Vue.extend({
       if (!scroller) return
 
       const iframe = doc.defaultView?.frameElement as HTMLIFrameElement | null
-      const {maskWidth} = this.getVerticalEpubPaginationMetrics(scroller, doc, iframe || undefined)
+      const mode = doc.documentElement.getAttribute('data-komga-writing-mode') || ''
+      const {maskWidth} = this.getVerticalEpubPaginationMetrics(scroller, doc, iframe || undefined, mode)
       doc.documentElement.style.setProperty('--KOMGA__verticalPageMask', `${maskWidth}px`)
+      this.updateEpubVerticalPageMask(doc, mode, maskWidth)
     },
-    getVerticalEpubPaginationMetrics(scroller: HTMLElement, doc: Document, iframe?: HTMLIFrameElement): { pageStep: number, maskWidth: number } {
+    getVerticalEpubPaginationMetrics(scroller: HTMLElement, doc: Document, iframe?: HTMLIFrameElement, mode?: string): { pageStep: number, maskWidth: number } {
       const pageWidth = Math.max(1, scroller.clientWidth || iframe?.clientWidth || this.$vuetify.breakpoint.width)
-      const bodyStyle = doc.defaultView?.getComputedStyle(doc.body)
-      const htmlStyle = doc.defaultView?.getComputedStyle(doc.documentElement)
-      const fontSize = this.parseCssPixelValue(bodyStyle?.fontSize) || this.parseCssPixelValue(htmlStyle?.fontSize) || 16
-      const lineHeight = this.parseCssPixelValue(bodyStyle?.lineHeight) || fontSize * 1.5
-      const lineAdvance = Math.max(1, Math.ceil(Math.max(fontSize, lineHeight)))
-      const pageColumns = Math.max(1, Math.floor(pageWidth / lineAdvance))
+      const lineAdvance = this.getVerticalEpubLineAdvance(doc)
+      const edgeOverflow = this.measureVerticalEpubEdgeOverflow(doc, mode || doc.documentElement.getAttribute('data-komga-writing-mode') || '', pageWidth, lineAdvance)
+      const pageColumns = Math.max(1, Math.floor((pageWidth - edgeOverflow) / lineAdvance))
       const pageStep = Math.min(pageWidth, pageColumns * lineAdvance)
       const maskWidth = Math.max(0, pageWidth - pageStep)
       return {pageStep, maskWidth}
+    },
+    getVerticalEpubLineAdvance(doc: Document): number {
+      return this.measureVerticalEpubLineAdvance(doc) || this.getComputedVerticalEpubLineAdvance(doc)
+    },
+    getComputedVerticalEpubLineAdvance(doc: Document): number {
+      const bodyStyle = doc.defaultView?.getComputedStyle(doc.body)
+      const htmlStyle = doc.defaultView?.getComputedStyle(doc.documentElement)
+      const fontSize = this.parseCssPixelValue(bodyStyle?.fontSize) || this.parseCssPixelValue(htmlStyle?.fontSize) || 16
+      const lineHeight = this.parseCssPixelValue(bodyStyle?.lineHeight) || this.parseCssPixelValue(htmlStyle?.lineHeight) || fontSize * 1.5
+      return Math.max(1, Math.ceil(Math.max(fontSize, lineHeight)))
+    },
+    measureVerticalEpubLineAdvance(doc: Document): number {
+      const positions = this.collectVerticalEpubTextRectPositions(doc, 260).map(rect => rect.left)
+      const columns = this.groupVerticalEpubPositions(positions)
+      const diffs = [] as number[]
+
+      for (let i = 1; i < columns.length; i++) {
+        const diff = Math.abs(columns[i] - columns[i - 1])
+        if (diff >= 6 && diff <= 120) diffs.push(diff)
+      }
+
+      if (diffs.length === 0) return 0
+      diffs.sort((a, b) => a - b)
+      return Math.max(1, Math.ceil(diffs[Math.floor(diffs.length / 2)]))
+    },
+    collectVerticalEpubTextRectPositions(doc: Document, maxRects: number): DOMRect[] {
+      const root = doc.body
+      if (!root) return []
+
+      const rects = [] as DOMRect[]
+      const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+      let node = walker.nextNode()
+
+      while (node && rects.length < maxRects) {
+        const textNode = node as Text
+        const value = textNode.nodeValue || ''
+        const parent = textNode.parentElement
+
+        if (parent && value.trim() && !parent.closest(EPUB_CHINESE_CONVERSION_SKIP_SELECTOR) && !this.isKomgaEpubReaderElement(parent)) {
+          const range = doc.createRange()
+          const length = Math.min(value.length, 180)
+
+          for (let i = 0; i < length && rects.length < maxRects; i++) {
+            if (!value[i]?.trim()) continue
+
+            try {
+              range.setStart(textNode, i)
+              range.setEnd(textNode, i + 1)
+              const rect = Array.from(range.getClientRects()).find(item => item.width > 0 && item.height > 0)
+              if (rect) rects.push(rect)
+            } catch (e) {
+            }
+          }
+
+          range.detach()
+        }
+
+        node = walker.nextNode()
+      }
+
+      return rects
+    },
+    groupVerticalEpubPositions(positions: number[]): number[] {
+      const sorted = positions
+        .filter(position => Number.isFinite(position))
+        .sort((a, b) => a - b)
+      const groups = [] as number[]
+
+      sorted.forEach(position => {
+        const last = groups[groups.length - 1]
+        if (last === undefined || Math.abs(position - last) > 2) groups.push(position)
+        else groups[groups.length - 1] = (last + position) / 2
+      })
+
+      return groups
+    },
+    measureVerticalEpubEdgeOverflow(doc: Document, mode: string, pageWidth: number, lineAdvance: number): number {
+      const rects = this.collectVerticalEpubTextRectPositions(doc, 360)
+      let overflow = 0
+
+      if (mode.indexOf('vertical-rl') === 0) {
+        rects.forEach(rect => {
+          if (rect.left < 1 && rect.right > 1) overflow = Math.max(overflow, rect.right)
+        })
+      } else if (mode.indexOf('vertical-lr') === 0) {
+        rects.forEach(rect => {
+          if (rect.left < pageWidth - 1 && rect.right > pageWidth - 1) overflow = Math.max(overflow, pageWidth - rect.left)
+        })
+      }
+
+      return Math.min(lineAdvance, Math.max(0, Math.ceil(overflow) + 2))
+    },
+    updateEpubVerticalPageMask(doc: Document, mode: string, maskWidth: number) {
+      if (!doc.body || this.verticalScroll || mode.indexOf('vertical') !== 0 || maskWidth <= 0) {
+        this.removeEpubVerticalPageMask(doc)
+        return
+      }
+
+      const mask = (doc.getElementById(EPUB_VERTICAL_PAGE_MASK_ID) || doc.createElement('div')) as HTMLElement
+      if (!mask.parentElement) {
+        mask.id = EPUB_VERTICAL_PAGE_MASK_ID
+        mask.setAttribute('aria-hidden', 'true')
+        doc.body.appendChild(mask)
+      }
+
+      mask.style.setProperty('all', 'initial')
+      mask.style.setProperty('position', 'fixed', 'important')
+      mask.style.setProperty('top', '0', 'important')
+      mask.style.setProperty('bottom', '0', 'important')
+      mask.style.setProperty('width', `${Math.ceil(maskWidth)}px`, 'important')
+      mask.style.setProperty('background-color', this.getEpubDocumentBackgroundColor(doc), 'important')
+      mask.style.setProperty('pointer-events', 'none', 'important')
+      mask.style.setProperty('z-index', '2147483647', 'important')
+      mask.style.setProperty('writing-mode', 'horizontal-tb', 'important')
+      mask.style.setProperty('display', 'block', 'important')
+
+      if (mode.indexOf('vertical-rl') === 0) {
+        mask.style.setProperty('left', '0', 'important')
+        mask.style.removeProperty('right')
+      } else {
+        mask.style.setProperty('right', '0', 'important')
+        mask.style.removeProperty('left')
+      }
+    },
+    removeEpubVerticalPageMask(doc: Document) {
+      const mask = doc.getElementById(EPUB_VERTICAL_PAGE_MASK_ID)
+      if (mask?.parentElement) mask.parentElement.removeChild(mask)
+    },
+    getEpubDocumentBackgroundColor(doc: Document): string {
+      const view = doc.defaultView
+      const colors = [
+        view?.getComputedStyle(doc.documentElement).backgroundColor,
+        doc.body ? view?.getComputedStyle(doc.body).backgroundColor : undefined,
+      ]
+      return colors.find(color => !!color && color !== 'rgba(0, 0, 0, 0)' && color !== 'transparent') || '#FFFFFF'
     },
     parseCssPixelValue(value?: string): number {
       if (!value) return 0
