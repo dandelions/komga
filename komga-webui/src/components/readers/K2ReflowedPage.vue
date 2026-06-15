@@ -947,9 +947,8 @@ export default Vue.extend({
       this.$set(this.explicitCropRoisByParity, 'even', even ? explicit.even !== false : false)
     },
     effectiveCropRoi(parity: PageParity): Roi | undefined {
-      if (this.localCropRoisByParity[parity]) return this.localCropRoisByParity[parity]
-      const fallbackParity = parity === 'odd' ? 'even' : 'odd'
-      return this.localCropRoisByParity[fallbackParity]
+      if (!this.explicitCropRoisByParity[parity]) return undefined
+      return this.localCropRoisByParity[parity]
     },
     normalizedStoredRoi(value: Roi | null | undefined): Roi | undefined {
       if (!value) return undefined

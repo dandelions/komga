@@ -1580,10 +1580,7 @@ export default Vue.extend({
     effectiveReaderCropRegion(parity: 'odd' | 'even', regionIndex: number): any | undefined {
       const regions = this.readerCropRegionsByParity
       if (!regions.enabled) return undefined
-      const current = regions.regions?.[parity]?.[regionIndex]
-      if (current) return current
-      const fallbackParity = parity === 'odd' ? 'even' : 'odd'
-      return regions.regions?.[fallbackParity]?.[regionIndex] || undefined
+      return regions.regions?.[parity]?.[regionIndex] || undefined
     },
     setReaderActiveCropRegion(region: number) {
       this.readerActiveCropRegion = region === 1 ? 1 : 0

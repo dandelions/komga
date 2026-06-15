@@ -1829,9 +1829,8 @@ export default Vue.extend({
       this.$set(this.explicitCropRoisByParity, 'even', evenExplicit)
     },
     effectiveCropRoi(parity: PageParity, region: CropRegionIndex): Roi | undefined {
-      if (this.cropRoisByParity[parity]?.[region]) return this.cropRoisByParity[parity][region]
-      const fallbackParity = parity === 'odd' ? 'even' : 'odd'
-      return this.cropRoisByParity[fallbackParity]?.[region]
+      if (!this.explicitCropRoisByParity[parity]?.[region]) return undefined
+      return this.cropRoisByParity[parity]?.[region]
     },
     effectiveCropRois(parity: PageParity): Array<Roi | undefined> {
       return ([0, 1] as CropRegionIndex[]).map(region => this.effectiveCropRoi(parity, region))
