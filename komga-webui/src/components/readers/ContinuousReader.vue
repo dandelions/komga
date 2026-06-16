@@ -258,7 +258,8 @@ export default Vue.extend({
       if (!crops?.enabled) return undefined
       const parity = pageNumber % 2 === 0 ? 'even' : 'odd'
       const index = this.activeCropRegion === 1 ? 1 : 0
-      return this.normalizedCropRegion(crops.regions?.[parity]?.[index] || (index === 0 ? crops[parity] : undefined))
+      return this.normalizedCropRegion(crops.regions?.[parity]?.[index] || (index === 0 ? crops[parity] : undefined)) ||
+        this.normalizedCropRegion(crops.regions?.[parity === 'odd' ? 'even' : 'odd']?.[index])
     },
     normalizedCropRegion(crop: CropRegion | null | undefined): CropRegion | undefined {
       if (!crop) return undefined
