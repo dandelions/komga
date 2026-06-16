@@ -1115,12 +1115,6 @@ export default Vue.extend({
 
       iframe.dataset.komgaEpubEnhancementBound = 'true'
       iframe.addEventListener('load', () => this.scheduleEpubIframeEnhancements(false))
-
-      const view = iframe.contentWindow
-      view?.addEventListener('touchstart', this.handleEpubIframeTouchStart, {capture: true, passive: true})
-      view?.addEventListener('touchmove', this.handleEpubIframeTouchMove, {capture: true, passive: false})
-      view?.addEventListener('touchend', this.handleEpubIframeTouchEnd, {capture: true, passive: false})
-      view?.addEventListener('touchcancel', this.handleEpubIframeTouchCancel, {capture: true, passive: true})
     },
     applyEpubEnhancementsToIframe(iframe: HTMLIFrameElement) {
       try {
@@ -1128,6 +1122,7 @@ export default Vue.extend({
         const view = iframe.contentWindow || doc?.defaultView
         if (!doc?.documentElement || !view) return
 
+        this.bindEpubIframeTouchNavigation(doc)
         this.applyEpubVerticalWritingMode(doc, view)
         this.applyEpubAuthorStylePreference(doc)
         this.applyEpubChineseConversion(doc)
@@ -1412,6 +1407,16 @@ export default Vue.extend({
     previousEpubPage() {
       if (!this.tryMoveVerticalEpubPage(-1)) this.d2Reader.previousPage()
     },
+    bindEpubIframeTouchNavigation(doc: Document) {
+      const html = doc.documentElement
+      if (html.dataset.komgaEpubTouchNavigationBound === 'true') return
+
+      html.dataset.komgaEpubTouchNavigationBound = 'true'
+      doc.addEventListener('touchstart', this.handleEpubIframeTouchStart, {capture: true, passive: true})
+      doc.addEventListener('touchmove', this.handleEpubIframeTouchMove, {capture: true, passive: false})
+      doc.addEventListener('touchend', this.handleEpubIframeTouchEnd, {capture: true, passive: false})
+      doc.addEventListener('touchcancel', this.handleEpubIframeTouchCancel, {capture: true, passive: true})
+    },
     stopEpubPageEvent(event: Event) {
       event.preventDefault()
       event.stopPropagation()
@@ -1471,8 +1476,10 @@ export default Vue.extend({
       return !!element?.closest?.('a, button, input, textarea, select, option, label, audio, video')
     },
     getEpubTouchDocument(event: TouchEvent): Document | undefined {
-      const currentTarget = event.currentTarget as Window | null
-      return currentTarget?.document || (event.target as Node | null)?.ownerDocument || undefined
+      const currentTarget = event.currentTarget as Document | Window | null
+      if (currentTarget && 'documentElement' in currentTarget) return currentTarget
+      if (currentTarget && 'document' in currentTarget) return currentTarget.document
+      return (event.target as Node | null)?.ownerDocument || undefined
     },
     getEpubHorizontalSwipeDirection(start: EpubTouchStart, x: number, y: number): -1 | 0 | 1 {
       const deltaX = x - start.x
