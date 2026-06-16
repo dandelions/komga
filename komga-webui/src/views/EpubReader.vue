@@ -405,6 +405,8 @@ const EPUB_VERTICAL_PAGE_MASK_ID = 'komga-epub-vertical-page-mask'
 const EPUB_CHINESE_TEXT_ORIGINALS = new WeakMap<Text, string>()
 const EPUB_CHINESE_CONVERTERS = {} as Partial<Record<Exclude<ClientSettingsEpubChineseConversion, 'none'>, ConverterFunction>>
 const EPUB_CHINESE_TEXT_PATTERN = /[\u3400-\u9fff\uf900-\ufaff]/
+const EPUB_HORIZONTAL_SWIPE_MIN_DISTANCE = 48
+const EPUB_HORIZONTAL_SWIPE_DOMINANCE_RATIO = 1.25
 const EPUB_AUTHOR_INLINE_STYLE_PROPERTIES = [
   'font-size',
   'font-family',
@@ -444,6 +446,11 @@ const EPUB_READER_STYLE_URLS = [
   R2D2BC_POPOVER_CSS_URL,
   R2D2BC_STYLE_CSS_URL,
 ]
+
+type EpubTouchStart = {
+  x: number,
+  y: number,
+}
 
 export default Vue.extend({
   name: 'EpubReader',
@@ -569,6 +576,7 @@ export default Vue.extend({
       epubCustomStyleSaving: false,
       epubIframeEnhancementObserver: undefined as MutationObserver | undefined,
       epubIframeEnhancementTimers: [] as number[],
+      epubTouchStart: undefined as EpubTouchStart | undefined,
     }
   },
   created() {
@@ -1107,6 +1115,12 @@ export default Vue.extend({
 
       iframe.dataset.komgaEpubEnhancementBound = 'true'
       iframe.addEventListener('load', () => this.scheduleEpubIframeEnhancements(false))
+
+      const view = iframe.contentWindow
+      view?.addEventListener('touchstart', this.handleEpubIframeTouchStart, {capture: true, passive: true})
+      view?.addEventListener('touchmove', this.handleEpubIframeTouchMove, {capture: true, passive: false})
+      view?.addEventListener('touchend', this.handleEpubIframeTouchEnd, {capture: true, passive: false})
+      view?.addEventListener('touchcancel', this.handleEpubIframeTouchCancel, {capture: true, passive: true})
     },
     applyEpubEnhancementsToIframe(iframe: HTMLIFrameElement) {
       try {
@@ -1398,10 +1412,76 @@ export default Vue.extend({
     previousEpubPage() {
       if (!this.tryMoveVerticalEpubPage(-1)) this.d2Reader.previousPage()
     },
-    stopEpubPageEvent(event: MouseEvent) {
+    stopEpubPageEvent(event: Event) {
       event.preventDefault()
       event.stopPropagation()
       event.stopImmediatePropagation()
+    },
+    handleEpubIframeTouchStart(event: TouchEvent) {
+      if (!this.shouldHandleEpubIframeTouch(event) || event.touches.length !== 1) {
+        this.epubTouchStart = undefined
+        return
+      }
+
+      const touch = event.touches[0]
+      this.epubTouchStart = {
+        x: touch.clientX,
+        y: touch.clientY,
+      }
+    },
+    handleEpubIframeTouchMove(event: TouchEvent) {
+      const start = this.epubTouchStart
+      if (!start || !this.shouldHandleEpubIframeTouch(event) || event.touches.length !== 1) return
+
+      const touch = event.touches[0]
+      if (this.getEpubHorizontalSwipeDirection(start, touch.clientX, touch.clientY) !== 0) {
+        this.stopEpubPageEvent(event)
+      }
+    },
+    handleEpubIframeTouchEnd(event: TouchEvent) {
+      const start = this.epubTouchStart
+      this.epubTouchStart = undefined
+      if (!start || !this.shouldHandleEpubIframeTouch(event) || event.changedTouches.length === 0) return
+
+      const touch = event.changedTouches[0]
+      const swipeDirection = this.getEpubHorizontalSwipeDirection(start, touch.clientX, touch.clientY)
+      if (swipeDirection === 0) return
+
+      this.stopEpubPageEvent(event)
+      if (swipeDirection < 0) this.nextEpubPage()
+      else this.previousEpubPage()
+    },
+    handleEpubIframeTouchCancel() {
+      this.epubTouchStart = undefined
+    },
+    shouldHandleEpubIframeTouch(event: TouchEvent): boolean {
+      if (this.verticalScroll) return false
+      if (this.isInteractiveEpubTouchTarget(event.target)) return false
+
+      const doc = this.getEpubTouchDocument(event)
+      const view = doc?.defaultView
+      const html = doc?.documentElement
+      if (!doc || !view || !html) return false
+
+      const mode = html.getAttribute('data-komga-writing-mode') || this.detectEpubVerticalWritingMode(doc, view)
+      return mode.indexOf('vertical') === 0
+    },
+    isInteractiveEpubTouchTarget(target: EventTarget | null): boolean {
+      const element = target as Element | null
+      return !!element?.closest?.('a, button, input, textarea, select, option, label, audio, video')
+    },
+    getEpubTouchDocument(event: TouchEvent): Document | undefined {
+      const currentTarget = event.currentTarget as Window | null
+      return currentTarget?.document || (event.target as Node | null)?.ownerDocument || undefined
+    },
+    getEpubHorizontalSwipeDirection(start: EpubTouchStart, x: number, y: number): -1 | 0 | 1 {
+      const deltaX = x - start.x
+      const deltaY = y - start.y
+      const absX = Math.abs(deltaX)
+      const absY = Math.abs(deltaY)
+      if (absX < EPUB_HORIZONTAL_SWIPE_MIN_DISTANCE) return 0
+      if (absX < absY * EPUB_HORIZONTAL_SWIPE_DOMINANCE_RATIO) return 0
+      return deltaX < 0 ? -1 : 1
     },
     tryMoveVerticalEpubPage(direction: 1 | -1): boolean {
       if (this.verticalScroll) return false
