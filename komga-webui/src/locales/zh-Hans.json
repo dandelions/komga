@@ -782,6 +782,11 @@
         "buttons": "按钮图标",
         "click": "单击 / 点击"
       },
+      "vertical_swipe_left_action": "竖排 EPUB 左滑",
+      "vertical_swipe_left_options": {
+        "next": "下一页",
+        "previous": "上一页"
+      },
       "chinese_conversion": "繁简转换",
       "chinese_conversion_none": "不转换",
       "chinese_conversion_simplified": "转为简体",

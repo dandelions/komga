@@ -780,6 +780,11 @@
         "buttons": "按鈕",
         "click": "單擊/點擊"
       },
+      "vertical_swipe_left_action": "直排 EPUB 左滑",
+      "vertical_swipe_left_options": {
+        "next": "下一頁",
+        "previous": "上一頁"
+      },
       "page_margins": "頁邊距",
       "viewing_theme": "觀看主題"
     },

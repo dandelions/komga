@@ -216,6 +216,14 @@
               />
             </v-list-item>
 
+            <v-list-item>
+              <settings-select
+                :items="epubVerticalSwipeLeftOptions"
+                v-model="epubVerticalSwipeLeftAction"
+                :label="$t('epubreader.settings.vertical_swipe_left_action')"
+              />
+            </v-list-item>
+
             <v-subheader class="font-weight-black text-h6">{{ $t('bookreader.settings.display') }}</v-subheader>
 
             <v-list-item v-if="fontFamilies.length > 1">
@@ -452,6 +460,8 @@ type EpubTouchStart = {
   y: number,
 }
 
+type EpubPageAction = 'next' | 'previous'
+
 export default Vue.extend({
   name: 'EpubReader',
   components: {SettingsSelect, ShortcutHelpDialog, TocList, SettingsSwitch},
@@ -538,11 +548,16 @@ export default Vue.extend({
         alwaysFullscreen: false,
         navigationClick: true,
         navigationButtons: true,
+        verticalSwipeLeftAction: 'previous' as EpubPageAction,
       },
       navigationOptions: [
         {text: this.$t('epubreader.settings.navigation_options.buttons').toString(), value: 'button'},
         {text: this.$t('epubreader.settings.navigation_options.click').toString(), value: 'click'},
         {text: this.$t('epubreader.settings.navigation_options.both').toString(), value: 'buttonclick'},
+      ],
+      epubVerticalSwipeLeftOptions: [
+        {text: this.$t('epubreader.settings.vertical_swipe_left_options.previous').toString(), value: 'previous'},
+        {text: this.$t('epubreader.settings.vertical_swipe_left_options.next').toString(), value: 'next'},
       ],
       epubChineseConversionOptions: [
         {text: this.$t('epubreader.settings.chinese_conversion_none').toString(), value: 'none'},
@@ -769,6 +784,17 @@ export default Vue.extend({
         this.settings.navigationButtons = value.includes('button')
         this.settings.navigationClick = value.includes('click')
         this.$store.commit('setEpubreaderSettings', this.settings)
+      },
+    },
+    epubVerticalSwipeLeftAction: {
+      get: function (): EpubPageAction {
+        return this.settings.verticalSwipeLeftAction === 'next' ? 'next' : 'previous'
+      },
+      set: function (value: EpubPageAction): void {
+        if (this.epubVerticalSwipeLeftOptions.map(x => x.value).includes(value)) {
+          this.settings.verticalSwipeLeftAction = value
+          this.$store.commit('setEpubreaderSettings', this.settings)
+        }
       },
     },
     fontFamily: {
@@ -1396,16 +1422,42 @@ export default Vue.extend({
       return !parent.closest(EPUB_CHINESE_CONVERSION_SKIP_SELECTOR)
     },
     nextEpubPageControl(event: MouseEvent) {
-      if (this.tryMoveVerticalEpubPage(1)) this.stopEpubPageEvent(event)
+      if (this.isVerticalEpubPaginationActive()) {
+        this.stopEpubPageEvent(event)
+        this.nextEpubPage()
+      }
     },
     previousEpubPageControl(event: MouseEvent) {
-      if (this.tryMoveVerticalEpubPage(-1)) this.stopEpubPageEvent(event)
+      if (this.isVerticalEpubPaginationActive()) {
+        this.stopEpubPageEvent(event)
+        this.previousEpubPage()
+      }
     },
     nextEpubPage() {
-      if (!this.tryMoveVerticalEpubPage(1)) this.d2Reader.nextPage()
+      if (this.isVerticalEpubPaginationActive()) {
+        if (!this.tryMoveVerticalEpubPage(1)) this.nextEpubResource()
+        return
+      }
+
+      this.d2Reader.nextPage()
     },
     previousEpubPage() {
-      if (!this.tryMoveVerticalEpubPage(-1)) this.d2Reader.previousPage()
+      if (this.isVerticalEpubPaginationActive()) {
+        if (!this.tryMoveVerticalEpubPage(-1)) this.previousEpubResource()
+        return
+      }
+
+      this.d2Reader.previousPage()
+    },
+    nextEpubResource() {
+      const reader = this.d2Reader as D2Reader & { nextResource?: () => void }
+      if (reader.nextResource) reader.nextResource()
+      else this.d2Reader.nextPage()
+    },
+    previousEpubResource() {
+      const reader = this.d2Reader as D2Reader & { previousResource?: () => void }
+      if (reader.previousResource) reader.previousResource()
+      else this.d2Reader.previousPage()
     },
     bindEpubIframeTouchNavigation(doc: Document) {
       const html = doc.documentElement
@@ -1453,8 +1505,7 @@ export default Vue.extend({
       if (swipeDirection === 0) return
 
       this.stopEpubPageEvent(event)
-      if (swipeDirection < 0) this.nextEpubPage()
-      else this.previousEpubPage()
+      this.handleEpubHorizontalSwipe(swipeDirection)
     },
     handleEpubIframeTouchCancel() {
       this.epubTouchStart = undefined
@@ -1489,6 +1540,25 @@ export default Vue.extend({
       if (absX < EPUB_HORIZONTAL_SWIPE_MIN_DISTANCE) return 0
       if (absX < absY * EPUB_HORIZONTAL_SWIPE_DOMINANCE_RATIO) return 0
       return deltaX < 0 ? -1 : 1
+    },
+    handleEpubHorizontalSwipe(swipeDirection: -1 | 1) {
+      const leftSwipeAction = this.epubVerticalSwipeLeftAction
+      const action = swipeDirection < 0
+        ? leftSwipeAction
+        : leftSwipeAction === 'next' ? 'previous' : 'next'
+
+      if (action === 'next') this.nextEpubPage()
+      else this.previousEpubPage()
+    },
+    isVerticalEpubPaginationActive(): boolean {
+      if (this.verticalScroll) return false
+
+      const iframe = document.querySelector<HTMLIFrameElement>('#iframe-wrapper iframe')
+      const doc = iframe?.contentDocument
+      const html = doc?.documentElement
+      const view = iframe?.contentWindow || doc?.defaultView
+      const mode = html?.getAttribute('data-komga-writing-mode') || (doc && view ? this.detectEpubVerticalWritingMode(doc, view) : '')
+      return !!doc && !!html && mode.indexOf('vertical') === 0
     },
     tryMoveVerticalEpubPage(direction: 1 | -1): boolean {
       if (this.verticalScroll) return false

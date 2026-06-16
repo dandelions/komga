@@ -782,6 +782,11 @@
         "buttons": "Buttons",
         "click": "Click / Tap"
       },
+      "vertical_swipe_left_action": "Left swipe in vertical EPUB",
+      "vertical_swipe_left_options": {
+        "next": "Next page",
+        "previous": "Previous page"
+      },
       "chinese_conversion": "Chinese conversion",
       "chinese_conversion_none": "No conversion",
       "chinese_conversion_simplified": "Simplified",
