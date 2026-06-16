@@ -601,6 +601,7 @@ export default Vue.extend({
       epubIframeEnhancementObserver: undefined as MutationObserver | undefined,
       epubIframeEnhancementTimers: [] as number[],
       epubTouchStart: undefined as EpubTouchStart | undefined,
+      pendingVerticalEpubResourceEdge: undefined as 'start' | 'end' | undefined,
     }
   },
   created() {
@@ -1164,6 +1165,7 @@ export default Vue.extend({
         this.applyEpubCustomStyleToDocument(doc)
         if ((doc.documentElement.getAttribute('data-komga-writing-mode') || '').indexOf('vertical') === 0) {
           this.updateEpubVerticalPaginationMetrics(doc)
+          this.applyPendingVerticalEpubResourceEdge(doc)
         }
       } catch (e) {
       }
@@ -1487,6 +1489,7 @@ export default Vue.extend({
       const href = this.getEpubReadingOrderHref(target)
       if (!href) return false
 
+      this.pendingVerticalEpubResourceEdge = offset > 0 ? 'start' : 'end'
       this.d2Reader.goTo({
         href,
         locations: {
@@ -1498,23 +1501,47 @@ export default Vue.extend({
       return true
     },
     getCurrentEpubResourceIndex(readingOrder: EpubReadingOrderItem[]): number | undefined {
-      const reader = this.d2Reader as D2Reader & { currentResource?: number }
-      if (reader.currentResource !== undefined && reader.currentResource >= 0 && reader.currentResource < readingOrder.length) {
-        return reader.currentResource
+      const currentHrefs = [
+        this.getCurrentEpubDocumentHref(),
+        this.currentLocation?.href,
+      ].filter((href): href is string => !!href)
+
+      for (const currentHref of currentHrefs) {
+        const index = readingOrder.findIndex(item => this.sameEpubResourceHref(this.getEpubReadingOrderHref(item), currentHref))
+        if (index >= 0) return index
       }
 
-      const currentHref = this.currentLocation?.href
-      if (!currentHref) return undefined
+      const reader = this.d2Reader as D2Reader & { currentResource?: number }
+      if (reader.currentResource !== undefined && reader.currentResource >= 0 && reader.currentResource < readingOrder.length) return reader.currentResource
 
-      const currentHrefWithoutHash = currentHref.split('#')[0]
-      const index = readingOrder.findIndex(item => {
-        const href = this.getEpubReadingOrderHref(item)
-        return !!href && href.split('#')[0] === currentHrefWithoutHash
-      })
-      return index >= 0 ? index : undefined
+      return undefined
     },
     getEpubReadingOrderHref(item?: EpubReadingOrderItem): string | undefined {
       return item?.href || item?.Href
+    },
+    getCurrentEpubDocumentHref(): string | undefined {
+      const doc = document.querySelector<HTMLIFrameElement>('#iframe-wrapper iframe')?.contentDocument
+      const baseHref = doc?.querySelector('base')?.getAttribute('href')
+      return baseHref || doc?.location?.href
+    },
+    sameEpubResourceHref(a?: string, b?: string): boolean {
+      if (!a || !b) return false
+
+      const normalize = (href: string): string => {
+        try {
+          if (!/^[a-z][a-z0-9+.-]*:/i.test(href) && !href.startsWith('/')) {
+            return decodeURIComponent(href.split('#')[0].split('?')[0]).replace(/\/+/g, '/').replace(/\/$/, '')
+          }
+          const url = new URL(href, window.location.href)
+          return decodeURIComponent(url.pathname).replace(/\/+/g, '/').replace(/\/$/, '')
+        } catch (e) {
+          return decodeURIComponent(href.split('#')[0].split('?')[0]).replace(/\/+/g, '/').replace(/\/$/, '')
+        }
+      }
+
+      const normalizedA = normalize(a)
+      const normalizedB = normalize(b)
+      return normalizedA === normalizedB || normalizedA.endsWith(`/${normalizedB}`) || normalizedB.endsWith(`/${normalizedA}`)
     },
     bindEpubIframeTouchNavigation(doc: Document) {
       const html = doc.documentElement
@@ -1659,6 +1686,23 @@ export default Vue.extend({
       const {maskWidth} = this.getVerticalEpubPaginationMetrics(scroller, doc, iframe || undefined, mode)
       doc.documentElement.style.setProperty('--KOMGA__verticalPageMask', `${maskWidth}px`)
       this.removeEpubVerticalPageMask(doc)
+    },
+    applyPendingVerticalEpubResourceEdge(doc: Document) {
+      const edge = this.pendingVerticalEpubResourceEdge
+      if (!edge) return
+
+      const scroller = doc.scrollingElement as HTMLElement | null
+      if (!scroller) return
+
+      const mode = doc.documentElement.getAttribute('data-komga-writing-mode') || ''
+      const pageDirection = mode.indexOf('vertical-rl') === 0 ? -1 : 1
+      const maxOffset = Math.max(0, scroller.scrollWidth - scroller.clientWidth)
+      const iframe = doc.defaultView?.frameElement as HTMLIFrameElement | null
+      const {pageStep} = this.getVerticalEpubPaginationMetrics(scroller, doc, iframe || undefined, mode)
+
+      scroller.scrollLeft = edge === 'end' ? this.clampVerticalEpubScrollLeft(pageDirection * maxOffset, pageDirection, maxOffset) : 0
+      this.updateVerticalEpubPosition(scroller, pageStep, maxOffset)
+      this.pendingVerticalEpubResourceEdge = undefined
     },
     getVerticalEpubPaginationMetrics(scroller: HTMLElement, doc: Document, iframe?: HTMLIFrameElement, mode?: string): { pageStep: number, maskWidth: number } {
       const pageWidth = Math.max(1, scroller.clientWidth || iframe?.clientWidth || this.$vuetify.breakpoint.width)
