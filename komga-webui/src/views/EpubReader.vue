@@ -1690,8 +1690,14 @@ export default Vue.extend({
 
       const pageDirection = mode.indexOf('vertical-rl') === 0 ? -1 : 1
       const current = scroller.scrollLeft
+      const currentPageIndex = Math.round(Math.abs(current) / pageStep)
+      const lastPageIndex = Math.max(0, Math.ceil(maxOffset / pageStep))
+      if (direction < 0 && currentPageIndex <= 0) return false
+      if (direction > 0 && currentPageIndex >= lastPageIndex) return false
+
+      const targetPageIndex = Math.max(0, Math.min(lastPageIndex, currentPageIndex + direction))
       const target = this.clampVerticalEpubScrollLeft(
-        this.snapVerticalEpubScrollLeft(current + (pageStep * direction * pageDirection), pageDirection, pageStep),
+        targetPageIndex * pageStep * pageDirection,
         pageDirection,
         maxOffset,
       )
@@ -1880,18 +1886,13 @@ export default Vue.extend({
       const parsed = Number.parseFloat(value)
       return Number.isFinite(parsed) ? parsed : 0
     },
-    snapVerticalEpubScrollLeft(value: number, pageDirection: number, pageStep: number): number {
-      if (pageStep <= 1) return value
-      const snapped = Math.round(Math.abs(value) / pageStep) * pageStep
-      return pageDirection < 0 ? -snapped : snapped
-    },
     clampVerticalEpubScrollLeft(value: number, pageDirection: number, maxOffset: number): number {
       if (pageDirection < 0) return Math.max(-maxOffset, Math.min(0, value))
       return Math.max(0, Math.min(maxOffset, value))
     },
     updateVerticalEpubPosition(scroller: HTMLElement, pageStep: number, maxOffset: number) {
       const pageCount = Math.max(1, Math.ceil(maxOffset / pageStep) + 1)
-      const page = Math.min(pageCount, Math.ceil(Math.abs(scroller.scrollLeft) / pageStep) + 1)
+      const page = Math.min(pageCount, Math.round(Math.abs(scroller.scrollLeft) / pageStep) + 1)
       this.progressionPage = page
       this.progressionPageCount = pageCount
     },
