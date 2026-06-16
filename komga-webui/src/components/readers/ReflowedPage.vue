@@ -386,9 +386,10 @@ const MIN_INDENT = 8
 const REFLOW_CONTROLS_HEIGHT = 48
 const VIEWPORT_PAGE_BUFFER = 40
 const SPLIT_GUARD_BAND = 5
-const DETECTION_MAX_SIDE = 1800
-const DETECTION_MAX_PIXELS = 2000000
-const DETECTION_MIN_SCALE = 0.28
+const DETECTION_FULL_RES_MAX_PIXELS = 16000000
+const DETECTION_MAX_SIDE = 3600
+const DETECTION_MAX_PIXELS = 10000000
+const DETECTION_MIN_SCALE = 0.5
 
 export default Vue.extend({
   name: 'ReflowedPage',
@@ -1072,7 +1073,7 @@ export default Vue.extend({
         nightDisplay: this.nightDisplay,
         deskewDetectionVersion: 9,
         imageExclusionVersion: 2,
-        detectionScaleVersion: 1,
+        detectionScaleVersion: 2,
         darkWordRenderVersion: 1,
       })
     },
@@ -1314,16 +1315,17 @@ export default Vue.extend({
       canvas.height = Math.max(1, Math.round(sourceCanvas.height * scale))
       const context = this.canvasContext(canvas, true)
       if (!context) return {canvas: sourceCanvas, scale: 1}
-      context.imageSmoothingEnabled = true
-      context.imageSmoothingQuality = 'high'
+      context.imageSmoothingEnabled = false
       context.fillStyle = this.pageBackground || '#fff'
       context.fillRect(0, 0, canvas.width, canvas.height)
       context.drawImage(sourceCanvas, 0, 0, sourceCanvas.width, sourceCanvas.height, 0, 0, canvas.width, canvas.height)
       return {canvas, scale}
     },
     detectionScale(width: number, height: number): number {
+      const pixels = Math.max(1, width * height)
+      if (pixels <= DETECTION_FULL_RES_MAX_PIXELS) return 1
       const maxSideScale = DETECTION_MAX_SIDE / Math.max(width, height)
-      const maxPixelScale = Math.sqrt(DETECTION_MAX_PIXELS / Math.max(1, width * height))
+      const maxPixelScale = Math.sqrt(DETECTION_MAX_PIXELS / pixels)
       return Math.min(1, Math.max(DETECTION_MIN_SCALE, Math.min(maxSideScale, maxPixelScale)))
     },
     scaleRoi(roi: Roi, scale: number, width: number, height: number): Roi {
