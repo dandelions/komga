@@ -462,6 +462,15 @@ type EpubTouchStart = {
 
 type EpubPageAction = 'next' | 'previous'
 
+type EpubReadingOrderItem = {
+  href?: string,
+  Href?: string,
+  title?: string,
+  Title?: string,
+  type?: string,
+  TypeLink?: string,
+}
+
 export default Vue.extend({
   name: 'EpubReader',
   components: {SettingsSelect, ShortcutHelpDialog, TocList, SettingsSwitch},
@@ -1450,14 +1459,62 @@ export default Vue.extend({
       this.d2Reader.previousPage()
     },
     nextEpubResource() {
-      const reader = this.d2Reader as D2Reader & { nextResource?: () => void }
-      if (reader.nextResource) reader.nextResource()
-      else this.d2Reader.nextPage()
+      if (!this.goToEpubResource(1)) {
+        const reader = this.d2Reader as D2Reader & { nextResource?: () => void }
+        if (reader.nextResource) reader.nextResource()
+        else this.d2Reader.nextPage()
+      }
     },
     previousEpubResource() {
-      const reader = this.d2Reader as D2Reader & { previousResource?: () => void }
-      if (reader.previousResource) reader.previousResource()
-      else this.d2Reader.previousPage()
+      if (!this.goToEpubResource(-1)) {
+        const reader = this.d2Reader as D2Reader & { previousResource?: () => void }
+        if (reader.previousResource) reader.previousResource()
+        else this.d2Reader.previousPage()
+      }
+    },
+    goToEpubResource(offset: 1 | -1): boolean {
+      const reader = this.d2Reader as D2Reader & {
+        readingOrder?: EpubReadingOrderItem[],
+        currentResource?: number,
+      }
+      const readingOrder = reader.readingOrder || []
+      if (readingOrder.length === 0) return false
+
+      const currentIndex = this.getCurrentEpubResourceIndex(readingOrder)
+      if (currentIndex === undefined) return false
+
+      const target = readingOrder[currentIndex + offset]
+      const href = this.getEpubReadingOrderHref(target)
+      if (!href) return false
+
+      this.d2Reader.goTo({
+        href,
+        locations: {
+          progression: offset > 0 ? 0 : 1,
+        },
+        title: target.title || target.Title,
+        type: target.type || target.TypeLink,
+      })
+      return true
+    },
+    getCurrentEpubResourceIndex(readingOrder: EpubReadingOrderItem[]): number | undefined {
+      const reader = this.d2Reader as D2Reader & { currentResource?: number }
+      if (reader.currentResource !== undefined && reader.currentResource >= 0 && reader.currentResource < readingOrder.length) {
+        return reader.currentResource
+      }
+
+      const currentHref = this.currentLocation?.href
+      if (!currentHref) return undefined
+
+      const currentHrefWithoutHash = currentHref.split('#')[0]
+      const index = readingOrder.findIndex(item => {
+        const href = this.getEpubReadingOrderHref(item)
+        return !!href && href.split('#')[0] === currentHrefWithoutHash
+      })
+      return index >= 0 ? index : undefined
+    },
+    getEpubReadingOrderHref(item?: EpubReadingOrderItem): string | undefined {
+      return item?.href || item?.Href
     },
     bindEpubIframeTouchNavigation(doc: Document) {
       const html = doc.documentElement
