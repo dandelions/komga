@@ -471,6 +471,19 @@ type EpubReadingOrderItem = {
   TypeLink?: string,
 }
 
+type EpubPublication = {
+  getAbsoluteHref: (href: string) => string,
+  getPreviousSpineItem: (href: string) => EpubReadingOrderItem | undefined,
+  getNextSpineItem: (href: string) => EpubReadingOrderItem | undefined,
+}
+
+type EpubNavigator = {
+  publication?: EpubPublication,
+  currentChapterLink?: {
+    href?: string,
+  },
+}
+
 export default Vue.extend({
   name: 'EpubReader',
   components: {SettingsSelect, ShortcutHelpDialog, TocList, SettingsSwitch},
@@ -1475,6 +1488,17 @@ export default Vue.extend({
       }
     },
     goToEpubResource(offset: 1 | -1): boolean {
+      const navigator = (this.d2Reader as D2Reader & { navigator?: EpubNavigator }).navigator
+      const publication = navigator?.publication
+      const currentHref = navigator?.currentChapterLink?.href || this.getCurrentEpubDocumentHref() || this.currentLocation?.href
+
+      if (publication && currentHref) {
+        const absoluteCurrentHref = /^[a-z][a-z0-9+.-]*:/i.test(currentHref) ? currentHref : publication.getAbsoluteHref(currentHref)
+        const target = offset > 0 ? publication.getNextSpineItem(absoluteCurrentHref) : publication.getPreviousSpineItem(absoluteCurrentHref)
+        const targetHref = this.getEpubReadingOrderHref(target)
+        if (target && targetHref) return this.goToEpubResourceHref(publication.getAbsoluteHref(targetHref), target, offset)
+      }
+
       const reader = this.d2Reader as D2Reader & {
         readingOrder?: EpubReadingOrderItem[],
         currentResource?: number,
@@ -1489,11 +1513,14 @@ export default Vue.extend({
       const href = this.getEpubReadingOrderHref(target)
       if (!href) return false
 
+      return this.goToEpubResourceHref(href, target, offset)
+    },
+    goToEpubResourceHref(href: string, target: EpubReadingOrderItem, offset: 1 | -1): boolean {
       this.pendingVerticalEpubResourceEdge = offset > 0 ? 'start' : 'end'
       this.d2Reader.goTo({
         href,
         locations: {
-          progression: offset > 0 ? 0 : 1,
+          progression: 0,
         },
         title: target.title || target.Title,
         type: target.type || target.TypeLink,
