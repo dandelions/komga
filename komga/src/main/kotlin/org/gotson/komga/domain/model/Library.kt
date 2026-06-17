@@ -8,7 +8,7 @@ import kotlin.io.path.toPath
 
 data class Library(
   val name: String,
-  val root: URL,
+  val root: URL?,
   val importComicInfoBook: Boolean = true,
   val importComicInfoSeries: Boolean = true,
   val importComicInfoCollection: Boolean = true,
@@ -58,5 +58,5 @@ data class Library(
   }
 
   @delegate:Transient
-  val path: Path by lazy { this.root.toURI().toPath() }
+  val path: Path? by lazy { this.root?.toURI()?.toPath() }
 }

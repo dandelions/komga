@@ -40,7 +40,7 @@ export interface LibraryDto {
 
 export interface LibraryCreationDto {
   name: string,
-  root: string,
+  root: string | null,
   importComicInfoBook: boolean,
   importComicInfoSeries: boolean,
   importComicInfoCollection: boolean,
@@ -72,7 +72,7 @@ export interface LibraryCreationDto {
 
 export interface LibraryUpdateDto {
   name: string,
-  root: string,
+  root: string | null,
   importComicInfoBook: boolean,
   importComicInfoSeries: boolean,
   importComicInfoCollection: boolean,

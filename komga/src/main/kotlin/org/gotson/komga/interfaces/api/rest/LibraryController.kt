@@ -93,7 +93,7 @@ class LibraryController(
         .addLibrary(
           Library(
             name = library.name,
-            root = filePathToUrl(library.root),
+            root = library.root?.ifBlank { null }?.let { filePathToUrl(it) },
             importComicInfoBook = library.importComicInfoBook,
             importComicInfoSeries = library.importComicInfoSeries,
             importComicInfoCollection = library.importComicInfoCollection,
@@ -167,7 +167,7 @@ class LibraryController(
           existing.copy(
             id = libraryId,
             name = name ?: existing.name,
-            root = root?.let { filePathToUrl(root!!) } ?: existing.root,
+            root = if (isSet("root")) root?.ifBlank { null }?.let { filePathToUrl(it) } else existing.root,
             importComicInfoBook = importComicInfoBook ?: existing.importComicInfoBook,
             importComicInfoSeries = importComicInfoSeries ?: existing.importComicInfoSeries,
             importComicInfoCollection = importComicInfoCollection ?: existing.importComicInfoCollection,
@@ -296,7 +296,7 @@ class LibraryController(
 
   private fun findLeafLibraries(library: Library): Collection<Library> {
     val children = libraryRepository.findAllByParentId(library.id)
-    if (children.isEmpty()) return listOf(library)
+    if (children.isEmpty()) return if (library.root != null) listOf(library) else emptyList()
     return children.flatMap { findLeafLibraries(it) }
   }
 }

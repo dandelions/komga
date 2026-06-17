@@ -91,7 +91,7 @@ class LibraryDao(
       .insertInto(l)
       .set(l.ID, library.id)
       .set(l.NAME, library.name)
-      .set(l.ROOT, library.root.toString())
+      .set(l.ROOT, library.root?.toString() ?: "")
       .set(l.IMPORT_COMICINFO_BOOK, library.importComicInfoBook)
       .set(l.IMPORT_COMICINFO_SERIES, library.importComicInfoSeries)
       .set(l.IMPORT_COMICINFO_COLLECTION, library.importComicInfoCollection)
@@ -129,7 +129,7 @@ class LibraryDao(
     dslRW
       .update(l)
       .set(l.NAME, library.name)
-      .set(l.ROOT, library.root.toString())
+      .set(l.ROOT, library.root?.toString() ?: "")
       .set(l.IMPORT_COMICINFO_BOOK, library.importComicInfoBook)
       .set(l.IMPORT_COMICINFO_SERIES, library.importComicInfoSeries)
       .set(l.IMPORT_COMICINFO_COLLECTION, library.importComicInfoCollection)
@@ -185,7 +185,7 @@ class LibraryDao(
   private fun LibraryRecord.toDomain(directoryExclusions: Set<String>) =
     Library(
       name = name,
-      root = URL(root),
+      root = root.takeIf { it.isNotBlank() }?.let { URL(it) },
       importComicInfoBook = importComicinfoBook,
       importComicInfoSeries = importComicinfoSeries,
       importComicInfoCollection = importComicinfoCollection,

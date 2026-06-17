@@ -99,17 +99,23 @@ class LibraryLifecycle(
     library: Library,
     existing: Collection<Library>,
   ) {
-    if (!Files.exists(library.path))
-      throw FileNotFoundException("Library root folder does not exist: ${library.root}")
-
-    if (!Files.isDirectory(library.path))
-      throw DirectoryNotFoundException("Library root folder is not a folder: ${library.root}")
-
     if (existing.map { it.name }.contains(library.name))
       throw DuplicateNameException("Library name already exists")
 
     if (library.parentId == library.id)
       throw IllegalArgumentException("A library cannot be its own parent")
+
+    if (library.parentId != null && library.root == null)
+      throw IllegalArgumentException("Child library root folder is required")
+
+    val libraryPath = library.path
+    if (libraryPath != null) {
+      if (!Files.exists(libraryPath))
+        throw FileNotFoundException("Library root folder does not exist: ${library.root}")
+
+      if (!Files.isDirectory(libraryPath))
+        throw DirectoryNotFoundException("Library root folder is not a folder: ${library.root}")
+    }
 
     library.parentId?.let { parentId ->
       if (existing.none { it.id == parentId })
@@ -119,11 +125,13 @@ class LibraryLifecycle(
     }
 
     existing.forEach {
+      val existingPath = it.path ?: return@forEach
+      if (libraryPath == null) return@forEach
       val relatedAsParentOrChild = library.parentId == it.id || it.parentId == library.id
-      if (!relatedAsParentOrChild && library.path.startsWith(it.path))
-        throw PathContainedInPath("Library path ${library.path} is a child of existing library ${it.name}: ${it.path}")
-      if (!relatedAsParentOrChild && it.path.startsWith(library.path))
-        throw PathContainedInPath("Library path ${library.path} is a parent of existing library ${it.name}: ${it.path}")
+      if (!relatedAsParentOrChild && libraryPath.startsWith(existingPath))
+        throw PathContainedInPath("Library path $libraryPath is a child of existing library ${it.name}: $existingPath")
+      if (!relatedAsParentOrChild && existingPath.startsWith(libraryPath))
+        throw PathContainedInPath("Library path $libraryPath is a parent of existing library ${it.name}: $existingPath")
     }
   }
 

@@ -436,10 +436,10 @@ class LibraryContentLifecycleTest(
       val library2 = makeLibrary(name = "library2")
       libraryRepository.insert(library2)
 
-      every { mockScanner.scanRootFolder(Paths.get(library1.root.toURI())) } returns
+      every { mockScanner.scanRootFolder(Paths.get(library1.root!!.toURI())) } returns
         mapOf(makeSeries(name = "series1") to listOf(makeBook("book1"))).toScanResult()
 
-      every { mockScanner.scanRootFolder(Paths.get(library2.root.toURI())) }.returnsMany(
+      every { mockScanner.scanRootFolder(Paths.get(library2.root!!.toURI())) }.returnsMany(
         mapOf(makeSeries(name = "series2") to listOf(makeBook("book2"))).toScanResult(),
         emptyMap<Series, List<Book>>().toScanResult(),
       )
@@ -454,8 +454,8 @@ class LibraryContentLifecycleTest(
       libraryContentLifecycle.scanRootFolder(library2)
 
       // then
-      verify(exactly = 1) { mockScanner.scanRootFolder(Paths.get(library1.root.toURI())) }
-      verify(exactly = 2) { mockScanner.scanRootFolder(Paths.get(library2.root.toURI())) }
+      verify(exactly = 1) { mockScanner.scanRootFolder(Paths.get(library1.root!!.toURI())) }
+      verify(exactly = 2) { mockScanner.scanRootFolder(Paths.get(library2.root!!.toURI())) }
 
       val (seriesLib1, seriesLib2) = seriesRepository.findAll().partition { it.libraryId == library1.id }
       val (booksLib1, booksLib2) = bookRepository.findAll().partition { it.libraryId == library1.id }

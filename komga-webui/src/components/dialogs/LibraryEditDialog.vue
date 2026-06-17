@@ -455,7 +455,7 @@
 <script lang="ts">
 import FileBrowserDialog from '@/components/dialogs/FileBrowserDialog.vue'
 import Vue from 'vue'
-import {required} from 'vuelidate/lib/validators'
+import {required, requiredIf} from 'vuelidate/lib/validators'
 import {ERROR} from '@/types/events'
 import {ScanIntervalDto, SeriesCoverDto} from '@/types/enum-libraries'
 import {LibraryDto} from '@/types/komga-libraries'
@@ -607,7 +607,11 @@ export default Vue.extend({
   validations: {
     form: {
       name: {required},
-      path: {required},
+      path: {
+        required: requiredIf(function (this: any) {
+          return !!this.form.parentId
+        }),
+      },
     },
   },
   methods: {
@@ -673,7 +677,7 @@ export default Vue.extend({
       if (!this.$v.$invalid) {
         return {
           name: this.form.name,
-          root: this.form.path,
+          root: this.form.path || null,
           importComicInfoBook: this.form.importComicInfoBook,
           importComicInfoSeries: this.form.importComicInfoSeries,
           importComicInfoCollection: this.form.importComicInfoCollection,

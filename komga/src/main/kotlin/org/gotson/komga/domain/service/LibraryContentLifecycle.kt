@@ -72,10 +72,11 @@ class LibraryContentLifecycle(
   ) {
     logger.info { "Scan root folder for library: $library" }
     measureTime {
+      val root = library.root ?: throw DirectoryNotFoundException("Library root folder is not configured: ${library.name}")
       val scanResult =
         try {
           fileSystemScanner.scanRootFolder(
-            Paths.get(library.root.toURI()),
+            Paths.get(root.toURI()),
             library.scanForceModifiedTime,
             library.oneshotsDirectory,
             library.scanCbx,

@@ -197,7 +197,7 @@ class TaskHandler(
 
   private fun findLeafLibraries(library: Library): Collection<Library> {
     val children = libraryRepository.findAllByParentId(library.id)
-    if (children.isEmpty()) return listOf(library)
+    if (children.isEmpty()) return if (library.root != null) listOf(library) else emptyList()
     return children.flatMap { findLeafLibraries(it) }
   }
 }

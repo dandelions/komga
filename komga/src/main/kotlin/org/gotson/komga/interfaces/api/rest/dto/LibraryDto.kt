@@ -41,7 +41,7 @@ fun Library.toDto(includeRoot: Boolean) =
   LibraryDto(
     id = id,
     name = name,
-    root = if (includeRoot) this.root.toFilePath() else "",
+    root = if (includeRoot) this.root?.toFilePath() ?: "" else "",
     importComicInfoBook = importComicInfoBook,
     importComicInfoSeries = importComicInfoSeries,
     importComicInfoCollection = importComicInfoCollection,

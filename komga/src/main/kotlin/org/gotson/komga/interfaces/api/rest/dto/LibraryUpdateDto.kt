@@ -12,7 +12,10 @@ class LibraryUpdateDto {
   val name: String? = null
 
   @get:NullOrNotBlank
-  val root: String? = null
+  var root: String?
+    by Delegates.observable(null) { prop, _, _ ->
+      isSet[prop.name] = true
+    }
 
   val importComicInfoBook: Boolean? = null
   val importComicInfoSeries: Boolean? = null

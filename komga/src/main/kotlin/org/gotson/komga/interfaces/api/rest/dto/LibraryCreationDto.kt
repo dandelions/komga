@@ -4,7 +4,7 @@ import jakarta.validation.constraints.NotBlank
 
 data class LibraryCreationDto(
   @get:NotBlank val name: String,
-  @get:NotBlank val root: String,
+  val root: String? = null,
   val importComicInfoBook: Boolean = true,
   val importComicInfoSeries: Boolean = true,
   val importComicInfoCollection: Boolean = true,
