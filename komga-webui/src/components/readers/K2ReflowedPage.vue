@@ -111,6 +111,14 @@
           :style="{width: `${item.width}px`, height: `${item.height}px`}"
           alt=""
         />
+        <img
+          v-else-if="item.type === 'image'"
+          :key="`image-${index}`"
+          :src="item.src"
+          class="k2-image"
+          :style="{width: `${item.width}px`, height: `${item.height}px`}"
+          alt=""
+        />
       </template>
     </div>
     <div
@@ -136,6 +144,14 @@
           :style="{width: `${item.width}px`, height: `${item.height}px`}"
           alt=""
         />
+        <img
+          v-else-if="item.type === 'image'"
+          :key="`measure-image-${index}`"
+          :src="item.src"
+          class="k2-image"
+          :style="{width: `${item.width}px`, height: `${item.height}px`}"
+          alt=""
+        />
       </template>
     </div>
   </div>
@@ -155,7 +171,8 @@ type WordLine = { column: Column, row: TextRow, words: WordBlock[] }
 type BreakItem = { type: 'break' }
 type IndentItem = { type: 'indent', width: number, sourceWidth: number }
 type WordItem = { type: 'word', src: string, sourceWidth: number, sourceHeight: number, width: number, height: number }
-type K2Item = BreakItem | IndentItem | WordItem
+type ImageItem = { type: 'image', src: string, sourceWidth: number, sourceHeight: number, width: number, height: number }
+type K2Item = BreakItem | IndentItem | WordItem | ImageItem
 type K2Settings = {
   textScale: number,
   maxColumns: number,
@@ -404,9 +421,10 @@ export default Vue.extend({
         const columns = this.detectColumns(ink, detectionSource.canvas.width, detectionSource.canvas.height, roi)
         const detectedLines = this.detectWordLines(ink, detectionSource.canvas.width, detectionSource.canvas.height, columns)
         const lines = this.scaleWordLines(detectedLines, detectionSource.scale, canvas.width, canvas.height)
+        const scaledImageRegions = this.scaleImageRegions(imageRegions, detectionSource.scale, canvas.width, canvas.height)
         if (requestId !== this.requestId) return
 
-        this.items = this.renderK2Items(canvas, lines)
+        this.items = this.renderK2Items(canvas, lines, scaledImageRegions)
         this.repaginate()
       } catch (e) {
         if (requestId !== this.requestId) return
@@ -648,6 +666,10 @@ export default Vue.extend({
         words: line.words.map(word => this.scaleWordBlock(word, scale, width, height)),
       }))
     },
+    scaleImageRegions(regions: ImageRegion[], scale: number, width: number, height: number): ImageRegion[] {
+      if (scale === 1) return regions.map(region => this.clampRoi(region, width, height))
+      return regions.map(region => this.scaleWordBlock(region, scale, width, height))
+    },
     scaleColumn(column: Column, scale: number, width: number, height: number): Column {
       return {
         start: this.clampNumber(Math.floor(column.start / scale), 0, Math.max(0, width - 1), 0),
@@ -710,7 +732,8 @@ export default Vue.extend({
         }
       }
 
-      return this.collectImageRegions(candidates, coloredTiles, denseTiles, texturedTiles, tileColumns, tileRows, tileSize, roi)
+      const regions = this.collectImageRegions(candidates, coloredTiles, denseTiles, texturedTiles, tileColumns, tileRows, tileSize, roi)
+      return this.expandImageRegions(regions, Math.max(2, Math.round(tileSize * 0.6)), roi, width, height)
     },
     imageTileMetrics(
       pixels: Uint8ClampedArray,
@@ -887,6 +910,19 @@ export default Vue.extend({
         a.x + a.w + gap >= b.x &&
         a.y <= b.y + b.h + gap &&
         a.y + a.h + gap >= b.y
+    },
+    expandImageRegions(regions: ImageRegion[], padding: number, roi: Roi, width: number, height: number): ImageRegion[] {
+      if (regions.length === 0) return regions
+      const rightLimit = Math.min(width, roi.x + roi.w)
+      const bottomLimit = Math.min(height, roi.y + roi.h)
+      const expanded = regions.map(region => {
+        const x = Math.max(roi.x, Math.floor(region.x - padding))
+        const y = Math.max(roi.y, Math.floor(region.y - padding))
+        const right = Math.min(rightLimit, Math.ceil(region.x + region.w + padding))
+        const bottom = Math.min(bottomLimit, Math.ceil(region.y + region.h + padding))
+        return {x, y, w: Math.max(1, right - x), h: Math.max(1, bottom - y)}
+      })
+      return this.mergeImageRegions(expanded)
     },
     clearImageRegions(ink: Uint8Array, width: number, height: number, regions: ImageRegion[]): Uint8Array {
       if (regions.length === 0) return ink
@@ -1245,7 +1281,7 @@ export default Vue.extend({
         h: bottom - top + 1,
       }
     },
-    renderK2Items(sourceCanvas: HTMLCanvasElement, lines: WordLine[]): K2Item[] {
+    renderK2Items(sourceCanvas: HTMLCanvasElement, lines: WordLine[], imageRegions: ImageRegion[]): K2Item[] {
       const sourceContext = this.canvasContext(sourceCanvas)
       if (!sourceContext) return []
       const sliceCanvas = document.createElement('canvas')
@@ -1258,11 +1294,13 @@ export default Vue.extend({
       const maxLineWidth = Math.max(80, this.targetWidth - outputPadding * 2)
       let lineWidth = 0
       const items = [] as K2Item[]
+      const imageSlots = this.horizontalImageSlots(imageRegions, lines)
 
       lines.forEach((line, index) => {
+        if (this.appendK2ImageItems(items, sourceCanvas, sliceCanvas, sliceContext, imageSlots[index])) lineWidth = 0
         const startParagraph = this.isParagraphStart(line, lines[index - 1])
         if (items.length > 0 && startParagraph) {
-          items.push({type: 'break'})
+          this.appendK2BreakIfNeeded(items)
           lineWidth = 0
         }
         const indent = startParagraph ? this.lineIndentSourceWidth(line) : 0
@@ -1298,8 +1336,95 @@ export default Vue.extend({
           lineWidth += scaledWidth + wordGap
         })
       })
+      this.appendK2ImageItems(items, sourceCanvas, sliceCanvas, sliceContext, imageSlots[lines.length])
 
       return items
+    },
+    horizontalImageSlots(imageRegions: ImageRegion[], lines: WordLine[]): ImageRegion[][] {
+      const slots = Array.from({length: lines.length + 1}, () => [] as ImageRegion[])
+      imageRegions.forEach(region => {
+        slots[this.horizontalImageSlot(region, lines)].push(region)
+      })
+      return slots.map(regions => regions.sort((a, b) => a.y - b.y || a.x - b.x))
+    },
+    horizontalImageSlot(region: ImageRegion, lines: WordLine[]): number {
+      if (lines.length === 0) return 0
+      const centerY = region.y + region.h / 2
+      let fallback = lines.length
+
+      for (let index = 0; index < lines.length; index++) {
+        const line = lines[index]
+        if (!this.imageOverlapsLineColumn(region, line)) continue
+        const lineCenterY = (line.row.start + line.row.end) / 2
+        if (centerY <= lineCenterY) return index
+        fallback = index + 1
+      }
+
+      for (let index = 0; index < lines.length; index++) {
+        const lineCenterY = (lines[index].row.start + lines[index].row.end) / 2
+        if (centerY <= lineCenterY) return index
+      }
+
+      return fallback
+    },
+    imageOverlapsLineColumn(region: ImageRegion, line: WordLine): boolean {
+      const overlap = Math.max(0, Math.min(region.x + region.w, line.column.end) - Math.max(region.x, line.column.start))
+      return overlap >= Math.min(region.w, line.column.end - line.column.start) * 0.25
+    },
+    appendK2ImageItems(
+      items: K2Item[],
+      sourceCanvas: HTMLCanvasElement,
+      sliceCanvas: HTMLCanvasElement,
+      sliceContext: CanvasRenderingContext2D,
+      imageRegions: ImageRegion[] = [],
+    ): boolean {
+      let appended = false
+      imageRegions.forEach(region => {
+        const image = this.renderK2ImageBlock(sourceCanvas, sliceCanvas, sliceContext, region)
+        if (!image) return
+        this.appendK2BreakIfNeeded(items)
+        items.push(image, {type: 'break'})
+        appended = true
+      })
+      return appended
+    },
+    appendK2BreakIfNeeded(items: K2Item[]) {
+      if (items.length > 0 && items[items.length - 1].type !== 'break') items.push({type: 'break'})
+    },
+    renderK2ImageBlock(
+      sourceCanvas: HTMLCanvasElement,
+      sliceCanvas: HTMLCanvasElement,
+      sliceContext: CanvasRenderingContext2D,
+      region: ImageRegion,
+    ): ImageItem | undefined {
+      const source = this.clampRoi(region, sourceCanvas.width, sourceCanvas.height)
+      if (source.w < 2 || source.h < 2) return undefined
+
+      sliceCanvas.width = source.w
+      sliceCanvas.height = source.h
+      sliceContext.imageSmoothingEnabled = true
+      sliceContext.imageSmoothingQuality = 'high'
+      this.fillWordSliceBackground(sliceContext, source.w, source.h)
+      sliceContext.drawImage(sourceCanvas, source.x, source.y, source.w, source.h, 0, 0, source.w, source.h)
+      return {
+        type: 'image',
+        src: sliceCanvas.toDataURL('image/png'),
+        sourceWidth: source.w,
+        sourceHeight: source.h,
+        ...this.scaledImageDimensions(source.w, source.h),
+      }
+    },
+    scaledImageDimensions(sourceWidth: number, sourceHeight: number): {width: number, height: number} {
+      const width = Math.max(1, sourceWidth)
+      const height = Math.max(1, sourceHeight)
+      const outputPadding = Math.round(this.clampNumber(this.outputPadding, 0, 48, DEFAULT_OUTPUT_PADDING))
+      const maxWidth = Math.max(1, this.targetWidth - outputPadding * 2)
+      const maxHeight = Math.max(80, this.pageContentHeight() - outputPadding * 2)
+      const scale = Math.max(0.01, Math.min(this.textScalePercent / 100, maxWidth / width, maxHeight / height))
+      return {
+        width: Math.max(1, Math.round(width * scale)),
+        height: Math.max(1, Math.round(height * scale)),
+      }
     },
     isParagraphStart(line: WordLine, previousLine: WordLine | undefined): boolean {
       if (!previousLine) return true
@@ -1391,7 +1516,7 @@ export default Vue.extend({
           return
         }
         currentLine.push(item)
-        currentLineHeight = Math.max(currentLineHeight, item.type === 'word' ? item.height : 1)
+        currentLineHeight = Math.max(currentLineHeight, item.type === 'indent' ? 1 : item.height)
       })
 
       pushLine()
@@ -1599,6 +1724,7 @@ export default Vue.extend({
             height: Math.max(1, Math.round(sourceHeight * scale)),
           }
         }
+        if (item.type === 'image') return {...item, ...this.scaledImageDimensions(item.sourceWidth, item.sourceHeight)}
         if (item.type === 'indent') return {...item, width: this.scaledIndentWidth(item.sourceWidth)}
         return item
       })
@@ -1861,6 +1987,14 @@ export default Vue.extend({
   display: inline-block;
   max-width: 100%;
   object-fit: contain;
+}
+
+.k2-image {
+  display: block;
+  flex: 0 0 auto;
+  max-width: 100%;
+  object-fit: contain;
+  align-self: center;
 }
 
 .k2-indent {
