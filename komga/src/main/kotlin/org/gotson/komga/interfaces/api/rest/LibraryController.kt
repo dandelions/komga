@@ -292,8 +292,7 @@ class LibraryController(
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
   }
 
-  private fun findLeafLibrariesOrNull(libraryId: String): Collection<Library>? =
-    libraryRepository.findByIdOrNull(libraryId)?.let { findLeafLibraries(it) }
+  private fun findLeafLibrariesOrNull(libraryId: String): Collection<Library>? = libraryRepository.findByIdOrNull(libraryId)?.let { findLeafLibraries(it) }
 
   private fun findLeafLibraries(library: Library): Collection<Library> {
     val children = libraryRepository.findAllByParentId(library.id)
