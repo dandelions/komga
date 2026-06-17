@@ -33,6 +33,7 @@ data class LibraryDto(
   val hashKoreader: Boolean,
   val analyzeDimensions: Boolean,
   val oneshotsDirectory: String?,
+  val parentId: String?,
   val unavailable: Boolean,
 )
 
@@ -67,5 +68,6 @@ fun Library.toDto(includeRoot: Boolean) =
     hashKoreader = hashKoreader,
     analyzeDimensions = analyzeDimensions,
     oneshotsDirectory = oneshotsDirectory,
+    parentId = this.parentId,
     unavailable = unavailableDate != null,
   )

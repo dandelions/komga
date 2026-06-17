@@ -108,12 +108,36 @@ class LibraryLifecycle(
     if (existing.map { it.name }.contains(library.name))
       throw DuplicateNameException("Library name already exists")
 
+    if (library.parentId == library.id)
+      throw IllegalArgumentException("A library cannot be its own parent")
+
+    library.parentId?.let { parentId ->
+      if (existing.none { it.id == parentId })
+        throw IllegalArgumentException("Parent library does not exist")
+      if (isParentCycle(library, existing))
+        throw IllegalArgumentException("A library cannot be moved under one of its child libraries")
+    }
+
     existing.forEach {
-      if (library.path.startsWith(it.path))
+      val relatedAsParentOrChild = library.parentId == it.id || it.parentId == library.id
+      if (!relatedAsParentOrChild && library.path.startsWith(it.path))
         throw PathContainedInPath("Library path ${library.path} is a child of existing library ${it.name}: ${it.path}")
-      if (it.path.startsWith(library.path))
+      if (!relatedAsParentOrChild && it.path.startsWith(library.path))
         throw PathContainedInPath("Library path ${library.path} is a parent of existing library ${it.name}: ${it.path}")
     }
+  }
+
+  private fun isParentCycle(
+    library: Library,
+    existing: Collection<Library>,
+  ): Boolean {
+    val librariesById = existing.associateBy { it.id }
+    var parentId = library.parentId
+    while (parentId != null) {
+      if (parentId == library.id) return true
+      parentId = librariesById[parentId]?.parentId
+    }
+    return false
   }
 
   fun deleteLibrary(library: Library) {
@@ -121,6 +145,9 @@ class LibraryLifecycle(
 
     val series = seriesRepository.findAllByLibraryId(library.id)
     transactionTemplate.executeWithoutResult {
+      libraryRepository.findAllByParentId(library.id).forEach {
+        libraryRepository.update(it.copy(parentId = null))
+      }
       seriesLifecycle.deleteMany(series)
       sidecarRepository.deleteByLibraryId(library.id)
 

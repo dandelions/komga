@@ -120,6 +120,7 @@ class LibraryController(
             hashKoreader = library.hashKoreader,
             analyzeDimensions = library.analyzeDimensions,
             oneshotsDirectory = library.oneshotsDirectory?.ifBlank { null },
+            parentId = library.parentId?.ifBlank { null },
           ),
         ).toDto(includeRoot = principal.user.isAdmin)
     } catch (e: Exception) {
@@ -128,6 +129,7 @@ class LibraryController(
         is DirectoryNotFoundException,
         is DuplicateNameException,
         is PathContainedInPath,
+        is IllegalArgumentException,
         ->
           throw ResponseStatusException(HttpStatus.BAD_REQUEST, e.message)
 
@@ -192,6 +194,7 @@ class LibraryController(
             hashKoreader = hashKoreader ?: existing.hashKoreader,
             analyzeDimensions = analyzeDimensions ?: existing.analyzeDimensions,
             oneshotsDirectory = if (isSet("oneshotsDirectory")) oneshotsDirectory?.ifBlank { null } else existing.oneshotsDirectory,
+            parentId = if (isSet("parentId")) parentId?.ifBlank { null } else existing.parentId,
           )
         }
       try {
@@ -202,6 +205,7 @@ class LibraryController(
           is DirectoryNotFoundException,
           is DuplicateNameException,
           is PathContainedInPath,
+          is IllegalArgumentException,
           ->
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, e.message)
 
@@ -243,14 +247,16 @@ class LibraryController(
   fun libraryAnalyze(
     @PathVariable libraryId: String,
   ) {
-    val books =
-      bookRepository
-        .findAll(
-          SearchCondition.LibraryId(SearchOperator.Is(libraryId)),
-          SearchContext.empty(),
-          Pageable.unpaged(),
-        ).content
-    taskEmitter.analyzeBook(books, HIGH_PRIORITY)
+    findLeafLibrariesOrNull(libraryId)?.forEach { library ->
+      val books =
+        bookRepository
+          .findAll(
+            SearchCondition.LibraryId(SearchOperator.Is(library.id)),
+            SearchContext.empty(),
+            Pageable.unpaged(),
+          ).content
+      taskEmitter.analyzeBook(books, HIGH_PRIORITY)
+    } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
   }
 
   @PostMapping("{libraryId}/metadata/refresh")
@@ -260,16 +266,18 @@ class LibraryController(
   fun libraryRefreshMetadata(
     @PathVariable libraryId: String,
   ) {
-    val books =
-      bookRepository
-        .findAll(
-          SearchCondition.LibraryId(SearchOperator.Is(libraryId)),
-          SearchContext.empty(),
-          Pageable.unpaged(),
-        ).content
-    taskEmitter.refreshBookMetadata(books, priority = HIGH_PRIORITY)
-    taskEmitter.refreshBookLocalArtwork(books, priority = HIGH_PRIORITY)
-    taskEmitter.refreshSeriesLocalArtwork(seriesRepository.findAllIdsByLibraryId(libraryId), priority = HIGH_PRIORITY)
+    findLeafLibrariesOrNull(libraryId)?.forEach { library ->
+      val books =
+        bookRepository
+          .findAll(
+            SearchCondition.LibraryId(SearchOperator.Is(library.id)),
+            SearchContext.empty(),
+            Pageable.unpaged(),
+          ).content
+      taskEmitter.refreshBookMetadata(books, priority = HIGH_PRIORITY)
+      taskEmitter.refreshBookLocalArtwork(books, priority = HIGH_PRIORITY)
+      taskEmitter.refreshSeriesLocalArtwork(seriesRepository.findAllIdsByLibraryId(library.id), priority = HIGH_PRIORITY)
+    } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
   }
 
   @PostMapping("{libraryId}/empty-trash")
@@ -279,8 +287,17 @@ class LibraryController(
   fun libraryEmptyTrash(
     @PathVariable libraryId: String,
   ) {
-    libraryRepository.findByIdOrNull(libraryId)?.let { library ->
+    findLeafLibrariesOrNull(libraryId)?.forEach { library ->
       taskEmitter.emptyTrash(library.id, HIGH_PRIORITY)
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+  }
+
+  private fun findLeafLibrariesOrNull(libraryId: String): Collection<Library>? =
+    libraryRepository.findByIdOrNull(libraryId)?.let { findLeafLibraries(it) }
+
+  private fun findLeafLibraries(library: Library): Collection<Library> {
+    val children = libraryRepository.findAllByParentId(library.id)
+    if (children.isEmpty()) return listOf(library)
+    return children.flatMap { findLeafLibraries(it) }
   }
 }

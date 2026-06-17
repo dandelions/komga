@@ -31,4 +31,5 @@ data class LibraryCreationDto(
   val hashKoreader: Boolean = false,
   val analyzeDimensions: Boolean = true,
   val oneshotsDirectory: String? = null,
+  val parentId: String? = null,
 )

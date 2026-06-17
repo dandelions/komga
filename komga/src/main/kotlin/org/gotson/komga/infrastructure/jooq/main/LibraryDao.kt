@@ -52,6 +52,12 @@ class LibraryDao(
       .where(l.ID.`in`(libraryIds))
       .fetchAndMap()
 
+  override fun findAllByParentId(parentId: String): Collection<Library> =
+    dslRO
+      .selectBase()
+      .where(l.PARENT_ID.eq(parentId))
+      .fetchAndMap()
+
   private fun DSLContext.selectBase() =
     select()
       .from(l)
@@ -111,6 +117,7 @@ class LibraryDao(
       .set(l.HASH_KOREADER, library.hashKoreader)
       .set(l.ANALYZE_DIMENSIONS, library.analyzeDimensions)
       .set(l.ONESHOTS_DIRECTORY, library.oneshotsDirectory)
+      .set(l.PARENT_ID, library.parentId)
       .set(l.UNAVAILABLE_DATE, library.unavailableDate)
       .execute()
 
@@ -148,6 +155,7 @@ class LibraryDao(
       .set(l.HASH_KOREADER, library.hashKoreader)
       .set(l.ANALYZE_DIMENSIONS, library.analyzeDimensions)
       .set(l.ONESHOTS_DIRECTORY, library.oneshotsDirectory)
+      .set(l.PARENT_ID, library.parentId)
       .set(l.UNAVAILABLE_DATE, library.unavailableDate)
       .set(l.LAST_MODIFIED_DATE, LocalDateTime.now(ZoneId.of("Z")))
       .where(l.ID.eq(library.id))
@@ -204,6 +212,7 @@ class LibraryDao(
       hashKoreader = hashKoreader,
       analyzeDimensions = analyzeDimensions,
       oneshotsDirectory = oneshotsDirectory,
+      parentId = parentId,
       unavailableDate = unavailableDate,
       id = id,
       createdDate = createdDate.toCurrentTimeZone(),

@@ -59,6 +59,17 @@
                     </v-col>
                   </v-row>
 
+                  <v-row>
+                    <v-col>
+                      <v-select
+                        v-model="form.parentId"
+                        :items="parentLibraryOptions"
+                        clearable
+                        :label="$t('dialog.edit_library.field_parent_library')"
+                      />
+                    </v-col>
+                  </v-row>
+
                   <v-row justify="center">
                     <v-col cols="8" align-self="center">
                       <file-browser-dialog
@@ -484,6 +495,7 @@ export default Vue.extend({
         hashKoreader: false,
         analyzeDimensions: true,
         oneshotsDirectory: '',
+        parentId: null as string | null,
       },
       validationFieldNames: new Map([]),
     }
@@ -521,6 +533,14 @@ export default Vue.extend({
         text: this.$t('common.epub').toString(),
         value: 'epub',
       }]
+    },
+    parentLibraryOptions(): any[] {
+      return this.$store.getters.getLibraries
+        .filter((it: LibraryDto) => it.id !== this.library?.id && it.parentId !== this.library?.id)
+        .map((it: LibraryDto) => ({
+          text: it.name,
+          value: it.id,
+        }))
     },
 
     importComicInfo: {
@@ -644,6 +664,7 @@ export default Vue.extend({
       this.form.hashKoreader = library ? library.hashKoreader : false
       this.form.analyzeDimensions = library ? library.analyzeDimensions : true
       this.form.oneshotsDirectory = library ? library.oneshotsDirectory : ''
+      this.form.parentId = library ? library.parentId : null
       this.$v.$reset()
     },
     validateLibrary() {
@@ -679,6 +700,7 @@ export default Vue.extend({
           hashKoreader: this.form.hashKoreader,
           analyzeDimensions: this.form.analyzeDimensions,
           oneshotsDirectory: this.form.oneshotsDirectory,
+          parentId: this.form.parentId,
         }
       }
       return null

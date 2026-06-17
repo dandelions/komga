@@ -478,6 +478,7 @@
       "field_import_mylar_series": "系列元資料",
       "field_name": "名稱",
       "field_oneshotsdirectory": "單發作品目錄",
+      "field_parent_library": "父庫",
       "field_repair_extensions": "自動修復不正確的檔案擴展名",
       "field_root_folder": "根資料夾",
       "field_scan_interval": "掃描間隔",

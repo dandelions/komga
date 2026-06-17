@@ -3,6 +3,7 @@ package org.gotson.komga.application.tasks
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.micrometer.core.instrument.MeterRegistry
 import org.gotson.komga.domain.model.BookAction
+import org.gotson.komga.domain.model.Library
 import org.gotson.komga.domain.persistence.BookRepository
 import org.gotson.komga.domain.persistence.LibraryRepository
 import org.gotson.komga.domain.persistence.SeriesRepository
@@ -52,14 +53,16 @@ class TaskHandler(
         when (task) {
           is Task.ScanLibrary ->
             libraryRepository.findByIdOrNull(task.libraryId)?.let { library ->
-              libraryContentLifecycle.scanRootFolder(library, task.scanDeep)
-              taskEmitter.analyzeUnknownAndOutdatedBooks(library)
-              taskEmitter.repairExtensions(library, LOW_PRIORITY)
-              taskEmitter.findBooksToConvert(library, LOWEST_PRIORITY)
-              taskEmitter.findBooksWithMissingPageHash(library, LOWEST_PRIORITY)
-              taskEmitter.findDuplicatePagesToDelete(library, LOWEST_PRIORITY)
-              taskEmitter.hashBooksWithoutHash(library)
-              taskEmitter.hashBooksWithoutHashKoreader(library)
+              findLeafLibraries(library).forEach {
+                libraryContentLifecycle.scanRootFolder(it, task.scanDeep)
+                taskEmitter.analyzeUnknownAndOutdatedBooks(it)
+                taskEmitter.repairExtensions(it, LOW_PRIORITY)
+                taskEmitter.findBooksToConvert(it, LOWEST_PRIORITY)
+                taskEmitter.findBooksWithMissingPageHash(it, LOWEST_PRIORITY)
+                taskEmitter.findDuplicatePagesToDelete(it, LOWEST_PRIORITY)
+                taskEmitter.hashBooksWithoutHash(it)
+                taskEmitter.hashBooksWithoutHashKoreader(it)
+              }
             } ?: logger.warn { "Cannot execute task $task: Library does not exist" }
 
           is Task.FindBooksToConvert ->
@@ -190,5 +193,11 @@ class TaskHandler(
       logger.error(e) { "Task $task execution failed" }
       meterRegistry.counter(METER_TASKS_FAILURE, "type", task.javaClass.simpleName).increment()
     }
+  }
+
+  private fun findLeafLibraries(library: Library): Collection<Library> {
+    val children = libraryRepository.findAllByParentId(library.id)
+    if (children.isEmpty()) return listOf(library)
+    return children.flatMap { findLeafLibraries(it) }
   }
 }

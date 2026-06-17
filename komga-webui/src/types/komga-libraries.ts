@@ -30,6 +30,7 @@ export interface LibraryDto {
   hashKoreader: boolean,
   analyzeDimensions: boolean,
   oneshotsDirectory: string,
+  parentId: string | null,
   unavailable: boolean,
 
   // custom fields
@@ -66,6 +67,7 @@ export interface LibraryCreationDto {
   hashKoreader: boolean,
   analyzeDimensions: boolean,
   oneshotsDirectory: string,
+  parentId: string | null,
 }
 
 export interface LibraryUpdateDto {
@@ -97,4 +99,5 @@ export interface LibraryUpdateDto {
   hashKoreader: boolean,
   analyzeDimensions: boolean,
   oneshotsDirectory: string,
+  parentId: string | null,
 }
