@@ -130,7 +130,8 @@
                 :key="i"
                 :to="t.to"
                 @click.native="$event.stopImmediatePropagation()"
-                class="link-underline text-truncate"
+                v-line-clamp="arrayTitleLineClamp(i)"
+                class="link-underline"
                 :title="t.title"
                 style="display: block"
                 :class="i !== 0 ? 'font-weight-light' : ''"
@@ -306,7 +307,14 @@ export default Vue.extend({
       return this.computedItem.title(this.itemContext)
     },
     subtitleProps(): Object {
-      return this.computedItem.subtitleProps()
+      const props = this.computedItem.subtitleProps() as { [key: string]: string }
+      if (this.computedItem.type() === ItemTypes.BOOK && Array.isArray(this.title)) {
+        return {
+          ...props,
+          style: `${props.style}; height: 5.25em`,
+        }
+      }
+      return props
     },
     body(): string {
       return this.computedItem.body(this.itemContext)
@@ -390,6 +398,10 @@ export default Vue.extend({
       if (this.onEdit !== undefined) {
         this.onEdit(this.item)
       }
+    },
+    arrayTitleLineClamp(index: number): number {
+      if (this.computedItem.type() === ItemTypes.BOOK && index > 0) return 2
+      return 1
     },
   },
 })
