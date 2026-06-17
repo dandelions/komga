@@ -175,6 +175,7 @@ import {
 } from '@/types/komga-search'
 import i18n from '@/i18n'
 import {objIsEqual} from '@/functions/object'
+import {getEffectiveLibraryIds} from '@/functions/libraries'
 import {
   FILTER_ANY,
   FILTER_NONE,
@@ -299,7 +300,7 @@ export default Vue.extend({
       else return this.$t('common.all_libraries').toString()
     },
     requestLibraryIds(): string[] {
-      return this.libraryId !== LIBRARIES_ALL ? [this.libraryId] : this.$store.getters.getLibrariesPinned.map((it: LibraryDto) => it.id)
+      return this.getRequestLibraryIds(this.libraryId)
     },
     itemContext(): ItemContext[] {
       if (this.sortActive.key === 'metadata.releaseDate') return [ItemContext.SHOW_SERIES, ItemContext.RELEASE_DATE]
@@ -444,7 +445,7 @@ export default Vue.extend({
         this.$store.getters.getLibrarySortBooks(route.params.libraryId) ||
         this.$_.clone(this.sortDefault)
 
-      const requestLibraryIds = libraryId !== LIBRARIES_ALL ? [libraryId] : this.$store.getters.getLibrariesPinned.map((it: LibraryDto) => it.id)
+      const requestLibraryIds = this.getRequestLibraryIds(libraryId)
 
       // load dynamic filters
       const [tags] = await Promise.all([
@@ -504,7 +505,7 @@ export default Vue.extend({
     libraryDeleted(event: LibrarySseDto) {
       if (event.libraryId === this.libraryId) {
         this.$router.push({name: 'home'})
-      } else if (this.libraryId === LIBRARIES_ALL) {
+      } else if (this.libraryId === LIBRARIES_ALL || this.requestLibraryIds.includes(event.libraryId)) {
         this.loadLibrary(this.libraryId)
       }
     },
@@ -549,12 +550,12 @@ export default Vue.extend({
       this.setWatches()
     },
     libraryChanged(event: LibrarySseDto) {
-      if (this.libraryId === LIBRARIES_ALL || event.libraryId === this.libraryId) {
+      if (event.libraryId === this.libraryId || this.requestLibraryIds.includes(event.libraryId)) {
         this.loadLibrary(this.libraryId)
       }
     },
     bookChanged(event: BookSseDto) {
-      if (event.libraryId === this.libraryId) this.reloadPage()
+      if (event.libraryId === this.libraryId || this.requestLibraryIds.includes(event.libraryId)) this.reloadPage()
     },
     readProgressChanged(event: ReadProgressSeriesSseDto) {
       if (this.books.some(b => b.id === event.seriesId)) this.reloadPage()
@@ -595,12 +596,10 @@ export default Vue.extend({
       }
 
       const conditions = [] as SearchConditionSeries[]
-      if (libraryId !== LIBRARIES_ALL) conditions.push(new SearchConditionLibraryId(new SearchOperatorIs(libraryId)))
-      else {
-        conditions.push(new SearchConditionAnyOfBook(
-          this.$store.getters.getLibrariesPinned.map((it: LibraryDto) => new SearchConditionLibraryId(new SearchOperatorIs(it.id))),
-        ))
-      }
+      const requestLibraryIds = this.getRequestLibraryIds(libraryId)
+      conditions.push(new SearchConditionAnyOfBook(
+        requestLibraryIds.map((it: string) => new SearchConditionLibraryId(new SearchOperatorIs(it))),
+      ))
       if (this.filters.readStatus && this.filters.readStatus.length > 0) conditions.push(new SearchConditionAnyOfBook(this.filters.readStatus))
       if (this.filters.tag && this.filters.tag.length > 0) this.filtersMode?.tag?.allOf ? conditions.push(new SearchConditionAllOfBook(this.filters.tag)) : conditions.push(new SearchConditionAnyOfBook(this.filters.tag))
       if (this.filters.oneshot && this.filters.oneshot.length > 0) conditions.push(...this.filters.oneshot)
@@ -643,6 +642,13 @@ export default Vue.extend({
       } else {
         return undefined
       }
+    },
+    getRequestLibraryIds(libraryId: string): string[] {
+      return getEffectiveLibraryIds(
+        libraryId,
+        this.$store.getters.getLibraries,
+        this.$store.getters.getLibrariesPinned,
+      )
     },
     async markSelectedRead() {
       await Promise.all(this.selectedBooks.map(b =>

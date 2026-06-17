@@ -163,6 +163,7 @@ import {
   RecommendedViewSection,
 } from '@/types/komga-clientsettings'
 import EditRecommendedDialog from '@/components/dialogs/EditRecommendedDialog.vue'
+import {getEffectiveLibraryIds} from '@/functions/libraries'
 
 interface SectionConfig {
   loader: PageLoader<any> | undefined,
@@ -295,7 +296,7 @@ export default Vue.extend({
       return this.getLibraryLazy(this.libraryId)
     },
     libraryIds(): string[] {
-      return this.libraryId !== LIBRARIES_ALL ? [this.libraryId] : this.$store.getters.getLibrariesPinned.map((it: LibraryDto) => it.id)
+      return this.getRequestLibraryId(this.libraryId)
     },
     isAdmin(): boolean {
       return this.$store.getters.meAdmin
@@ -386,15 +387,19 @@ export default Vue.extend({
       if (percent > 0.95) await loader.loadNext()
     },
     getRequestLibraryId(libraryId: string): string[] {
-      return libraryId !== LIBRARIES_ALL ? [libraryId] : this.$store.getters.getLibrariesPinned.map((it: LibraryDto) => it.id)
+      return getEffectiveLibraryIds(
+        libraryId,
+        this.$store.getters.getLibraries,
+        this.$store.getters.getLibrariesPinned,
+      )
     },
     seriesChanged(event: SeriesSseDto) {
-      if (this.libraryId === LIBRARIES_ALL || event.libraryId === this.libraryId) {
+      if (event.libraryId === this.libraryId || this.libraryIds.includes(event.libraryId)) {
         this.reload()
       }
     },
     bookChanged(event: BookSseDto) {
-      if (this.libraryId === LIBRARIES_ALL || event.libraryId === this.libraryId) {
+      if (event.libraryId === this.libraryId || this.libraryIds.includes(event.libraryId)) {
         this.reload()
       }
     },

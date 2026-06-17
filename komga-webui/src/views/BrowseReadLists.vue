@@ -72,6 +72,7 @@ import {LibrarySseDto} from '@/types/komga-sse'
 import MultiSelectBar from '@/components/bars/MultiSelectBar.vue'
 import {LibraryDto} from '@/types/komga-libraries'
 import {ReadListDto} from '@/types/komga-readlists'
+import {getEffectiveLibraryIds} from '@/functions/libraries'
 
 export default Vue.extend({
   name: 'BrowseReadLists',
@@ -213,7 +214,7 @@ export default Vue.extend({
       this.loadLibrary(this.libraryId)
     },
     reloadLibrary(event: LibrarySseDto) {
-      if (event.libraryId === this.libraryId) {
+      if (event.libraryId === this.libraryId || this.getRequestLibraryIds(this.libraryId).includes(event.libraryId)) {
         this.loadLibrary(this.libraryId)
       }
     },
@@ -233,7 +234,7 @@ export default Vue.extend({
         size: this.pageSize,
       } as PageRequest
 
-      const lib = libraryId !== LIBRARIES_ALL ? [libraryId] : this.$store.getters.getLibrariesPinned.map(it => it.id)
+      const lib = this.getRequestLibraryIds(libraryId)
       const elementsPage = await this.$komgaReadLists.getReadLists(lib, pageRequest)
 
       this.totalPages = elementsPage.totalPages
@@ -246,6 +247,13 @@ export default Vue.extend({
       } else {
         return undefined
       }
+    },
+    getRequestLibraryIds(libraryId: string): string[] {
+      return getEffectiveLibraryIds(
+        libraryId,
+        this.$store.getters.getLibraries,
+        this.$store.getters.getLibrariesPinned,
+      )
     },
     editSingle(element: ReadListDto) {
       this.$store.dispatch('dialogEditReadList', element)
