@@ -86,51 +86,33 @@
           </v-list-item>
 
           <!--   PINNED LIBRARIES     -->
-          <v-list-item v-for="(l, index) in librariesPinned"
-                       :key="index"
-                       :to="{name:'libraries', params: {libraryId: l.id}}"
-          >
-            <v-list-item-icon>
-            </v-list-item-icon>
-            <v-list-item-content>
-              <v-list-item-title>{{ l.name }}</v-list-item-title>
-              <v-list-item-subtitle
-                v-if="l.unavailable"
-                class="error--text caption"
-              >{{ $t('common.unavailable') }}
-              </v-list-item-subtitle>
-            </v-list-item-content>
-            <v-list-item-action class="ma-0" v-if="isAdmin">
-              <library-actions-menu :library="l"/>
-            </v-list-item-action>
-          </v-list-item>
+          <library-drawer-item
+            v-for="node in librariesPinnedNavigationNodes"
+            :key="node.library.id"
+            :node="node"
+            :is-admin="isAdmin"
+            :expanded-libraries="expandedLibraries"
+            @toggle="setLibraryExpanded"
+          />
 
           <!--   UNPINNED LIBRARIES     -->
           <v-list-group no-action
                         sub-group
-                        v-if="librariesUnpinned.length > 0"
+                        v-if="librariesUnpinnedNavigationNodes.length > 0"
                         v-model="expandUnpinned"
           >
             <template v-slot:activator>
               <v-list-item-title>{{ $t('common.more') }}</v-list-item-title>
             </template>
 
-            <v-list-item v-for="(l, index) in librariesUnpinned"
-                         :key="index"
-                         :to="{name:'libraries', params: {libraryId: l.id}}"
-            >
-              <v-list-item-content>
-                <v-list-item-title>{{ l.name }}</v-list-item-title>
-                <v-list-item-subtitle
-                  v-if="l.unavailable"
-                  class="error--text caption"
-                >{{ $t('common.unavailable') }}
-                </v-list-item-subtitle>
-              </v-list-item-content>
-              <v-list-item-action class="ma-0">
-                <library-actions-menu :library="l"/>
-              </v-list-item-action>
-            </v-list-item>
+            <library-drawer-item
+              v-for="node in librariesUnpinnedNavigationNodes"
+              :key="node.library.id"
+              :node="node"
+              :is-admin="isAdmin"
+              :expanded-libraries="expandedLibraries"
+              @toggle="setLibraryExpanded"
+            />
           </v-list-group>
 
           <!--   IMPORT     -->
@@ -372,7 +354,6 @@
 
 <script lang="ts">
 import ReusableDialogs from '@/components/ReusableDialogs.vue'
-import LibraryActionsMenu from '@/components/menus/LibraryActionsMenu.vue'
 import SearchBox from '@/components/SearchBox.vue'
 import {Theme} from '@/types/themes'
 import Vue from 'vue'
@@ -383,14 +364,20 @@ import {LibraryDto} from '@/types/komga-libraries'
 import {BookSearch, SearchConditionAnyOfBook, SearchConditionMediaStatus, SearchOperatorIs} from '@/types/komga-search'
 import LibrariesActionsMenu from '@/components/menus/LibrariesActionsMenu.vue'
 import ReorderLibraries from '@/components/ReorderLibraries.vue'
+import LibraryDrawerItem from '@/components/LibraryDrawerItem.vue'
+
+interface LibraryNavigationNode {
+  library: LibraryDto,
+  children: LibraryNavigationNode[],
+}
 
 export default Vue.extend({
   name: 'HomeView',
   components: {
+    LibraryDrawerItem,
     ReorderLibraries,
     LibrariesActionsMenu,
     ToasterNotification,
-    LibraryActionsMenu,
     SearchBox,
     ReusableDialogs,
   },
@@ -405,6 +392,7 @@ export default Vue.extend({
       expandImport: false,
       expandAccount: false,
       expandUnpinned: false,
+      expandedLibraries: {} as { [key: string]: boolean },
       showReorder: false,
     }
   },
@@ -430,6 +418,9 @@ export default Vue.extend({
     $route(to, from) {
       this.checkRoute(to)
     },
+    libraries() {
+      this.checkRoute(this.$route)
+    },
   },
   computed: {
     taskCount(): number {
@@ -441,11 +432,14 @@ export default Vue.extend({
     libraries(): LibraryDto[] {
       return this.$store.getters.getLibraries
     },
-    librariesPinned(): LibraryDto[] {
-      return this.$store.getters.getLibrariesPinned
+    libraryNavigationNodes(): LibraryNavigationNode[] {
+      return this.buildLibraryNavigationNodes(this.libraries)
     },
-    librariesUnpinned(): LibraryDto[] {
-      return this.$store.getters.getLibrariesUnpinned
+    librariesPinnedNavigationNodes(): LibraryNavigationNode[] {
+      return this.libraryNavigationNodes.filter(it => !it.library.unpinned)
+    },
+    librariesUnpinnedNavigationNodes(): LibraryNavigationNode[] {
+      return this.libraryNavigationNodes.filter(it => it.library.unpinned)
     },
     isAdmin(): boolean {
       return this.$store.getters.meAdmin
@@ -497,8 +491,51 @@ export default Vue.extend({
       this.expandImport = to.path.includes('/import/')
       this.expandDuplicatePages = to.path.includes('/duplicate-pages/')
       this.expandAccount = to.path.includes('/account/')
-      if (this.librariesUnpinned.some(it => it.id === to.params.libraryId)) this.expandUnpinned = true
-      else if (this.librariesPinned.some(it => it.id === to.params.libraryId)) this.expandUnpinned = false
+      const libraryPath = this.findLibraryNavigationPath(to.params.libraryId, this.libraryNavigationNodes)
+      if (libraryPath.length > 0) {
+        libraryPath.slice(0, -1).forEach(it => this.setLibraryExpanded(it.library.id, true))
+        this.expandUnpinned = libraryPath[0].library.unpinned === true
+      }
+    },
+    buildLibraryNavigationNodes(libraries: LibraryDto[]): LibraryNavigationNode[] {
+      const nodesById = new Map<string, LibraryNavigationNode>()
+      libraries.forEach(library => {
+        nodesById.set(library.id, {library, children: []})
+      })
+
+      const roots: LibraryNavigationNode[] = []
+      libraries.forEach(library => {
+        const node = nodesById.get(library.id)!
+        if (library.parentId && nodesById.has(library.parentId)) {
+          nodesById.get(library.parentId)!.children.push(node)
+        } else {
+          roots.push(node)
+        }
+      })
+
+      return roots
+    },
+    findLibraryNavigationPath(
+      libraryId: string | undefined,
+      nodes: LibraryNavigationNode[],
+      parents: LibraryNavigationNode[] = [],
+    ): LibraryNavigationNode[] {
+      if (!libraryId) return []
+
+      for (const node of nodes) {
+        const path = [...parents, node]
+        if (node.library.id === libraryId) return path
+        const childPath = this.findLibraryNavigationPath(libraryId, node.children, path)
+        if (childPath.length > 0) return childPath
+      }
+
+      return []
+    },
+    setLibraryExpanded(
+      libraryId: string,
+      expanded: boolean,
+    ) {
+      this.$set(this.expandedLibraries, libraryId, expanded)
     },
     toggleDrawer() {
       this.drawerVisible = !this.drawerVisible
