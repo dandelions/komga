@@ -17,6 +17,9 @@ import org.gotson.komga.infrastructure.search.LuceneEntity
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.ZoneId
 
 private val logger = KotlinLogging.logger {}
 
@@ -33,6 +36,21 @@ class TaskEmitter(
     priority: Int = DEFAULT_PRIORITY,
   ) {
     submitTask(Task.ScanLibrary(libraryId, scanDeep, priority))
+  }
+
+  fun scanLibraryTomorrow(
+    libraryId: String,
+    scanDeep: Boolean = false,
+    priority: Int = DEFAULT_PRIORITY,
+  ) {
+    val tomorrow = LocalDate.now(ZoneId.systemDefault()).plusDays(1)
+    val availableAt =
+      tomorrow
+        .atStartOfDay(ZoneId.systemDefault())
+        .withZoneSameInstant(ZoneId.of("Z"))
+        .toLocalDateTime()
+
+    submitTask(Task.ScanLibrary(libraryId, scanDeep, priority, continuationDate = tomorrow.toString()), availableAt)
   }
 
   fun emptyTrash(
@@ -281,9 +299,12 @@ class TaskEmitter(
     submitTask(Task.FindBookThumbnailsToRegenerate(forBiggerResultOnly, priority))
   }
 
-  private fun submitTask(task: Task) {
+  private fun submitTask(
+    task: Task,
+    availableDate: LocalDateTime? = null,
+  ) {
     logger.info { "Sending task: $task" }
-    tasksRepository.save(task)
+    tasksRepository.save(task, availableDate)
     eventPublisher.publishEvent(TaskAddedEvent)
   }
 

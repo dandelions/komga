@@ -35,6 +35,19 @@
           class="mt-4"
         />
         <v-text-field
+          v-model="form.libraryScanDailyFileLimit"
+          @input="$v.form.libraryScanDailyFileLimit.$touch()"
+          @blur="$v.form.libraryScanDailyFileLimit.$touch()"
+          :error-messages="libraryScanDailyFileLimitErrors"
+          :label="$t('server_settings.label_library_scan_daily_file_limit')"
+          :hint="$t('server_settings.hint_library_scan_daily_file_limit')"
+          persistent-hint
+          clearable
+          type="number"
+          min="1"
+          class="mt-4"
+        />
+        <v-text-field
           v-model="form.rememberMeDurationDays"
           @input="$v.form.rememberMeDurationDays.$touch()"
           @blur="$v.form.rememberMeDurationDays.$touch()"
@@ -214,6 +227,7 @@ export default Vue.extend({
       renewRememberMeKey: false,
       thumbnailSize: ThumbnailSizeDto.DEFAULT,
       taskPoolSize: 1,
+      libraryScanDailyFileLimit: undefined,
       serverPort: 25600,
       serverContextPath: '',
       koboProxy: false,
@@ -237,6 +251,9 @@ export default Vue.extend({
       taskPoolSize: {
         minValue: minValue(1),
         required,
+      },
+      libraryScanDailyFileLimit: {
+        minValue: minValue(1),
       },
       serverPort: {
         minValue: minValue(1),
@@ -275,6 +292,12 @@ export default Vue.extend({
       if (!this.$v.form?.taskPoolSize?.$dirty) return errors
       !this.$v?.form?.taskPoolSize?.minValue && errors.push(this.$t('validation.one_or_more').toString())
       !this.$v?.form?.taskPoolSize?.required && errors.push(this.$t('common.required').toString())
+      return errors
+    },
+    libraryScanDailyFileLimitErrors(): string[] {
+      const errors = [] as string[]
+      if (!this.$v.form?.libraryScanDailyFileLimit?.$dirty) return errors
+      !this.$v?.form?.libraryScanDailyFileLimit?.minValue && errors.push(this.$t('validation.one_or_more').toString())
       return errors
     },
     serverPortErrors(): string[] {
@@ -329,6 +352,8 @@ export default Vue.extend({
       }
       if (this.$v.form?.taskPoolSize?.$dirty)
         this.$_.merge(newSettings, {taskPoolSize: this.form.taskPoolSize})
+      if (this.$v.form?.libraryScanDailyFileLimit?.$dirty)
+        this.$_.merge(newSettings, {libraryScanDailyFileLimit: this.form.libraryScanDailyFileLimit || null})
       if (this.$v.form?.serverPort?.$dirty)
         this.$_.merge(newSettings, {serverPort: this.form.serverPort})
       if (this.$v.form?.serverContextPath?.$dirty)

@@ -54,14 +54,20 @@ class TaskHandler(
           is Task.ScanLibrary ->
             libraryRepository.findByIdOrNull(task.libraryId)?.let { library ->
               findLeafLibraries(library).forEach {
-                libraryContentLifecycle.scanRootFolder(it, task.scanDeep)
-                taskEmitter.analyzeUnknownAndOutdatedBooks(it)
-                taskEmitter.repairExtensions(it, LOW_PRIORITY)
-                taskEmitter.findBooksToConvert(it, LOWEST_PRIORITY)
-                taskEmitter.findBooksWithMissingPageHash(it, LOWEST_PRIORITY)
-                taskEmitter.findDuplicatePagesToDelete(it, LOWEST_PRIORITY)
-                taskEmitter.hashBooksWithoutHash(it)
-                taskEmitter.hashBooksWithoutHashKoreader(it)
+                val scanSummary = libraryContentLifecycle.scanRootFolder(it, task.scanDeep)
+                if (scanSummary.limited) {
+                  logger.info { "Daily scan file limit reached for library '${it.name}', scheduling continuation tomorrow" }
+                  taskEmitter.scanLibraryTomorrow(task.libraryId, task.scanDeep, task.priority)
+                }
+                if (!scanSummary.limited || scanSummary.countedBookCount > 0) {
+                  taskEmitter.analyzeUnknownAndOutdatedBooks(it)
+                  taskEmitter.repairExtensions(it, LOW_PRIORITY)
+                  taskEmitter.findBooksToConvert(it, LOWEST_PRIORITY)
+                  taskEmitter.findBooksWithMissingPageHash(it, LOWEST_PRIORITY)
+                  taskEmitter.findDuplicatePagesToDelete(it, LOWEST_PRIORITY)
+                  taskEmitter.hashBooksWithoutHash(it)
+                  taskEmitter.hashBooksWithoutHashKoreader(it)
+                }
               }
             } ?: logger.warn { "Cannot execute task $task: Library does not exist" }
 

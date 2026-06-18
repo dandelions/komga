@@ -69,6 +69,75 @@ class FileSystemScannerTest {
   }
 
   @Test
+  fun `given max counted books when scanning then stop before exceeding counted book limit`() {
+    Jimfs.newFileSystem(Configuration.unix()).use { fs ->
+      // given
+      val root = fs.getPath("/root")
+      Files.createDirectory(root)
+
+      listOf("file1.cbz", "file2.cbz").forEach { Files.createFile(root.resolve(it)) }
+
+      // when
+      val scanResult = scanner.scanRootFolder(root, maxCountedBooks = 1)
+
+      // then
+      assertThat(scanResult.limited).isTrue
+      assertThat(scanResult.countedBookCount).isEqualTo(1)
+      assertThat(scanResult.scannedBookCount).isEqualTo(1)
+    }
+  }
+
+  @Test
+  fun `given max counted books when scanning then uncounted books do not consume the limit`() {
+    Jimfs.newFileSystem(Configuration.unix()).use { fs ->
+      // given
+      val root = fs.getPath("/root")
+      Files.createDirectory(root)
+
+      listOf("unchanged.cbz", "changed.cbz").forEach { Files.createFile(root.resolve(it)) }
+
+      // when
+      val scanResult = scanner.scanRootFolder(root, maxCountedBooks = 1) { book -> book.name == "changed" }
+
+      // then
+      assertThat(scanResult.limited).isFalse
+      assertThat(scanResult.countedBookCount).isEqualTo(1)
+      assertThat(scanResult.scannedBookCount).isEqualTo(2)
+      val scannedNames =
+        scanResult.series
+          .values
+          .flatten()
+          .map { it.name }
+      assertThat(scannedNames).containsExactlyInAnyOrder("unchanged", "changed")
+    }
+  }
+
+  @Test
+  fun `given counted book cannot be consumed when scanning then stop before adding it`() {
+    Jimfs.newFileSystem(Configuration.unix()).use { fs ->
+      // given
+      val root = fs.getPath("/root")
+      Files.createDirectory(root)
+
+      listOf("file1.cbz", "file2.cbz").forEach { Files.createFile(root.resolve(it)) }
+      var consumedBooks = 0
+
+      // when
+      val scanResult =
+        scanner.scanRootFolder(
+          root,
+          maxCountedBooks = 10,
+          consumeCountedBook = { consumedBooks++ == 0 },
+        )
+
+      // then
+      assertThat(scanResult.limited).isTrue
+      assertThat(scanResult.countedBookCount).isEqualTo(1)
+      assertThat(scanResult.scannedBookCount).isEqualTo(1)
+    }
+  }
+
+  @Test
   fun `given root directory as filesystem root when scanning then return 1 series containing those files as books`() {
     Jimfs.newFileSystem(Configuration.unix()).use { fs ->
       // given

@@ -7,6 +7,7 @@ import org.springframework.beans.factory.InitializingBean
 import org.springframework.boot.context.event.ApplicationReadyEvent
 import org.springframework.boot.task.ThreadPoolTaskExecutorBuilder
 import org.springframework.context.event.EventListener
+import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor
 import org.springframework.stereotype.Service
 
@@ -45,7 +46,8 @@ class TaskProcessor(
     if (processTasks) {
       logger.debug { "Active count: ${executor.activeCount}, Core Pool Size: ${executor.corePoolSize}, Pool Size: ${executor.poolSize}" }
       if (executor.corePoolSize == 1) {
-        executor.execute { takeAndProcess() }
+        if (executor.activeCount < executor.corePoolSize && tasksRepository.hasAvailable())
+          executor.execute { takeAndProcess() }
       } else {
         // fan out while threads are available
         while (tasksRepository.hasAvailable() && executor.activeCount < executor.corePoolSize) {
@@ -55,6 +57,11 @@ class TaskProcessor(
     } else {
       logger.debug { "Not processing tasks" }
     }
+  }
+
+  @Scheduled(fixedDelay = 60_000, initialDelay = 60_000)
+  fun processAvailableScheduledTask() {
+    processAvailableTask()
   }
 
   private fun takeAndProcess() {

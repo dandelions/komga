@@ -21,10 +21,11 @@ sealed class Task(
     val libraryId: String,
     val scanDeep: Boolean,
     priority: Int = DEFAULT_PRIORITY,
+    val continuationDate: String? = null,
   ) : Task(priority) {
-    override val uniqueId = "SCAN_LIBRARY_${libraryId}_DEEP_$scanDeep"
+    override val uniqueId = "SCAN_LIBRARY_${libraryId}_DEEP_$scanDeep${continuationDate?.let { "_CONTINUE_$it" } ?: ""}"
 
-    override fun toString(): String = "ScanLibrary(libraryId='$libraryId', scanDeep='$scanDeep', priority='$priority')"
+    override fun toString(): String = "ScanLibrary(libraryId='$libraryId', scanDeep='$scanDeep', priority='$priority', continuationDate=$continuationDate)"
   }
 
   class FindBooksToConvert(

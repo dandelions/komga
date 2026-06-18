@@ -1,5 +1,7 @@
 package org.gotson.komga.application.tasks
 
+import java.time.LocalDateTime
+
 interface TasksRepository {
   fun hasAvailable(): Boolean
 
@@ -13,7 +15,10 @@ interface TasksRepository {
 
   fun countBySimpleType(): Map<String, Int>
 
-  fun save(task: Task)
+  fun save(
+    task: Task,
+    availableDate: LocalDateTime? = null,
+  )
 
   fun save(tasks: Collection<Task>)
 

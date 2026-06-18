@@ -5,11 +5,13 @@ import org.gotson.komga.application.tasks.TasksRepository
 import org.gotson.komga.domain.model.DomainEvent
 import org.gotson.komga.domain.model.KomgaUser
 import org.gotson.komga.domain.persistence.BookRepository
+import org.gotson.komga.infrastructure.configuration.KomgaSettingsProvider
 import org.gotson.komga.infrastructure.security.KomgaPrincipal
 import org.gotson.komga.infrastructure.web.toFilePath
 import org.gotson.komga.interfaces.sse.dto.BookImportSseDto
 import org.gotson.komga.interfaces.sse.dto.BookSseDto
 import org.gotson.komga.interfaces.sse.dto.CollectionSseDto
+import org.gotson.komga.interfaces.sse.dto.LibraryScanDailyFileLimitUsageSseDto
 import org.gotson.komga.interfaces.sse.dto.LibrarySseDto
 import org.gotson.komga.interfaces.sse.dto.ReadListSseDto
 import org.gotson.komga.interfaces.sse.dto.ReadProgressSeriesSseDto
@@ -38,6 +40,7 @@ private val logger = KotlinLogging.logger {}
 class SseController(
   private val bookRepository: BookRepository,
   private val tasksRepository: TasksRepository,
+  private val komgaSettingsProvider: KomgaSettingsProvider,
 ) : SmartLifecycle {
   private var acceptingConnections = true
   private val emitters = Collections.synchronizedMap(HashMap<SseEmitter, KomgaUser>())
@@ -72,7 +75,22 @@ class SseController(
   fun taskCount() {
     if (emitters.isNotEmpty()) {
       val tasksCount = tasksRepository.countBySimpleType()
-      emitSse("TaskQueueStatus", TaskQueueSseDto(tasksCount.values.sum(), tasksCount), adminOnly = true)
+      emitSse(
+        "TaskQueueStatus",
+        TaskQueueSseDto(
+          tasksCount.values.sum(),
+          tasksCount,
+          komgaSettingsProvider.libraryScanDailyFileLimitUsage()?.let {
+            LibraryScanDailyFileLimitUsageSseDto(
+              it.date.toString(),
+              it.limit,
+              it.used,
+              it.remaining,
+            )
+          },
+        ),
+        adminOnly = true,
+      )
     }
   }
 

@@ -6,6 +6,7 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
+import java.time.LocalDateTime
 
 @SpringBootTest
 class TasksDaoTest(
@@ -90,6 +91,38 @@ class TasksDaoTest(
 
     // then
     assertThat(task).isNull()
+  }
+
+  @Test
+  fun `given future available task when taking first then it is not returned before available date`() {
+    // given
+    val task = Task.ScanLibrary("library1", false, 2, continuationDate = "2099-01-01")
+    tasksDao.save(task, LocalDateTime.now().plusDays(1))
+
+    // when
+    val available = tasksDao.hasAvailable()
+    val taken = tasksDao.takeFirst()
+
+    // then
+    assertThat(available).isFalse
+    assertThat(taken).isNull()
+    assertThat(tasksDao.findAll()).hasSize(1)
+  }
+
+  @Test
+  fun `given past available task when taking first then it is returned`() {
+    // given
+    val task = Task.ScanLibrary("library1", false, 2, continuationDate = "2000-01-01")
+    tasksDao.save(task, LocalDateTime.now().minusDays(1))
+
+    // when
+    val taken = tasksDao.takeFirst()
+
+    // then
+    assertThat(taken)
+      .isInstanceOf(Task.ScanLibrary::class.java)
+      .hasFieldOrPropertyWithValue("libraryId", task.libraryId)
+      .hasFieldOrPropertyWithValue("continuationDate", task.continuationDate)
   }
 
   @Test

@@ -31,8 +31,11 @@ class TasksDao(
   TasksRepository {
   private val t = Tables.TASK
 
-  private val tasksAvailableCondition =
+  private fun nowUtc() = LocalDateTime.now(ZoneId.of("Z"))
+
+  private fun tasksAvailableCondition() =
     t.OWNER.isNull
+      .and(t.AVAILABLE_DATE.isNull.or(t.AVAILABLE_DATE.le(nowUtc())))
       .and(
         t.GROUP_ID
           .notIn(
@@ -47,7 +50,7 @@ class TasksDao(
   override fun hasAvailable(): Boolean =
     dslRO.fetchExists(
       t,
-      tasksAvailableCondition,
+      tasksAvailableCondition(),
     )
 
   @Transactional
@@ -55,7 +58,7 @@ class TasksDao(
     val task =
       dslRW
         .selectBase()
-        .where(tasksAvailableCondition)
+        .where(tasksAvailableCondition())
         .orderBy(t.PRIORITY.desc(), t.LAST_MODIFIED_DATE)
         .limit(1)
         .fetchOne()
@@ -115,13 +118,16 @@ class TasksDao(
       .fetch()
       .associate { it.value1() to it.value2() }
 
-  override fun save(task: Task) {
-    task.toQuery(dslRW).execute()
+  override fun save(
+    task: Task,
+    availableDate: LocalDateTime?,
+  ) {
+    task.toQuery(dslRW, availableDate).execute()
   }
 
   override fun save(tasks: Collection<Task>) {
     tasks
-      .map { it.toQuery(dslRW) }
+      .map { it.toQuery(dslRW, null) }
       .chunked(batchSize)
       .forEach { chunk -> dslRW.batch(chunk).execute() }
   }
@@ -143,7 +149,10 @@ class TasksDao(
 
   override fun deleteAllWithoutOwner(): Int = dslRW.deleteFrom(t).where(t.OWNER.isNull).execute()
 
-  private fun Task.toQuery(dsl: DSLContext): Query =
+  private fun Task.toQuery(
+    dsl: DSLContext,
+    availableDate: LocalDateTime?,
+  ): Query =
     dsl
       .insertInto(
         t,
@@ -153,6 +162,7 @@ class TasksDao(
         t.CLASS,
         t.SIMPLE_TYPE,
         t.PAYLOAD,
+        t.AVAILABLE_DATE,
       ).values(
         uniqueId,
         priority,
@@ -160,11 +170,13 @@ class TasksDao(
         javaClass.typeName,
         javaClass.simpleName,
         objectMapper.writeValueAsString(this),
+        availableDate,
       ).onDuplicateKeyUpdate()
       .set(t.GROUP_ID, groupId)
       .set(t.PRIORITY, priority)
       .set(t.CLASS, javaClass.typeName)
       .set(t.SIMPLE_TYPE, javaClass.simpleName)
       .set(t.PAYLOAD, objectMapper.writeValueAsString(this))
-      .set(t.LAST_MODIFIED_DATE, LocalDateTime.now(ZoneId.of("Z")))
+      .set(t.AVAILABLE_DATE, availableDate)
+      .set(t.LAST_MODIFIED_DATE, nowUtc())
 }

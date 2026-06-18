@@ -8,6 +8,7 @@ import org.gotson.komga.domain.model.DirectoryNotFoundException
 import org.gotson.komga.domain.model.DomainEvent
 import org.gotson.komga.domain.model.Library
 import org.gotson.komga.domain.model.Media
+import org.gotson.komga.domain.model.ScanResult
 import org.gotson.komga.domain.model.SearchCondition
 import org.gotson.komga.domain.model.SearchContext
 import org.gotson.komga.domain.model.SearchOperator
@@ -41,6 +42,12 @@ import kotlin.time.measureTime
 
 private val logger = KotlinLogging.logger {}
 
+data class LibraryScanSummary(
+  val limited: Boolean,
+  val scannedBookCount: Int,
+  val countedBookCount: Int,
+)
+
 @Service
 class LibraryContentLifecycle(
   private val fileSystemScanner: FileSystemScanner,
@@ -69,21 +76,66 @@ class LibraryContentLifecycle(
   fun scanRootFolder(
     library: Library,
     scanDeep: Boolean = false,
-  ) {
+  ): LibraryScanSummary {
     logger.info { "Scan root folder for library: $library" }
+    val scanLimitUsage = komgaSettingsProvider.libraryScanDailyFileLimitUsage()
+    if (scanLimitUsage?.exhausted == true) {
+      logger.info { "Daily scan file limit exhausted, postponing scan for library: ${library.name}" }
+      return LibraryScanSummary(limited = true, scannedBookCount = 0, countedBookCount = 0)
+    }
+
+    var fileScanResult: ScanResult? = null
+
     measureTime {
       val root = library.root ?: throw DirectoryNotFoundException("Library root folder is not configured: ${library.name}")
+      val existingBooksByUrl =
+        if (scanLimitUsage != null) {
+          bookRepository
+            .findAll(
+              SearchCondition.AllOfBook(
+                SearchCondition.LibraryId(SearchOperator.Is(library.id)),
+                SearchCondition.Deleted(SearchOperator.IsFalse),
+              ),
+              SearchContext.empty(),
+              Pageable.unpaged(),
+            ).content
+            .associateBy { it.url }
+        } else {
+          emptyMap()
+        }
+
       val scanResult =
         try {
-          fileSystemScanner.scanRootFolder(
-            Paths.get(root.toURI()),
-            library.scanForceModifiedTime,
-            library.oneshotsDirectory,
-            library.scanCbx,
-            library.scanPdf,
-            library.scanEpub,
-            library.scanDirectoryExclusions,
-          )
+          if (scanLimitUsage == null) {
+            fileSystemScanner.scanRootFolder(
+              Paths.get(root.toURI()),
+              library.scanForceModifiedTime,
+              library.oneshotsDirectory,
+              library.scanCbx,
+              library.scanPdf,
+              library.scanEpub,
+              library.scanDirectoryExclusions,
+            )
+          } else {
+            fileSystemScanner.scanRootFolder(
+              Paths.get(root.toURI()),
+              library.scanForceModifiedTime,
+              library.oneshotsDirectory,
+              library.scanCbx,
+              library.scanPdf,
+              library.scanEpub,
+              library.scanDirectoryExclusions,
+              scanLimitUsage.remaining,
+              countBook = { book ->
+                existingBooksByUrl[book.url]?.let { existingBook ->
+                  book.fileLastModified.notEquals(existingBook.fileLastModified)
+                } ?: true
+              },
+              consumeCountedBook = {
+                komgaSettingsProvider.tryConsumeLibraryScanFile()
+              },
+            )
+          }
         } catch (e: DirectoryNotFoundException) {
           library.copy(unavailableDate = LocalDateTime.now()).let {
             libraryRepository.update(it)
@@ -91,6 +143,7 @@ class LibraryContentLifecycle(
           }
           throw e
         }
+      fileScanResult = scanResult
 
       if (library.unavailableDate != null) {
         library.copy(unavailableDate = null).let {
@@ -107,7 +160,9 @@ class LibraryContentLifecycle(
           }.toMap()
 
       // delete series that don't exist anymore
-      if (scannedSeries.isEmpty()) {
+      if (scanResult.limited) {
+        logger.info { "Scan reached the daily file limit, skipping missing series and book cleanup for library: ${library.name}" }
+      } else if (scannedSeries.isEmpty()) {
         logger.info { "Scan returned no series, soft deleting all existing series" }
         val series = seriesRepository.findAllByLibraryId(library.id)
         seriesLifecycle.softDeleteMany(series)
@@ -123,18 +178,22 @@ class LibraryContentLifecycle(
 
       // delete books that don't exist anymore. We need to do this now, so trash bin can work
       val seriesToSortAndRefresh =
-        scannedSeries.values.flatten().map { it.url }.let { urls ->
-          val books = bookRepository.findAllNotDeletedByLibraryIdAndUrlNotIn(library.id, urls)
-          if (books.isNotEmpty()) {
-            logger.info { "Soft deleting books not on disk anymore: $books" }
-            bookLifecycle.softDeleteMany(books)
-            books
-              .map { it.seriesId }
-              .distinct()
-              .mapNotNull { seriesRepository.findByIdOrNull(it) }
-              .toMutableList()
-          } else {
-            mutableListOf()
+        if (scanResult.limited) {
+          mutableListOf()
+        } else {
+          scannedSeries.values.flatten().map { it.url }.let { urls ->
+            val books = bookRepository.findAllNotDeletedByLibraryIdAndUrlNotIn(library.id, urls)
+            if (books.isNotEmpty()) {
+              logger.info { "Soft deleting books not on disk anymore: $books" }
+              bookLifecycle.softDeleteMany(books)
+              books
+                .map { it.seriesId }
+                .distinct()
+                .mapNotNull { seriesRepository.findByIdOrNull(it) }
+                .toMutableList()
+            } else {
+              mutableListOf()
+            }
           }
         }
       // we store the url of all the series that had deleted books
@@ -250,21 +309,30 @@ class LibraryContentLifecycle(
       }
 
       // cleanup sidecars that don't exist anymore
-      scanResult.sidecars.map { it.url }.let { newSidecarsUrls ->
-        existingSidecars
-          .filterNot { existing -> newSidecarsUrls.contains(existing.url) }
-          .let { sidecars ->
-            sidecarRepository.deleteByLibraryIdAndUrls(library.id, sidecars.map { it.url })
-          }
+      if (scanResult.limited) {
+        logger.info { "Scan reached the daily file limit, skipping sidecar cleanup for library: ${library.name}" }
+      } else {
+        scanResult.sidecars.map { it.url }.let { newSidecarsUrls ->
+          existingSidecars
+            .filterNot { existing -> newSidecarsUrls.contains(existing.url) }
+            .let { sidecars ->
+              sidecarRepository.deleteByLibraryIdAndUrls(library.id, sidecars.map { it.url })
+            }
+        }
       }
 
-      if (library.emptyTrashAfterScan)
+      if (scanResult.limited) {
+        logger.info { "Scan reached the daily file limit, skipping full-scan cleanup for library: ${library.name}" }
+      } else if (library.emptyTrashAfterScan) {
         emptyTrash(library)
-      else
+      } else {
         cleanupEmptySets()
+      }
     }.also { logger.info { "Library updated in $it" } }
 
     eventPublisher.publishEvent(DomainEvent.LibraryScanned(library))
+    val scanResult = checkNotNull(fileScanResult)
+    return LibraryScanSummary(scanResult.limited, scanResult.scannedBookCount, scanResult.countedBookCount)
   }
 
   /**

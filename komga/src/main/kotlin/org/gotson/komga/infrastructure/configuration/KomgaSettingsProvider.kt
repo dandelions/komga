@@ -5,6 +5,8 @@ import org.gotson.komga.domain.model.ThumbnailSize
 import org.gotson.komga.infrastructure.jooq.main.ServerSettingsDao
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Service
+import java.time.LocalDate
+import java.time.ZoneId
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.days
 
@@ -65,6 +67,68 @@ class KomgaSettingsProvider(
       eventPublisher.publishEvent(SettingChangedEvent.TaskPoolSize)
     }
 
+  var libraryScanDailyFileLimit: Int? =
+    serverSettingsDao.getSettingByKey(Settings.LIBRARY_SCAN_DAILY_FILE_LIMIT.name, Int::class.java)
+    set(value) {
+      if (value != null) {
+        serverSettingsDao.saveSetting(Settings.LIBRARY_SCAN_DAILY_FILE_LIMIT.name, value)
+      } else {
+        serverSettingsDao.deleteSetting(Settings.LIBRARY_SCAN_DAILY_FILE_LIMIT.name)
+        resetLibraryScanDailyFileLimitUsage()
+      }
+      field = value
+    }
+
+  private var libraryScanDailyFileLimitDate: LocalDate? =
+    serverSettingsDao.getSettingByKey(Settings.LIBRARY_SCAN_DAILY_FILE_LIMIT_DATE.name, String::class.java)?.let(LocalDate::parse)
+
+  private var libraryScanDailyFileLimitCount: Int =
+    serverSettingsDao.getSettingByKey(Settings.LIBRARY_SCAN_DAILY_FILE_LIMIT_COUNT.name, Int::class.java) ?: 0
+
+  @Synchronized
+  fun libraryScanDailyFileLimitUsage(): LibraryScanDailyFileLimitUsage? {
+    val limit = libraryScanDailyFileLimit ?: return null
+    val today = LocalDate.now(ZoneId.systemDefault())
+    resetLibraryScanDailyFileLimitUsageIfNeeded(today)
+    return LibraryScanDailyFileLimitUsage(today, limit, libraryScanDailyFileLimitCount.coerceIn(0, limit))
+  }
+
+  @Synchronized
+  fun tryConsumeLibraryScanFile(): Boolean {
+    val limit = libraryScanDailyFileLimit ?: return true
+    val today = LocalDate.now(ZoneId.systemDefault())
+    resetLibraryScanDailyFileLimitUsageIfNeeded(today)
+
+    if (libraryScanDailyFileLimitCount >= limit) return false
+
+    libraryScanDailyFileLimitCount += 1
+    saveLibraryScanDailyFileLimitUsage(today, libraryScanDailyFileLimitCount)
+    return true
+  }
+
+  private fun resetLibraryScanDailyFileLimitUsageIfNeeded(today: LocalDate) {
+    if (libraryScanDailyFileLimitDate?.equals(today) != true) {
+      saveLibraryScanDailyFileLimitUsage(today, 0)
+    }
+  }
+
+  private fun saveLibraryScanDailyFileLimitUsage(
+    date: LocalDate,
+    count: Int,
+  ) {
+    libraryScanDailyFileLimitDate = date
+    libraryScanDailyFileLimitCount = count
+    serverSettingsDao.saveSetting(Settings.LIBRARY_SCAN_DAILY_FILE_LIMIT_DATE.name, date.toString())
+    serverSettingsDao.saveSetting(Settings.LIBRARY_SCAN_DAILY_FILE_LIMIT_COUNT.name, count)
+  }
+
+  private fun resetLibraryScanDailyFileLimitUsage() {
+    libraryScanDailyFileLimitDate = null
+    libraryScanDailyFileLimitCount = 0
+    serverSettingsDao.deleteSetting(Settings.LIBRARY_SCAN_DAILY_FILE_LIMIT_DATE.name)
+    serverSettingsDao.deleteSetting(Settings.LIBRARY_SCAN_DAILY_FILE_LIMIT_COUNT.name)
+  }
+
   var serverPort: Int? =
     serverSettingsDao.getSettingByKey(Settings.SERVER_PORT.name, Int::class.java)
     set(value) {
@@ -121,9 +185,21 @@ private enum class Settings {
   REMEMBER_ME_DURATION,
   THUMBNAIL_SIZE,
   TASK_POOL_SIZE,
+  LIBRARY_SCAN_DAILY_FILE_LIMIT,
+  LIBRARY_SCAN_DAILY_FILE_LIMIT_DATE,
+  LIBRARY_SCAN_DAILY_FILE_LIMIT_COUNT,
   SERVER_PORT,
   SERVER_CONTEXT_PATH,
   KOBO_PROXY,
   KOBO_PORT,
   KEPUBIFY_PATH,
+}
+
+data class LibraryScanDailyFileLimitUsage(
+  val date: LocalDate,
+  val limit: Int,
+  val used: Int,
+) {
+  val remaining: Int = (limit - used).coerceAtLeast(0)
+  val exhausted: Boolean = remaining == 0
 }

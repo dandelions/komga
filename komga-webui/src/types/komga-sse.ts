@@ -60,7 +60,15 @@ export interface SessionExpiredDto {
 
 export interface TaskQueueSseDto {
   count: number,
-  countByType: { [key: string]: number }
+  countByType: { [key: string]: number },
+  libraryScanDailyFileLimitUsage?: LibraryScanDailyFileLimitUsageSseDto | null,
+}
+
+export interface LibraryScanDailyFileLimitUsageSseDto {
+  date: string,
+  limit: number,
+  used: number,
+  remaining: number,
 }
 
 export interface BookImportSseDto {

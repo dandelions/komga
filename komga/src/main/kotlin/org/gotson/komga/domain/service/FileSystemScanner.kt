@@ -53,6 +53,9 @@ class FileSystemScanner(
     scanPdf: Boolean = true,
     scanEpub: Boolean = true,
     directoryExclusions: Set<String> = emptySet(),
+    maxCountedBooks: Int? = null,
+    consumeCountedBook: (Book) -> Boolean = { true },
+    countBook: (Book) -> Boolean = { true },
   ): ScanResult {
     val scanForExtensions =
       buildList {
@@ -64,12 +67,15 @@ class FileSystemScanner(
     logger.info { "Scan for extensions: $scanForExtensions" }
     logger.info { "Excluded directory patterns: $directoryExclusions" }
     logger.info { "Force directory modified time: $forceDirectoryModifiedTime" }
+    logger.info { "Max counted books: ${maxCountedBooks ?: "unlimited"}" }
 
     if (!(Files.isDirectory(root) && Files.isReadable(root)))
       throw DirectoryNotFoundException("Folder is not accessible: $root", "ERR_1016")
 
     val scannedSeries = mutableMapOf<Series, List<Book>>()
     val scannedSidecars = mutableListOf<Sidecar>()
+    var countedBooks = 0
+    var limitReached = false
 
     measureTime {
       // path is the series directory
@@ -89,6 +95,8 @@ class FileSystemScanner(
             attrs: BasicFileAttributes,
           ): FileVisitResult {
             logger.trace { "preVisit: $dir (regularFile:${attrs.isRegularFile}, directory:${attrs.isDirectory}, symbolicLink:${attrs.isSymbolicLink}, other:${attrs.isOther})" }
+            if (limitReached) return FileVisitResult.SKIP_SUBTREE
+
             if (dir.name.startsWith(".") ||
               directoryExclusions.any { exclude ->
                 dir.pathString.contains(exclude, true)
@@ -111,11 +119,22 @@ class FileSystemScanner(
             attrs: BasicFileAttributes,
           ): FileVisitResult {
             logger.trace { "visitFile: $file (regularFile:${attrs.isRegularFile}, directory:${attrs.isDirectory}, symbolicLink:${attrs.isSymbolicLink}, other:${attrs.isOther})" }
+            if (limitReached) return FileVisitResult.SKIP_SIBLINGS
+
             if (!attrs.isSymbolicLink && !attrs.isDirectory) {
               if (scanForExtensions.contains(file.extension.lowercase()) &&
                 !file.name.startsWith(".")
               ) {
                 val book = pathToBook(file, attrs)
+                if (maxCountedBooks != null && countBook(book)) {
+                  if (countedBooks >= maxCountedBooks || !consumeCountedBook(book)) {
+                    limitReached = true
+                    logger.info { "Daily scan file limit reached while scanning: $file" }
+                    return FileVisitResult.SKIP_SIBLINGS
+                  }
+                  countedBooks++
+                }
+
                 file.parent.let { key ->
                   pathToBooks.merge(key, mutableListOf(book)) { prev, one -> prev.union(one).toMutableList() }
                 }
@@ -203,10 +222,11 @@ class FileSystemScanner(
       )
     }.also {
       val countOfBooks = scannedSeries.values.sumOf { it.size }
-      logger.info { "Scanned ${scannedSeries.size} series, $countOfBooks books, and ${scannedSidecars.size} sidecars in $it" }
+      val countOfCountedBooks = if (maxCountedBooks != null) countedBooks else countOfBooks
+      logger.info { "Scanned ${scannedSeries.size} series, $countOfBooks books, ${scannedSidecars.size} sidecars, and $countOfCountedBooks counted books in $it" }
     }
 
-    return ScanResult(scannedSeries, scannedSidecars)
+    return ScanResult(scannedSeries, scannedSidecars, countedBookCount = if (maxCountedBooks != null) countedBooks else scannedSeries.values.sumOf { it.size }, limited = limitReached)
   }
 
   fun scanFile(path: Path): Book? {

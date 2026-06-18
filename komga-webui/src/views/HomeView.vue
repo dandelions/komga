@@ -47,6 +47,13 @@
                :key="taskType"
           >{{ taskType }}: {{ taskCountByType[taskType] }}
           </div>
+          <template v-if="libraryScanDailyFileLimitUsage">
+            <v-divider class="my-2"/>
+            <div class="mb-1">{{ $t('common.library_scan_daily_file_limit') }}</div>
+            <div>
+              {{ $t('common.library_scan_daily_file_limit_usage', libraryScanDailyFileLimitUsage) }}
+            </div>
+          </template>
         </v-tooltip>
       </v-list-item>
 
@@ -365,6 +372,7 @@ import {BookSearch, SearchConditionAnyOfBook, SearchConditionMediaStatus, Search
 import LibrariesActionsMenu from '@/components/menus/LibrariesActionsMenu.vue'
 import ReorderLibraries from '@/components/ReorderLibraries.vue'
 import LibraryDrawerItem from '@/components/LibraryDrawerItem.vue'
+import {LibraryScanDailyFileLimitUsageSseDto} from '@/types/komga-sse'
 
 interface LibraryNavigationNode {
   library: LibraryDto,
@@ -428,6 +436,9 @@ export default Vue.extend({
     },
     taskCountByType(): { [key: string]: number } {
       return this.$store.state.komgaSse.taskCountByType
+    },
+    libraryScanDailyFileLimitUsage(): LibraryScanDailyFileLimitUsageSseDto | undefined {
+      return this.$store.state.komgaSse.libraryScanDailyFileLimitUsage
     },
     libraries(): LibraryDto[] {
       return this.$store.getters.getLibraries

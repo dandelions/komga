@@ -17,6 +17,7 @@ import org.gotson.komga.domain.model.KomgaUser
 import org.gotson.komga.domain.model.MarkSelectedPreference
 import org.gotson.komga.domain.model.Media
 import org.gotson.komga.domain.model.ReadList
+import org.gotson.komga.domain.model.ScanResult
 import org.gotson.komga.domain.model.Series
 import org.gotson.komga.domain.model.SeriesCollection
 import org.gotson.komga.domain.model.ThumbnailBook
@@ -169,6 +170,59 @@ class LibraryContentLifecycleTest(
       assertThat(allBooks).hasSize(2)
       assertThat(allBooks.filter { it.deletedDate == null }.map { it.name }).containsExactly("book1")
       assertThat(allBooks.filter { it.deletedDate != null }.map { it.name }).containsExactly("book2")
+    }
+
+    @Test
+    fun `given scan reaches daily file limit when not all files are visited then missing books are not deleted`() {
+      // given
+      val library = makeLibrary()
+      libraryRepository.insert(library)
+
+      every { mockScanner.scanRootFolder(any()) }
+        .returnsMany(
+          mapOf(makeSeries(name = "series") to listOf(makeBook("book1"), makeBook("book2"))).toScanResult(),
+          ScanResult(
+            mapOf(makeSeries(name = "series") to listOf(makeBook("book1"))),
+            emptyList(),
+            limited = true,
+          ),
+        )
+      libraryContentLifecycle.scanRootFolder(library)
+
+      // when
+      val scanSummary = libraryContentLifecycle.scanRootFolder(library)
+
+      // then
+      val allBooks = bookRepository.findAll().sortedBy { it.number }
+
+      assertThat(scanSummary.limited).isTrue
+      assertThat(allBooks).hasSize(2)
+      assertThat(allBooks.filter { it.deletedDate == null }.map { it.name }).containsExactly("book1", "book2")
+    }
+
+    @Test
+    fun `given scan reaches daily file limit when files are visited then scanned books are persisted`() {
+      // given
+      val library = makeLibrary()
+      libraryRepository.insert(library)
+
+      every { mockScanner.scanRootFolder(any()) } returns
+        ScanResult(
+          mapOf(makeSeries(name = "series") to listOf(makeBook("book1"))),
+          emptyList(),
+          countedBookCount = 1,
+          limited = true,
+        )
+
+      // when
+      val scanSummary = libraryContentLifecycle.scanRootFolder(library)
+
+      // then
+      val allBooks = bookRepository.findAll()
+
+      assertThat(scanSummary.limited).isTrue
+      assertThat(scanSummary.countedBookCount).isEqualTo(1)
+      assertThat(allBooks.map { it.name }).containsExactly("book1")
     }
 
     @Test

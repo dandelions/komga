@@ -45,6 +45,7 @@ class SettingsController(
       komgaSettingsProvider.rememberMeDuration.inWholeDays,
       komgaSettingsProvider.thumbnailSize.toDto(),
       komgaSettingsProvider.taskPoolSize,
+      komgaSettingsProvider.libraryScanDailyFileLimit,
       SettingMultiSource(configServerPort, komgaSettingsProvider.serverPort, serverSettings.effectiveServerPort),
       SettingMultiSource(configServerContextPath, komgaSettingsProvider.serverContextPath, serverSettings.effectiveServletContextPath),
       komgaSettingsProvider.koboProxy,
@@ -66,6 +67,7 @@ class SettingsController(
     if (newSettings.renewRememberMeKey == true) komgaSettingsProvider.renewRememberMeKey()
     newSettings.thumbnailSize?.let { komgaSettingsProvider.thumbnailSize = it.toDomain() }
     newSettings.taskPoolSize?.let { komgaSettingsProvider.taskPoolSize = it }
+    if (newSettings.isSet("libraryScanDailyFileLimit")) komgaSettingsProvider.libraryScanDailyFileLimit = newSettings.libraryScanDailyFileLimit
 
     if (newSettings.isSet("serverPort")) komgaSettingsProvider.serverPort = newSettings.serverPort
     if (newSettings.isSet("serverContextPath")) komgaSettingsProvider.serverContextPath = newSettings.serverContextPath
