@@ -65,16 +65,18 @@ class TaskProcessor(
   }
 
   private fun takeAndProcess() {
-    logger.debug { "Try to process first available task" }
-    val task = tasksRepository.takeFirst()
-    if (task != null) {
+    while (true) {
+      logger.debug { "Try to process first available task" }
+      val task =
+        tasksRepository.takeFirst() ?: run {
+          logger.debug { "No available task found" }
+          return
+        }
+
       logger.debug { "Found task to process: $task" }
       taskHandler.handleTask(task)
       logger.debug { "Task processed, remove it from the queue: $task" }
       tasksRepository.delete(task.uniqueId)
-      processAvailableTask()
-    } else {
-      logger.debug { "No available task found" }
     }
   }
 }
