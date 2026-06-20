@@ -6,7 +6,6 @@ import org.gotson.komga.infrastructure.jooq.main.ServerSettingsDao
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Service
 import java.time.LocalDate
-import java.time.ZoneId
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.days
 
@@ -88,7 +87,7 @@ class KomgaSettingsProvider(
   @Synchronized
   fun libraryScanDailyFileLimitUsage(): LibraryScanDailyFileLimitUsage? {
     val limit = libraryScanDailyFileLimit ?: return null
-    val today = LocalDate.now(ZoneId.systemDefault())
+    val today = LibraryScanDailyFileLimitTime.currentDate()
     resetLibraryScanDailyFileLimitUsageIfNeeded(today)
     return LibraryScanDailyFileLimitUsage(today, limit, libraryScanDailyFileLimitCount.coerceIn(0, limit))
   }
@@ -96,7 +95,7 @@ class KomgaSettingsProvider(
   @Synchronized
   fun tryConsumeLibraryScanFile(): Boolean {
     val limit = libraryScanDailyFileLimit ?: return true
-    val today = LocalDate.now(ZoneId.systemDefault())
+    val today = LibraryScanDailyFileLimitTime.currentDate()
     resetLibraryScanDailyFileLimitUsageIfNeeded(today)
 
     if (libraryScanDailyFileLimitCount >= limit) return false

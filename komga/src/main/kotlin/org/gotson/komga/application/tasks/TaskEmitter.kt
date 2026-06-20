@@ -12,14 +12,13 @@ import org.gotson.komga.domain.model.SearchContext
 import org.gotson.komga.domain.model.SearchOperator
 import org.gotson.komga.domain.persistence.BookRepository
 import org.gotson.komga.domain.service.BookConverter
+import org.gotson.komga.infrastructure.configuration.LibraryScanDailyFileLimitTime
 import org.gotson.komga.infrastructure.jooq.UnpagedSorted
 import org.gotson.komga.infrastructure.search.LuceneEntity
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
-import java.time.LocalDate
 import java.time.LocalDateTime
-import java.time.ZoneId
 
 private val logger = KotlinLogging.logger {}
 
@@ -43,12 +42,8 @@ class TaskEmitter(
     scanDeep: Boolean = false,
     priority: Int = DEFAULT_PRIORITY,
   ) {
-    val tomorrow = LocalDate.now(ZoneId.systemDefault()).plusDays(1)
-    val availableAt =
-      tomorrow
-        .atStartOfDay(ZoneId.systemDefault())
-        .withZoneSameInstant(ZoneId.of("Z"))
-        .toLocalDateTime()
+    val tomorrow = LibraryScanDailyFileLimitTime.nextResetDate()
+    val availableAt = LibraryScanDailyFileLimitTime.nextResetAtUtc()
 
     submitTask(Task.ScanLibrary(libraryId, scanDeep, priority, continuationDate = tomorrow.toString()), availableAt)
   }
