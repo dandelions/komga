@@ -9,6 +9,7 @@ export const persistedModule: Module<any, any> = {
       paged: {
         scale: '',
         pageLayout: '',
+        leftNavigationAction: '',
       },
       continuous: {
         scale: '',
@@ -124,6 +125,9 @@ export const persistedModule: Module<any, any> = {
     },
     setWebreaderPagedPageLayout(state, val) {
       state.webreader.paged.pageLayout = val
+    },
+    setWebreaderPagedLeftNavigationAction(state, val) {
+      state.webreader.paged.leftNavigationAction = val
     },
     setWebreaderContinuousScale(state, val) {
       state.webreader.continuous.scale = val

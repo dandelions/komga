@@ -19,5 +19,10 @@ export enum PagedReaderLayout {
   DOUBLE_NO_COVER = 'bookreader.paged_reader_layout.double_no_cover'
 }
 
+export enum PagedNavigationAction {
+  PREVIOUS = 'previous',
+  NEXT = 'next'
+}
+
 export const PaddingPercentage: number[] = [0, 5, 10, 15, 20, 25, 30, 35, 40]
 export const MarginValues: number[] = [0, 5, 10, 15]

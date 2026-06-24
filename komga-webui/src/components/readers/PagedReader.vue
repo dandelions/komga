@@ -2,8 +2,8 @@
   <div
     class="paged-reader full-height"
     v-touch="{
-               left: () => {if(swipe) {turnRight()}},
-               right: () => {if(swipe) {turnLeft()}},
+               left: () => {if(swipe) {navigateLeftSide()}},
+               right: () => {if(swipe) {navigateRightSide()}},
                up: () => {if(swipe) {verticalNext()}},
                down: () => {if(swipe) {verticalPrev()}}
              }"
@@ -54,14 +54,14 @@
 
     <!--  clickable zone: left  -->
     <div v-if="!vertical"
-         @click="turnLeft()"
+         @click="navigateLeftSide()"
          class="left-quarter"
          style="z-index: 1;"
     />
 
     <!--  clickable zone: right  -->
     <div v-if="!vertical"
-         @click="turnRight()"
+         @click="navigateRightSide()"
          class="right-quarter"
          style="z-index: 1;"
     />
@@ -91,7 +91,7 @@
 <script lang="ts">
 import Vue from 'vue'
 import {ReadingDirection} from '@/types/enum-books'
-import {PagedReaderLayout, ScaleType} from '@/types/enum-reader'
+import {PagedNavigationAction, PagedReaderLayout, ScaleType} from '@/types/enum-reader'
 import {shortcutsLTR, shortcutsRTL, shortcutsVertical} from '@/functions/shortcuts/paged-reader'
 import {PageDtoWithUrl} from '@/types/komga-books'
 import {buildSpreads} from '@/functions/book-spreads'
@@ -192,6 +192,10 @@ export default Vue.extend({
     activeCropRegion: {
       type: Number,
       default: 0,
+    },
+    leftNavigationAction: {
+      type: String as () => PagedNavigationAction,
+      default: PagedNavigationAction.PREVIOUS,
     },
   },
   watch: {
@@ -729,6 +733,14 @@ export default Vue.extend({
     turnLeft() {
       if (!this.vertical)
         this.flipDirection ? this.next() : this.prev()
+    },
+    navigateLeftSide() {
+      if (this.vertical) return
+      this.leftNavigationAction === PagedNavigationAction.NEXT ? this.next() : this.prev()
+    },
+    navigateRightSide() {
+      if (this.vertical) return
+      this.leftNavigationAction === PagedNavigationAction.NEXT ? this.prev() : this.next()
     },
     verticalPrev() {
       if (this.vertical) this.prev()

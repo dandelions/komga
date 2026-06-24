@@ -342,6 +342,7 @@
         :scale="scale"
         :animations="animations"
         :swipe="readerSwipeEnabled"
+        :left-navigation-action="pagedLeftNavigationAction"
         :image-filter="normalReaderImageFilter"
         :skew-correction="readerSkewCorrection"
         :contrast-enhancement="readerContrastEnhancement"
@@ -585,6 +586,14 @@
                 />
               </v-list-item>
 
+              <v-list-item v-if="!activeReflowMode">
+                <settings-select
+                  :items="pagedLeftNavigationActions"
+                  v-model="pagedLeftNavigationAction"
+                  label="左侧点击/左滑"
+                />
+              </v-list-item>
+
               <template v-if="isPdf">
                 <v-subheader class="font-weight-black text-h6">Reflow</v-subheader>
                 <v-list-item>
@@ -802,7 +811,7 @@ import ContinuousReader from '@/components/readers/ContinuousReader.vue'
 import ReflowedPage from '@/components/readers/ReflowedPage.vue'
 import K2ReflowedPage from '@/components/readers/K2ReflowedPage.vue'
 import TocList from '@/components/TocList.vue'
-import {ContinuousScaleType, MarginValues, PaddingPercentage, PagedReaderLayout, ScaleType} from '@/types/enum-reader'
+import {ContinuousScaleType, MarginValues, PaddingPercentage, PagedNavigationAction, PagedReaderLayout, ScaleType} from '@/types/enum-reader'
 import {
   shortcutsLTR,
   shortcutsRTL,
@@ -940,7 +949,7 @@ export default Vue.extend({
       reflowCropMode: false,
       reflowSettingsBookId: '',
       loadingReflowSettings: false,
-      saveReflowSettingsServerDebounced: undefined as undefined | (() => void),
+      saveReflowSettingsServerDebounced: undefined as undefined | ((bookId?: string, settings?: Record<string, any>) => void),
       readerImageSettingsBookId: '',
       loadingReaderImageSettings: false,
       saveReaderImageSettingsServerDebounced: undefined as undefined | ((bookId?: string, settings?: Record<string, any>) => void),
@@ -951,6 +960,7 @@ export default Vue.extend({
       goToPage: 1,
       settings: {
         pageLayout: PagedReaderLayout.SINGLE_PAGE,
+        leftNavigationAction: PagedNavigationAction.PREVIOUS,
         swipe: true,
         alwaysFullscreen: false,
         animations: true,
@@ -996,6 +1006,10 @@ export default Vue.extend({
         text: this.$i18n.t(x),
         value: x,
       })),
+      pagedLeftNavigationActions: [
+        {text: '上一页', value: PagedNavigationAction.PREVIOUS},
+        {text: '下一页', value: PagedNavigationAction.NEXT},
+      ],
       reflowColumnCounts: [
         {text: '1', value: 1},
         {text: '2', value: 2},
@@ -1033,7 +1047,7 @@ export default Vue.extend({
       if (isSupported) this.supportedMediaTypes.push('image/avif')
     })
     this.shortcuts = this.$_.keyBy([...shortcutsSettings, ...shortcutsSettingsPaged, ...shortcutsSettingsContinuous, ...shortcutsMenus, ...shortcutsAll], x => x.key)
-    this.saveReflowSettingsServerDebounced = debounce(() => this.saveReflowSettingsServer(), 700)
+    this.saveReflowSettingsServerDebounced = debounce((bookId?: string, settings?: Record<string, any>) => this.saveReflowSettingsServer(bookId, settings), 700)
     this.saveReaderImageSettingsServerDebounced = debounce((bookId?: string, settings?: Record<string, any>) => this.saveReaderImageSettingsServer(bookId, settings), 700)
     window.addEventListener('keydown', this.keyPressed)
     if (screenfull.isEnabled) screenfull.on('change', this.fullscreenChanged)
@@ -1046,6 +1060,7 @@ export default Vue.extend({
     this.readingDirection = this.$store.state.persistedState.webreader.readingDirection
     this.animations = this.$store.state.persistedState.webreader.animations
     this.pageLayout = this.$store.state.persistedState.webreader.paged.pageLayout
+    this.pagedLeftNavigationAction = this.$store.state.persistedState.webreader.paged.leftNavigationAction
     this.swipe = this.$store.state.persistedState.webreader.swipe
     this.alwaysFullscreen = this.$store.state.persistedState.webreader.alwaysFullscreen
     this.scale = this.$store.state.persistedState.webreader.paged.scale
@@ -1408,6 +1423,20 @@ export default Vue.extend({
         }
       },
     },
+    pagedLeftNavigationAction: {
+      get: function (): PagedNavigationAction {
+        return Object.values(PagedNavigationAction).includes(this.settings.leftNavigationAction)
+          ? this.settings.leftNavigationAction
+          : PagedNavigationAction.PREVIOUS
+      },
+      set: function (leftNavigationAction: PagedNavigationAction): void {
+        const normalized = Object.values(PagedNavigationAction).includes(leftNavigationAction)
+          ? leftNavigationAction
+          : PagedNavigationAction.PREVIOUS
+        this.settings.leftNavigationAction = normalized
+        this.$store.commit('setWebreaderPagedLeftNavigationAction', normalized)
+      },
+    },
     swipe: {
       get: function (): boolean {
         return this.settings.swipe
@@ -1443,9 +1472,12 @@ export default Vue.extend({
         const defaults = defaultReaderImageSettings()
         let loaded = {} as Record<string, any>
         const serverSettings = this.readServerReaderImageSettings()[bookId]
-        const raw = serverSettings ? JSON.stringify(serverSettings) : window.localStorage.getItem(this.readerImageSettingsStorageKey(bookId))
+        const localRaw = window.localStorage.getItem(this.readerImageSettingsStorageKey(bookId))
+        const raw = serverSettings ? JSON.stringify(serverSettings) : localRaw
         if (raw) loaded = JSON.parse(raw)
-        this.applyReaderImageSettings(this.normalizedReaderImageSettings({...defaults, ...loaded}))
+        const normalized = this.normalizedReaderImageSettings({...defaults, ...loaded})
+        this.applyReaderImageSettings(normalized)
+        if (!serverSettings && localRaw) this.saveReaderImageSettingsServerDebounced?.(bookId, normalized)
       } catch (e) {
         this.applyReaderImageSettings(defaultReaderImageSettings())
         this.$debug('Unable to load reader image settings', e)
@@ -2115,9 +2147,11 @@ export default Vue.extend({
         const defaults = defaultReflowSettings()
         let loaded = {} as Record<string, any>
         const serverSettings = this.readServerReflowSettings()[bookId]
-        const raw = serverSettings ? JSON.stringify(serverSettings) : window.localStorage.getItem(this.reflowSettingsStorageKey(bookId))
+        const localRaw = window.localStorage.getItem(this.reflowSettingsStorageKey(bookId))
+        const raw = serverSettings ? JSON.stringify(serverSettings) : localRaw
         if (raw) loaded = JSON.parse(raw)
         this.reflowSettings = this.normalizedReflowSettings({...defaults, ...loaded})
+        if (!serverSettings && localRaw) this.saveReflowSettingsServerDebounced?.(bookId, this.reflowSettings)
       } catch (e) {
         this.reflowSettings = defaultReflowSettings()
         this.$debug('Unable to load PDF reflow settings', e)
@@ -2127,19 +2161,19 @@ export default Vue.extend({
     },
     saveReflowSettings() {
       if (!this.bookId) return
+      const settings = this.normalizedReflowSettings(this.reflowSettings)
       try {
-        window.localStorage.setItem(this.reflowSettingsStorageKey(), JSON.stringify(this.reflowSettings))
+        window.localStorage.setItem(this.reflowSettingsStorageKey(), JSON.stringify(settings))
       } catch (e) {
         this.$debug('Unable to save PDF reflow settings', e)
       }
-      this.saveReflowSettingsServerDebounced?.()
+      this.saveReflowSettingsServerDebounced?.(this.bookId, settings)
     },
-    async saveReflowSettingsServer() {
-      const bookId = this.reflowSettingsBookId || this.bookId
+    async saveReflowSettingsServer(bookId: string = this.reflowSettingsBookId || this.bookId, settings: Record<string, any> = this.normalizedReflowSettings(this.reflowSettings)) {
       if (!bookId) return
       try {
         const all = this.readServerReflowSettings()
-        all[bookId] = this.normalizedReflowSettings(this.reflowSettings)
+        all[bookId] = this.normalizedReflowSettings(settings)
         const newSettings = {} as Record<string, ClientSettingUserUpdateDto>
         newSettings[CLIENT_SETTING.WEBUI_PDF_REFLOW_SETTINGS] = {
           value: JSON.stringify(all),
