@@ -781,6 +781,7 @@ export default Vue.extend({
         if (!context) throw new Error('Canvas is unavailable')
         context.drawImage(image, 0, 0)
         this.pageBackground = this.detectPageBackground(context, canvas.width, canvas.height)
+        this.enhanceSourceCanvas(context, canvas.width, canvas.height)
         const skewCorrection = this.skewCorrection
         const deskewedCanvas = skewCorrection === 0 ? canvas : this.skewCorrectedCanvas(canvas, skewCorrection)
         const cropRois = this.reflowCropRois()
@@ -1241,9 +1242,13 @@ export default Vue.extend({
       context.fillStyle = this.pageBackground || '#fff'
       context.fillRect(0, 0, width, height)
     },
+    enhanceSourceCanvas(context: CanvasRenderingContext2D, width: number, height: number) {
+      if (!this.contrastEnhancement) return
+      enhanceTextContrast(context, width, height, {enabled: true, nightDisplay: this.nightDisplay})
+      this.pageBackground = this.nightDisplay ? '#000' : '#fff'
+    },
     finishWordSlice(context: CanvasRenderingContext2D, width: number, height: number) {
       if (this.contrastEnhancement) {
-        enhanceTextContrast(context, width, height, {enabled: true, nightDisplay: this.nightDisplay})
         return
       }
       if (!this.nightDisplay) return
