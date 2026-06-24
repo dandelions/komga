@@ -42,6 +42,7 @@ import Vue from 'vue'
 import {ContinuousScaleType} from '@/types/enum-reader'
 import {PageDtoWithUrl} from '@/types/komga-books'
 import {throttle} from 'lodash'
+import {enhanceTextContrast} from '@/functions/image-enhancement'
 
 type CropRegion = {
   x: number,
@@ -104,6 +105,10 @@ export default Vue.extend({
       type: Number,
       default: 0,
     },
+    contrastEnhancement: {
+      type: Boolean,
+      default: false,
+    },
     cropRegionsByParity: {
       type: Object as () => CropRegionsByParity,
       default: () => ({enabled: false}),
@@ -129,6 +134,17 @@ export default Vue.extend({
     skewCorrection() {
       this.revokeDeskewedPageUrls()
       this.$nextTick(this.ensureLoadedDeskewedPageUrls)
+    },
+    contrastEnhancement() {
+      this.revokeDeskewedPageUrls()
+      this.$nextTick(this.ensureLoadedDeskewedPageUrls)
+    },
+    pageDisplayUrls: {
+      handler() {
+        this.revokeDeskewedPageUrls()
+        this.$nextTick(this.ensureLoadedDeskewedPageUrls)
+      },
+      deep: true,
     },
     page: {
       handler(val) {
@@ -222,7 +238,7 @@ export default Vue.extend({
       }
     },
     pageDisplayUrl(page: PageDtoWithUrl): string {
-      return this.pageDisplayUrls[page.number] || this.deskewedPageUrls[page.number] || page.url
+      return this.deskewedPageUrls[page.number] || this.pageDisplayUrls[page.number] || page.url
     },
     pageStyle(page: PageDtoWithUrl, index: number): object {
       const crop = this.effectiveCropRegion(page.number)
@@ -237,15 +253,19 @@ export default Vue.extend({
     imageTransform(crop: CropRegion | undefined): string | undefined {
       const transforms = [] as string[]
       if (crop) {
-        const scaleX = 100 / crop.w
-        const scaleY = 100 / crop.h
-        const scale = Math.min(2.5, Math.max(scaleX, scaleY))
+        const scale = this.cropTransformScale(crop)
         const translateX = (50 - crop.x - crop.w / 2) * scale
         const translateY = (50 - crop.y - crop.h / 2) * scale
         transforms.push(`translate(${translateX.toFixed(2)}%, ${translateY.toFixed(2)}%)`)
         transforms.push(`scale(${scale.toFixed(3)})`)
       }
       return transforms.join(' ') || undefined
+    },
+    cropTransformScale(crop: CropRegion): number {
+      const scaleX = 100 / crop.w
+      const scaleY = 100 / crop.h
+      const scale = this.scale === ContinuousScaleType.WIDTH ? scaleX : Math.max(scaleX, scaleY)
+      return Math.min(2.5, scale)
     },
     cropClipPath(crop: CropRegion | undefined): string | undefined {
       if (!crop) return undefined
@@ -276,21 +296,41 @@ export default Vue.extend({
     },
     async ensureDeskewedPageUrl(page: PageDtoWithUrl, event: Event) {
       const angle = this.skewCorrection || 0
-      if (!angle || this.pageDisplayUrls[page.number] || this.deskewedPageUrls[page.number] || this.deskewedPagePending[page.number]) return
+      const contrastEnhancement = this.contrastEnhancement
+      if ((!angle && !this.contrastEnhancement) || this.deskewedPageUrls[page.number] || this.deskewedPagePending[page.number]) return
 
       const image = event.target as HTMLImageElement
-      if (!image?.complete || image.naturalWidth <= 0 || image.currentSrc.startsWith('blob:')) return
+      if (!image?.complete || image.naturalWidth <= 0) return
 
       this.$set(this.deskewedPagePending, page.number, true)
       try {
-        const canvas = this.skewCorrectedCanvas(image, angle)
+        const canvas = this.processedPageCanvas(image, angle)
         const url = await this.canvasObjectUrl(canvas)
-        if (this.skewCorrection === angle) this.$set(this.deskewedPageUrls, page.number, url)
+        if (this.skewCorrection === angle && this.contrastEnhancement === contrastEnhancement) this.$set(this.deskewedPageUrls, page.number, url)
         else URL.revokeObjectURL(url)
       } catch (e) {
       } finally {
         this.$delete(this.deskewedPagePending, page.number)
       }
+    },
+    processedPageCanvas(image: HTMLImageElement, degrees: number): HTMLCanvasElement {
+      const canvas = degrees ? this.skewCorrectedCanvas(image, degrees) : this.sourceImageCanvas(image)
+      if (this.contrastEnhancement) {
+        const context = canvas.getContext('2d')
+        if (context) enhanceTextContrast(context, canvas.width, canvas.height, {enabled: true})
+      }
+      return canvas
+    },
+    sourceImageCanvas(image: HTMLImageElement): HTMLCanvasElement {
+      const canvas = document.createElement('canvas')
+      canvas.width = image.naturalWidth
+      canvas.height = image.naturalHeight
+      const context = canvas.getContext('2d')
+      if (!context) return canvas
+      context.fillStyle = '#fff'
+      context.fillRect(0, 0, canvas.width, canvas.height)
+      context.drawImage(image, 0, 0)
+      return canvas
     },
     skewCorrectedCanvas(image: HTMLImageElement, degrees: number): HTMLCanvasElement {
       const canvas = document.createElement('canvas')
@@ -319,7 +359,7 @@ export default Vue.extend({
       this.deskewedPagePending = {}
     },
     ensureLoadedDeskewedPageUrls() {
-      if (!this.skewCorrection) return
+      if (!this.skewCorrection && !this.contrastEnhancement) return
       const images = Array.from(this.$el.querySelectorAll('img[data-page-number]')) as HTMLImageElement[]
       images.forEach(image => {
         const pageNumber = Number(image.dataset.pageNumber)

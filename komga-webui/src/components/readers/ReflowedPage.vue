@@ -280,6 +280,7 @@
 <script lang="ts">
 import Vue from 'vue'
 import {PageDtoWithUrl} from '@/types/komga-books'
+import {enhanceTextContrast} from '@/functions/image-enhancement'
 
 type ReflowOptions = {
   autoCropBorder: boolean,
@@ -290,6 +291,7 @@ type ReflowOptions = {
   columnGap: number,
   wordGap: number,
   strokeStrength: number,
+  contrastEnhancement: boolean,
   blockSpacing: number,
   verticalText: boolean,
   verticalDirection: VerticalDirection,
@@ -532,6 +534,9 @@ export default Vue.extend({
     },
     strokeStrength(): number {
       return this.clampNumber(this.options.strokeStrength, 0.1, 3, 0.1)
+    },
+    contrastEnhancement(): boolean {
+      return this.options.contrastEnhancement === true
     },
     blockSpacing(): number {
       return this.clampNumber(this.options.blockSpacing, 0, 24, 6)
@@ -1111,6 +1116,7 @@ export default Vue.extend({
         columnGap: this.options.columnGap,
         wordGap: this.options.wordGap,
         strokeStrength: this.options.strokeStrength,
+        contrastEnhancement: this.options.contrastEnhancement,
         verticalText: this.options.verticalText,
         verticalDirection: this.options.verticalDirection,
         marginTop: this.options.marginTop,
@@ -1229,13 +1235,17 @@ export default Vue.extend({
       return canvas.getContext('2d')
     },
     wordOutputBackground(): string {
-      return this.nightDisplay ? '#000' : this.pageBackground || '#fff'
+      return this.nightDisplay ? '#000' : this.contrastEnhancement ? '#fff' : this.pageBackground || '#fff'
     },
     fillWordSliceBackground(context: CanvasRenderingContext2D, width: number, height: number) {
       context.fillStyle = this.pageBackground || '#fff'
       context.fillRect(0, 0, width, height)
     },
     finishWordSlice(context: CanvasRenderingContext2D, width: number, height: number) {
+      if (this.contrastEnhancement) {
+        enhanceTextContrast(context, width, height, {enabled: true, nightDisplay: this.nightDisplay})
+        return
+      }
       if (!this.nightDisplay) return
 
       const imageData = context.getImageData(0, 0, width, height)

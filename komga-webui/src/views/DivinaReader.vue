@@ -322,6 +322,7 @@
           :page-margin="pageMargin"
           :image-filter="normalReaderImageFilter"
           :skew-correction="readerSkewCorrection"
+          :contrast-enhancement="readerContrastEnhancement"
           :crop-regions-by-parity="readerCropRegionsByParity"
           :page-display-urls="readerDeskewedPageUrls"
           :active-crop-region="readerActiveCropRegion"
@@ -343,6 +344,7 @@
         :swipe="readerSwipeEnabled"
         :image-filter="normalReaderImageFilter"
         :skew-correction="readerSkewCorrection"
+        :contrast-enhancement="readerContrastEnhancement"
         :crop-regions-by-parity="readerCropRegionsByParity"
         :page-display-urls="readerDeskewedPageUrls"
         :active-crop-region="readerActiveCropRegion"
@@ -504,6 +506,9 @@
               />
             </v-list-item>
             <v-list-item v-if="!activeReflowMode">
+              <settings-switch v-model="readerContrastEnhancement" label="文字/背景增强"/>
+            </v-list-item>
+            <v-list-item v-if="!activeReflowMode">
               <v-slider
                 v-model="readerSkewCorrection"
                 label="手动纠斜"
@@ -589,6 +594,9 @@
               <template v-if="isPdf && reflowMode">
                 <v-list-item>
                   <settings-switch v-model="reflowSettings.autoCropBorder" label="Auto crop borders"/>
+                </v-list-item>
+                <v-list-item>
+                  <settings-switch v-model="reflowSettings.contrastEnhancement" label="文字/背景增强"/>
                 </v-list-item>
                 <v-list-item>
                   <settings-switch v-model="reflowSettings.verticalText" label="Vertical text"/>
@@ -850,6 +858,7 @@ function defaultReflowSettings(): any {
     columnGap: 15,
     wordGap: 3,
     strokeStrength: 0.1,
+    contrastEnhancement: false,
     blockSpacing: 6,
     verticalText: false,
     verticalDirection: 'rtl',
@@ -863,6 +872,7 @@ function defaultReflowSettings(): any {
       maxColumns: 2,
       threshold: 185,
       strokeStrength: 0.8,
+      contrastEnhancement: false,
       wordGap: 3,
       outputPadding: 16,
     },
@@ -873,6 +883,7 @@ function defaultReaderImageSettings(): any {
   return {
     strokeStrength: 0,
     skewCorrection: 0,
+    contrastEnhancement: false,
     cropRegionsByParity: defaultCropRegionsByParity(false),
   }
 }
@@ -951,6 +962,7 @@ export default Vue.extend({
         backgroundColor: 'black',
         strokeStrength: 0,
         skewCorrection: 0,
+        contrastEnhancement: false,
         cropRegionsByParity: defaultCropRegionsByParity(false),
       },
       readerCropMode: false,
@@ -1236,6 +1248,7 @@ export default Vue.extend({
         columnGap: this.reflowSettings.columnGap,
         wordGap: this.reflowSettings.wordGap,
         strokeStrength: this.reflowSettings.strokeStrength,
+        contrastEnhancement: this.reflowSettings.contrastEnhancement,
         verticalText: this.reflowSettings.verticalText,
         verticalDirection: this.reflowSettings.verticalDirection,
         marginTop: this.reflowSettings.marginTop,
@@ -1323,6 +1336,17 @@ export default Vue.extend({
         const normalized = Math.round(Math.max(0, Math.min(3, Number(strokeStrength) || 0)) * 10) / 10
         this.settings.strokeStrength = normalized
         this.saveReaderImageSettings()
+      },
+    },
+    readerContrastEnhancement: {
+      get: function (): boolean {
+        return this.settings.contrastEnhancement === true
+      },
+      set: function (contrastEnhancement: boolean): void {
+        const changed = this.settings.contrastEnhancement !== (contrastEnhancement === true)
+        this.settings.contrastEnhancement = contrastEnhancement === true
+        this.saveReaderImageSettings()
+        if (changed) this.revokeReaderDeskewedPageUrls()
       },
     },
     readerSkewCorrection: {
@@ -1432,10 +1456,12 @@ export default Vue.extend({
     applyReaderImageSettings(settings: Record<string, any>) {
       const normalized = this.normalizedReaderImageSettings(settings)
       const previousSkew = this.settings.skewCorrection
+      const previousContrastEnhancement = this.settings.contrastEnhancement
       this.settings.strokeStrength = normalized.strokeStrength
       this.settings.skewCorrection = normalized.skewCorrection
+      this.settings.contrastEnhancement = normalized.contrastEnhancement
       this.$set(this.settings, 'cropRegionsByParity', normalized.cropRegionsByParity)
-      if (previousSkew !== normalized.skewCorrection) this.revokeReaderDeskewedPageUrls()
+      if (previousSkew !== normalized.skewCorrection || previousContrastEnhancement !== normalized.contrastEnhancement) this.revokeReaderDeskewedPageUrls()
       this.readerCropMode = false
       this.readerCropDraft = undefined
       this.readerCropDrawing = false
@@ -1447,6 +1473,7 @@ export default Vue.extend({
       return {
         strokeStrength: Math.round(Math.max(0, Math.min(3, Number(settings.strokeStrength) || 0)) * 10) / 10,
         skewCorrection: this.normalizedReaderSkewCorrection(settings.skewCorrection),
+        contrastEnhancement: settings.contrastEnhancement === true,
         cropRegionsByParity: this.normalizedReaderCropRegionsByParity(settings.cropRegionsByParity),
       }
     },
@@ -2140,6 +2167,7 @@ export default Vue.extend({
         columnGap: this.clampReflowNumber(settings.columnGap, 5, 80, this.reflowSettings.columnGap),
         wordGap: this.clampReflowNumber(settings.wordGap, 1, 30, this.reflowSettings.wordGap),
         strokeStrength: Math.round(this.clampReflowNumber(settings.strokeStrength, 0.1, 3, this.reflowSettings.strokeStrength) * 10) / 10,
+        contrastEnhancement: settings.contrastEnhancement === true,
         blockSpacing: Math.round(this.clampReflowNumber(settings.blockSpacing, 0, 24, this.reflowSettings.blockSpacing)),
         verticalText: typeof settings.verticalText === 'boolean' ? settings.verticalText : this.reflowSettings.verticalText,
         verticalDirection: settings.verticalDirection === 'ltr' ? 'ltr' : 'rtl',
@@ -2158,6 +2186,7 @@ export default Vue.extend({
         maxColumns: Math.round(this.clampReflowNumber(settings.maxColumns, 1, 4, this.reflowSettings.k2Settings.maxColumns)),
         threshold: this.clampReflowNumber(settings.threshold, 50, 230, this.reflowSettings.k2Settings.threshold),
         strokeStrength: Math.round(this.clampReflowNumber(settings.strokeStrength, 0, 3, this.reflowSettings.k2Settings.strokeStrength) * 10) / 10,
+        contrastEnhancement: settings.contrastEnhancement === true,
         wordGap: Math.round(this.clampReflowNumber(settings.wordGap, 1, 30, this.reflowSettings.k2Settings.wordGap)),
         outputPadding: Math.round(this.clampReflowNumber(settings.outputPadding, 0, 48, this.reflowSettings.k2Settings.outputPadding)),
       }

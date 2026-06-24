@@ -30,6 +30,10 @@
           <button type="button" @click="adjustStrokeStrength(0.1)">+</button>
           <span class="k2-value">{{ strokeStrength }}</span>
         </label>
+        <label class="k2-control k2-compact k2-checkbox-control">
+          <span>增强</span>
+          <input type="checkbox" :checked="contrastEnhancement" @change="setContrastEnhancement"/>
+        </label>
         <label class="k2-control k2-compact">
           <span>Word gap</span>
           <input type="number" min="1" max="30" step="1" :value="wordGap" @input="setWordGap"/>
@@ -160,6 +164,7 @@
 <script lang="ts">
 import Vue from 'vue'
 import {PageDtoWithUrl} from '@/types/komga-books'
+import {enhanceTextContrast} from '@/functions/image-enhancement'
 
 type Roi = { x: number, y: number, w: number, h: number }
 type PageParity = 'odd' | 'even'
@@ -178,6 +183,7 @@ type K2Settings = {
   maxColumns: number,
   threshold: number,
   strokeStrength: number,
+  contrastEnhancement: boolean,
   wordGap: number,
   outputPadding: number,
 }
@@ -250,6 +256,7 @@ export default Vue.extend({
     maxColumns: 2,
     threshold: DEFAULT_THRESHOLD,
     strokeStrength: 0.8,
+    contrastEnhancement: false,
     wordGap: DEFAULT_WORD_GAP,
     outputPadding: DEFAULT_OUTPUT_PADDING,
   }),
@@ -358,6 +365,7 @@ export default Vue.extend({
       this.maxColumns = Math.round(this.clampNumber(Number(this.settings.maxColumns), 1, 4, 2))
       this.threshold = this.clampNumber(Number(this.settings.threshold), 50, 230, DEFAULT_THRESHOLD)
       this.strokeStrength = Math.round(this.clampNumber(Number(this.settings.strokeStrength), 0, 3, 0.8) * 10) / 10
+      this.contrastEnhancement = this.settings.contrastEnhancement === true
       this.wordGap = Math.round(this.clampNumber(Number(this.settings.wordGap), 1, 30, DEFAULT_WORD_GAP))
       this.outputPadding = Math.round(this.clampNumber(Number(this.settings.outputPadding), 0, 48, DEFAULT_OUTPUT_PADDING))
     },
@@ -367,6 +375,7 @@ export default Vue.extend({
         maxColumns: this.maxColumns,
         threshold: this.threshold,
         strokeStrength: this.strokeStrength,
+        contrastEnhancement: this.contrastEnhancement,
         wordGap: this.wordGap,
         outputPadding: this.outputPadding,
       } as K2Settings)
@@ -499,13 +508,17 @@ export default Vue.extend({
       return canvas.getContext('2d')
     },
     wordOutputBackground(): string {
-      return this.nightDisplay ? '#000' : this.pageBackground || '#fff'
+      return this.nightDisplay ? '#000' : this.contrastEnhancement ? '#fff' : this.pageBackground || '#fff'
     },
     fillWordSliceBackground(context: CanvasRenderingContext2D, width: number, height: number) {
       context.fillStyle = this.pageBackground || '#fff'
       context.fillRect(0, 0, width, height)
     },
     finishWordSlice(context: CanvasRenderingContext2D, width: number, height: number) {
+      if (this.contrastEnhancement) {
+        enhanceTextContrast(context, width, height, {enabled: true, nightDisplay: this.nightDisplay})
+        return
+      }
       if (!this.nightDisplay) return
 
       const imageData = context.getImageData(0, 0, width, height)
@@ -1693,6 +1706,11 @@ export default Vue.extend({
     },
     adjustStrokeStrength(delta: number) {
       this.strokeStrength = Math.round(this.clampNumber(this.strokeStrength + delta, 0, 3, 0.8) * 10) / 10
+      this.emitSettingsChange()
+    },
+    setContrastEnhancement(event: Event) {
+      const target = event.target as HTMLInputElement
+      this.contrastEnhancement = target.checked
       this.emitSettingsChange()
     },
     setWordGap(event: Event) {
