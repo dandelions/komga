@@ -73,6 +73,10 @@
             <option value="4">4</option>
           </select>
         </label>
+        <label class="reflow-column-control reflow-checkbox-control">
+          <span>文字/背景增强</span>
+          <input type="checkbox" :checked="contrastEnhancement" @change="setContrastEnhancement"/>
+        </label>
         <label class="reflow-stroke-control">
           <span>字体宽度</span>
           <button type="button" class="reflow-step-control" @click="adjustStrokeStrength(-0.1)">-</button>
@@ -3097,6 +3101,10 @@ export default Vue.extend({
     },
     adjustStrokeStrength(delta: number) {
       this.pendingStrokeStrength = this.roundStrokeStrength(this.controlStrokeStrength + delta)
+    },
+    setContrastEnhancement(event: Event) {
+      const target = event.target as HTMLInputElement
+      this.$emit('contrast-enhancement-change', target.checked)
     },
     setBlockSpacing(event: Event) {
       const target = event.target as HTMLInputElement

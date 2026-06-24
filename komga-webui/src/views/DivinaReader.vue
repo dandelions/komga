@@ -269,6 +269,7 @@
           @vertical-text-change="setReflowVerticalText"
           @vertical-direction-change="setReflowVerticalDirection"
           @stroke-strength-change="setReflowStrokeStrength"
+          @contrast-enhancement-change="setReflowContrastEnhancement"
           @block-spacing-change="setReflowBlockSpacing"
           @crop-mode-change="setReflowCropMode"
           @crop-rois-change="setReflowCropRois"
@@ -2404,6 +2405,9 @@ export default Vue.extend({
     },
     setReflowStrokeStrength(strokeStrength: number) {
       this.reflowSettings.strokeStrength = Math.round(Math.max(0.1, Math.min(3, strokeStrength)) * 10) / 10
+    },
+    setReflowContrastEnhancement(contrastEnhancement: boolean) {
+      this.reflowSettings.contrastEnhancement = contrastEnhancement === true
     },
     setReflowBlockSpacing(blockSpacing: number) {
       this.reflowSettings.blockSpacing = Math.max(0, Math.min(24, Math.round(blockSpacing)))
