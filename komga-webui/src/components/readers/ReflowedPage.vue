@@ -1,5 +1,5 @@
 <template>
-  <div class="reflowed-page" :class="{'reflowed-page-dark': $vuetify.theme.dark || nightDisplay}">
+  <div class="reflowed-page" :class="{'reflowed-page-dark': darkDisplay}">
     <div v-if="!preload" ref="reflowControls" class="reflow-controls" @click.stop>
       <div class="reflow-top-controls">
         <button
@@ -541,6 +541,9 @@ export default Vue.extend({
     verticalDirection(): VerticalDirection {
       return this.options.verticalDirection === 'ltr' ? 'ltr' : 'rtl'
     },
+    darkDisplay(): boolean {
+      return this.$vuetify.theme.dark || this.nightDisplay
+    },
     strokeStrength(): number {
       return this.clampNumber(this.options.strokeStrength, 0.1, 3, 0.1)
     },
@@ -679,7 +682,7 @@ export default Vue.extend({
       if (this.cropMode) return
       this.reflow()
     },
-    nightDisplay() {
+    darkDisplay() {
       if (this.cropMode) return
       this.reflow()
     },
@@ -1138,7 +1141,7 @@ export default Vue.extend({
         marginBottom: this.options.marginBottom,
         marginLeft: this.options.marginLeft,
         cropRois: this.effectiveCropRois(this.pageParity),
-        nightDisplay: this.nightDisplay,
+        darkDisplay: this.darkDisplay,
         deskewDetectionVersion: 9,
         imageExclusionVersion: 3,
         detectionScaleVersion: 2,
@@ -1249,7 +1252,7 @@ export default Vue.extend({
       return canvas.getContext('2d')
     },
     wordOutputBackground(): string {
-      return this.nightDisplay ? '#000' : (this.contrastEnhancement || this.matchBackground) ? '#fff' : this.pageBackground || '#fff'
+      return this.darkDisplay ? '#000' : (this.contrastEnhancement || this.matchBackground) ? '#fff' : this.pageBackground || '#fff'
     },
     fillWordSliceBackground(context: CanvasRenderingContext2D, width: number, height: number) {
       context.fillStyle = this.pageBackground || '#fff'
@@ -1259,16 +1262,16 @@ export default Vue.extend({
       if (!this.contrastEnhancement && !this.matchBackground) return
       enhanceTextContrast(context, width, height, {
         enabled: this.contrastEnhancement,
-        nightDisplay: this.nightDisplay,
+        nightDisplay: this.darkDisplay,
         matchBackground: this.matchBackground,
       })
-      this.pageBackground = this.nightDisplay ? '#000' : '#fff'
+      this.pageBackground = this.darkDisplay ? '#000' : '#fff'
     },
     finishWordSlice(context: CanvasRenderingContext2D, width: number, height: number) {
       if (this.contrastEnhancement || this.matchBackground) {
         return
       }
-      if (!this.nightDisplay) return
+      if (!this.darkDisplay) return
 
       const imageData = context.getImageData(0, 0, width, height)
       const data = imageData.data

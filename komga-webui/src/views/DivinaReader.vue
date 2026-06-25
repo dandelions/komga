@@ -1279,7 +1279,7 @@ export default Vue.extend({
         marginBottom: this.reflowSettings.marginBottom,
         marginLeft: this.reflowSettings.marginLeft,
         cropRoisByParity: this.reflowSettings.cropRoisByParity,
-        nightDisplay: this.nightDisplay,
+        darkDisplay: this.$vuetify.theme.dark || this.nightDisplay,
         deskewDetectionVersion: 9,
         imageExclusionVersion: 2,
         detectionScaleVersion: 1,

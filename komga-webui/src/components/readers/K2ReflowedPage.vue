@@ -1,5 +1,5 @@
 <template>
-  <div class="k2-reflowed-page" :class="{'k2-reflowed-page-dark': $vuetify.theme.dark || nightDisplay}">
+  <div class="k2-reflowed-page" :class="{'k2-reflowed-page-dark': darkDisplay}">
     <div ref="k2Controls" class="k2-controls" @click.stop>
       <template v-if="!controlsCollapsed">
         <label class="k2-control k2-wide-control">
@@ -291,7 +291,7 @@ export default Vue.extend({
       },
       deep: true,
     },
-    nightDisplay() {
+    darkDisplay() {
       if (this.cropMode) return
       this.reflow()
     },
@@ -319,6 +319,9 @@ export default Vue.extend({
         minHeight: `${this.pageContentHeight()}px`,
         backgroundColor: this.wordOutputBackground(),
       }
+    },
+    darkDisplay(): boolean {
+      return this.$vuetify.theme.dark || this.nightDisplay
     },
     k2MeasureStyle(): object {
       return {
@@ -517,7 +520,7 @@ export default Vue.extend({
       return canvas.getContext('2d')
     },
     wordOutputBackground(): string {
-      return this.nightDisplay ? '#000' : (this.contrastEnhancement || this.matchBackground) ? '#fff' : this.pageBackground || '#fff'
+      return this.darkDisplay ? '#000' : (this.contrastEnhancement || this.matchBackground) ? '#fff' : this.pageBackground || '#fff'
     },
     fillWordSliceBackground(context: CanvasRenderingContext2D, width: number, height: number) {
       context.fillStyle = this.pageBackground || '#fff'
@@ -527,16 +530,16 @@ export default Vue.extend({
       if (!this.contrastEnhancement && !this.matchBackground) return
       enhanceTextContrast(context, width, height, {
         enabled: this.contrastEnhancement,
-        nightDisplay: this.nightDisplay,
+        nightDisplay: this.darkDisplay,
         matchBackground: this.matchBackground,
       })
-      this.pageBackground = this.nightDisplay ? '#000' : '#fff'
+      this.pageBackground = this.darkDisplay ? '#000' : '#fff'
     },
     finishWordSlice(context: CanvasRenderingContext2D, width: number, height: number) {
       if (this.contrastEnhancement || this.matchBackground) {
         return
       }
-      if (!this.nightDisplay) return
+      if (!this.darkDisplay) return
 
       const imageData = context.getImageData(0, 0, width, height)
       const data = imageData.data
