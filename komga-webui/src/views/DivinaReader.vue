@@ -270,6 +270,7 @@
           @vertical-direction-change="setReflowVerticalDirection"
           @stroke-strength-change="setReflowStrokeStrength"
           @contrast-enhancement-change="setReflowContrastEnhancement"
+          @match-background-change="setReflowMatchBackground"
           @block-spacing-change="setReflowBlockSpacing"
           @crop-mode-change="setReflowCropMode"
           @crop-rois-change="setReflowCropRois"
@@ -609,6 +610,9 @@
                   <settings-switch v-model="reflowSettings.contrastEnhancement" label="文字/背景增强"/>
                 </v-list-item>
                 <v-list-item>
+                  <settings-switch v-model="reflowSettings.matchBackground" label="背景跟随底色"/>
+                </v-list-item>
+                <v-list-item>
                   <settings-switch v-model="reflowSettings.verticalText" label="Vertical text"/>
                 </v-list-item>
                 <v-list-item v-if="reflowSettings.verticalText">
@@ -869,6 +873,7 @@ function defaultReflowSettings(): any {
     wordGap: 3,
     strokeStrength: 0.1,
     contrastEnhancement: false,
+    matchBackground: false,
     blockSpacing: 6,
     verticalText: false,
     verticalDirection: 'rtl',
@@ -883,6 +888,7 @@ function defaultReflowSettings(): any {
       threshold: 185,
       strokeStrength: 0.8,
       contrastEnhancement: false,
+      matchBackground: false,
       wordGap: 3,
       outputPadding: 16,
     },
@@ -1265,6 +1271,7 @@ export default Vue.extend({
         wordGap: this.reflowSettings.wordGap,
         strokeStrength: this.reflowSettings.strokeStrength,
         contrastEnhancement: this.reflowSettings.contrastEnhancement,
+        matchBackground: this.reflowSettings.matchBackground,
         verticalText: this.reflowSettings.verticalText,
         verticalDirection: this.reflowSettings.verticalDirection,
         marginTop: this.reflowSettings.marginTop,
@@ -2203,6 +2210,7 @@ export default Vue.extend({
         wordGap: this.clampReflowNumber(settings.wordGap, 1, 30, this.reflowSettings.wordGap),
         strokeStrength: Math.round(this.clampReflowNumber(settings.strokeStrength, 0.1, 3, this.reflowSettings.strokeStrength) * 10) / 10,
         contrastEnhancement: settings.contrastEnhancement === true,
+        matchBackground: settings.matchBackground === true,
         blockSpacing: Math.round(this.clampReflowNumber(settings.blockSpacing, 0, 24, this.reflowSettings.blockSpacing)),
         verticalText: typeof settings.verticalText === 'boolean' ? settings.verticalText : this.reflowSettings.verticalText,
         verticalDirection: settings.verticalDirection === 'ltr' ? 'ltr' : 'rtl',
@@ -2222,6 +2230,7 @@ export default Vue.extend({
         threshold: this.clampReflowNumber(settings.threshold, 50, 230, this.reflowSettings.k2Settings.threshold),
         strokeStrength: Math.round(this.clampReflowNumber(settings.strokeStrength, 0, 3, this.reflowSettings.k2Settings.strokeStrength) * 10) / 10,
         contrastEnhancement: settings.contrastEnhancement === true,
+        matchBackground: settings.matchBackground === true,
         wordGap: Math.round(this.clampReflowNumber(settings.wordGap, 1, 30, this.reflowSettings.k2Settings.wordGap)),
         outputPadding: Math.round(this.clampReflowNumber(settings.outputPadding, 0, 48, this.reflowSettings.k2Settings.outputPadding)),
       }
@@ -2408,6 +2417,9 @@ export default Vue.extend({
     },
     setReflowContrastEnhancement(contrastEnhancement: boolean) {
       this.reflowSettings.contrastEnhancement = contrastEnhancement === true
+    },
+    setReflowMatchBackground(matchBackground: boolean) {
+      this.reflowSettings.matchBackground = matchBackground === true
     },
     setReflowBlockSpacing(blockSpacing: number) {
       this.reflowSettings.blockSpacing = Math.max(0, Math.min(24, Math.round(blockSpacing)))

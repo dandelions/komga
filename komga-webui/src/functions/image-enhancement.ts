@@ -6,6 +6,7 @@ type LumaStats = {
 type TextContrastOptions = {
   enabled?: boolean,
   nightDisplay?: boolean,
+  matchBackground?: boolean,
 }
 
 export function enhanceTextContrast(
@@ -14,7 +15,7 @@ export function enhanceTextContrast(
   height: number,
   options: TextContrastOptions = {},
 ) {
-  if (!options.enabled && !options.nightDisplay) return
+  if (!options.enabled && !options.nightDisplay && !options.matchBackground) return
   if (width <= 0 || height <= 0) return
 
   const imageData = context.getImageData(0, 0, width, height)
@@ -33,8 +34,11 @@ function enhanceTextContrastData(
 
   const targetDark = options.nightDisplay === true
   const backgroundValue = targetDark ? 0 : 255
-  const minDelta = options.enabled ? 10 : 0
+  const baseMinDelta = options.enabled ? 10 : 0
   const maxDelta = stats.sourceDark ? 255 - stats.background : stats.background
+  const minDelta = options.matchBackground
+    ? Math.max(baseMinDelta, Math.min(72, Math.max(24, maxDelta * 0.18)))
+    : baseMinDelta
   const contrastRange = Math.max(28, maxDelta * (options.enabled ? 0.32 : 0.55))
 
   for (let i = 0; i < width * height; i++) {

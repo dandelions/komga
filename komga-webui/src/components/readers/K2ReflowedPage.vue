@@ -34,6 +34,10 @@
           <span>增强</span>
           <input type="checkbox" :checked="contrastEnhancement" @change="setContrastEnhancement"/>
         </label>
+        <label class="k2-control k2-compact k2-checkbox-control">
+          <span>背景</span>
+          <input type="checkbox" :checked="matchBackground" @change="setMatchBackground"/>
+        </label>
         <label class="k2-control k2-compact">
           <span>Word gap</span>
           <input type="number" min="1" max="30" step="1" :value="wordGap" @input="setWordGap"/>
@@ -184,6 +188,7 @@ type K2Settings = {
   threshold: number,
   strokeStrength: number,
   contrastEnhancement: boolean,
+  matchBackground: boolean,
   wordGap: number,
   outputPadding: number,
 }
@@ -257,6 +262,7 @@ export default Vue.extend({
     threshold: DEFAULT_THRESHOLD,
     strokeStrength: 0.8,
     contrastEnhancement: false,
+    matchBackground: false,
     wordGap: DEFAULT_WORD_GAP,
     outputPadding: DEFAULT_OUTPUT_PADDING,
   }),
@@ -366,6 +372,7 @@ export default Vue.extend({
       this.threshold = this.clampNumber(Number(this.settings.threshold), 50, 230, DEFAULT_THRESHOLD)
       this.strokeStrength = Math.round(this.clampNumber(Number(this.settings.strokeStrength), 0, 3, 0.8) * 10) / 10
       this.contrastEnhancement = this.settings.contrastEnhancement === true
+      this.matchBackground = this.settings.matchBackground === true
       this.wordGap = Math.round(this.clampNumber(Number(this.settings.wordGap), 1, 30, DEFAULT_WORD_GAP))
       this.outputPadding = Math.round(this.clampNumber(Number(this.settings.outputPadding), 0, 48, DEFAULT_OUTPUT_PADDING))
     },
@@ -376,6 +383,7 @@ export default Vue.extend({
         threshold: this.threshold,
         strokeStrength: this.strokeStrength,
         contrastEnhancement: this.contrastEnhancement,
+        matchBackground: this.matchBackground,
         wordGap: this.wordGap,
         outputPadding: this.outputPadding,
       } as K2Settings)
@@ -509,19 +517,23 @@ export default Vue.extend({
       return canvas.getContext('2d')
     },
     wordOutputBackground(): string {
-      return this.nightDisplay ? '#000' : this.contrastEnhancement ? '#fff' : this.pageBackground || '#fff'
+      return this.nightDisplay ? '#000' : (this.contrastEnhancement || this.matchBackground) ? '#fff' : this.pageBackground || '#fff'
     },
     fillWordSliceBackground(context: CanvasRenderingContext2D, width: number, height: number) {
       context.fillStyle = this.pageBackground || '#fff'
       context.fillRect(0, 0, width, height)
     },
     enhanceSourceCanvas(context: CanvasRenderingContext2D, width: number, height: number) {
-      if (!this.contrastEnhancement) return
-      enhanceTextContrast(context, width, height, {enabled: true, nightDisplay: this.nightDisplay})
+      if (!this.contrastEnhancement && !this.matchBackground) return
+      enhanceTextContrast(context, width, height, {
+        enabled: this.contrastEnhancement,
+        nightDisplay: this.nightDisplay,
+        matchBackground: this.matchBackground,
+      })
       this.pageBackground = this.nightDisplay ? '#000' : '#fff'
     },
     finishWordSlice(context: CanvasRenderingContext2D, width: number, height: number) {
-      if (this.contrastEnhancement) {
+      if (this.contrastEnhancement || this.matchBackground) {
         return
       }
       if (!this.nightDisplay) return
@@ -1716,6 +1728,11 @@ export default Vue.extend({
     setContrastEnhancement(event: Event) {
       const target = event.target as HTMLInputElement
       this.contrastEnhancement = target.checked
+      this.emitSettingsChange()
+    },
+    setMatchBackground(event: Event) {
+      const target = event.target as HTMLInputElement
+      this.matchBackground = target.checked
       this.emitSettingsChange()
     },
     setWordGap(event: Event) {

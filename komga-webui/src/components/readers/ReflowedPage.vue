@@ -77,6 +77,10 @@
           <span>文字/背景增强</span>
           <input type="checkbox" :checked="contrastEnhancement" @change="setContrastEnhancement"/>
         </label>
+        <label class="reflow-column-control reflow-checkbox-control">
+          <span>背景跟随底色</span>
+          <input type="checkbox" :checked="matchBackground" @change="setMatchBackground"/>
+        </label>
         <label class="reflow-stroke-control">
           <span>字体宽度</span>
           <button type="button" class="reflow-step-control" @click="adjustStrokeStrength(-0.1)">-</button>
@@ -296,6 +300,7 @@ type ReflowOptions = {
   wordGap: number,
   strokeStrength: number,
   contrastEnhancement: boolean,
+  matchBackground: boolean,
   blockSpacing: number,
   verticalText: boolean,
   verticalDirection: VerticalDirection,
@@ -541,6 +546,9 @@ export default Vue.extend({
     },
     contrastEnhancement(): boolean {
       return this.options.contrastEnhancement === true
+    },
+    matchBackground(): boolean {
+      return this.options.matchBackground === true
     },
     blockSpacing(): number {
       return this.clampNumber(this.options.blockSpacing, 0, 24, 6)
@@ -1122,6 +1130,7 @@ export default Vue.extend({
         wordGap: this.options.wordGap,
         strokeStrength: this.options.strokeStrength,
         contrastEnhancement: this.options.contrastEnhancement,
+        matchBackground: this.options.matchBackground,
         verticalText: this.options.verticalText,
         verticalDirection: this.options.verticalDirection,
         marginTop: this.options.marginTop,
@@ -1240,19 +1249,23 @@ export default Vue.extend({
       return canvas.getContext('2d')
     },
     wordOutputBackground(): string {
-      return this.nightDisplay ? '#000' : this.contrastEnhancement ? '#fff' : this.pageBackground || '#fff'
+      return this.nightDisplay ? '#000' : (this.contrastEnhancement || this.matchBackground) ? '#fff' : this.pageBackground || '#fff'
     },
     fillWordSliceBackground(context: CanvasRenderingContext2D, width: number, height: number) {
       context.fillStyle = this.pageBackground || '#fff'
       context.fillRect(0, 0, width, height)
     },
     enhanceSourceCanvas(context: CanvasRenderingContext2D, width: number, height: number) {
-      if (!this.contrastEnhancement) return
-      enhanceTextContrast(context, width, height, {enabled: true, nightDisplay: this.nightDisplay})
+      if (!this.contrastEnhancement && !this.matchBackground) return
+      enhanceTextContrast(context, width, height, {
+        enabled: this.contrastEnhancement,
+        nightDisplay: this.nightDisplay,
+        matchBackground: this.matchBackground,
+      })
       this.pageBackground = this.nightDisplay ? '#000' : '#fff'
     },
     finishWordSlice(context: CanvasRenderingContext2D, width: number, height: number) {
-      if (this.contrastEnhancement) {
+      if (this.contrastEnhancement || this.matchBackground) {
         return
       }
       if (!this.nightDisplay) return
@@ -3105,6 +3118,10 @@ export default Vue.extend({
     setContrastEnhancement(event: Event) {
       const target = event.target as HTMLInputElement
       this.$emit('contrast-enhancement-change', target.checked)
+    },
+    setMatchBackground(event: Event) {
+      const target = event.target as HTMLInputElement
+      this.$emit('match-background-change', target.checked)
     },
     setBlockSpacing(event: Event) {
       const target = event.target as HTMLInputElement
