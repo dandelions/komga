@@ -1889,12 +1889,12 @@ export default Vue.extend({
   top: 0;
   z-index: 4;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  justify-content: flex-start;
+  gap: 6px;
   min-height: 48px;
-  padding: 6px 12px;
+  padding: 5px 8px;
   box-sizing: border-box;
   background: rgba(250, 250, 250, 0.96);
   border-bottom: 1px solid rgba(0, 0, 0, 0.12);
@@ -1907,15 +1907,16 @@ export default Vue.extend({
   min-width: 280px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   color: #212121;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
 }
 
 .k2-wide-control {
-  flex-basis: 300px;
+  flex-basis: 260px;
+  min-width: 260px;
 }
 
 .k2-control input[type="range"] {
@@ -1934,8 +1935,8 @@ export default Vue.extend({
 }
 
 .k2-compact input[type="range"] {
-  width: 120px;
-  min-width: 120px;
+  width: 100px;
+  min-width: 100px;
 }
 
 .k2-action-controls {
@@ -1944,7 +1945,7 @@ export default Vue.extend({
   flex-wrap: nowrap;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 6px;
 }
 
 .k2-control button,
@@ -1955,7 +1956,8 @@ export default Vue.extend({
   background: white;
   color: #212121;
   min-height: 28px;
-  padding: 4px 9px;
+  padding: 4px 7px;
+  font-size: 12px;
   font-weight: 700;
   white-space: nowrap;
 }

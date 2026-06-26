@@ -3390,10 +3390,10 @@ export default Vue.extend({
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
   width: 100%;
   min-height: 48px;
-  padding: 6px 12px;
+  padding: 5px 8px;
   box-sizing: border-box;
   background: rgba(248, 250, 252, 0.94);
   border-bottom: 1px solid rgba(0, 0, 0, 0.12);
@@ -3406,18 +3406,21 @@ export default Vue.extend({
   flex: 0 0 100%;
   min-width: 100%;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: flex-start;
-  gap: 14px;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .reflow-navigation-controls {
   display: flex;
-  flex-wrap: wrap;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: flex-start;
-  gap: 14px;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -3578,20 +3581,21 @@ export default Vue.extend({
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 3px;
   border: 1px solid rgba(0, 0, 0, 0.2);
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.94);
   color: #212121;
-  padding: 6px 10px;
-  font-size: 13px;
+  padding: 5px 7px;
+  font-size: 12px;
   line-height: 1.2;
   white-space: nowrap;
 }
 
 .reflow-icon-control {
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
+  flex-basis: 30px;
   padding: 0;
 }
 
