@@ -75,6 +75,7 @@ class LibraryDaoTest(
           scanCbx = false,
           scanEpub = false,
           scanPdf = false,
+          scanBypassDailyFileLimit = true,
           scanInterval = Library.ScanInterval.DAILY,
           scanOnStartup = true,
           scanDirectoryExclusions = setOf("a", "b"),
@@ -113,6 +114,7 @@ class LibraryDaoTest(
     assertThat(modified.scanCbx).isEqualTo(updated.scanCbx)
     assertThat(modified.scanEpub).isEqualTo(updated.scanEpub)
     assertThat(modified.scanPdf).isEqualTo(updated.scanPdf)
+    assertThat(modified.scanBypassDailyFileLimit).isEqualTo(updated.scanBypassDailyFileLimit)
     assertThat(modified.scanInterval).isEqualTo(updated.scanInterval)
     assertThat(modified.scanOnStartup).isEqualTo(updated.scanOnStartup)
     assertThat(modified.scanDirectoryExclusions).containsExactlyInAnyOrderElementsOf(updated.scanDirectoryExclusions)

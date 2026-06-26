@@ -487,6 +487,7 @@
       "field_root_folder": "根文件夹",
       "field_scan_interval": "扫描间隔",
       "field_scanner_empty_trash_after_scan": "每次扫描后自动清理垃圾",
+      "field_scanner_bypass_daily_file_limit": "此库不使用每日扫描额度限制",
       "field_scanner_force_directory_modified_time": "强制目录修改时间",
       "field_scanner_scan_startup": "启动时扫描",
       "field_series_cover": "系列封面",

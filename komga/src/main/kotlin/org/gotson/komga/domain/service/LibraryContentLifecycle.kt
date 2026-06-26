@@ -78,7 +78,12 @@ class LibraryContentLifecycle(
     scanDeep: Boolean = false,
   ): LibraryScanSummary {
     logger.info { "Scan root folder for library: $library" }
-    val scanLimitUsage = komgaSettingsProvider.libraryScanDailyFileLimitUsage()
+    val scanLimitUsage =
+      if (library.scanBypassDailyFileLimit) {
+        null
+      } else {
+        komgaSettingsProvider.libraryScanDailyFileLimitUsage()
+      }
     if (scanLimitUsage?.exhausted == true) {
       logger.info { "Daily scan file limit exhausted, postponing scan for library: ${library.name}" }
       return LibraryScanSummary(limited = true, scannedBookCount = 0, countedBookCount = 0)

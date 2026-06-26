@@ -34,6 +34,7 @@ class LibraryUpdateDto {
   val scanCbx: Boolean? = null
   val scanPdf: Boolean? = null
   val scanEpub: Boolean? = null
+  val scanBypassDailyFileLimit: Boolean? = null
   var scanDirectoryExclusions: Set<String>?
     by Delegates.observable(null) { prop, _, _ ->
       isSet[prop.name] = true

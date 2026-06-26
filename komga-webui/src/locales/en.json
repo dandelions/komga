@@ -487,6 +487,7 @@
       "field_root_folder": "Root folder",
       "field_scan_interval": "Scan interval",
       "field_scanner_empty_trash_after_scan": "Empty trash automatically after every scan",
+      "field_scanner_bypass_daily_file_limit": "Do not apply the daily scan quota to this library",
       "field_scanner_force_directory_modified_time": "Force directory modified time",
       "field_scanner_scan_startup": "Scan on startup",
       "field_series_cover": "Series cover",

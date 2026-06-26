@@ -64,6 +64,11 @@ class TaskProcessor(
     processAvailableTask()
   }
 
+  @Scheduled(cron = "0 0 0 * * *", zone = "Asia/Shanghai")
+  fun processAvailableTaskAfterDailyScanLimitReset() {
+    processAvailableTask()
+  }
+
   private fun takeAndProcess() {
     logger.debug { "Try to process first available task" }
     val task = tasksRepository.takeFirst()

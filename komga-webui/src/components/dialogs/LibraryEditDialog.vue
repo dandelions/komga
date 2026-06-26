@@ -130,6 +130,13 @@
                         class="mx-4"
                       />
 
+                      <v-checkbox
+                        v-model="form.scanBypassDailyFileLimit"
+                        :label="$t('dialog.edit_library.field_scanner_bypass_daily_file_limit')"
+                        hide-details
+                        class="mx-4"
+                      />
+
                       <v-select :items="scanInterval"
                                 v-model="form.scanInterval"
                                 :label="$t('dialog.edit_library.field_scan_interval')"
@@ -484,6 +491,7 @@ export default Vue.extend({
         scanForceModifiedTime: false,
         scanInterval: ScanIntervalDto.EVERY_6H,
         scanOnStartup: false,
+        scanBypassDailyFileLimit: false,
         scanTypes: [],
         scanDirectoryExclusions: [] as string[],
         repairExtensions: false,
@@ -653,6 +661,7 @@ export default Vue.extend({
       this.form.scanForceModifiedTime = library ? library.scanForceModifiedTime : false
       this.form.scanInterval = library ? library.scanInterval : ScanIntervalDto.EVERY_6H
       this.form.scanOnStartup = library ? library.scanOnStartup : false
+      this.form.scanBypassDailyFileLimit = library ? library.scanBypassDailyFileLimit : false
       this.form.scanTypes = []
       if (!library) this.form.scanTypes = ['cbx', 'pdf', 'epub']
       if (library?.scanEpub == true) this.form.scanTypes.splice(0, 0, 'epub')
@@ -691,6 +700,7 @@ export default Vue.extend({
           scanForceModifiedTime: this.form.scanForceModifiedTime,
           scanInterval: this.form.scanInterval,
           scanOnStartup: this.form.scanOnStartup,
+          scanBypassDailyFileLimit: this.form.scanBypassDailyFileLimit,
           scanCbx: this.form.scanTypes.includes('cbx'),
           scanPdf: this.form.scanTypes.includes('pdf'),
           scanEpub: this.form.scanTypes.includes('epub'),

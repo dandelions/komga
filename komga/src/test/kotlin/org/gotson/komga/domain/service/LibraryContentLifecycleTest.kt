@@ -38,6 +38,7 @@ import org.gotson.komga.domain.persistence.SeriesMetadataRepository
 import org.gotson.komga.domain.persistence.SeriesRepository
 import org.gotson.komga.domain.persistence.ThumbnailBookRepository
 import org.gotson.komga.infrastructure.hash.Hasher
+import org.gotson.komga.infrastructure.configuration.KomgaSettingsProvider
 import org.gotson.komga.interfaces.api.persistence.SeriesDtoRepository
 import org.gotson.komga.language.toIndexedMap
 import org.gotson.komga.toScanResult
@@ -76,6 +77,7 @@ class LibraryContentLifecycleTest(
   @Autowired private val userLifecycle: KomgaUserLifecycle,
   @Autowired private val seriesDtoRepository: SeriesDtoRepository,
   @Autowired private val thumbnailBookRepository: ThumbnailBookRepository,
+  @Autowired private val komgaSettingsProvider: KomgaSettingsProvider,
 ) {
   @MockkBean
   private lateinit var mockScanner: FileSystemScanner
@@ -223,6 +225,28 @@ class LibraryContentLifecycleTest(
       assertThat(scanSummary.limited).isTrue
       assertThat(scanSummary.countedBookCount).isEqualTo(1)
       assertThat(allBooks.map { it.name }).containsExactly("book1")
+    }
+
+    @Test
+    fun `given library bypasses daily file limit when limit is exhausted then library is scanned`() {
+      // given
+      val library = makeLibrary().copy(scanBypassDailyFileLimit = true)
+      libraryRepository.insert(library)
+      komgaSettingsProvider.libraryScanDailyFileLimit = 0
+
+      every { mockScanner.scanRootFolder(any()) } returns
+        mapOf(makeSeries(name = "series") to listOf(makeBook("book1"))).toScanResult()
+
+      try {
+        // when
+        val scanSummary = libraryContentLifecycle.scanRootFolder(library)
+
+        // then
+        assertThat(scanSummary.limited).isFalse
+        verify(exactly = 1) { mockScanner.scanRootFolder(any()) }
+      } finally {
+        komgaSettingsProvider.libraryScanDailyFileLimit = null
+      }
     }
 
     @Test
