@@ -228,6 +228,7 @@
           @crop-rois-change="setReflowCropRois"
           @settings-change="setK2ReflowSettings"
           @show-pdf-toc="openPdfToc"
+          @toggle-night-display="toggleNightDisplay"
           @back-to-book="closeBook"
         />
 
@@ -280,6 +281,7 @@
           @source-previous="reflowSourcePreviousPage"
           @source-next="reflowSourceNextPage"
           @show-pdf-toc="openPdfToc"
+          @toggle-night-display="toggleNightDisplay"
           @back-to-book="closeBook"
         />
         <reflowed-page
@@ -1279,7 +1281,7 @@ export default Vue.extend({
         marginBottom: this.reflowSettings.marginBottom,
         marginLeft: this.reflowSettings.marginLeft,
         cropRoisByParity: this.reflowSettings.cropRoisByParity,
-        darkDisplay: this.$vuetify.theme.dark || this.nightDisplay,
+        darkDisplay: this.nightDisplay,
         deskewDetectionVersion: 9,
         imageExclusionVersion: 2,
         detectionScaleVersion: 1,

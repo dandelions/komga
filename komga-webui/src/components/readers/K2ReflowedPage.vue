@@ -1,5 +1,5 @@
 <template>
-  <div class="k2-reflowed-page" :class="{'k2-reflowed-page-dark': darkDisplay}">
+  <div class="k2-reflowed-page" :class="{'k2-reflowed-page-dark': $vuetify.theme.dark || nightDisplay}">
     <div ref="k2Controls" class="k2-controls" @click.stop>
       <template v-if="!controlsCollapsed">
         <label class="k2-control k2-wide-control">
@@ -59,6 +59,15 @@
       </button>
       <button type="button" class="k2-action" @click="$emit('show-pdf-toc')">
         {{ $t('browse_book.pdf_toc') }}
+      </button>
+      <button
+        type="button"
+        class="k2-action"
+        :title="nightDisplay ? '白天模式' : '黑夜模式'"
+        :aria-label="nightDisplay ? '白天模式' : '黑夜模式'"
+        @click="$emit('toggle-night-display')"
+      >
+        <v-icon small>{{ nightDisplay ? 'mdi-white-balance-sunny' : 'mdi-weather-night' }}</v-icon>
       </button>
       <button type="button" class="k2-action k2-apply-action" @click="applyK2Reflow">
         重排
@@ -321,7 +330,7 @@ export default Vue.extend({
       }
     },
     darkDisplay(): boolean {
-      return this.$vuetify.theme.dark || this.nightDisplay
+      return this.nightDisplay
     },
     k2MeasureStyle(): object {
       return {

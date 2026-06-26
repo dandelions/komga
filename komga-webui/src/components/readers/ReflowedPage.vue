@@ -1,5 +1,5 @@
 <template>
-  <div class="reflowed-page" :class="{'reflowed-page-dark': darkDisplay}">
+  <div class="reflowed-page" :class="{'reflowed-page-dark': $vuetify.theme.dark || nightDisplay}">
     <div v-if="!preload" ref="reflowControls" class="reflow-controls" @click.stop>
       <div class="reflow-top-controls">
         <button
@@ -10,6 +10,15 @@
           @click="$emit('show-pdf-toc')"
         >
           <v-icon small>mdi-menu</v-icon>
+        </button>
+        <button
+          type="button"
+          class="reflow-control reflow-icon-control"
+          :title="nightDisplay ? '白天模式' : '黑夜模式'"
+          :aria-label="nightDisplay ? '白天模式' : '黑夜模式'"
+          @click="$emit('toggle-night-display')"
+        >
+          <v-icon small>{{ nightDisplay ? 'mdi-white-balance-sunny' : 'mdi-weather-night' }}</v-icon>
         </button>
         <div class="reflow-navigation-controls">
           <button type="button" class="reflow-control reflow-nav-control" @click="$emit('back-to-book')">
@@ -542,7 +551,7 @@ export default Vue.extend({
       return this.options.verticalDirection === 'ltr' ? 'ltr' : 'rtl'
     },
     darkDisplay(): boolean {
-      return this.$vuetify.theme.dark || this.nightDisplay
+      return this.nightDisplay
     },
     strokeStrength(): number {
       return this.clampNumber(this.options.strokeStrength, 0.1, 3, 0.1)
