@@ -33,9 +33,11 @@ class TasksDao(
 
   private fun nowUtc() = LocalDateTime.now(ZoneId.of("Z"))
 
+  private fun readyOrRunningCondition() = t.AVAILABLE_DATE.isNull.or(t.AVAILABLE_DATE.le(nowUtc()))
+
   private fun tasksAvailableCondition() =
     t.OWNER.isNull
-      .and(t.AVAILABLE_DATE.isNull.or(t.AVAILABLE_DATE.le(nowUtc())))
+      .and(readyOrRunningCondition())
       .and(
         t.GROUP_ID
           .notIn(
@@ -114,6 +116,15 @@ class TasksDao(
     dslRO
       .select(t.SIMPLE_TYPE, DSL.count(t.SIMPLE_TYPE))
       .from(t)
+      .groupBy(t.SIMPLE_TYPE)
+      .fetch()
+      .associate { it.value1() to it.value2() }
+
+  override fun countReadyOrRunningBySimpleType(): Map<String, Int> =
+    dslRO
+      .select(t.SIMPLE_TYPE, DSL.count(t.SIMPLE_TYPE))
+      .from(t)
+      .where(readyOrRunningCondition())
       .groupBy(t.SIMPLE_TYPE)
       .fetch()
       .associate { it.value1() to it.value2() }

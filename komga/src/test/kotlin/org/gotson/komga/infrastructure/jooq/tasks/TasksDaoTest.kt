@@ -320,4 +320,25 @@ class TasksDaoTest(
     assertThat(count).isEqualTo(1)
     assertThat(countByType.values.sum()).isEqualTo(1)
   }
+
+  @Test
+  fun `given future task when counting ready or running tasks then future task is ignored`() {
+    // given
+    tasksDao.save(Task.HashBookPages("book1", 5))
+    tasksDao.save(
+      Task.ScanLibrary("library1", false, 2, continuationDate = "2099-01-01"),
+      LocalDateTime.now().plusDays(1),
+    )
+    tasksDao.takeFirst()
+
+    // when
+    val count = tasksDao.count()
+    val countByType = tasksDao.countReadyOrRunningBySimpleType()
+
+    // then
+    assertThat(count).isEqualTo(2)
+    assertThat(countByType.values.sum()).isEqualTo(1)
+    assertThat(countByType).containsEntry("HashBookPages", 1)
+    assertThat(countByType).doesNotContainKey("ScanLibrary")
+  }
 }

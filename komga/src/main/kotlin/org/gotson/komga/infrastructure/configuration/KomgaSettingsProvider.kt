@@ -93,6 +93,12 @@ class KomgaSettingsProvider(
   }
 
   @Synchronized
+  fun refreshLibraryScanDailyFileLimitUsage() {
+    libraryScanDailyFileLimit ?: return
+    resetLibraryScanDailyFileLimitUsageIfNeeded(LibraryScanDailyFileLimitTime.currentDate())
+  }
+
+  @Synchronized
   fun tryConsumeLibraryScanFile(): Boolean {
     val limit = libraryScanDailyFileLimit ?: return true
     val today = LibraryScanDailyFileLimitTime.currentDate()

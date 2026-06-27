@@ -64,8 +64,9 @@ class TaskProcessor(
     processAvailableTask()
   }
 
-  @Scheduled(cron = "0 0 0 * * *", zone = "Asia/Shanghai")
+  @Scheduled(cron = "5 0 0 * * *", zone = "Asia/Shanghai")
   fun processAvailableTaskAfterDailyScanLimitReset() {
+    settingsProvider.refreshLibraryScanDailyFileLimitUsage()
     processAvailableTask()
   }
 

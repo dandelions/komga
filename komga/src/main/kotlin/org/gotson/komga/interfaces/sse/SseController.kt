@@ -74,7 +74,7 @@ class SseController(
   @Scheduled(fixedRate = 10_000)
   fun taskCount() {
     if (emitters.isNotEmpty()) {
-      val tasksCount = tasksRepository.countBySimpleType()
+      val tasksCount = tasksRepository.countReadyOrRunningBySimpleType()
       emitSse(
         "TaskQueueStatus",
         TaskQueueSseDto(
