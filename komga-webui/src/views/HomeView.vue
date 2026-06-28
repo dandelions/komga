@@ -29,6 +29,11 @@
             Komga
           </v-list-item-title>
         </v-list-item-content>
+        <v-list-item-action v-if="taskCount > 0 || libraryScanDailyFileLimitUsage" class="ma-0">
+          <v-btn icon small @click.stop.prevent="expandTaskDetails = !expandTaskDetails">
+            <v-icon small>{{ expandTaskDetails ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
+          </v-btn>
+        </v-list-item-action>
 
         <v-tooltip left>
           <template v-slot:activator="{ on }">
@@ -56,6 +61,30 @@
           </template>
         </v-tooltip>
       </v-list-item>
+
+      <v-expand-transition>
+        <div v-if="expandTaskDetails" class="px-4 pb-2 text-caption">
+          <div class="mb-1">{{ $tc('common.pending_tasks', taskCount) }}</div>
+          <div v-for="taskType in Object.keys(runningTaskCountByType)"
+               :key="`running-${taskType}`"
+               class="d-flex align-center"
+          >
+            <v-icon x-small class="me-1">mdi-play</v-icon>
+            <span>{{ taskType }}: {{ runningTaskCountByType[taskType] }}</span>
+          </div>
+          <div v-for="taskType in Object.keys(readyTaskCountByType)"
+               :key="`ready-${taskType}`"
+               class="d-flex align-center"
+          >
+            <v-icon x-small class="me-1">mdi-clock-outline</v-icon>
+            <span>{{ taskType }}: {{ readyTaskCountByType[taskType] }}</span>
+          </div>
+          <template v-if="libraryScanDailyFileLimitUsage">
+            <v-divider class="my-2"/>
+            <div>{{ $t('common.library_scan_daily_file_limit_usage', libraryScanDailyFileLimitUsage) }}</div>
+          </template>
+        </div>
+      </v-expand-transition>
 
       <v-divider/>
 
@@ -400,6 +429,7 @@ export default Vue.extend({
       expandImport: false,
       expandAccount: false,
       expandUnpinned: false,
+      expandTaskDetails: false,
       expandedLibraries: {} as { [key: string]: boolean },
       showReorder: false,
     }
@@ -436,6 +466,12 @@ export default Vue.extend({
     },
     taskCountByType(): { [key: string]: number } {
       return this.$store.state.komgaSse.taskCountByType
+    },
+    readyTaskCountByType(): { [key: string]: number } {
+      return this.$store.state.komgaSse.readyTaskCountByType
+    },
+    runningTaskCountByType(): { [key: string]: number } {
+      return this.$store.state.komgaSse.runningTaskCountByType
     },
     libraryScanDailyFileLimitUsage(): LibraryScanDailyFileLimitUsageSseDto | undefined {
       return this.$store.state.komgaSse.libraryScanDailyFileLimitUsage

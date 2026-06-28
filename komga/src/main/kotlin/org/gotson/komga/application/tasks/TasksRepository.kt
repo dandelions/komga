@@ -17,6 +17,10 @@ interface TasksRepository {
 
   fun countReadyOrRunningBySimpleType(): Map<String, Int>
 
+  fun countReadyBySimpleType(): Map<String, Int>
+
+  fun countRunningBySimpleType(): Map<String, Int>
+
   fun save(
     task: Task,
     availableDate: LocalDateTime? = null,

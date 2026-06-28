@@ -61,6 +61,8 @@ export interface SessionExpiredDto {
 export interface TaskQueueSseDto {
   count: number,
   countByType: { [key: string]: number },
+  readyCountByType: { [key: string]: number },
+  runningCountByType: { [key: string]: number },
   libraryScanDailyFileLimitUsage?: LibraryScanDailyFileLimitUsageSseDto | null,
 }
 

@@ -341,4 +341,22 @@ class TasksDaoTest(
     assertThat(countByType).containsEntry("HashBookPages", 1)
     assertThat(countByType).doesNotContainKey("ScanLibrary")
   }
+
+  @Test
+  fun `given ready and running tasks when counting by status then tasks are grouped by owner`() {
+    // given
+    tasksDao.save(Task.HashBookPages("book1", 5))
+    tasksDao.save(Task.HashBook("book2", 4))
+    tasksDao.takeFirst()
+
+    // when
+    val readyCountByType = tasksDao.countReadyBySimpleType()
+    val runningCountByType = tasksDao.countRunningBySimpleType()
+
+    // then
+    assertThat(readyCountByType).containsEntry("HashBook", 1)
+    assertThat(readyCountByType).doesNotContainKey("HashBookPages")
+    assertThat(runningCountByType).containsEntry("HashBookPages", 1)
+    assertThat(runningCountByType).doesNotContainKey("HashBook")
+  }
 }

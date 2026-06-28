@@ -75,11 +75,15 @@ class SseController(
   fun taskCount() {
     if (emitters.isNotEmpty()) {
       val tasksCount = tasksRepository.countReadyOrRunningBySimpleType()
+      val readyTasksCount = tasksRepository.countReadyBySimpleType()
+      val runningTasksCount = tasksRepository.countRunningBySimpleType()
       emitSse(
         "TaskQueueStatus",
         TaskQueueSseDto(
           tasksCount.values.sum(),
           tasksCount,
+          readyTasksCount,
+          runningTasksCount,
           komgaSettingsProvider.libraryScanDailyFileLimitUsage()?.let {
             LibraryScanDailyFileLimitUsageSseDto(
               it.date.toString(),

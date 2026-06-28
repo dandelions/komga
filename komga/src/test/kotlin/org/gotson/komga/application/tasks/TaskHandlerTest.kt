@@ -1,6 +1,7 @@
 package org.gotson.komga.application.tasks
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
+import io.mockk.clearMocks
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -20,6 +21,7 @@ import org.gotson.komga.domain.service.PageHashLifecycle
 import org.gotson.komga.domain.service.SeriesLifecycle
 import org.gotson.komga.domain.service.SeriesMetadataLifecycle
 import org.gotson.komga.infrastructure.search.SearchIndexLifecycle
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 
 class TaskHandlerTest {
@@ -60,6 +62,11 @@ class TaskHandlerTest {
       meterRegistry,
     )
 
+  @BeforeEach
+  fun clearMockCalls() {
+    clearMocks(taskEmitter, answers = false)
+  }
+
   @Test
   fun `given scan reaches daily file limit when handling scan task then continuation is scheduled`() {
     // given
@@ -68,6 +75,23 @@ class TaskHandlerTest {
     every { libraryRepository.findAllByParentId(library.id) } returns emptyList()
     every { libraryContentLifecycle.scanRootFolder(library, false) } returns
       LibraryScanSummary(limited = true, scannedBookCount = 1, countedBookCount = 1)
+
+    // when
+    taskHandler.handleTask(Task.ScanLibrary(library.id, scanDeep = false, priority = 7))
+
+    // then
+    verify(exactly = 1) { taskEmitter.scanLibraryTomorrow(library.id, false, 7) }
+    verify(exactly = 1) { taskEmitter.analyzeUnknownAndOutdatedBooks(library) }
+  }
+
+  @Test
+  fun `given limited scan persists books without counted books when handling scan task then analysis is scheduled`() {
+    // given
+    val library = makeLibrary(id = "library1")
+    every { libraryRepository.findByIdOrNull(library.id) } returns library
+    every { libraryRepository.findAllByParentId(library.id) } returns emptyList()
+    every { libraryContentLifecycle.scanRootFolder(library, false) } returns
+      LibraryScanSummary(limited = true, scannedBookCount = 1, countedBookCount = 0)
 
     // when
     taskHandler.handleTask(Task.ScanLibrary(library.id, scanDeep = false, priority = 7))

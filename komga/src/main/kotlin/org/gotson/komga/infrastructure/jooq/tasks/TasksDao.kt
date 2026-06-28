@@ -6,6 +6,7 @@ import org.gotson.komga.application.tasks.Task
 import org.gotson.komga.application.tasks.TasksRepository
 import org.gotson.komga.infrastructure.jooq.SplitDslDaoBase
 import org.gotson.komga.jooq.tasks.Tables
+import org.jooq.Condition
 import org.jooq.DSLContext
 import org.jooq.Query
 import org.jooq.Record2
@@ -112,19 +113,19 @@ class TasksDao(
 
   override fun count(): Int = dslRO.fetchCount(t)
 
-  override fun countBySimpleType(): Map<String, Int> =
-    dslRO
-      .select(t.SIMPLE_TYPE, DSL.count(t.SIMPLE_TYPE))
-      .from(t)
-      .groupBy(t.SIMPLE_TYPE)
-      .fetch()
-      .associate { it.value1() to it.value2() }
+  override fun countBySimpleType(): Map<String, Int> = countTasksBySimpleType()
 
-  override fun countReadyOrRunningBySimpleType(): Map<String, Int> =
+  override fun countReadyOrRunningBySimpleType(): Map<String, Int> = countTasksBySimpleType(readyOrRunningCondition())
+
+  override fun countReadyBySimpleType(): Map<String, Int> = countTasksBySimpleType(readyOrRunningCondition().and(t.OWNER.isNull))
+
+  override fun countRunningBySimpleType(): Map<String, Int> = countTasksBySimpleType(readyOrRunningCondition().and(t.OWNER.isNotNull))
+
+  private fun countTasksBySimpleType(condition: Condition = DSL.trueCondition()): Map<String, Int> =
     dslRO
       .select(t.SIMPLE_TYPE, DSL.count(t.SIMPLE_TYPE))
       .from(t)
-      .where(readyOrRunningCondition())
+      .where(condition)
       .groupBy(t.SIMPLE_TYPE)
       .fetch()
       .associate { it.value1() to it.value2() }
