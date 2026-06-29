@@ -100,4 +100,22 @@ class TaskHandlerTest {
     verify(exactly = 1) { taskEmitter.scanLibraryTomorrow(library.id, false, 7) }
     verify(exactly = 1) { taskEmitter.analyzeUnknownAndOutdatedBooks(library) }
   }
+
+  @Test
+  fun `given limited scan does not visit books when handling scan task then analysis is still scheduled`() {
+    // given
+    val library = makeLibrary(id = "library1")
+    every { libraryRepository.findByIdOrNull(library.id) } returns library
+    every { libraryRepository.findAllByParentId(library.id) } returns emptyList()
+    every { libraryContentLifecycle.scanRootFolder(library, false) } returns
+      LibraryScanSummary(limited = true, scannedBookCount = 0, countedBookCount = 0)
+
+    // when
+    taskHandler.handleTask(Task.ScanLibrary(library.id, scanDeep = false, priority = 7))
+
+    // then
+    verify(exactly = 1) { taskEmitter.scanLibraryTomorrow(library.id, false, 7) }
+    verify(exactly = 1) { taskEmitter.analyzeUnknownAndOutdatedBooks(library) }
+    verify(exactly = 0) { taskEmitter.repairExtensions(any(), any()) }
+  }
 }

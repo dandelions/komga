@@ -359,4 +359,18 @@ class TasksDaoTest(
     assertThat(runningCountByType).containsEntry("HashBookPages", 1)
     assertThat(runningCountByType).doesNotContainKey("HashBook")
   }
+
+  @Test
+  fun `given owned tasks when deleting all tasks then owned tasks are deleted too`() {
+    // given
+    tasksDao.save(Task.HashBookPages("book1", 5))
+    tasksDao.takeFirst()
+
+    // when
+    val deleted = tasksDao.deleteAll()
+
+    // then
+    assertThat(deleted).isEqualTo(1)
+    assertThat(tasksDao.count()).isEqualTo(0)
+  }
 }

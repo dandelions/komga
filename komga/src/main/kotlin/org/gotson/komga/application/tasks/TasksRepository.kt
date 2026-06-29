@@ -30,7 +30,7 @@ interface TasksRepository {
 
   fun delete(taskId: String)
 
-  fun deleteAll()
+  fun deleteAll(): Int
 
   fun deleteAllWithoutOwner(): Int
 

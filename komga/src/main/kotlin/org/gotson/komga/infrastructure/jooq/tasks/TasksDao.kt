@@ -155,9 +155,7 @@ class TasksDao(
     dslRW.deleteFrom(t).where(t.ID.eq(taskId)).execute()
   }
 
-  override fun deleteAll() {
-    dslRW.deleteFrom(t).execute()
-  }
+  override fun deleteAll(): Int = dslRW.deleteFrom(t).execute()
 
   override fun deleteAllWithoutOwner(): Int = dslRW.deleteFrom(t).where(t.OWNER.isNull).execute()
 

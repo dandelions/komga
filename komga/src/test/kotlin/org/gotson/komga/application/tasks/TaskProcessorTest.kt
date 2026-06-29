@@ -1,6 +1,7 @@
 package org.gotson.komga.application.tasks
 
 import com.ninjasquad.springmockk.MockkBean
+import io.mockk.clearMocks
 import io.mockk.every
 import io.mockk.slot
 import io.mockk.verify
@@ -9,6 +10,7 @@ import org.gotson.komga.domain.model.Book
 import org.gotson.komga.domain.model.makeBook
 import org.gotson.komga.domain.persistence.BookRepository
 import org.gotson.komga.domain.service.BookLifecycle
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
@@ -19,12 +21,20 @@ import kotlin.time.Duration.Companion.seconds
 class TaskProcessorTest(
   @Autowired private val taskEmitter: TaskEmitter,
   @Autowired private val taskProcessor: TaskProcessor,
+  @Autowired private val tasksRepository: TasksRepository,
 ) {
   @MockkBean
   private lateinit var mockBookLifecycle: BookLifecycle
 
   @MockkBean
   private lateinit var mockBookRepository: BookRepository
+
+  @BeforeEach
+  fun cleanup() {
+    taskProcessor.processTasks = false
+    tasksRepository.deleteAll()
+    clearMocks(mockBookLifecycle, mockBookRepository)
+  }
 
   fun testTasks(
     sleep: Duration = 3.seconds,
@@ -35,6 +45,18 @@ class TaskProcessorTest(
     taskProcessor.processTasks = true
     taskProcessor.processAvailableTask()
     Thread.sleep(sleep.inWholeMilliseconds)
+  }
+
+  @Test
+  fun `when task handler throws unexpectedly then task is removed from queue`() {
+    every { mockBookRepository.findByIdOrNull(any()) } returns makeBook("id")
+    every { mockBookLifecycle.analyzeAndPersist(any()) } throws RuntimeException("boom")
+
+    testTasks {
+      taskEmitter.analyzeBook(makeBook("book"))
+    }
+
+    assertThat(tasksRepository.count()).isEqualTo(0)
   }
 
   @Test

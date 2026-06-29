@@ -22,5 +22,5 @@ class TaskController(
   @ResponseStatus(HttpStatus.OK)
   @PreAuthorize("hasRole('ADMIN')")
   @Operation(summary = "Clear task queue", description = "Cancel all tasks queued")
-  fun emptyTaskQueue(): Int = tasksRepository.deleteAllWithoutOwner()
+  fun emptyTaskQueue(): Int = tasksRepository.deleteAll()
 }
