@@ -1004,6 +1004,7 @@
     "updates": "Updates"
   },
   "server_settings": {
+    "button_reset_library_scan_daily_file_limit_usage": "Reset today's usage",
     "config_precedence": "Takes precedence over the configuration file",
     "dialog_regenerate_thumbnails": {
       "body": "Thumbnails size has changed. Do you want to regenerate book thumbnails?",

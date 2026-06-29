@@ -46,7 +46,18 @@
           type="number"
           min="1"
           class="mt-4"
-        />
+        >
+          <template v-slot:append-outer>
+            <v-btn
+              small
+              :disabled="!existingSettings.libraryScanDailyFileLimit"
+              :loading="resettingLibraryScanDailyFileLimitUsage"
+              @click="resetLibraryScanDailyFileLimitUsage"
+            >
+              {{ $t('server_settings.button_reset_library_scan_daily_file_limit_usage') }}
+            </v-btn>
+          </template>
+        </v-text-field>
         <v-text-field
           v-model="form.rememberMeDurationDays"
           @input="$v.form.rememberMeDurationDays.$touch()"
@@ -237,6 +248,7 @@ export default Vue.extend({
     existingSettings: {} as SettingsDto,
     dialogRegenerateThumbnails: false,
     modalFileBrowserKepubify: false,
+    resettingLibraryScanDailyFileLimitUsage: false,
   }),
   validations: {
     form: {
@@ -377,6 +389,15 @@ export default Vue.extend({
     },
     regenerateThumbnails(forBiggerResultOnly: boolean) {
       this.$komgaBooks.regenerateThumbnails(forBiggerResultOnly)
+    },
+    async resetLibraryScanDailyFileLimitUsage() {
+      this.resettingLibraryScanDailyFileLimitUsage = true
+      try {
+        await this.$komgaSettings.resetLibraryScanDailyFileLimitUsage()
+        await this.refreshSettings()
+      } finally {
+        this.resettingLibraryScanDailyFileLimitUsage = false
+      }
     },
   },
 })

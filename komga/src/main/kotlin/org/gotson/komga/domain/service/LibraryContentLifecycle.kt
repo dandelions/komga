@@ -220,11 +220,18 @@ class LibraryContentLifecycle(
           // if series already exists, update it
           logger.debug { "Scanned series already exists. Scanned: $newSeries, Existing: $existingSeries" }
           val seriesChanged = newSeries.fileLastModified.notEquals(existingSeries.fileLastModified) || existingSeries.deletedDate != null || seriesUrlWithDeletedBooks.contains(newSeries.url)
+          val hasCountedBooks =
+            scanLimitUsage != null &&
+              newBooks.any { book ->
+                existingBooksByUrl[book.url]?.let { existingBook ->
+                  book.fileLastModified.notEquals(existingBook.fileLastModified)
+                } ?: true
+              }
           if (seriesChanged) {
             logger.info { "Series changed on disk, updating: $existingSeries" }
             seriesRepository.update(existingSeries.copy(fileLastModified = newSeries.fileLastModified, deletedDate = null))
           }
-          if (scanDeep || seriesChanged) {
+          if (scanDeep || seriesChanged || hasCountedBooks) {
             // update list of books with existing entities if they exist
             val existingBooks = bookRepository.findAllBySeriesId(existingSeries.id)
             logger.debug { "Existing books: $existingBooks" }

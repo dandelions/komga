@@ -34,5 +34,7 @@ interface TasksRepository {
 
   fun deleteAllWithoutOwner(): Int
 
+  fun makeFutureScanLibraryTasksAvailable(): Int
+
   fun disown(): Int
 }

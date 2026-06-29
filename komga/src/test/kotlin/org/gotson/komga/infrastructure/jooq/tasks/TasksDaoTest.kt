@@ -343,6 +343,25 @@ class TasksDaoTest(
   }
 
   @Test
+  fun `given future scan library task when making future scan tasks available then task is ready`() {
+    // given
+    tasksDao.save(Task.HashBookPages("book1", 5), LocalDateTime.now().plusDays(1))
+    tasksDao.save(
+      Task.ScanLibrary("library1", false, 2, continuationDate = "2099-01-01"),
+      LocalDateTime.now().plusDays(1),
+    )
+
+    // when
+    val updated = tasksDao.makeFutureScanLibraryTasksAvailable()
+    val countByType = tasksDao.countReadyBySimpleType()
+
+    // then
+    assertThat(updated).isEqualTo(1)
+    assertThat(countByType).containsEntry("ScanLibrary", 1)
+    assertThat(countByType).doesNotContainKey("HashBookPages")
+  }
+
+  @Test
   fun `given ready and running tasks when counting by status then tasks are grouped by owner`() {
     // given
     tasksDao.save(Task.HashBookPages("book1", 5))

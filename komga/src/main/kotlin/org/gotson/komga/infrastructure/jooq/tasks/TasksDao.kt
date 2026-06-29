@@ -159,6 +159,17 @@ class TasksDao(
 
   override fun deleteAllWithoutOwner(): Int = dslRW.deleteFrom(t).where(t.OWNER.isNull).execute()
 
+  override fun makeFutureScanLibraryTasksAvailable(): Int =
+    dslRW
+      .update(t)
+      .set(t.AVAILABLE_DATE, null as LocalDateTime?)
+      .set(t.LAST_MODIFIED_DATE, nowUtc())
+      .where(t.SIMPLE_TYPE.eq(Task.ScanLibrary::class.simpleName))
+      .and(t.OWNER.isNull)
+      .and(t.AVAILABLE_DATE.isNotNull)
+      .and(t.AVAILABLE_DATE.gt(nowUtc()))
+      .execute()
+
   private fun Task.toQuery(
     dsl: DSLContext,
     availableDate: LocalDateTime?,

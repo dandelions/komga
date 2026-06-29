@@ -228,6 +228,49 @@ class LibraryContentLifecycleTest(
     }
 
     @Test
+    fun `given limited shallow scan finds new book when series timestamp is unchanged then new book is persisted`() {
+      // given
+      val library = makeLibrary()
+      libraryRepository.insert(library)
+      komgaSettingsProvider.libraryScanDailyFileLimit = 10
+
+      val series = makeSeries(name = "series")
+      every { mockScanner.scanRootFolder(any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) }
+        .returnsMany(
+          ScanResult(
+            mapOf(series to listOf(makeBook("book1"))),
+            emptyList(),
+            countedBookCount = 1,
+          ),
+          ScanResult(
+            mapOf(
+              series.copy(fileLastModified = series.fileLastModified) to
+                listOf(makeBook("book1"), makeBook("book2")),
+            ),
+            emptyList(),
+            countedBookCount = 1,
+            limited = true,
+          ),
+        )
+
+      try {
+        libraryContentLifecycle.scanRootFolder(library)
+
+        // when
+        val scanSummary = libraryContentLifecycle.scanRootFolder(library)
+
+        // then
+        val allBooks = bookRepository.findAll().sortedBy { it.name }
+
+        assertThat(scanSummary.limited).isTrue
+        assertThat(scanSummary.countedBookCount).isEqualTo(1)
+        assertThat(allBooks.map { it.name }).containsExactly("book1", "book2")
+      } finally {
+        komgaSettingsProvider.libraryScanDailyFileLimit = null
+      }
+    }
+
+    @Test
     fun `given library bypasses daily file limit when limit is exhausted then library is scanned`() {
       // given
       val library = makeLibrary().copy(scanBypassDailyFileLimit = true)

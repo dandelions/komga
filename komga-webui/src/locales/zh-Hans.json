@@ -1004,6 +1004,7 @@
     "updates": "更新"
   },
   "server_settings": {
+    "button_reset_library_scan_daily_file_limit_usage": "重置今日用量",
     "config_precedence": "优先于配置文件",
     "dialog_regenerate_thumbnails": {
       "body": "缩略图大小已更改。您想重新生成书籍缩略图吗？",

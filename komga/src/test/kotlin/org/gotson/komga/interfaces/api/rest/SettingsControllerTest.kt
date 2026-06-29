@@ -15,6 +15,7 @@ import org.springframework.security.test.context.support.WithAnonymousUser
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.patch
+import org.springframework.test.web.servlet.post
 import kotlin.time.Duration.Companion.days
 
 @SpringBootTest
@@ -40,6 +41,26 @@ class SettingsControllerTest(
     fun `given restricted user when retrieving settings then returns forbidden`() {
       mockMvc
         .get("/api/v1/settings")
+        .andExpect {
+          status { isForbidden() }
+        }
+    }
+
+    @Test
+    @WithAnonymousUser
+    fun `given anonymous user when resetting library scan daily file limit usage then returns unauthorized`() {
+      mockMvc
+        .post("/api/v1/settings/library-scan-daily-file-limit/reset")
+        .andExpect {
+          status { isUnauthorized() }
+        }
+    }
+
+    @Test
+    @WithMockCustomUser
+    fun `given restricted user when resetting library scan daily file limit usage then returns forbidden`() {
+      mockMvc
+        .post("/api/v1/settings/library-scan-daily-file-limit/reset")
         .andExpect {
           status { isForbidden() }
         }
@@ -118,6 +139,16 @@ class SettingsControllerTest(
     assertThat(komgaSettingsProvider.taskPoolSize).isEqualTo(8)
     assertThat(komgaSettingsProvider.serverPort).isEqualTo(5678)
     assertThat(komgaSettingsProvider.serverContextPath).isEqualTo("/komga-hyphen/subpath123")
+  }
+
+  @Test
+  @WithMockCustomUser(roles = ["ADMIN"])
+  fun `given admin user when resetting library scan daily file limit usage then returns no content`() {
+    mockMvc
+      .post("/api/v1/settings/library-scan-daily-file-limit/reset")
+      .andExpect {
+        status { isNoContent() }
+      }
   }
 
   @Test
