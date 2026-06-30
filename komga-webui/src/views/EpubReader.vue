@@ -297,42 +297,65 @@
             </v-list-item>
 
             <v-list-item>
+              <settings-switch
+                v-model="epubBackgroundImagesEnabled"
+                :label="$t('epubreader.settings.background_images_enabled')"
+              />
+            </v-list-item>
+
+            <v-list-item v-if="epubBackgroundImagesEnabled">
+              <settings-select
+                :items="epubBackgroundImageLightItems"
+                v-model="epubBackgroundImageLightId"
+                :label="$t('epubreader.settings.background_image_light')"
+              />
+            </v-list-item>
+
+            <v-list-item v-if="epubBackgroundImagesEnabled">
               <v-file-input
                 v-model="epubBackgroundImageLightFile"
                 accept="image/*"
                 prepend-icon="mdi-image-outline"
                 show-size
                 hide-details
-                :label="$t('epubreader.settings.background_image_light')"
+                :label="$t('epubreader.settings.background_image_light_upload')"
                 @change="setEpubBackgroundImage('light', $event)"
               />
               <v-btn
                 icon
-                :aria-label="$t('epubreader.settings.background_image_clear')"
-                :disabled="!settings.backgroundImageLight"
-                @click="clearEpubBackgroundImage('light')"
+                :aria-label="$t('epubreader.settings.background_image_delete')"
+                :disabled="!epubBackgroundImageLightId"
+                @click="deleteEpubBackgroundImage('light')"
               >
-                <v-icon>mdi-close</v-icon>
+                <v-icon>mdi-delete</v-icon>
               </v-btn>
             </v-list-item>
 
-            <v-list-item>
+            <v-list-item v-if="epubBackgroundImagesEnabled">
+              <settings-select
+                :items="epubBackgroundImageDarkItems"
+                v-model="epubBackgroundImageDarkId"
+                :label="$t('epubreader.settings.background_image_dark')"
+              />
+            </v-list-item>
+
+            <v-list-item v-if="epubBackgroundImagesEnabled">
               <v-file-input
                 v-model="epubBackgroundImageDarkFile"
                 accept="image/*"
                 prepend-icon="mdi-image-outline"
                 show-size
                 hide-details
-                :label="$t('epubreader.settings.background_image_dark')"
+                :label="$t('epubreader.settings.background_image_dark_upload')"
                 @change="setEpubBackgroundImage('dark', $event)"
               />
               <v-btn
                 icon
-                :aria-label="$t('epubreader.settings.background_image_clear')"
-                :disabled="!settings.backgroundImageDark"
-                @click="clearEpubBackgroundImage('dark')"
+                :aria-label="$t('epubreader.settings.background_image_delete')"
+                :disabled="!epubBackgroundImageDarkId"
+                @click="deleteEpubBackgroundImage('dark')"
               >
-                <v-icon>mdi-close</v-icon>
+                <v-icon>mdi-delete</v-icon>
               </v-btn>
             </v-list-item>
 
@@ -436,6 +459,8 @@ import OpenCC, {ConverterFunction} from 'opencc-js'
 import {
   CLIENT_SETTING,
   ClientSettingUserUpdateDto,
+  ClientSettingsEpubBackgroundImage,
+  ClientSettingsEpubBackgroundImages,
   ClientSettingsEpubChineseConversion,
   ClientSettingsEpubCustomStyle,
 } from '@/types/komga-clientsettings'
@@ -495,6 +520,13 @@ const EPUB_READER_STYLE_URLS = [
   R2D2BC_POPOVER_CSS_URL,
   R2D2BC_STYLE_CSS_URL,
 ]
+const createEmptyEpubBackgroundImages = (): ClientSettingsEpubBackgroundImages => ({
+  enabled: false,
+  selectedLightId: '',
+  selectedDarkId: '',
+  light: [],
+  dark: [],
+})
 
 type EpubTouchStart = {
   x: number,
@@ -613,11 +645,13 @@ export default Vue.extend({
         navigationClick: true,
         navigationButtons: true,
         verticalSwipeLeftAction: 'previous' as EpubPageAction,
+        // legacy local values, migrated to WEBUI_EPUB_BACKGROUND_IMAGES when present
         backgroundImageLight: '',
         backgroundImageDark: '',
       },
       epubBackgroundImageLightFile: undefined as File | undefined,
       epubBackgroundImageDarkFile: undefined as File | undefined,
+      epubBackgroundImages: createEmptyEpubBackgroundImages(),
       navigationOptions: [
         {text: this.$t('epubreader.settings.navigation_options.buttons').toString(), value: 'button'},
         {text: this.$t('epubreader.settings.navigation_options.click').toString(), value: 'click'},
@@ -733,6 +767,42 @@ export default Vue.extend({
         style.backgroundAttachment = 'fixed'
       }
       return style
+    },
+    epubBackgroundImagesEnabled: {
+      get: function (): boolean {
+        return this.epubBackgroundImages.enabled
+      },
+      set: function (enabled: boolean): void {
+        this.epubBackgroundImages.enabled = enabled
+        this.saveEpubBackgroundImages()
+        this.scheduleEpubIframeEnhancements(false)
+      },
+    },
+    epubBackgroundImageLightId: {
+      get: function (): string {
+        return this.epubBackgroundImages.selectedLightId || ''
+      },
+      set: function (id: string): void {
+        this.epubBackgroundImages.selectedLightId = id
+        this.saveEpubBackgroundImages()
+        this.scheduleEpubIframeEnhancements(false)
+      },
+    },
+    epubBackgroundImageDarkId: {
+      get: function (): string {
+        return this.epubBackgroundImages.selectedDarkId || ''
+      },
+      set: function (id: string): void {
+        this.epubBackgroundImages.selectedDarkId = id
+        this.saveEpubBackgroundImages()
+        this.scheduleEpubIframeEnhancements(false)
+      },
+    },
+    epubBackgroundImageLightItems(): { text: string, value: string }[] {
+      return this.getEpubBackgroundImageItems('light')
+    },
+    epubBackgroundImageDarkItems(): { text: string, value: string }[] {
+      return this.getEpubBackgroundImageItems('dark')
     },
     shortcutsHelp(): object {
       let nav = []
@@ -1132,6 +1202,91 @@ export default Vue.extend({
     updateDirection(dir: string) {
       this.effectiveDirection = dir
     },
+    loadEpubBackgroundImages() {
+      this.epubBackgroundImages = this.normalizeEpubBackgroundImages(this.getEpubBackgroundImages())
+    },
+    getEpubBackgroundImages(): ClientSettingsEpubBackgroundImages {
+      try {
+        return JSON.parse(this.$store.state.komgaSettings.clientSettingsUser[CLIENT_SETTING.WEBUI_EPUB_BACKGROUND_IMAGES]?.value)
+      } catch (e) {
+        return createEmptyEpubBackgroundImages()
+      }
+    },
+    normalizeEpubBackgroundImages(config?: Partial<ClientSettingsEpubBackgroundImages>): ClientSettingsEpubBackgroundImages {
+      const light = Array.isArray(config?.light) ? config?.light.filter(this.isValidEpubBackgroundImage) || [] : []
+      const dark = Array.isArray(config?.dark) ? config?.dark.filter(this.isValidEpubBackgroundImage) || [] : []
+      const selectedLightId = light.some(x => x.id === config?.selectedLightId) ? config?.selectedLightId : light[0]?.id || ''
+      const selectedDarkId = dark.some(x => x.id === config?.selectedDarkId) ? config?.selectedDarkId : dark[0]?.id || ''
+
+      return {
+        enabled: config?.enabled || false,
+        selectedLightId,
+        selectedDarkId,
+        light,
+        dark,
+      }
+    },
+    isValidEpubBackgroundImage(image: ClientSettingsEpubBackgroundImage): boolean {
+      return !!image?.id && !!image?.name && !!image?.dataUrl
+    },
+    async migrateLocalEpubBackgroundImages() {
+      let changed = false
+      const config = this.normalizeEpubBackgroundImages(this.epubBackgroundImages)
+
+      if (this.settings.backgroundImageLight && config.light.length === 0) {
+        const image = this.createEpubBackgroundImage(
+          this.$t('epubreader.settings.background_image_light').toString(),
+          this.settings.backgroundImageLight,
+        )
+        config.light.push(image)
+        config.selectedLightId = image.id
+        config.enabled = true
+        changed = true
+      }
+
+      if (this.settings.backgroundImageDark && config.dark.length === 0) {
+        const image = this.createEpubBackgroundImage(
+          this.$t('epubreader.settings.background_image_dark').toString(),
+          this.settings.backgroundImageDark,
+        )
+        config.dark.push(image)
+        config.selectedDarkId = image.id
+        config.enabled = true
+        changed = true
+      }
+
+      if (!changed) return
+
+      this.epubBackgroundImages = config
+      this.settings.backgroundImageLight = ''
+      this.settings.backgroundImageDark = ''
+      this.saveEpubReaderSettings()
+      await this.saveEpubBackgroundImages()
+    },
+    getEpubBackgroundImageItems(mode: EpubBackgroundImageMode): { text: string, value: string }[] {
+      return [
+        {text: this.$t('epubreader.settings.background_image_none').toString(), value: ''},
+        ...this.getEpubBackgroundImageList(mode).map(image => ({text: image.name, value: image.id})),
+      ]
+    },
+    getEpubBackgroundImageList(mode: EpubBackgroundImageMode): ClientSettingsEpubBackgroundImage[] {
+      return mode === 'light' ? this.epubBackgroundImages.light : this.epubBackgroundImages.dark
+    },
+    setEpubBackgroundImageList(mode: EpubBackgroundImageMode, images: ClientSettingsEpubBackgroundImage[]) {
+      if (mode === 'light') this.epubBackgroundImages.light = images
+      else this.epubBackgroundImages.dark = images
+    },
+    getSelectedEpubBackgroundImageId(mode: EpubBackgroundImageMode): string {
+      return mode === 'light' ? this.epubBackgroundImages.selectedLightId || '' : this.epubBackgroundImages.selectedDarkId || ''
+    },
+    setSelectedEpubBackgroundImageId(mode: EpubBackgroundImageMode, id: string) {
+      if (mode === 'light') this.epubBackgroundImages.selectedLightId = id
+      else this.epubBackgroundImages.selectedDarkId = id
+    },
+    getSelectedEpubBackgroundImage(mode: EpubBackgroundImageMode): ClientSettingsEpubBackgroundImage | undefined {
+      const id = this.getSelectedEpubBackgroundImageId(mode)
+      return this.getEpubBackgroundImageList(mode).find(image => image.id === id)
+    },
     async setEpubBackgroundImage(mode: EpubBackgroundImageMode, fileOrFiles?: File | File[] | null) {
       const file = Array.isArray(fileOrFiles) ? fileOrFiles[0] : fileOrFiles
       if (!file) return
@@ -1143,20 +1298,32 @@ export default Vue.extend({
       }
 
       const dataUrl = await this.readFileAsDataUrl(file)
-      if (mode === 'light') this.settings.backgroundImageLight = dataUrl
-      else this.settings.backgroundImageDark = dataUrl
+      const image = this.createEpubBackgroundImage(file.name, dataUrl)
+      this.setEpubBackgroundImageList(mode, [...this.getEpubBackgroundImageList(mode), image])
+      this.setSelectedEpubBackgroundImageId(mode, image.id)
+      this.epubBackgroundImages.enabled = true
 
       this.resetEpubBackgroundImageInput(mode)
-      this.saveEpubReaderSettings()
+      await this.saveEpubBackgroundImages()
       this.scheduleEpubIframeEnhancements(false)
     },
-    clearEpubBackgroundImage(mode: EpubBackgroundImageMode) {
-      if (mode === 'light') this.settings.backgroundImageLight = ''
-      else this.settings.backgroundImageDark = ''
+    async deleteEpubBackgroundImage(mode: EpubBackgroundImageMode) {
+      const selectedId = this.getSelectedEpubBackgroundImageId(mode)
+      if (!selectedId) return
 
-      this.resetEpubBackgroundImageInput(mode)
-      this.saveEpubReaderSettings()
+      const images = this.getEpubBackgroundImageList(mode).filter(image => image.id !== selectedId)
+      this.setEpubBackgroundImageList(mode, images)
+      this.setSelectedEpubBackgroundImageId(mode, images[0]?.id || '')
+
+      await this.saveEpubBackgroundImages()
       this.scheduleEpubIframeEnhancements(false)
+    },
+    createEpubBackgroundImage(name: string, dataUrl: string): ClientSettingsEpubBackgroundImage {
+      return {
+        id: `epub-bg-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+        name,
+        dataUrl,
+      }
     },
     resetEpubBackgroundImageInput(mode: EpubBackgroundImageMode) {
       if (mode === 'light') this.epubBackgroundImageLightFile = undefined
@@ -1169,6 +1336,14 @@ export default Vue.extend({
         reader.onerror = () => reject(reader.error)
         reader.readAsDataURL(file)
       })
+    },
+    async saveEpubBackgroundImages() {
+      const update = {} as Record<string, ClientSettingUserUpdateDto>
+      update[CLIENT_SETTING.WEBUI_EPUB_BACKGROUND_IMAGES] = {
+        value: JSON.stringify(this.epubBackgroundImages),
+      }
+      await this.$komgaSettings.updateClientSettingUser(update)
+      await this.$store.dispatch('getClientSettingsUser')
     },
     saveEpubReaderSettings() {
       this.$store.commit('setEpubreaderSettings', this.settings)
@@ -1189,8 +1364,10 @@ export default Vue.extend({
       }
     },
     getCurrentEpubBackgroundImage(): string {
-      if (this.getEpubAppearanceName() === 'night') return this.settings.backgroundImageDark || ''
-      return this.settings.backgroundImageLight || ''
+      if (!this.epubBackgroundImages.enabled) return ''
+
+      const mode = this.getEpubAppearanceName() === 'night' ? 'dark' : 'light'
+      return this.getSelectedEpubBackgroundImage(mode)?.dataUrl || ''
     },
     toCssUrl(value: string): string {
       return `url("${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}")`
@@ -1241,6 +1418,8 @@ export default Vue.extend({
     },
     async loadEpubCustomStyle(bookId: string) {
       await this.$store.dispatch('getClientSettingsUser')
+      this.loadEpubBackgroundImages()
+      await this.migrateLocalEpubBackgroundImages()
       const config = this.getEpubCustomStyles()[bookId]
       this.epubCustomStyleEnabled = config?.enabled || false
       this.epubCustomStyleDisableOriginalStyle = config?.disableOriginalStyle || false
@@ -1271,6 +1450,9 @@ export default Vue.extend({
         const update = {} as Record<string, ClientSettingUserUpdateDto>
         update[CLIENT_SETTING.WEBUI_EPUB_CUSTOM_STYLES] = {
           value: JSON.stringify(all),
+        }
+        update[CLIENT_SETTING.WEBUI_EPUB_BACKGROUND_IMAGES] = {
+          value: JSON.stringify(this.epubBackgroundImages),
         }
         await this.$komgaSettings.updateClientSettingUser(update)
         await this.$store.dispatch('getClientSettingsUser')

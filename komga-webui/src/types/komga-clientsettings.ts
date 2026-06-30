@@ -23,6 +23,7 @@ export enum CLIENT_SETTING {
   WEBUI_PDF_REFLOW_SETTINGS = 'webui.pdf_reflow_settings',
   WEBUI_READER_IMAGE_SETTINGS = 'webui.reader_image_settings',
   WEBUI_EPUB_CUSTOM_STYLES = 'webui.epub_custom_styles',
+  WEBUI_EPUB_BACKGROUND_IMAGES = 'webui.epub_background_images',
 }
 
 export interface ClientSettingsEpubCustomStyle {
@@ -33,6 +34,20 @@ export interface ClientSettingsEpubCustomStyle {
 }
 
 export type ClientSettingsEpubChineseConversion = 'none' | 'simplified' | 'traditional'
+
+export interface ClientSettingsEpubBackgroundImages {
+  enabled: boolean,
+  selectedLightId?: string,
+  selectedDarkId?: string,
+  light: ClientSettingsEpubBackgroundImage[],
+  dark: ClientSettingsEpubBackgroundImage[],
+}
+
+export interface ClientSettingsEpubBackgroundImage {
+  id: string,
+  name: string,
+  dataUrl: string,
+}
 
 export interface ClientSettingLibrary {
   unpinned?: boolean,
