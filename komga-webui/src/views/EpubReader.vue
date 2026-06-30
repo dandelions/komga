@@ -461,6 +461,7 @@ import {
   ClientSettingUserUpdateDto,
   ClientSettingsEpubBackgroundImage,
   ClientSettingsEpubBackgroundImages,
+  ClientSettingsEpubBackgroundImageSelection,
   ClientSettingsEpubChineseConversion,
   ClientSettingsEpubCustomStyle,
 } from '@/types/komga-clientsettings'
@@ -526,6 +527,13 @@ const createEmptyEpubBackgroundImages = (): ClientSettingsEpubBackgroundImages =
   selectedDarkId: '',
   light: [],
   dark: [],
+  books: {},
+})
+
+const createEmptyEpubBackgroundImageSelection = (): ClientSettingsEpubBackgroundImageSelection => ({
+  enabled: false,
+  selectedLightId: '',
+  selectedDarkId: '',
 })
 
 type EpubTouchStart = {
@@ -770,30 +778,30 @@ export default Vue.extend({
     },
     epubBackgroundImagesEnabled: {
       get: function (): boolean {
-        return this.epubBackgroundImages.enabled
+        return this.getCurrentEpubBackgroundImageSelection().enabled
       },
       set: function (enabled: boolean): void {
-        this.epubBackgroundImages.enabled = enabled
+        this.setCurrentEpubBackgroundImageSelection({enabled})
         this.saveEpubBackgroundImages()
         this.scheduleEpubIframeEnhancements(false)
       },
     },
     epubBackgroundImageLightId: {
       get: function (): string {
-        return this.epubBackgroundImages.selectedLightId || ''
+        return this.getCurrentEpubBackgroundImageSelection().selectedLightId || ''
       },
       set: function (id: string): void {
-        this.epubBackgroundImages.selectedLightId = id
+        this.setCurrentEpubBackgroundImageSelection({selectedLightId: id})
         this.saveEpubBackgroundImages()
         this.scheduleEpubIframeEnhancements(false)
       },
     },
     epubBackgroundImageDarkId: {
       get: function (): string {
-        return this.epubBackgroundImages.selectedDarkId || ''
+        return this.getCurrentEpubBackgroundImageSelection().selectedDarkId || ''
       },
       set: function (id: string): void {
-        this.epubBackgroundImages.selectedDarkId = id
+        this.setCurrentEpubBackgroundImageSelection({selectedDarkId: id})
         this.saveEpubBackgroundImages()
         this.scheduleEpubIframeEnhancements(false)
       },
@@ -1215,15 +1223,31 @@ export default Vue.extend({
     normalizeEpubBackgroundImages(config?: Partial<ClientSettingsEpubBackgroundImages>): ClientSettingsEpubBackgroundImages {
       const light = Array.isArray(config?.light) ? config?.light.filter(this.isValidEpubBackgroundImage) || [] : []
       const dark = Array.isArray(config?.dark) ? config?.dark.filter(this.isValidEpubBackgroundImage) || [] : []
-      const selectedLightId = light.some(x => x.id === config?.selectedLightId) ? config?.selectedLightId : light[0]?.id || ''
-      const selectedDarkId = dark.some(x => x.id === config?.selectedDarkId) ? config?.selectedDarkId : dark[0]?.id || ''
+      const books =
+        Object.entries(config?.books || {})
+          .reduce((acc, [bookId, selection]) => {
+            acc[bookId] = this.normalizeEpubBackgroundImageSelection(selection, light, dark)
+            return acc
+          }, {} as Record<string, ClientSettingsEpubBackgroundImageSelection>)
 
       return {
-        enabled: config?.enabled || false,
-        selectedLightId,
-        selectedDarkId,
+        enabled: false,
+        selectedLightId: '',
+        selectedDarkId: '',
         light,
         dark,
+        books,
+      }
+    },
+    normalizeEpubBackgroundImageSelection(
+      selection: Partial<ClientSettingsEpubBackgroundImageSelection> | undefined,
+      light: ClientSettingsEpubBackgroundImage[] = this.epubBackgroundImages.light,
+      dark: ClientSettingsEpubBackgroundImage[] = this.epubBackgroundImages.dark,
+    ): ClientSettingsEpubBackgroundImageSelection {
+      return {
+        enabled: selection?.enabled || false,
+        selectedLightId: light.some(x => x.id === selection?.selectedLightId) ? selection?.selectedLightId : '',
+        selectedDarkId: dark.some(x => x.id === selection?.selectedDarkId) ? selection?.selectedDarkId : '',
       }
     },
     isValidEpubBackgroundImage(image: ClientSettingsEpubBackgroundImage): boolean {
@@ -1239,8 +1263,6 @@ export default Vue.extend({
           this.settings.backgroundImageLight,
         )
         config.light.push(image)
-        config.selectedLightId = image.id
-        config.enabled = true
         changed = true
       }
 
@@ -1250,8 +1272,6 @@ export default Vue.extend({
           this.settings.backgroundImageDark,
         )
         config.dark.push(image)
-        config.selectedDarkId = image.id
-        config.enabled = true
         changed = true
       }
 
@@ -1277,15 +1297,27 @@ export default Vue.extend({
       else this.epubBackgroundImages.dark = images
     },
     getSelectedEpubBackgroundImageId(mode: EpubBackgroundImageMode): string {
-      return mode === 'light' ? this.epubBackgroundImages.selectedLightId || '' : this.epubBackgroundImages.selectedDarkId || ''
+      const selection = this.getCurrentEpubBackgroundImageSelection()
+      return mode === 'light' ? selection.selectedLightId || '' : selection.selectedDarkId || ''
     },
     setSelectedEpubBackgroundImageId(mode: EpubBackgroundImageMode, id: string) {
-      if (mode === 'light') this.epubBackgroundImages.selectedLightId = id
-      else this.epubBackgroundImages.selectedDarkId = id
+      this.setCurrentEpubBackgroundImageSelection(mode === 'light' ? {selectedLightId: id} : {selectedDarkId: id})
     },
     getSelectedEpubBackgroundImage(mode: EpubBackgroundImageMode): ClientSettingsEpubBackgroundImage | undefined {
       const id = this.getSelectedEpubBackgroundImageId(mode)
       return this.getEpubBackgroundImageList(mode).find(image => image.id === id)
+    },
+    getCurrentEpubBackgroundImageSelection(): ClientSettingsEpubBackgroundImageSelection {
+      return this.normalizeEpubBackgroundImageSelection(this.epubBackgroundImages.books?.[this.bookId])
+    },
+    setCurrentEpubBackgroundImageSelection(patch: Partial<ClientSettingsEpubBackgroundImageSelection>) {
+      if (!this.epubBackgroundImages.books) this.$set(this.epubBackgroundImages, 'books', {})
+
+      const selection = {
+        ...this.getCurrentEpubBackgroundImageSelection(),
+        ...patch,
+      }
+      this.$set(this.epubBackgroundImages.books, this.bookId, this.normalizeEpubBackgroundImageSelection(selection))
     },
     async setEpubBackgroundImage(mode: EpubBackgroundImageMode, fileOrFiles?: File | File[] | null) {
       const file = Array.isArray(fileOrFiles) ? fileOrFiles[0] : fileOrFiles
@@ -1301,7 +1333,7 @@ export default Vue.extend({
       const image = this.createEpubBackgroundImage(file.name, dataUrl)
       this.setEpubBackgroundImageList(mode, [...this.getEpubBackgroundImageList(mode), image])
       this.setSelectedEpubBackgroundImageId(mode, image.id)
-      this.epubBackgroundImages.enabled = true
+      this.setCurrentEpubBackgroundImageSelection({enabled: true})
 
       this.resetEpubBackgroundImageInput(mode)
       await this.saveEpubBackgroundImages()
@@ -1313,10 +1345,20 @@ export default Vue.extend({
 
       const images = this.getEpubBackgroundImageList(mode).filter(image => image.id !== selectedId)
       this.setEpubBackgroundImageList(mode, images)
-      this.setSelectedEpubBackgroundImageId(mode, images[0]?.id || '')
+      this.clearEpubBackgroundImageSelection(mode, selectedId)
 
       await this.saveEpubBackgroundImages()
       this.scheduleEpubIframeEnhancements(false)
+    },
+    clearEpubBackgroundImageSelection(mode: EpubBackgroundImageMode, deletedId: string) {
+      Object.entries(this.epubBackgroundImages.books || {}).forEach(([bookId, selection]) => {
+        const patch = {} as Partial<ClientSettingsEpubBackgroundImageSelection>
+        if (mode === 'light' && selection.selectedLightId === deletedId) patch.selectedLightId = ''
+        if (mode === 'dark' && selection.selectedDarkId === deletedId) patch.selectedDarkId = ''
+        if (Object.keys(patch).length > 0) {
+          this.$set(this.epubBackgroundImages.books, bookId, this.normalizeEpubBackgroundImageSelection({...selection, ...patch}))
+        }
+      })
     },
     createEpubBackgroundImage(name: string, dataUrl: string): ClientSettingsEpubBackgroundImage {
       return {
@@ -1364,7 +1406,7 @@ export default Vue.extend({
       }
     },
     getCurrentEpubBackgroundImage(): string {
-      if (!this.epubBackgroundImages.enabled) return ''
+      if (!this.getCurrentEpubBackgroundImageSelection().enabled) return ''
 
       const mode = this.getEpubAppearanceName() === 'night' ? 'dark' : 'light'
       return this.getSelectedEpubBackgroundImage(mode)?.dataUrl || ''

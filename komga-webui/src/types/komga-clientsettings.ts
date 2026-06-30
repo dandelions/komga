@@ -36,11 +36,18 @@ export interface ClientSettingsEpubCustomStyle {
 export type ClientSettingsEpubChineseConversion = 'none' | 'simplified' | 'traditional'
 
 export interface ClientSettingsEpubBackgroundImages {
-  enabled: boolean,
+  enabled?: boolean,
   selectedLightId?: string,
   selectedDarkId?: string,
   light: ClientSettingsEpubBackgroundImage[],
   dark: ClientSettingsEpubBackgroundImage[],
+  books?: Record<string, ClientSettingsEpubBackgroundImageSelection>,
+}
+
+export interface ClientSettingsEpubBackgroundImageSelection {
+  enabled: boolean,
+  selectedLightId?: string,
+  selectedDarkId?: string,
 }
 
 export interface ClientSettingsEpubBackgroundImage {
