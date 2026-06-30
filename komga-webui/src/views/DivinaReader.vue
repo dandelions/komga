@@ -2369,11 +2369,11 @@ export default Vue.extend({
     },
     reflowSwipeLeft() {
       if (!this.reflowTouchEnabled() || this.readingDirection === ReadingDirection.VERTICAL) return
-      this.readingDirection === ReadingDirection.RIGHT_TO_LEFT ? this.activeReflowPreviousPage() : this.activeReflowNextPage()
+      this.activeReflowNextPage()
     },
     reflowSwipeRight() {
       if (!this.reflowTouchEnabled() || this.readingDirection === ReadingDirection.VERTICAL) return
-      this.readingDirection === ReadingDirection.RIGHT_TO_LEFT ? this.activeReflowNextPage() : this.activeReflowPreviousPage()
+      this.activeReflowPreviousPage()
     },
     reflowSwipeUp() {
       if (!this.reflowTouchEnabled() || this.readingDirection !== ReadingDirection.VERTICAL) return

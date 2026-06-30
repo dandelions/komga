@@ -2,8 +2,8 @@
   <div
     class="paged-reader full-height"
     v-touch="{
-               left: () => {if(swipe) {navigateLeftSide()}},
-               right: () => {if(swipe) {navigateRightSide()}},
+               left: () => {if(swipe) {navigateRightSide()}},
+               right: () => {if(swipe) {navigateLeftSide()}},
                up: () => {if(swipe) {verticalNext()}},
                down: () => {if(swipe) {verticalPrev()}}
              }"
