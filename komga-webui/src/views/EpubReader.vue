@@ -123,7 +123,7 @@
 
     <header id="headerMenu"/>
 
-    <div id="D2Reader-Container" style="height: 100vh" :class="appearanceClass('bg')">
+    <div id="D2Reader-Container" :style="epubReaderBackgroundStyle" :class="appearanceClass('bg')">
       <main tabindex=-1 id="iframe-wrapper" style="height: 100vh" @click="clickThrough">
         <div id="reader-loading"></div>
         <div id="reader-error"></div>
@@ -296,6 +296,46 @@
               />
             </v-list-item>
 
+            <v-list-item>
+              <v-file-input
+                v-model="epubBackgroundImageLightFile"
+                accept="image/*"
+                prepend-icon="mdi-image-outline"
+                show-size
+                hide-details
+                :label="$t('epubreader.settings.background_image_light')"
+                @change="setEpubBackgroundImage('light', $event)"
+              />
+              <v-btn
+                icon
+                :aria-label="$t('epubreader.settings.background_image_clear')"
+                :disabled="!settings.backgroundImageLight"
+                @click="clearEpubBackgroundImage('light')"
+              >
+                <v-icon>mdi-close</v-icon>
+              </v-btn>
+            </v-list-item>
+
+            <v-list-item>
+              <v-file-input
+                v-model="epubBackgroundImageDarkFile"
+                accept="image/*"
+                prepend-icon="mdi-image-outline"
+                show-size
+                hide-details
+                :label="$t('epubreader.settings.background_image_dark')"
+                @change="setEpubBackgroundImage('dark', $event)"
+              />
+              <v-btn
+                icon
+                :aria-label="$t('epubreader.settings.background_image_clear')"
+                :disabled="!settings.backgroundImageDark"
+                @click="clearEpubBackgroundImage('dark')"
+              >
+                <v-icon>mdi-close</v-icon>
+              </v-btn>
+            </v-list-item>
+
             <v-divider/>
             <v-subheader class="font-weight-black text-h6">{{ $t('epubreader.settings.custom_style') }}</v-subheader>
 
@@ -415,6 +455,7 @@ const EPUB_CHINESE_CONVERTERS = {} as Partial<Record<Exclude<ClientSettingsEpubC
 const EPUB_CHINESE_TEXT_PATTERN = /[\u3400-\u9fff\uf900-\ufaff]/
 const EPUB_HORIZONTAL_SWIPE_MIN_DISTANCE = 48
 const EPUB_HORIZONTAL_SWIPE_DOMINANCE_RATIO = 1.25
+const EPUB_BACKGROUND_IMAGE_MAX_BYTES = 2 * 1024 * 1024
 const EPUB_AUTHOR_INLINE_STYLE_PROPERTIES = [
   'font-size',
   'font-family',
@@ -461,6 +502,7 @@ type EpubTouchStart = {
 }
 
 type EpubPageAction = 'next' | 'previous'
+type EpubBackgroundImageMode = 'light' | 'dark'
 
 type EpubReadingOrderItem = {
   href?: string,
@@ -571,7 +613,11 @@ export default Vue.extend({
         navigationClick: true,
         navigationButtons: true,
         verticalSwipeLeftAction: 'previous' as EpubPageAction,
+        backgroundImageLight: '',
+        backgroundImageDark: '',
       },
+      epubBackgroundImageLightFile: undefined as File | undefined,
+      epubBackgroundImageDarkFile: undefined as File | undefined,
       navigationOptions: [
         {text: this.$t('epubreader.settings.navigation_options.buttons').toString(), value: 'button'},
         {text: this.$t('epubreader.settings.navigation_options.click').toString(), value: 'click'},
@@ -673,6 +719,21 @@ export default Vue.extend({
       if (p) return `${Math.round(p * 100)}%`
       return ''
     },
+    epubReaderBackgroundStyle(): Record<string, string> {
+      const style = {
+        height: '100vh',
+        backgroundColor: this.getEpubThemeBackgroundColor(),
+      } as Record<string, string>
+      const image = this.getCurrentEpubBackgroundImage()
+      if (image) {
+        style.backgroundImage = this.toCssUrl(image)
+        style.backgroundSize = 'cover'
+        style.backgroundPosition = 'center'
+        style.backgroundRepeat = 'no-repeat'
+        style.backgroundAttachment = 'fixed'
+      }
+      return style
+    },
     shortcutsHelp(): object {
       let nav = []
       if (this.effectiveDirection === 'rtl') nav.push(...shortcutsD2ReaderRTL)
@@ -719,6 +780,7 @@ export default Vue.extend({
           this.settings.appearance = color
           this.d2Reader.applyUserSettings({appearance: color})
           this.$store.commit('setEpubreaderSettings', this.settings)
+          this.scheduleEpubIframeEnhancements(false)
         }
       },
     },
@@ -1070,6 +1132,106 @@ export default Vue.extend({
     updateDirection(dir: string) {
       this.effectiveDirection = dir
     },
+    async setEpubBackgroundImage(mode: EpubBackgroundImageMode, fileOrFiles?: File | File[] | null) {
+      const file = Array.isArray(fileOrFiles) ? fileOrFiles[0] : fileOrFiles
+      if (!file) return
+
+      if (file.size > EPUB_BACKGROUND_IMAGE_MAX_BYTES) {
+        this.sendNotification(this.$t('epubreader.settings.background_image_too_large').toString())
+        this.resetEpubBackgroundImageInput(mode)
+        return
+      }
+
+      const dataUrl = await this.readFileAsDataUrl(file)
+      if (mode === 'light') this.settings.backgroundImageLight = dataUrl
+      else this.settings.backgroundImageDark = dataUrl
+
+      this.resetEpubBackgroundImageInput(mode)
+      this.saveEpubReaderSettings()
+      this.scheduleEpubIframeEnhancements(false)
+    },
+    clearEpubBackgroundImage(mode: EpubBackgroundImageMode) {
+      if (mode === 'light') this.settings.backgroundImageLight = ''
+      else this.settings.backgroundImageDark = ''
+
+      this.resetEpubBackgroundImageInput(mode)
+      this.saveEpubReaderSettings()
+      this.scheduleEpubIframeEnhancements(false)
+    },
+    resetEpubBackgroundImageInput(mode: EpubBackgroundImageMode) {
+      if (mode === 'light') this.epubBackgroundImageLightFile = undefined
+      else this.epubBackgroundImageDarkFile = undefined
+    },
+    readFileAsDataUrl(file: File): Promise<string> {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result?.toString() || '')
+        reader.onerror = () => reject(reader.error)
+        reader.readAsDataURL(file)
+      })
+    },
+    saveEpubReaderSettings() {
+      this.$store.commit('setEpubreaderSettings', this.settings)
+    },
+    getEpubAppearanceName(): string {
+      return this.appearance.replace('readium-', '').replace('-on', '').replace('default', 'day')
+    },
+    getEpubThemeBackgroundColor(): string {
+      switch (this.getEpubAppearanceName()) {
+        case 'night':
+          return '#000000'
+        case 'sepia':
+          return '#faf4e8'
+        case 'green':
+          return '#c7edcc'
+        default:
+          return '#ffffff'
+      }
+    },
+    getCurrentEpubBackgroundImage(): string {
+      if (this.getEpubAppearanceName() === 'night') return this.settings.backgroundImageDark || ''
+      return this.settings.backgroundImageLight || ''
+    },
+    toCssUrl(value: string): string {
+      return `url("${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}")`
+    },
+    applyEpubThemeToDocument(doc: Document) {
+      const html = doc.documentElement
+      const body = doc.body
+      const backgroundColor = this.getEpubThemeBackgroundColor()
+      const backgroundImage = this.getCurrentEpubBackgroundImage()
+
+      html.style.setProperty('--USER__backgroundColor', backgroundColor)
+      html.style.setProperty('background-color', backgroundColor, 'important')
+
+      if (backgroundImage) {
+        this.applyEpubBackgroundImageToElement(html, backgroundImage)
+        if (body) {
+          this.applyEpubBackgroundImageToElement(body, backgroundImage)
+          body.style.setProperty('background-color', 'transparent', 'important')
+        }
+      } else {
+        this.clearEpubBackgroundImageFromElement(html)
+        if (body) {
+          this.clearEpubBackgroundImageFromElement(body)
+          body.style.setProperty('background-color', backgroundColor, 'important')
+        }
+      }
+    },
+    applyEpubBackgroundImageToElement(element: HTMLElement, image: string) {
+      element.style.setProperty('background-image', this.toCssUrl(image), 'important')
+      element.style.setProperty('background-size', 'cover', 'important')
+      element.style.setProperty('background-position', 'center', 'important')
+      element.style.setProperty('background-repeat', 'no-repeat', 'important')
+      element.style.setProperty('background-attachment', 'fixed', 'important')
+    },
+    clearEpubBackgroundImageFromElement(element: HTMLElement) {
+      element.style.removeProperty('background-image')
+      element.style.removeProperty('background-size')
+      element.style.removeProperty('background-position')
+      element.style.removeProperty('background-repeat')
+      element.style.removeProperty('background-attachment')
+    },
     getEpubCustomStyles(): Record<string, ClientSettingsEpubCustomStyle> {
       try {
         return JSON.parse(this.$store.state.komgaSettings.clientSettingsUser[CLIENT_SETTING.WEBUI_EPUB_CUSTOM_STYLES]?.value) || {}
@@ -1175,6 +1337,7 @@ export default Vue.extend({
         this.applyEpubVerticalWritingMode(doc, view)
         this.applyEpubAuthorStylePreference(doc)
         this.applyEpubChineseConversion(doc)
+        this.applyEpubThemeToDocument(doc)
         this.applyEpubCustomStyleToDocument(doc)
         if ((doc.documentElement.getAttribute('data-komga-writing-mode') || '').indexOf('vertical') === 0) {
           this.updateEpubVerticalPaginationMetrics(doc)
@@ -2013,6 +2176,14 @@ export default Vue.extend({
 
 .day {
   color: #5B5852;
+}
+
+.green-bg {
+  background-color: #c7edcc;
+}
+
+.green {
+  color: #33533a;
 }
 
 .night-bg {
