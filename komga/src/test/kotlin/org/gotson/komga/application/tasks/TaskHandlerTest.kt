@@ -74,14 +74,14 @@ class TaskHandlerTest {
     every { libraryRepository.findByIdOrNull(library.id) } returns library
     every { libraryRepository.findAllByParentId(library.id) } returns emptyList()
     every { libraryContentLifecycle.scanRootFolder(library, false) } returns
-      LibraryScanSummary(limited = true, scannedBookCount = 1, countedBookCount = 1)
+      LibraryScanSummary(limited = true, scannedBookCount = 1, countedBookCount = 1, bookIdsToAnalyze = setOf("book1"))
 
     // when
     taskHandler.handleTask(Task.ScanLibrary(library.id, scanDeep = false, priority = 7))
 
     // then
     verify(exactly = 1) { taskEmitter.scanLibraryTomorrow(library.id, false, 7) }
-    verify(exactly = 1) { taskEmitter.analyzeUnknownAndOutdatedBooks(library) }
+    verify(exactly = 1) { taskEmitter.analyzeUnknownAndOutdatedBooks(setOf("book1")) }
   }
 
   @Test
@@ -91,14 +91,14 @@ class TaskHandlerTest {
     every { libraryRepository.findByIdOrNull(library.id) } returns library
     every { libraryRepository.findAllByParentId(library.id) } returns emptyList()
     every { libraryContentLifecycle.scanRootFolder(library, false) } returns
-      LibraryScanSummary(limited = true, scannedBookCount = 1, countedBookCount = 0)
+      LibraryScanSummary(limited = true, scannedBookCount = 1, countedBookCount = 0, bookIdsToAnalyze = setOf("book1"))
 
     // when
     taskHandler.handleTask(Task.ScanLibrary(library.id, scanDeep = false, priority = 7))
 
     // then
     verify(exactly = 1) { taskEmitter.scanLibraryTomorrow(library.id, false, 7) }
-    verify(exactly = 1) { taskEmitter.analyzeUnknownAndOutdatedBooks(library) }
+    verify(exactly = 1) { taskEmitter.analyzeUnknownAndOutdatedBooks(setOf("book1")) }
   }
 
   @Test
@@ -115,7 +115,7 @@ class TaskHandlerTest {
 
     // then
     verify(exactly = 1) { taskEmitter.scanLibraryTomorrow(library.id, false, 7) }
-    verify(exactly = 1) { taskEmitter.analyzeUnknownAndOutdatedBooks(library) }
+    verify(exactly = 1) { taskEmitter.analyzeUnknownAndOutdatedBooks(emptySet()) }
     verify(exactly = 0) { taskEmitter.repairExtensions(any(), any()) }
   }
 }

@@ -11,6 +11,7 @@ import org.gotson.komga.domain.model.SearchCondition
 import org.gotson.komga.domain.model.SearchContext
 import org.gotson.komga.domain.model.SearchOperator
 import org.gotson.komga.domain.persistence.BookRepository
+import org.gotson.komga.domain.persistence.MediaRepository
 import org.gotson.komga.domain.service.BookConverter
 import org.gotson.komga.infrastructure.configuration.LibraryScanDailyFileLimitTime
 import org.gotson.komga.infrastructure.jooq.UnpagedSorted
@@ -25,6 +26,7 @@ private val logger = KotlinLogging.logger {}
 @Service
 class TaskEmitter(
   private val bookRepository: BookRepository,
+  private val mediaRepository: MediaRepository,
   private val bookConverter: BookConverter,
   private val tasksRepository: TasksRepository,
   private val eventPublisher: ApplicationEventPublisher,
@@ -69,6 +71,27 @@ class TaskEmitter(
         UnpagedSorted(Sort.by(Sort.Order.asc("seriesId"), Sort.Order.asc("number"))),
       ).content
       .map { Task.AnalyzeBook(it.id, groupId = it.seriesId) }
+      .let { submitTasks(it) }
+  }
+
+  fun analyzeUnknownAndOutdatedBooks(bookIds: Collection<String>) {
+    bookIds
+      .mapNotNull { bookRepository.findByIdOrNull(it) }
+      .mapNotNull { book ->
+        mediaRepository.findByIdOrNull(book.id)?.let { media -> book to media }
+      }.filter { (_, media) ->
+        media.status == Media.Status.UNKNOWN ||
+          media.status == Media.Status.OUTDATED
+      }.sortedWith(
+        compareBy<Pair<Book, Media>> {
+          when (it.second.status) {
+            Media.Status.UNKNOWN -> 0
+            Media.Status.OUTDATED -> 1
+            else -> 2
+          }
+        }.thenBy { it.first.seriesId }
+          .thenBy { it.first.number },
+      ).map { (book, _) -> Task.AnalyzeBook(book.id, groupId = book.seriesId) }
       .let { submitTasks(it) }
   }
 

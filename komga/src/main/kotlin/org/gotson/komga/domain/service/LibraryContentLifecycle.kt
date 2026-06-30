@@ -36,8 +36,10 @@ import org.springframework.context.ApplicationEventPublisher
 import org.springframework.data.domain.Pageable
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
+import java.net.URL
 import java.nio.file.Paths
 import java.time.LocalDateTime
+import java.time.temporal.ChronoUnit
 import kotlin.time.measureTime
 
 private val logger = KotlinLogging.logger {}
@@ -46,6 +48,7 @@ data class LibraryScanSummary(
   val limited: Boolean,
   val scannedBookCount: Int,
   val countedBookCount: Int,
+  val bookIdsToAnalyze: Set<String> = emptySet(),
 )
 
 @Service
@@ -90,6 +93,7 @@ class LibraryContentLifecycle(
     }
 
     var fileScanResult: ScanResult? = null
+    val bookIdsToAnalyze = mutableSetOf<String>()
 
     measureTime {
       val root = library.root ?: throw DirectoryNotFoundException("Library root folder is not configured: ${library.name}")
@@ -109,7 +113,7 @@ class LibraryContentLifecycle(
           emptyMap()
         }
 
-      val scanResult =
+      val rawScanResult =
         try {
           if (scanLimitUsage == null) {
             fileSystemScanner.scanRootFolder(
@@ -132,9 +136,7 @@ class LibraryContentLifecycle(
               library.scanDirectoryExclusions,
               scanLimitUsage.remaining,
               countBook = { book ->
-                existingBooksByUrl[book.url]?.let { existingBook ->
-                  book.fileLastModified.notEquals(existingBook.fileLastModified)
-                } ?: true
+                existingBooksByUrl[book.url] == null
               },
               consumeCountedBook = {
                 komgaSettingsProvider.tryConsumeLibraryScanFile()
@@ -147,6 +149,12 @@ class LibraryContentLifecycle(
             eventPublisher.publishEvent(DomainEvent.LibraryUpdated(it))
           }
           throw e
+        }
+      val scanResult =
+        if (scanLimitUsage == null) {
+          rawScanResult
+        } else {
+          applyScanLimitPriority(rawScanResult, existingBooksByUrl, scanLimitUsage.remaining)
         }
       fileScanResult = scanResult
 
@@ -213,6 +221,7 @@ class LibraryContentLifecycle(
           logger.info { "Adding new series: $newSeries" }
           val createdSeries = seriesLifecycle.createSeries(newSeries)
           seriesLifecycle.addBooks(createdSeries, newBooks)
+          bookIdsToAnalyze += newBooks.map { it.id }
           tryRestoreSeries(createdSeries, newBooks)
           tryRestoreBooks(newBooks)
           seriesToSortAndRefresh.add(createdSeries)
@@ -224,7 +233,7 @@ class LibraryContentLifecycle(
             scanLimitUsage != null &&
               newBooks.any { book ->
                 existingBooksByUrl[book.url]?.let { existingBook ->
-                  book.fileLastModified.notEquals(existingBook.fileLastModified)
+                  isBookModifiedForQuota(book, existingBook)
                 } ?: true
               }
           if (seriesChanged) {
@@ -241,7 +250,7 @@ class LibraryContentLifecycle(
               logger.debug { "Trying to match scanned book by url: $newBook" }
               existingBooks.find { it.url == newBook.url && it.deletedDate == null }?.let { existingBook ->
                 logger.debug { "Matched existing book: $existingBook" }
-                if (newBook.fileLastModified.notEquals(existingBook.fileLastModified)) {
+                if (isBookModifiedForQuota(newBook, existingBook)) {
                   val hash =
                     if (existingBook.fileSize == newBook.fileSize && existingBook.fileHash.isNotBlank()) {
                       hasher.computeHash(newBook.path)
@@ -271,6 +280,7 @@ class LibraryContentLifecycle(
                       }
                       bookRepository.update(updatedBook)
                     }
+                    bookIdsToAnalyze += existingBook.id
                   }
                 }
               }
@@ -281,6 +291,7 @@ class LibraryContentLifecycle(
             val booksToAdd = newBooks.filterNot { newBook -> existingBooksUrls.contains(newBook.url) }
             logger.info { "Adding new books: $booksToAdd" }
             seriesLifecycle.addBooks(existingSeries, booksToAdd)
+            bookIdsToAnalyze += booksToAdd.map { it.id }
             tryRestoreBooks(booksToAdd)
             seriesToSortAndRefresh.add(existingSeries)
           }
@@ -344,8 +355,74 @@ class LibraryContentLifecycle(
 
     eventPublisher.publishEvent(DomainEvent.LibraryScanned(library))
     val scanResult = checkNotNull(fileScanResult)
-    return LibraryScanSummary(scanResult.limited, scanResult.scannedBookCount, scanResult.countedBookCount)
+    return LibraryScanSummary(scanResult.limited, scanResult.scannedBookCount, scanResult.countedBookCount, bookIdsToAnalyze)
   }
+
+  private fun applyScanLimitPriority(
+    scanResult: ScanResult,
+    existingBooksByUrl: Map<URL, Book>,
+    initialRemaining: Int,
+  ): ScanResult {
+    val countedNewBooks = scanResult.countedBookCount
+    if (scanResult.limited) {
+      val series = scanResult.series.filterBooks { existingBooksByUrl[it.url] == null }
+      return scanResult.copy(
+        series = series,
+        scannedBookCount = series.scannedBookCount(),
+        countedBookCount = countedNewBooks,
+        limited = true,
+      )
+    }
+
+    val modifiedBooks =
+      scanResult.series.values.flatten().filter { scannedBook ->
+        existingBooksByUrl[scannedBook.url]?.let { existingBook ->
+          isBookModifiedForQuota(scannedBook, existingBook)
+        } ?: false
+      }
+
+    var countedBookCount = countedNewBooks
+    var remaining = (initialRemaining - countedNewBooks).coerceAtLeast(0)
+    var limited = false
+    val countedModifiedBookUrls = mutableSetOf<String>()
+
+    for (book in modifiedBooks) {
+      if (remaining <= 0 || !komgaSettingsProvider.tryConsumeLibraryScanFile()) {
+        limited = true
+        break
+      }
+
+      countedModifiedBookUrls += book.url.toString()
+      countedBookCount++
+      remaining--
+    }
+
+    if (!limited) {
+      return scanResult.copy(countedBookCount = countedBookCount)
+    }
+
+    val series =
+      scanResult.series.filterBooks { book ->
+        existingBooksByUrl[book.url] == null || countedModifiedBookUrls.contains(book.url.toString())
+      }
+    return scanResult.copy(
+      series = series,
+      scannedBookCount = series.scannedBookCount(),
+      countedBookCount = countedBookCount,
+      limited = true,
+    )
+  }
+
+  private fun Map<Series, List<Book>>.filterBooks(predicate: (Book) -> Boolean): Map<Series, List<Book>> =
+    mapValues { (_, books) -> books.filter(predicate) }
+      .filterValues { it.isNotEmpty() }
+
+  private fun Map<Series, List<Book>>.scannedBookCount(): Int = values.sumOf { it.size }
+
+  private fun isBookModifiedForQuota(
+    scannedBook: Book,
+    existingBook: Book,
+  ): Boolean = scannedBook.fileLastModified.notEquals(existingBook.fileLastModified, ChronoUnit.HOURS)
 
   /**
    * This will try to match newSeries with a deleted series.
