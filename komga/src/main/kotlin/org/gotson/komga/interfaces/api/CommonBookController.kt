@@ -229,7 +229,7 @@ class CommonBookController(
     pageNumber: Int,
   ): ResponseEntity<ByteArray> =
     try {
-      val pageContent = bookAnalyzer.getPageContentRaw(BookWithMedia(book, media), pageNumber)
+      val pageContent = bookLifecycle.getBookPageRaw(book, media, pageNumber)
 
       ResponseEntity
         .ok()
