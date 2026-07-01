@@ -1267,7 +1267,79 @@ export default Vue.extend({
         if (word) words.push(word)
       }
 
-      return words
+      return this.mergeHorizontalGlyphFragments(words, rowBounds, ink, width, height)
+    },
+    mergeHorizontalGlyphFragments(
+      words: WordBlock[],
+      rowBounds: {top: number, bottom: number},
+      ink: Uint8Array,
+      width: number,
+      height: number,
+    ): WordBlock[] {
+      if (words.length <= 1) return words
+      const glyphHeight = Math.max(1, rowBounds.bottom - rowBounds.top + 1)
+      const sorted = words.slice().sort((a, b) => a.x - b.x)
+      const merged = [] as WordBlock[]
+      let current = {...sorted[0]}
+
+      for (let i = 1; i < sorted.length; i++) {
+        const next = sorted[i]
+        if (this.shouldMergeHorizontalGlyphFragments(current, next, glyphHeight, rowBounds, ink, width, height)) {
+          current = this.unionWordBlocks(current, next)
+          continue
+        }
+        merged.push(current)
+        current = {...next}
+      }
+
+      merged.push(current)
+      return merged
+    },
+    shouldMergeHorizontalGlyphFragments(
+      left: WordBlock,
+      right: WordBlock,
+      glyphHeight: number,
+      rowBounds: {top: number, bottom: number},
+      ink: Uint8Array,
+      width: number,
+      height: number,
+    ): boolean {
+      const gap = right.x - (left.x + left.w)
+      const maxInternalGap = Math.max(3, Math.min(glyphHeight * 0.42, this.clampNumber(this.wordGap, 1, 30, DEFAULT_WORD_GAP) * 3.5))
+      if (gap < 0 || gap > maxInternalGap) return false
+
+      const union = this.unionWordBlocks(left, right)
+      const overlap = this.verticalOverlap(left, right)
+      const minHeight = Math.max(1, Math.min(left.h, right.h))
+      const leftCenter = left.y + left.h / 2
+      const rightCenter = right.y + right.h / 2
+      const centerGap = Math.abs(leftCenter - rightCenter)
+      const hasSmallFragment = left.h < glyphHeight * 0.58 || right.h < glyphHeight * 0.58 || left.w < glyphHeight * 0.42 || right.w < glyphHeight * 0.42
+      const singleGlyphWidthLimit = glyphHeight * (hasSmallFragment ? 1.85 : 1.42)
+      if (union.w > singleGlyphWidthLimit) return false
+
+      const aligned = overlap >= minHeight * 0.2 || centerGap <= glyphHeight * 0.52 || hasSmallFragment
+      if (!aligned) return false
+
+      const strictGapLimit = Math.max(3, Math.min(glyphHeight * 0.24, this.clampNumber(this.wordGap, 1, 30, DEFAULT_WORD_GAP) * 2.2))
+      if (gap <= strictGapLimit) return true
+      return this.horizontalFragmentSidesHaveInk(left, right, rowBounds, glyphHeight, ink, width, height)
+    },
+    horizontalFragmentSidesHaveInk(
+      left: WordBlock,
+      right: WordBlock,
+      rowBounds: {top: number, bottom: number},
+      glyphHeight: number,
+      ink: Uint8Array,
+      width: number,
+      height: number,
+    ): boolean {
+      const search = Math.max(3, Math.min(10, Math.round(glyphHeight * 0.25)))
+      const yStart = Math.max(0, rowBounds.top)
+      const yEnd = rowBounds.bottom + 1
+      const leftInk = this.countInkInRect(ink, width, height, Math.max(left.x, left.x + left.w - search), left.x + left.w, yStart, yEnd)
+      if (leftInk <= 0) return false
+      return this.countInkInRect(ink, width, height, right.x, Math.min(right.x + right.w, right.x + search), yStart, yEnd) > 0
     },
     tightRowBounds(
       ink: Uint8Array,
@@ -1876,6 +1948,29 @@ export default Vue.extend({
       this.$set(this.localCropRoisByParity, this.pageParity, roi)
       this.$set(this.explicitCropRoisByParity, this.pageParity, !!roi)
       this.$emit('crop-rois-change', this.cropRoisPayload())
+    },
+    countInkInRect(ink: Uint8Array, width: number, height: number, xStart: number, xEnd: number, yStart: number, yEnd: number): number {
+      const left = Math.max(0, Math.floor(xStart))
+      const right = Math.min(width, Math.ceil(xEnd))
+      const top = Math.max(0, Math.floor(yStart))
+      const bottom = Math.min(height, Math.ceil(yEnd))
+      let count = 0
+      for (let y = top; y < bottom; y++) {
+        for (let x = left; x < right; x++) {
+          if (this.hasInk(ink, width, height, x, y)) count++
+        }
+      }
+      return count
+    },
+    unionWordBlocks(a: WordBlock, b: WordBlock): WordBlock {
+      const left = Math.min(a.x, b.x)
+      const top = Math.min(a.y, b.y)
+      const right = Math.max(a.x + a.w, b.x + b.w)
+      const bottom = Math.max(a.y + a.h, b.y + b.h)
+      return {x: left, y: top, w: right - left, h: bottom - top}
+    },
+    verticalOverlap(a: WordBlock, b: WordBlock): number {
+      return Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y))
     },
     clampNumber(value: number, min: number, max: number, fallback: number): number {
       return Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback
