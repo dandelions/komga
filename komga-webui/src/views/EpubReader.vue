@@ -164,7 +164,8 @@
       </a>
     </footer>
 
-    <v-container fluid class="full-width" style="position: fixed; bottom: 0; font-size: .85rem"
+    <v-container fluid class="full-width epub-status-bar"
+                 :style="epubReaderStatusStyle"
                  :class="appearanceClass()"
                  v-if="!verticalScroll"
     >
@@ -764,6 +765,23 @@ export default Vue.extend({
     epubReaderBackgroundStyle(): Record<string, string> {
       const style = {
         height: '100vh',
+        backgroundColor: this.getEpubThemeBackgroundColor(),
+      } as Record<string, string>
+      const image = this.getCurrentEpubBackgroundImage()
+      if (image) {
+        style.backgroundImage = this.toCssUrl(image)
+        style.backgroundSize = 'cover'
+        style.backgroundPosition = 'center'
+        style.backgroundRepeat = 'no-repeat'
+        style.backgroundAttachment = 'fixed'
+      }
+      return style
+    },
+    epubReaderStatusStyle(): Record<string, string> {
+      const style = {
+        position: 'fixed',
+        bottom: '0',
+        fontSize: '.85rem',
         backgroundColor: this.getEpubThemeBackgroundColor(),
       } as Record<string, string>
       const image = this.getCurrentEpubBackgroundImage()
@@ -2408,6 +2426,11 @@ export default Vue.extend({
 
 .green {
   color: #33533a;
+}
+
+.epub-status-bar {
+  box-sizing: border-box;
+  z-index: 13;
 }
 
 .night-bg {
