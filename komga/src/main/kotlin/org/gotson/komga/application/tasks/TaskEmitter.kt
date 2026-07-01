@@ -75,14 +75,23 @@ class TaskEmitter(
   }
 
   fun analyzeUnknownAndOutdatedBooks(bookIds: Collection<String>) {
+    analyzeBooks(bookIds, setOf(Media.Status.UNKNOWN, Media.Status.OUTDATED))
+  }
+
+  fun analyzeUnknownBooks(bookIds: Collection<String>) {
+    analyzeBooks(bookIds, setOf(Media.Status.UNKNOWN))
+  }
+
+  private fun analyzeBooks(
+    bookIds: Collection<String>,
+    statuses: Set<Media.Status>,
+  ) {
     bookIds
       .mapNotNull { bookRepository.findByIdOrNull(it) }
       .mapNotNull { book ->
         mediaRepository.findByIdOrNull(book.id)?.let { media -> book to media }
-      }.filter { (_, media) ->
-        media.status == Media.Status.UNKNOWN ||
-          media.status == Media.Status.OUTDATED
-      }.sortedWith(
+      }.filter { (_, media) -> statuses.contains(media.status) }
+      .sortedWith(
         compareBy<Pair<Book, Media>> {
           when (it.second.status) {
             Media.Status.UNKNOWN -> 0

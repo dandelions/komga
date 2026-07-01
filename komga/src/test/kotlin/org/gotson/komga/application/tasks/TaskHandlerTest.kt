@@ -118,4 +118,22 @@ class TaskHandlerTest {
     verify(exactly = 1) { taskEmitter.analyzeUnknownAndOutdatedBooks(emptySet()) }
     verify(exactly = 0) { taskEmitter.repairExtensions(any(), any()) }
   }
+
+  @Test
+  fun `given library scans only new books when handling scan task then only unknown books are scheduled for analysis`() {
+    // given
+    val library = makeLibrary(id = "library1").copy(scanOnlyNewBooks = true)
+    every { libraryRepository.findByIdOrNull(library.id) } returns library
+    every { libraryRepository.findAllByParentId(library.id) } returns emptyList()
+    every { libraryContentLifecycle.scanRootFolder(library, false) } returns
+      LibraryScanSummary(limited = false, scannedBookCount = 2, countedBookCount = 2, bookIdsToAnalyze = setOf("book1", "book2"))
+
+    // when
+    taskHandler.handleTask(Task.ScanLibrary(library.id, scanDeep = false, priority = 7))
+
+    // then
+    verify(exactly = 1) { taskEmitter.analyzeUnknownBooks(setOf("book1", "book2")) }
+    verify(exactly = 0) { taskEmitter.analyzeUnknownAndOutdatedBooks(any<Collection<String>>()) }
+    verify(exactly = 0) { taskEmitter.repairExtensions(any(), any()) }
+  }
 }
