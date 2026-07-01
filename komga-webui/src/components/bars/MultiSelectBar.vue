@@ -61,6 +61,15 @@
         </v-tooltip>
       </v-btn>
 
+      <v-btn icon @click="analyze" v-if="isAdmin && showAnalyze">
+        <v-tooltip bottom>
+          <template v-slot:activator="{ on }">
+            <v-icon v-on="on">mdi-book-search</v-icon>
+          </template>
+          <span>{{ $t('menu.analyze') }}</span>
+        </v-tooltip>
+      </v-btn>
+
       <v-btn icon @click="bulkEdit" v-if="isAdmin && kind === 'books'">
         <v-tooltip bottom>
           <template v-slot:activator="{ on }">
@@ -122,6 +131,10 @@ export default Vue.extend({
       type: Boolean,
       default: false,
     },
+    showAnalyze: {
+      type: Boolean,
+      default: false,
+    },
   },
   computed: {
     isAdmin (): boolean {
@@ -146,6 +159,9 @@ export default Vue.extend({
     },
     addToReadList () {
       this.$emit('add-to-readlist')
+    },
+    analyze () {
+      this.$emit('analyze')
     },
     edit () {
       this.$emit('edit')
