@@ -436,10 +436,10 @@ const MIN_INDENT = 8
 const REFLOW_CONTROLS_HEIGHT = 48
 const VIEWPORT_PAGE_BUFFER = 40
 const SPLIT_GUARD_BAND = 5
-const DETECTION_FULL_RES_MAX_PIXELS = 16000000
-const DETECTION_MAX_SIDE = 3600
-const DETECTION_MAX_PIXELS = 10000000
-const DETECTION_MIN_SCALE = 0.5
+const DETECTION_FULL_RES_MAX_PIXELS = 6000000
+const DETECTION_MAX_SIDE = 2800
+const DETECTION_MAX_PIXELS = 5000000
+const DETECTION_MIN_SCALE = 0.4
 
 export default Vue.extend({
   name: 'ReflowedPage',
@@ -720,6 +720,7 @@ export default Vue.extend({
   destroyed() {
     window.removeEventListener('resize', this.handleResize)
     window.visualViewport?.removeEventListener('resize', this.handleResize)
+    this.requestId += 1
     this.revokeObjectUrl()
   },
   methods: {
@@ -1153,7 +1154,7 @@ export default Vue.extend({
         darkDisplay: this.darkDisplay,
         deskewDetectionVersion: 9,
         imageExclusionVersion: 3,
-        detectionScaleVersion: 2,
+        detectionScaleVersion: 3,
         darkWordRenderVersion: 3,
       })
     },
@@ -1674,9 +1675,10 @@ export default Vue.extend({
       let lumaSum = 0
       let lumaSquareSum = 0
       const coverageThreshold = Math.min(248, threshold + 42)
+      const sampleStep = Math.max(1, Math.floor(Math.sqrt(Math.max(1, (xEnd - xStart) * (yEnd - yStart)) / 220)))
 
-      for (let y = yStart; y < yEnd; y++) {
-        for (let x = xStart; x < xEnd; x++) {
+      for (let y = yStart; y < yEnd; y += sampleStep) {
+        for (let x = xStart; x < xEnd; x += sampleStep) {
           const offset = (y * width + x) * 4
           const alpha = pixels[offset + 3]
           if (alpha === 0) continue
@@ -1881,7 +1883,7 @@ export default Vue.extend({
     detectionStrokeRadius(): number {
       const strength = this.clampNumber(this.options.strokeStrength, 0.1, 3, 0.1)
       if (strength >= 2) return 2
-      return strength > 0 ? 1 : 0
+      return strength >= 0.8 ? 1 : 0
     },
     detectRoi(isInk: (x: number, y: number) => boolean, width: number, height: number, cropRoi?: Roi): Roi {
       if (cropRoi) return this.clampRoi(cropRoi, width, height)

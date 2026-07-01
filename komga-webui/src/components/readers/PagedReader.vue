@@ -32,6 +32,9 @@
                  :alt="`Page ${page.number}`"
                  :key="`spread${i}-${j}`"
                  :src="pageDisplayUrl(page)"
+                 :loading="imageLoading(i)"
+                 :fetchpriority="imageFetchPriority(i)"
+                 :decoding="imageDecoding(i)"
                  :data-page-number="page.number"
                  :class="imgClass(spread)"
                  class="img-fit-all"
@@ -240,6 +243,7 @@ export default Vue.extend({
       this.ensureActiveCropSegmentForPage(val)
       this.scrollToPageEdge(this.pendingScrollPosition)
       this.pendingScrollPosition = 'top'
+      this.$nextTick(this.ensureLoadedDeskewedPageUrls)
     },
     scale() {
       this.activeCropSegment = 0
@@ -639,6 +643,9 @@ export default Vue.extend({
 
       this.$set(this.deskewedPagePending, page.number, true)
       try {
+        const pageIsCurrent = this.isCurrentSpreadPage(page.number)
+        if (!pageIsCurrent) await this.waitForReaderIdle()
+        if (this.skewCorrection !== angle || this.contrastEnhancement !== contrastEnhancement || this.deskewedPageUrls[page.number]) return
         const canvas = this.processedPageCanvas(image, angle)
         const url = await this.canvasObjectUrl(canvas)
         if (this.skewCorrection === angle && this.contrastEnhancement === contrastEnhancement) this.$set(this.deskewedPageUrls, page.number, url)
@@ -702,6 +709,28 @@ export default Vue.extend({
         if (page && image.complete && image.naturalWidth > 0) this.ensureDeskewedPageUrl(page, {target: image} as unknown as Event)
       })
     },
+    waitForReaderIdle(): Promise<void> {
+      return new Promise(resolve => {
+        const requestIdleCallback = (window as any).requestIdleCallback
+        if (requestIdleCallback) {
+          requestIdleCallback(() => resolve(), {timeout: 500})
+        } else {
+          window.setTimeout(resolve, 160)
+        }
+      })
+    },
+    isCurrentSpreadPage(pageNumber: number): boolean {
+      return this.spreads[this.carouselPage]?.some(page => page.number === pageNumber) === true
+    },
+    imageLoading(spreadIndex: number): string {
+      return Math.abs(this.carouselPage - spreadIndex) <= 1 ? 'eager' : 'lazy'
+    },
+    imageFetchPriority(spreadIndex: number): string {
+      return spreadIndex === this.carouselPage ? 'high' : 'low'
+    },
+    imageDecoding(spreadIndex: number): string {
+      return spreadIndex === this.carouselPage ? 'sync' : 'async'
+    },
     imgClass(spread: PageDtoWithUrl[]): string {
       const double = spread.length > 1
       switch (this.scale) {
@@ -718,7 +747,7 @@ export default Vue.extend({
       }
     },
     eagerLoad(spreadIndex: number): boolean {
-      return Math.abs(this.carouselPage - spreadIndex) <= 2
+      return Math.abs(this.carouselPage - spreadIndex) <= 1
     },
     preRender(spreadIndex: number): boolean {
       return Math.abs(this.carouselPage - spreadIndex) > (this.animations ? 1 : 0)

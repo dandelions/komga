@@ -7,6 +7,9 @@
            :key="`page${i}`"
            :alt="`Page ${page.number}`"
            :src="shouldLoad(i) ? pageDisplayUrl(page) : undefined"
+           :loading="imageLoading(i)"
+           :fetchpriority="imageFetchPriority(i)"
+           :decoding="imageDecoding(i)"
            :height="calcHeight(page)"
            :width="calcWidth(page)"
            :id="`page${page.number}`"
@@ -210,10 +213,11 @@ export default Vue.extend({
         this.seen.splice(page - 1, 1, true)
         this.currentPage = page
         this.$emit('update:page', page)
+        this.$nextTick(this.ensureLoadedDeskewedPageUrls)
       }
     },
     shouldLoad(page: number): boolean {
-      return page == 0 || this.seen[page] || Math.abs((this.currentPage - 1) - page) <= 2
+      return page == 0 || this.seen[page] || Math.abs((this.currentPage - 1) - page) <= 1
     },
     calcHeight(page: PageDtoWithUrl): number | undefined {
       switch (this.scale) {
@@ -304,6 +308,9 @@ export default Vue.extend({
 
       this.$set(this.deskewedPagePending, page.number, true)
       try {
+        const pageIsCurrent = page.number === this.currentPage
+        if (!pageIsCurrent) await this.waitForReaderIdle()
+        if (this.skewCorrection !== angle || this.contrastEnhancement !== contrastEnhancement || this.deskewedPageUrls[page.number]) return
         const canvas = this.processedPageCanvas(image, angle)
         const url = await this.canvasObjectUrl(canvas)
         if (this.skewCorrection === angle && this.contrastEnhancement === contrastEnhancement) this.$set(this.deskewedPageUrls, page.number, url)
@@ -366,6 +373,25 @@ export default Vue.extend({
         const page = this.pages.find(x => x.number === pageNumber)
         if (page && image.complete && image.naturalWidth > 0) this.ensureDeskewedPageUrl(page, {target: image} as unknown as Event)
       })
+    },
+    waitForReaderIdle(): Promise<void> {
+      return new Promise(resolve => {
+        const requestIdleCallback = (window as any).requestIdleCallback
+        if (requestIdleCallback) {
+          requestIdleCallback(() => resolve(), {timeout: 500})
+        } else {
+          window.setTimeout(resolve, 160)
+        }
+      })
+    },
+    imageLoading(index: number): string {
+      return Math.abs((this.currentPage - 1) - index) <= 1 ? 'eager' : 'lazy'
+    },
+    imageFetchPriority(index: number): string {
+      return index === this.currentPage - 1 ? 'high' : 'low'
+    },
+    imageDecoding(index: number): string {
+      return index === this.currentPage - 1 ? 'sync' : 'async'
     },
     centerClick() {
       this.$emit('menu')

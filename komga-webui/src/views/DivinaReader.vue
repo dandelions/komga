@@ -842,7 +842,7 @@ import {CLIENT_SETTING, ClientSettingUserUpdateDto} from '@/types/komga-clientse
 const REFLOW_SETTINGS_STORAGE_PREFIX = 'komga.pdfReflowSettings.'
 const READER_IMAGE_SETTINGS_STORAGE_PREFIX = 'komga.readerImageSettings.'
 const REFLOW_CACHE_RADIUS = 4
-const REFLOW_PREFETCH_DELAY_MS = 150
+const REFLOW_PREFETCH_DELAY_MS = 800
 
 function defaultCropRegionsByParity(enabled: boolean = false): any {
   return {
@@ -965,6 +965,7 @@ export default Vue.extend({
       reflowCache: {} as Record<string, any>,
       reflowPrefetchPage: 0,
       reflowPrefetchTimer: undefined as number | undefined,
+      reflowPrefetchIdleHandle: undefined as number | undefined,
       reflowSettings: defaultReflowSettings(),
       goToPage: 1,
       settings: {
@@ -2504,14 +2505,31 @@ export default Vue.extend({
         window.clearTimeout(this.reflowPrefetchTimer)
         this.reflowPrefetchTimer = undefined
       }
+      if (this.reflowPrefetchIdleHandle !== undefined) {
+        const cancelIdleCallback = (window as any).cancelIdleCallback
+        if (cancelIdleCallback) cancelIdleCallback(this.reflowPrefetchIdleHandle)
+        else window.clearTimeout(this.reflowPrefetchIdleHandle)
+        this.reflowPrefetchIdleHandle = undefined
+      }
       this.reflowPrefetchPage = 0
     },
     scheduleNextReflowPrefetch() {
       this.clearReflowPrefetch()
       if (!this.nextReflowPage || this.reflowCropMode) return
+      const sourcePage = this.page
+      const nextPageNumber = this.nextReflowPage.number
       this.reflowPrefetchTimer = window.setTimeout(() => {
         this.reflowPrefetchTimer = undefined
-        if (this.nextReflowPage && !this.reflowCropMode) this.reflowPrefetchPage = this.nextReflowPage.number
+        const startPrefetch = () => {
+          this.reflowPrefetchIdleHandle = undefined
+          if (this.page === sourcePage && this.nextReflowPage?.number === nextPageNumber && !this.reflowCropMode) this.reflowPrefetchPage = nextPageNumber
+        }
+        const requestIdleCallback = (window as any).requestIdleCallback
+        if (requestIdleCallback) {
+          this.reflowPrefetchIdleHandle = requestIdleCallback(startPrefetch, {timeout: 2500})
+        } else {
+          this.reflowPrefetchIdleHandle = window.setTimeout(startPrefetch, 350)
+        }
       }, REFLOW_PREFETCH_DELAY_MS)
     },
     reflowPreviousPage() {

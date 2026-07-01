@@ -6,6 +6,7 @@ import org.gotson.komga.infrastructure.configuration.SettingChangedEvent
 import org.springframework.beans.factory.InitializingBean
 import org.springframework.boot.context.event.ApplicationReadyEvent
 import org.springframework.boot.task.ThreadPoolTaskExecutorBuilder
+import org.springframework.boot.task.ThreadPoolTaskExecutorCustomizer
 import org.springframework.context.event.EventListener
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor
@@ -24,6 +25,7 @@ class TaskProcessor(
     taskExecutorBuilder
       .threadNamePrefix("taskProcessor-")
       .corePoolSize(settingsProvider.taskPoolSize)
+      .additionalCustomizers(ThreadPoolTaskExecutorCustomizer { it.setThreadPriority(Thread.MIN_PRIORITY) })
       .build()
       .apply { initialize() }
 
