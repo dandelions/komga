@@ -1154,7 +1154,7 @@ export default Vue.extend({
         deskewDetectionVersion: 9,
         imageExclusionVersion: 3,
         detectionScaleVersion: 2,
-        darkWordRenderVersion: 1,
+        darkWordRenderVersion: 2,
       })
     },
     emitReflowed() {
@@ -1277,15 +1277,12 @@ export default Vue.extend({
       this.pageBackground = this.darkDisplay ? '#000' : '#fff'
     },
     finishWordSlice(context: CanvasRenderingContext2D, width: number, height: number) {
-      if (this.contrastEnhancement || this.matchBackground) {
-        return
-      }
       if (!this.darkDisplay) return
 
       const imageData = context.getImageData(0, 0, width, height)
       const data = imageData.data
       const threshold = Math.min(245, this.clampNumber(this.options.threshold, 50, 230, THRESHOLD) + 18)
-      const sourceDark = this.sourceBackgroundLuma() < 128
+      const sourceDark = this.estimateSliceBackgroundLuma(data, width, height) < 128
       const edgeRows = this.lineLikeEdgeRows(data, width, height, threshold, sourceDark)
       const edgeColumns = this.lineLikeEdgeColumns(data, width, height, threshold, sourceDark)
 
@@ -1376,6 +1373,33 @@ export default Vue.extend({
       const color = this.parseColor(this.pageBackground)
       if (!color) return 255
       return 0.299 * color.r + 0.587 * color.g + 0.114 * color.b
+    },
+    estimateSliceBackgroundLuma(data: Uint8ClampedArray, width: number, height: number): number {
+      const lumas = [] as number[]
+      const addPixel = (x: number, y: number) => {
+        if (x < 0 || x >= width || y < 0 || y >= height) return
+        const offset = (y * width + x) * 4
+        if (data[offset + 3] === 0) return
+        lumas.push(this.pixelLuma(data, offset))
+      }
+
+      const edgeBand = Math.max(1, Math.min(3, Math.floor(Math.min(width, height) / 4)))
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < edgeBand; x++) {
+          addPixel(x, y)
+          addPixel(width - 1 - x, y)
+        }
+      }
+      for (let x = edgeBand; x < width - edgeBand; x++) {
+        for (let y = 0; y < edgeBand; y++) {
+          addPixel(x, y)
+          addPixel(x, height - 1 - y)
+        }
+      }
+
+      if (lumas.length === 0) return this.sourceBackgroundLuma()
+      lumas.sort((a, b) => a - b)
+      return lumas[Math.floor(lumas.length / 2)]
     },
     parseColor(color: string): {r: number, g: number, b: number} | undefined {
       const normalized = (color || '').trim().toLowerCase()
