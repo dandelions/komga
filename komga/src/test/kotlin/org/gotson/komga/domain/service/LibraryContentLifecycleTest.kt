@@ -390,6 +390,41 @@ class LibraryContentLifecycleTest(
     }
 
     @Test
+    fun `given library scans only new books when existing book changes then only new books are persisted and analyzed`() {
+      // given
+      val library = makeLibrary().copy(scanOnlyNewBooks = true)
+      libraryRepository.insert(library)
+      val baseTime = LocalDateTime.of(2026, 1, 1, 10, 15)
+      val series = makeSeries(name = "series")
+      val book1 = makeBook("book1", fileLastModified = baseTime)
+      val book2 = makeBook("book2", fileLastModified = baseTime.plusHours(1))
+
+      every { mockScanner.scanRootFolder(any()) }
+        .returnsMany(
+          mapOf(series to listOf(book1)).toScanResult(),
+          mapOf(series.copy(fileLastModified = series.fileLastModified) to listOf(makeBook("book1", fileLastModified = baseTime.plusHours(1)), book2)).toScanResult(),
+        )
+      libraryContentLifecycle.scanRootFolder(library)
+
+      val existingBook = bookRepository.findAll().first()
+      mediaRepository.update(mediaRepository.findById(existingBook.id).copy(status = Media.Status.READY))
+
+      // when
+      val scanSummary = libraryContentLifecycle.scanRootFolder(library)
+
+      // then
+      val allBooks = bookRepository.findAll().sortedBy { it.name }
+
+      verify(exactly = 2) { mockScanner.scanRootFolder(any()) }
+      verify(exactly = 0) { mockHasher.computeHash(any<Path>()) }
+
+      assertThat(allBooks.map { it.name }).containsExactly("book1", "book2")
+      assertThat(allBooks.first { it.name == "book1" }.fileLastModified).isEqualTo(baseTime)
+      assertThat(mediaRepository.findById(existingBook.id).status).isEqualTo(Media.Status.READY)
+      assertThat(scanSummary.bookIdsToAnalyze).containsExactly(book2.id)
+    }
+
+    @Test
     fun `given existing series when updating files and scanning then books are updated`() {
       // given
       val library = makeLibrary()

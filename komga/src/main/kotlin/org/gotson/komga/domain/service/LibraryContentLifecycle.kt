@@ -154,7 +154,7 @@ class LibraryContentLifecycle(
         if (scanLimitUsage == null) {
           rawScanResult
         } else {
-          applyScanLimitPriority(rawScanResult, existingBooksByUrl, scanLimitUsage.remaining)
+          applyScanLimitPriority(rawScanResult, existingBooksByUrl, scanLimitUsage.remaining, includeModifiedBooks = !library.scanOnlyNewBooks)
         }
       fileScanResult = scanResult
 
@@ -175,6 +175,8 @@ class LibraryContentLifecycle(
       // delete series that don't exist anymore
       if (scanResult.limited) {
         logger.info { "Scan reached the daily file limit, skipping missing series and book cleanup for library: ${library.name}" }
+      } else if (library.scanOnlyNewBooks) {
+        logger.info { "Library is configured to scan only new books, skipping missing series cleanup for library: ${library.name}" }
       } else if (scannedSeries.isEmpty()) {
         logger.info { "Scan returned no series, soft deleting all existing series" }
         val series = seriesRepository.findAllByLibraryId(library.id)
@@ -192,6 +194,9 @@ class LibraryContentLifecycle(
       // delete books that don't exist anymore. We need to do this now, so trash bin can work
       val seriesToSortAndRefresh =
         if (scanResult.limited) {
+          mutableListOf()
+        } else if (library.scanOnlyNewBooks) {
+          logger.info { "Library is configured to scan only new books, skipping missing book cleanup for library: ${library.name}" }
           mutableListOf()
         } else {
           scannedSeries.values.flatten().map { it.url }.let { urls ->
@@ -212,6 +217,8 @@ class LibraryContentLifecycle(
       // we store the url of all the series that had deleted books
       // this can be used to detect changed series even if their file modified date did not change, for example because of NFS/SMB cache
       val seriesUrlWithDeletedBooks = seriesToSortAndRefresh.map { it.url }
+      val addedSeriesUrls = mutableSetOf<URL>()
+      val addedBookUrls = mutableSetOf<URL>()
 
       scannedSeries.forEach { (newSeries, newBooks) ->
         val existingSeries = seriesRepository.findNotDeletedByLibraryIdAndUrlOrNull(library.id, newSeries.url)
@@ -222,6 +229,8 @@ class LibraryContentLifecycle(
           val createdSeries = seriesLifecycle.createSeries(newSeries)
           seriesLifecycle.addBooks(createdSeries, newBooks)
           bookIdsToAnalyze += newBooks.map { it.id }
+          addedSeriesUrls += newSeries.url
+          addedBookUrls += newBooks.map { it.url }
           tryRestoreSeries(createdSeries, newBooks)
           tryRestoreBooks(newBooks)
           seriesToSortAndRefresh.add(createdSeries)
@@ -238,49 +247,56 @@ class LibraryContentLifecycle(
               }
           if (seriesChanged) {
             logger.info { "Series changed on disk, updating: $existingSeries" }
-            seriesRepository.update(existingSeries.copy(fileLastModified = newSeries.fileLastModified, deletedDate = null))
+            if (library.scanOnlyNewBooks)
+              logger.info { "Library is configured to scan only new books, skipping existing series update: $existingSeries" }
+            else
+              seriesRepository.update(existingSeries.copy(fileLastModified = newSeries.fileLastModified, deletedDate = null))
           }
-          if (scanDeep || seriesChanged || hasCountedBooks) {
+          if (library.scanOnlyNewBooks || scanDeep || seriesChanged || hasCountedBooks) {
             // update list of books with existing entities if they exist
             val existingBooks = bookRepository.findAllBySeriesId(existingSeries.id)
             logger.debug { "Existing books: $existingBooks" }
 
             // update existing books
-            newBooks.forEach { newBook ->
-              logger.debug { "Trying to match scanned book by url: $newBook" }
-              existingBooks.find { it.url == newBook.url && it.deletedDate == null }?.let { existingBook ->
-                logger.debug { "Matched existing book: $existingBook" }
-                if (isBookModifiedForQuota(newBook, existingBook)) {
-                  val hash =
-                    if (existingBook.fileSize == newBook.fileSize && existingBook.fileHash.isNotBlank()) {
-                      hasher.computeHash(newBook.path)
-                    } else {
-                      null
-                    }
-                  if (hash == existingBook.fileHash) {
-                    logger.info { "Book changed on disk, but still has the same hash, no need to reset media status: $existingBook" }
-                    val updatedBook =
-                      existingBook.copy(
-                        fileLastModified = newBook.fileLastModified,
-                        fileSize = newBook.fileSize,
-                        fileHash = hash,
-                      )
-                    bookRepository.update(updatedBook)
-                  } else {
-                    logger.info { "Book changed on disk, update and reset media status: $existingBook" }
-                    val updatedBook =
-                      existingBook.copy(
-                        fileLastModified = newBook.fileLastModified,
-                        fileSize = newBook.fileSize,
-                        fileHash = hash ?: "",
-                      )
-                    transactionTemplate.executeWithoutResult {
-                      mediaRepository.findById(existingBook.id).let {
-                        mediaRepository.update(it.copy(status = Media.Status.OUTDATED))
+            if (library.scanOnlyNewBooks) {
+              logger.debug { "Library is configured to scan only new books, skipping existing book updates for series: $existingSeries" }
+            } else {
+              newBooks.forEach { newBook ->
+                logger.debug { "Trying to match scanned book by url: $newBook" }
+                existingBooks.find { it.url == newBook.url && it.deletedDate == null }?.let { existingBook ->
+                  logger.debug { "Matched existing book: $existingBook" }
+                  if (isBookModifiedForQuota(newBook, existingBook)) {
+                    val hash =
+                      if (existingBook.fileSize == newBook.fileSize && existingBook.fileHash.isNotBlank()) {
+                        hasher.computeHash(newBook.path)
+                      } else {
+                        null
                       }
+                    if (hash == existingBook.fileHash) {
+                      logger.info { "Book changed on disk, but still has the same hash, no need to reset media status: $existingBook" }
+                      val updatedBook =
+                        existingBook.copy(
+                          fileLastModified = newBook.fileLastModified,
+                          fileSize = newBook.fileSize,
+                          fileHash = hash,
+                        )
                       bookRepository.update(updatedBook)
+                    } else {
+                      logger.info { "Book changed on disk, update and reset media status: $existingBook" }
+                      val updatedBook =
+                        existingBook.copy(
+                          fileLastModified = newBook.fileLastModified,
+                          fileSize = newBook.fileSize,
+                          fileHash = hash ?: "",
+                        )
+                      transactionTemplate.executeWithoutResult {
+                        mediaRepository.findById(existingBook.id).let {
+                          mediaRepository.update(it.copy(status = Media.Status.OUTDATED))
+                        }
+                        bookRepository.update(updatedBook)
+                      }
+                      bookIdsToAnalyze += existingBook.id
                     }
-                    bookIdsToAnalyze += existingBook.id
                   }
                 }
               }
@@ -292,8 +308,10 @@ class LibraryContentLifecycle(
             logger.info { "Adding new books: $booksToAdd" }
             seriesLifecycle.addBooks(existingSeries, booksToAdd)
             bookIdsToAnalyze += booksToAdd.map { it.id }
+            addedBookUrls += booksToAdd.map { it.url }
             tryRestoreBooks(booksToAdd)
-            seriesToSortAndRefresh.add(existingSeries)
+            if (booksToAdd.isNotEmpty() || !library.scanOnlyNewBooks)
+              seriesToSortAndRefresh.add(existingSeries)
           }
         }
       }
@@ -305,7 +323,18 @@ class LibraryContentLifecycle(
       }
 
       val existingSidecars = sidecarRepository.findAll()
-      scanResult.sidecars.forEach { newSidecar ->
+      val sidecarsToProcess =
+        if (library.scanOnlyNewBooks)
+          scanResult.sidecars.filter { sidecar ->
+            when (sidecar.source) {
+              Sidecar.Source.SERIES -> addedSeriesUrls.contains(sidecar.parentUrl)
+              Sidecar.Source.BOOK -> addedBookUrls.contains(sidecar.parentUrl)
+            }
+          }
+        else
+          scanResult.sidecars
+
+      sidecarsToProcess.forEach { newSidecar ->
         val existingSidecar = existingSidecars.firstOrNull { it.url == newSidecar.url }
         if (existingSidecar == null || existingSidecar.lastModifiedTime.notEquals(newSidecar.lastModifiedTime)) {
           when (newSidecar.source) {
@@ -334,6 +363,8 @@ class LibraryContentLifecycle(
       // cleanup sidecars that don't exist anymore
       if (scanResult.limited) {
         logger.info { "Scan reached the daily file limit, skipping sidecar cleanup for library: ${library.name}" }
+      } else if (library.scanOnlyNewBooks) {
+        logger.info { "Library is configured to scan only new books, skipping sidecar cleanup for library: ${library.name}" }
       } else {
         scanResult.sidecars.map { it.url }.let { newSidecarsUrls ->
           existingSidecars
@@ -346,6 +377,8 @@ class LibraryContentLifecycle(
 
       if (scanResult.limited) {
         logger.info { "Scan reached the daily file limit, skipping full-scan cleanup for library: ${library.name}" }
+      } else if (library.scanOnlyNewBooks) {
+        logger.info { "Library is configured to scan only new books, skipping full-scan cleanup for library: ${library.name}" }
       } else if (library.emptyTrashAfterScan) {
         emptyTrash(library)
       } else {
@@ -362,6 +395,7 @@ class LibraryContentLifecycle(
     scanResult: ScanResult,
     existingBooksByUrl: Map<URL, Book>,
     initialRemaining: Int,
+    includeModifiedBooks: Boolean,
   ): ScanResult {
     val countedNewBooks = scanResult.countedBookCount
     if (scanResult.limited) {
@@ -372,6 +406,9 @@ class LibraryContentLifecycle(
         countedBookCount = countedNewBooks,
         limited = true,
       )
+    }
+    if (!includeModifiedBooks) {
+      return scanResult.copy(countedBookCount = countedNewBooks)
     }
 
     val modifiedBooks =

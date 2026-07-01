@@ -485,6 +485,7 @@
       "field_root_folder": "根資料夾",
       "field_scan_interval": "掃描間隔",
       "field_scanner_empty_trash_after_scan": "每次掃描後自動清理垃圾",
+      "field_scanner_only_new_books": "只掃描分析新增書籍",
       "field_scanner_force_directory_modified_time": "強制目錄修改時間",
       "field_scanner_scan_startup": "啟動時掃描",
       "field_series_cover": "系列封面",

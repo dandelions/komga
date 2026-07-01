@@ -26,6 +26,7 @@ data class Library(
   val scanPdf: Boolean = true,
   val scanEpub: Boolean = true,
   val scanBypassDailyFileLimit: Boolean = false,
+  val scanOnlyNewBooks: Boolean = false,
   val scanDirectoryExclusions: Set<String> = emptySet(),
   val repairExtensions: Boolean = false,
   val convertToCbz: Boolean = false,

@@ -60,7 +60,7 @@ class TaskHandler(
                   taskEmitter.scanLibraryTomorrow(task.libraryId, task.scanDeep, task.priority)
                 }
                 taskEmitter.analyzeUnknownAndOutdatedBooks(scanSummary.bookIdsToAnalyze)
-                if (!scanSummary.limited || scanSummary.scannedBookCount > 0) {
+                if (!it.scanOnlyNewBooks && (!scanSummary.limited || scanSummary.scannedBookCount > 0)) {
                   taskEmitter.repairExtensions(it, LOW_PRIORITY)
                   taskEmitter.findBooksToConvert(it, LOWEST_PRIORITY)
                   taskEmitter.findBooksWithMissingPageHash(it, LOWEST_PRIORITY)
