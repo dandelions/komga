@@ -1154,7 +1154,7 @@ export default Vue.extend({
         deskewDetectionVersion: 9,
         imageExclusionVersion: 3,
         detectionScaleVersion: 2,
-        darkWordRenderVersion: 2,
+        darkWordRenderVersion: 3,
       })
     },
     emitReflowed() {
@@ -1375,31 +1375,33 @@ export default Vue.extend({
       return 0.299 * color.r + 0.587 * color.g + 0.114 * color.b
     },
     estimateSliceBackgroundLuma(data: Uint8ClampedArray, width: number, height: number): number {
-      const lumas = [] as number[]
-      const addPixel = (x: number, y: number) => {
-        if (x < 0 || x >= width || y < 0 || y >= height) return
-        const offset = (y * width + x) * 4
-        if (data[offset + 3] === 0) return
-        lumas.push(this.pixelLuma(data, offset))
-      }
+      const bins = new Array(32).fill(0)
+      const sums = new Array(32).fill(0)
+      const pixels = Math.max(1, width * height)
+      const step = Math.max(1, Math.floor(Math.sqrt(pixels / 16000)))
 
-      const edgeBand = Math.max(1, Math.min(3, Math.floor(Math.min(width, height) / 4)))
-      for (let y = 0; y < height; y++) {
-        for (let x = 0; x < edgeBand; x++) {
-          addPixel(x, y)
-          addPixel(width - 1 - x, y)
-        }
-      }
-      for (let x = edgeBand; x < width - edgeBand; x++) {
-        for (let y = 0; y < edgeBand; y++) {
-          addPixel(x, y)
-          addPixel(x, height - 1 - y)
+      for (let y = 0; y < height; y += step) {
+        for (let x = 0; x < width; x += step) {
+          const offset = (y * width + x) * 4
+          if (data[offset + 3] === 0) continue
+          const luma = this.pixelLuma(data, offset)
+          const bin = Math.max(0, Math.min(bins.length - 1, Math.floor(luma / 8)))
+          bins[bin]++
+          sums[bin] += luma
         }
       }
 
-      if (lumas.length === 0) return this.sourceBackgroundLuma()
-      lumas.sort((a, b) => a - b)
-      return lumas[Math.floor(lumas.length / 2)]
+      let bestBin = -1
+      let bestCount = 0
+      bins.forEach((count, index) => {
+        if (count > bestCount) {
+          bestCount = count
+          bestBin = index
+        }
+      })
+
+      if (bestBin < 0 || bestCount === 0) return this.sourceBackgroundLuma()
+      return sums[bestBin] / bestCount
     },
     parseColor(color: string): {r: number, g: number, b: number} | undefined {
       const normalized = (color || '').trim().toLowerCase()
@@ -3312,6 +3314,9 @@ export default Vue.extend({
   width: 100%;
   min-height: 100%;
   position: relative;
+  color-scheme: only light;
+  forced-color-adjust: none;
+  background: #fff;
 }
 
 .reflow-wrapper {
@@ -3326,6 +3331,8 @@ export default Vue.extend({
   align-content: flex-start;
   gap: 4px 2px;
   overflow: hidden;
+  color-scheme: only light;
+  forced-color-adjust: none;
 }
 
 .reflow-measure-wrapper {
@@ -3342,6 +3349,8 @@ export default Vue.extend({
   align-items: flex-end;
   align-content: flex-start;
   gap: 4px 2px;
+  color-scheme: only light;
+  forced-color-adjust: none;
   visibility: hidden;
   pointer-events: none;
 }
@@ -3370,6 +3379,12 @@ export default Vue.extend({
   height: auto;
   max-width: 100%;
   object-fit: contain;
+  color-scheme: only light;
+  forced-color-adjust: none;
+  filter: none !important;
+  mix-blend-mode: normal;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
 }
 
 .reflow-image-block {
@@ -3378,6 +3393,12 @@ export default Vue.extend({
   max-width: 100%;
   object-fit: contain;
   align-self: center;
+  color-scheme: only light;
+  forced-color-adjust: none;
+  filter: none !important;
+  mix-blend-mode: normal;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
 }
 
 .line-break {
@@ -3634,6 +3655,10 @@ export default Vue.extend({
 .reflowed-page-dark .reflow-controls {
   background: rgba(30, 30, 30, 0.96);
   border-bottom-color: rgba(255, 255, 255, 0.14);
+}
+
+.reflowed-page-dark {
+  background: #000;
 }
 
 .reflowed-page-dark .reflow-font-control,
