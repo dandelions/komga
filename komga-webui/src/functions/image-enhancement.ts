@@ -7,6 +7,7 @@ type TextContrastOptions = {
   enabled?: boolean,
   nightDisplay?: boolean,
   matchBackground?: boolean,
+  backgroundLuma?: number,
 }
 
 export function enhanceTextContrast(
@@ -29,7 +30,7 @@ function enhanceTextContrastData(
   height: number,
   options: TextContrastOptions,
 ) {
-  const stats = estimateLumaStats(data, width, height)
+  const stats = estimateLumaStats(data, width, height, options.backgroundLuma)
   if (!stats) return
 
   const targetDark = options.nightDisplay === true
@@ -64,7 +65,12 @@ function enhanceTextContrastData(
   }
 }
 
-function estimateLumaStats(data: Uint8ClampedArray, width: number, height: number): LumaStats | undefined {
+function estimateLumaStats(data: Uint8ClampedArray, width: number, height: number, backgroundLuma?: number): LumaStats | undefined {
+  if (backgroundLuma !== undefined && Number.isFinite(backgroundLuma)) {
+    const background = clamp(backgroundLuma, 0, 255)
+    return {background, sourceDark: background < 128}
+  }
+
   const lumas = [] as number[]
   const pixels = Math.max(1, width * height)
   const step = Math.max(1, Math.floor(Math.sqrt(pixels / 12000)))

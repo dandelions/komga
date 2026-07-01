@@ -532,20 +532,26 @@ export default Vue.extend({
       return this.darkDisplay ? '#000' : (this.contrastEnhancement || this.matchBackground) ? '#fff' : this.pageBackground || '#fff'
     },
     fillWordSliceBackground(context: CanvasRenderingContext2D, width: number, height: number) {
-      context.fillStyle = this.pageBackground || '#fff'
+      context.fillStyle = this.wordOutputBackground()
       context.fillRect(0, 0, width, height)
     },
     enhanceSourceCanvas(context: CanvasRenderingContext2D, width: number, height: number) {
-      if (!this.contrastEnhancement && !this.matchBackground) return
+      if (!this.contrastEnhancement || this.darkDisplay) return
       enhanceTextContrast(context, width, height, {
         enabled: this.contrastEnhancement,
-        nightDisplay: this.darkDisplay,
-        matchBackground: this.matchBackground,
+        nightDisplay: false,
+        matchBackground: false,
       })
-      this.pageBackground = this.darkDisplay ? '#000' : '#fff'
+      this.pageBackground = '#fff'
     },
     finishWordSlice(context: CanvasRenderingContext2D, width: number, height: number) {
       if (this.contrastEnhancement || this.matchBackground) {
+        enhanceTextContrast(context, width, height, {
+          enabled: this.contrastEnhancement,
+          nightDisplay: this.darkDisplay,
+          matchBackground: this.matchBackground,
+          backgroundLuma: this.sourceBackgroundLuma(),
+        })
         return
       }
       if (!this.darkDisplay) return
