@@ -1,8 +1,6 @@
 package org.gotson.komga.domain.service
 
-import com.github.benmanes.caffeine.cache.Caffeine
 import io.github.oshai.kotlinlogging.KotlinLogging
-import jakarta.annotation.PreDestroy
 import org.gotson.komga.domain.model.Book
 import org.gotson.komga.domain.model.BookAction
 import org.gotson.komga.domain.model.BookWithMedia
@@ -44,10 +42,8 @@ import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
 import java.io.File
 import java.net.URLDecoder
-import java.nio.file.Files
 import java.time.LocalDateTime
 import java.time.ZoneId
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -61,17 +57,6 @@ import kotlin.io.path.toPath
 import kotlin.math.roundToInt
 
 private val logger = KotlinLogging.logger {}
-
-private data class PdfPageCacheKey(
-  val bookId: String,
-  val path: String,
-  val fileLastModified: Long,
-  val fileSize: Long,
-  val pageNumber: Int,
-  val raw: Boolean,
-  val convertTo: ImageType?,
-  val resizeTo: Int?,
-)
 
 @Service
 class BookLifecycle(
@@ -94,29 +79,8 @@ class BookLifecycle(
   private val pdfImageType: ImageType,
   @Value("\${komga.analysis-timeout-seconds:1800}")
   private val analysisTimeoutSeconds: Long,
-  @Value("\${komga.pdf-page-cache-max-size-mb:64}")
-  private val pdfPageCacheMaxSizeMb: Long,
-  @Value("\${komga.pdf-page-cache-ahead-count:5}")
-  private val pdfPageCacheAheadCount: Int,
 ) {
   private val resizeTargetFormat = ImageType.JPEG
-  private val pdfPageCachePrefetching = ConcurrentHashMap.newKeySet<PdfPageCacheKey>()
-  private val pdfPageCachePrefetchExecutor =
-    Executors.newSingleThreadExecutor { runnable ->
-      Thread(runnable, "pdf-page-cache-prefetch").apply { isDaemon = true }
-    }
-  private val pdfPageCache =
-    Caffeine
-      .newBuilder()
-      .maximumWeight(pdfPageCacheMaxSizeMb * 1024 * 1024)
-      .weigher<PdfPageCacheKey, TypedBytes> { _, value -> value.bytes.size }
-      .expireAfterAccess(10, TimeUnit.MINUTES)
-      .build<PdfPageCacheKey, TypedBytes>()
-
-  @PreDestroy
-  fun shutdownPdfPageCachePrefetchExecutor() {
-    pdfPageCachePrefetchExecutor.shutdownNow()
-  }
 
   fun analyzeAndPersist(book: Book): Set<BookAction> {
     logger.info { "Analyze and persist book: $book" }
@@ -386,117 +350,6 @@ class BookLifecycle(
     resizeTo: Int? = null,
   ): TypedBytes {
     val media = mediaRepository.findById(book.id)
-    if (media.profile == MediaProfile.PDF) {
-      return getCachedPdfPage(
-        key = pdfPageCacheKey(book, number, convertTo = convertTo, resizeTo = resizeTo),
-        pageCount = media.pageCount,
-        loader = { pageNumber -> loadBookPage(book, media, pageNumber, convertTo, resizeTo) },
-      )
-    }
-
-    return loadBookPage(book, media, number, convertTo, resizeTo)
-  }
-
-  fun getBookPageRaw(
-    book: Book,
-    media: Media,
-    number: Int,
-  ): TypedBytes {
-    if (media.profile == MediaProfile.PDF) {
-      return getCachedPdfPage(
-        key = pdfPageCacheKey(book, number, raw = true),
-        pageCount = media.pageCount,
-        loader = { pageNumber -> bookAnalyzer.getPageContentRaw(BookWithMedia(book, media), pageNumber) },
-      )
-    }
-
-    return bookAnalyzer.getPageContentRaw(BookWithMedia(book, media), number)
-  }
-
-  private fun pdfPageCacheKey(
-    book: Book,
-    number: Int,
-    raw: Boolean = false,
-    convertTo: ImageType? = null,
-    resizeTo: Int? = null,
-  ): PdfPageCacheKey =
-    PdfPageCacheKey(
-      bookId = book.id,
-      path =
-        book.path
-          .toAbsolutePath()
-          .normalize()
-          .toString(),
-      fileLastModified = Files.getLastModifiedTime(book.path).toMillis(),
-      fileSize = Files.size(book.path),
-      pageNumber = number,
-      raw = raw,
-      convertTo = convertTo,
-      resizeTo = resizeTo,
-    )
-
-  private fun getCachedPdfPage(
-    key: PdfPageCacheKey,
-    pageCount: Int,
-    loader: (Int) -> TypedBytes,
-  ): TypedBytes {
-    val page = pdfPageCache.get(key) { loader(key.pageNumber) }
-
-    trimPdfPageCacheWindow(key)
-    prefetchPdfPageCacheWindow(key, pageCount, loader)
-
-    return page
-  }
-
-  private fun trimPdfPageCacheWindow(key: PdfPageCacheKey) {
-    val endPage = key.pageNumber + pdfPageCacheAheadCount
-    pdfPageCache
-      .asMap()
-      .keys
-      .filter {
-        it.bookId == key.bookId &&
-          it.path == key.path &&
-          it.fileLastModified == key.fileLastModified &&
-          it.fileSize == key.fileSize &&
-          it.raw == key.raw &&
-          it.convertTo == key.convertTo &&
-          it.resizeTo == key.resizeTo &&
-          it.pageNumber !in key.pageNumber..endPage
-      }.forEach(pdfPageCache::invalidate)
-  }
-
-  private fun prefetchPdfPageCacheWindow(
-    key: PdfPageCacheKey,
-    pageCount: Int,
-    loader: (Int) -> TypedBytes,
-  ) {
-    if (pdfPageCacheAheadCount <= 0 || key.pageNumber >= pageCount) return
-
-    pdfPageCachePrefetchExecutor.submit {
-      ((key.pageNumber + 1)..minOf(pageCount, key.pageNumber + pdfPageCacheAheadCount))
-        .map { key.copy(pageNumber = it) }
-        .filter { pdfPageCache.getIfPresent(it) == null }
-        .forEach { prefetchKey ->
-          if (pdfPageCachePrefetching.add(prefetchKey)) {
-            try {
-              pdfPageCache.get(prefetchKey) { loader(prefetchKey.pageNumber) }
-            } catch (e: Exception) {
-              logger.debug(e) { "Prefetch PDF page cache failed: $prefetchKey" }
-            } finally {
-              pdfPageCachePrefetching.remove(prefetchKey)
-            }
-          }
-        }
-    }
-  }
-
-  private fun loadBookPage(
-    book: Book,
-    media: Media,
-    number: Int,
-    convertTo: ImageType?,
-    resizeTo: Int?,
-  ): TypedBytes {
     val pageContent = bookAnalyzer.getPageContent(BookWithMedia(book, media), number)
     val pageMediaType =
       if (media.profile == MediaProfile.PDF)
