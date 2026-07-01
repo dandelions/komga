@@ -58,14 +58,30 @@ class TaskEmitter(
   }
 
   fun analyzeUnknownAndOutdatedBooks(library: Library) {
+    analyzeBooks(library, setOf(Media.Status.UNKNOWN, Media.Status.OUTDATED))
+  }
+
+  fun analyzeUnknownBooks(library: Library) {
+    analyzeBooks(library, setOf(Media.Status.UNKNOWN))
+  }
+
+  private fun analyzeBooks(
+    library: Library,
+    statuses: Set<Media.Status>,
+  ) {
+    val statusConditions = statuses.map { SearchCondition.MediaStatus(SearchOperator.Is(it)) }
+    val mediaStatusCondition: SearchCondition.Book =
+      if (statusConditions.size == 1) {
+        statusConditions.first()
+      } else {
+        SearchCondition.AnyOfBook(statusConditions)
+      }
+
     bookRepository
       .findAll(
         SearchCondition.AllOfBook(
           SearchCondition.LibraryId(SearchOperator.Is(library.id)),
-          SearchCondition.AnyOfBook(
-            SearchCondition.MediaStatus(SearchOperator.Is(Media.Status.UNKNOWN)),
-            SearchCondition.MediaStatus(SearchOperator.Is(Media.Status.OUTDATED)),
-          ),
+          mediaStatusCondition,
         ),
         SearchContext.empty(),
         UnpagedSorted(Sort.by(Sort.Order.asc("seriesId"), Sort.Order.asc("number"))),

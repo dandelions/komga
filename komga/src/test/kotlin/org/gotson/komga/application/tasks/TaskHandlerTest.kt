@@ -5,6 +5,7 @@ import io.mockk.clearMocks
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import org.gotson.komga.domain.model.Library
 import org.gotson.komga.domain.model.makeLibrary
 import org.gotson.komga.domain.persistence.BookRepository
 import org.gotson.komga.domain.persistence.LibraryRepository
@@ -102,7 +103,7 @@ class TaskHandlerTest {
   }
 
   @Test
-  fun `given limited scan does not visit books when handling scan task then analysis is still scheduled`() {
+  fun `given limited scan does not visit books when handling scan task then library analysis is still scheduled`() {
     // given
     val library = makeLibrary(id = "library1")
     every { libraryRepository.findByIdOrNull(library.id) } returns library
@@ -115,7 +116,8 @@ class TaskHandlerTest {
 
     // then
     verify(exactly = 1) { taskEmitter.scanLibraryTomorrow(library.id, false, 7) }
-    verify(exactly = 1) { taskEmitter.analyzeUnknownAndOutdatedBooks(emptySet()) }
+    verify(exactly = 1) { taskEmitter.analyzeUnknownAndOutdatedBooks(library) }
+    verify(exactly = 0) { taskEmitter.analyzeUnknownAndOutdatedBooks(any<Collection<String>>()) }
     verify(exactly = 0) { taskEmitter.repairExtensions(any(), any()) }
   }
 
@@ -134,6 +136,25 @@ class TaskHandlerTest {
     // then
     verify(exactly = 1) { taskEmitter.analyzeUnknownBooks(setOf("book1", "book2")) }
     verify(exactly = 0) { taskEmitter.analyzeUnknownAndOutdatedBooks(any<Collection<String>>()) }
+    verify(exactly = 0) { taskEmitter.repairExtensions(any(), any()) }
+  }
+
+  @Test
+  fun `given library scans only new books and no book ids are returned when handling scan task then unknown books are scheduled`() {
+    // given
+    val library = makeLibrary(id = "library1").copy(scanOnlyNewBooks = true)
+    every { libraryRepository.findByIdOrNull(library.id) } returns library
+    every { libraryRepository.findAllByParentId(library.id) } returns emptyList()
+    every { libraryContentLifecycle.scanRootFolder(library, false) } returns
+      LibraryScanSummary(limited = false, scannedBookCount = 0, countedBookCount = 0)
+
+    // when
+    taskHandler.handleTask(Task.ScanLibrary(library.id, scanDeep = false, priority = 7))
+
+    // then
+    verify(exactly = 1) { taskEmitter.analyzeUnknownBooks(library) }
+    verify(exactly = 0) { taskEmitter.analyzeUnknownBooks(any<Collection<String>>()) }
+    verify(exactly = 0) { taskEmitter.analyzeUnknownAndOutdatedBooks(any<Library>()) }
     verify(exactly = 0) { taskEmitter.repairExtensions(any(), any()) }
   }
 }
