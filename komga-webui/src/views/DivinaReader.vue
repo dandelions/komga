@@ -63,7 +63,7 @@
             title="Reflow"
             @click="toggleReflowMode"
           >
-            <v-icon>{{ reflowMode ? 'mdi-file-document' : 'mdi-file-document-outline' }}</v-icon>
+            <v-icon>{{ reflowMode || reflowSetupMode ? 'mdi-file-document' : 'mdi-file-document-outline' }}</v-icon>
           </v-btn>
 
           <v-btn
@@ -113,7 +113,7 @@
                 </v-list-item>
                 <v-list-item v-if="isPdf" :disabled="continuousReader" @click="toggleReflowMode">
                   <v-list-item-icon>
-                    <v-icon>{{ reflowMode ? 'mdi-file-document' : 'mdi-file-document-outline' }}</v-icon>
+                    <v-icon>{{ reflowMode || reflowSetupMode ? 'mdi-file-document' : 'mdi-file-document-outline' }}</v-icon>
                   </v-list-item-icon>
                   <v-list-item-title>Reflow</v-list-item-title>
                 </v-list-item>
@@ -250,7 +250,7 @@
       </div>
 
       <div
-        v-else-if="isPdf && reflowMode && !continuousReader"
+        v-else-if="isPdf && (reflowMode || reflowSetupMode) && !continuousReader"
         class="reflow-reader"
         v-touch="reflowTouchHandlers"
       >
@@ -264,6 +264,7 @@
           :cache-key="reflowCacheKey"
           :night-display="nightDisplay"
           :start-at-end="reflowStartAtEnd"
+          :defer-reflow="reflowSetupMode"
           @text-scale-change="setReflowTextScale"
           @column-count-change="setReflowColumnCount"
           @skew-correction-change="setReflowSkewCorrection"
@@ -275,6 +276,7 @@
           @block-spacing-change="setReflowBlockSpacing"
           @crop-mode-change="setReflowCropMode"
           @crop-rois-change="setReflowCropRois"
+          @start-reflow="startReflowMode"
           @force-reflow="forceCurrentReflow"
           @exit-reflow="exitReflowMode"
           @reflowed="cacheReflowPage"
@@ -285,7 +287,7 @@
           @back-to-book="closeBook"
         />
         <reflowed-page
-          v-if="prefetchReflowPage"
+          v-if="reflowMode && prefetchReflowPage"
           class="reflow-prefetch"
           :page="prefetchReflowPage"
           :target-width="reflowTargetWidth"
@@ -299,17 +301,17 @@
         />
 
         <div
-          v-if="!reflowCropMode"
+          v-if="reflowMode && !reflowCropMode"
           @click="reflowPreviousPage"
           class="reflow-click-left"
         />
         <div
-          v-if="!reflowCropMode"
+          v-if="reflowMode && !reflowCropMode"
           @click="reflowNextPage"
           class="reflow-click-right"
         />
         <div
-          v-if="!reflowCropMode"
+          v-if="reflowMode && !reflowCropMode"
           @click="toggleToolbars()"
           class="reflow-click-center"
         />
@@ -601,10 +603,10 @@
               <template v-if="isPdf">
                 <v-subheader class="font-weight-black text-h6">Reflow</v-subheader>
                 <v-list-item>
-                  <settings-switch v-model="reflowMode" label="Reflow page"/>
+                  <settings-switch :value="reflowEnabled" label="Reflow page" @input="setReflowEnabled"/>
                 </v-list-item>
               </template>
-              <template v-if="isPdf && reflowMode">
+              <template v-if="isPdf && reflowEnabled">
                 <v-list-item>
                   <settings-switch v-model="reflowSettings.autoCropBorder" label="Auto crop borders"/>
                 </v-list-item>
@@ -951,6 +953,7 @@ export default Vue.extend({
       showSettings: false,
       showHelp: false,
       landscapeDisplay: false,
+      reflowSetupMode: false,
       reflowMode: false,
       k2ReflowMode: false,
       reflowStartAtEnd: false,
@@ -1211,7 +1214,10 @@ export default Vue.extend({
       return this.backgroundColor === 'black'
     },
     activeReflowMode(): boolean {
-      return this.isPdf && !this.continuousReader && (this.reflowMode || this.k2ReflowMode)
+      return this.isPdf && !this.continuousReader && (this.reflowMode || this.reflowSetupMode || this.k2ReflowMode)
+    },
+    reflowEnabled(): boolean {
+      return this.reflowMode || this.reflowSetupMode
     },
     readerCropPageParity(): 'odd' | 'even' {
       return this.currentPage?.number % 2 === 0 ? 'even' : 'odd'
@@ -2310,13 +2316,44 @@ export default Vue.extend({
         return
       }
 
+      if (this.reflowSetupMode) {
+        this.startReflowMode()
+        return
+      }
+
+      this.openReflowSetupMode()
+    },
+    openReflowSetupMode() {
+      if (!this.isPdf) return
+
+      this.reflowSetupMode = true
+      this.reflowMode = false
+      this.k2ReflowMode = false
+      this.reflowStartAtEnd = false
+      this.reflowCropMode = false
+      this.clearReflowPrefetch()
+      this.$nextTick(() => this.scrollToPageEdge('top'))
+    },
+    startReflowMode() {
+      if (!this.isPdf) return
+
+      this.reflowSetupMode = false
       this.reflowMode = true
       this.k2ReflowMode = false
       this.reflowStartAtEnd = false
       this.reflowCropMode = false
       this.clearReflowPrefetch()
+      this.$nextTick(() => this.scrollToPageEdge('top'))
+    },
+    setReflowEnabled(enabled: boolean) {
+      if (enabled === true) {
+        if (!this.reflowEnabled) this.openReflowSetupMode()
+      } else {
+        this.exitReflowMode()
+      }
     },
     exitReflowMode() {
+      this.reflowSetupMode = false
       this.reflowMode = false
       this.reflowCropMode = false
       this.reflowStartAtEnd = false
@@ -2332,6 +2369,7 @@ export default Vue.extend({
       }
 
       this.k2ReflowMode = true
+      this.reflowSetupMode = false
       this.reflowMode = false
       this.reflowCropMode = false
       this.reflowStartAtEnd = false
@@ -2345,6 +2383,7 @@ export default Vue.extend({
       this.$nextTick(() => this.scrollToPageEdge('top'))
     },
     exitAllReflowModes() {
+      this.reflowSetupMode = false
       this.reflowMode = false
       this.k2ReflowMode = false
       this.reflowCropMode = false
@@ -2366,7 +2405,7 @@ export default Vue.extend({
       this.k2ReflowMode ? this.k2NextPage() : this.reflowNextPage()
     },
     reflowTouchEnabled(): boolean {
-      return this.readerSwipeEnabled && !this.reflowCropMode
+      return (this.reflowMode || this.k2ReflowMode) && this.readerSwipeEnabled && !this.reflowCropMode
     },
     reflowSwipeLeft() {
       if (!this.reflowTouchEnabled() || this.readingDirection === ReadingDirection.VERTICAL) return

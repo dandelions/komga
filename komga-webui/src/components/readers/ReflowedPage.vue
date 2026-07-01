@@ -221,6 +221,15 @@
       <div>Unable to reflow this page</div>
       <div v-if="errorMessage" class="reflow-error">{{ errorMessage }}</div>
     </div>
+    <div v-else-if="deferReflow" class="reflow-setup-preview">
+      <img
+        :src="page.url"
+        class="reflow-setup-image"
+        alt=""
+        draggable="false"
+        @dragstart.prevent
+      />
+    </div>
     <div v-else class="reflow-wrapper" :class="{'vertical-reflow-wrapper': verticalText}" :style="reflowWrapperStyle">
       <div v-if="reflowItems.length === 0" class="reflow-status">No text blocks detected</div>
       <template v-for="(item, i) in visibleItems">
@@ -480,6 +489,10 @@ export default Vue.extend({
       type: Boolean,
       default: false,
     },
+    deferReflow: {
+      type: Boolean,
+      default: false,
+    },
   },
   data: () => {
     return {
@@ -670,6 +683,15 @@ export default Vue.extend({
         this.drawingCrop = false
         this.cropMode = false
         this.$emit('crop-mode-change', false)
+        if (this.deferReflow) {
+          this.loading = false
+          this.error = false
+          this.errorMessage = ''
+          this.reflowItems = []
+          this.pages = []
+          this.virtualPageIndex = 0
+          return
+        }
         this.reflow()
       },
       immediate: true,
@@ -682,24 +704,40 @@ export default Vue.extend({
       deep: true,
     },
     targetWidth() {
+      if (this.deferReflow) return
       this.reflow()
     },
     startAtEnd() {
       this.setInitialVirtualPage()
     },
     cacheKey() {
-      if (this.cropMode) return
+      if (this.deferReflow || this.cropMode) return
       this.reflow()
     },
     darkDisplay() {
-      if (this.cropMode) return
+      if (this.deferReflow || this.cropMode) return
       this.reflow()
     },
     cachedItems: {
       handler() {
-        if (this.cropMode) return
+        if (this.deferReflow || this.cropMode) return
         this.reflow()
       },
+    },
+    deferReflow(defer) {
+      if (defer) {
+        this.controlsCollapsed = false
+        this.loading = false
+        this.error = false
+        this.errorMessage = ''
+        this.reflowItems = []
+        this.pages = []
+        this.virtualPageIndex = 0
+        this.requestId += 1
+        return
+      }
+      if (this.cropMode) return
+      this.reflow()
     },
     controlsCollapsed() {
       this.$nextTick(() => {
@@ -709,6 +747,7 @@ export default Vue.extend({
     },
   },
   mounted() {
+    if (this.deferReflow) this.controlsCollapsed = false
     this.updateViewportMetrics()
     window.addEventListener('resize', this.handleResize)
     window.visualViewport?.addEventListener('resize', this.handleResize)
@@ -3187,9 +3226,17 @@ export default Vue.extend({
       this.$emit('stroke-strength-change', this.controlStrokeStrength)
       this.$emit('block-spacing-change', this.controlBlockSpacing)
       this.$emit('crop-rois-change', this.cropRoisPayload())
+      if (this.deferReflow) {
+        this.$emit('start-reflow')
+        return
+      }
       this.$emit('force-reflow')
     },
     forceReflow() {
+      if (this.deferReflow) {
+        this.$emit('start-reflow')
+        return
+      }
       if (this.cropMode) return
       this.forceReflowOnce = true
       this.lastDetectionKey = ''
@@ -3375,6 +3422,25 @@ export default Vue.extend({
   justify-content: center;
   color: #9e9e9e;
   width: 100%;
+}
+
+.reflow-setup-preview {
+  min-height: calc(100vh - 48px);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 16px;
+  box-sizing: border-box;
+  overflow: auto;
+}
+
+.reflow-setup-image {
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: calc(100vh - 80px);
+  object-fit: contain;
+  user-select: none;
 }
 
 .reflow-error {
