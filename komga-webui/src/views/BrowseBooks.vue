@@ -349,6 +349,17 @@ export default Vue.extend({
               value: new SearchConditionMediaStatus(new SearchOperatorIs(MediaStatus.UNKNOWN)),
               nValue: new SearchConditionMediaStatus(new SearchOperatorIsNot(MediaStatus.UNKNOWN)),
             },
+            {
+              name: `${this.$t('book_card.error')} / ${this.$t('book_card.unsupported')}`,
+              value: new SearchConditionAnyOfBook([
+                new SearchConditionMediaStatus(new SearchOperatorIs(MediaStatus.ERROR)),
+                new SearchConditionMediaStatus(new SearchOperatorIs(MediaStatus.UNSUPPORTED)),
+              ]),
+              nValue: new SearchConditionAllOfBook([
+                new SearchConditionMediaStatus(new SearchOperatorIsNot(MediaStatus.ERROR)),
+                new SearchConditionMediaStatus(new SearchOperatorIsNot(MediaStatus.UNSUPPORTED)),
+              ]),
+            },
           ],
         },
         oneshot: {
