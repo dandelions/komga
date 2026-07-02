@@ -21,11 +21,15 @@ data class PdfPageReflowOptions(
   val targetWidth: Int,
   val autoCropBorder: Boolean,
   val textScale: Int,
+  val columnCount: Int,
+  val skewCorrection: Double,
   val threshold: Int,
+  val columnGap: Int,
   val wordGap: Int,
   val strokeStrength: Double,
   val contrastEnhancement: Boolean,
   val matchBackground: Boolean,
+  val blockSpacing: Int,
   val verticalText: Boolean,
   val verticalDirection: String,
   val marginTop: Double,
@@ -288,34 +292,171 @@ class PdfPageReflowService(
     textScale: Double,
   ): List<PdfPageReflowItemDto> {
     val items = mutableListOf<PdfPageReflowItemDto>()
-    val lineBands =
-      detectBands(roi.y, roi.y + roi.h) { y ->
-        var count = 0
-        for (x in roi.x until roi.x + roi.w) {
-          if (ink[y * image.width + x].toInt() != 0) count++
-        }
-        count >= 1
-      }.filter { it.end - it.start >= 2 }
+    val columns = detectHorizontalColumns(image, ink, roi, options)
 
-    lineBands.forEach { line ->
-      val wordBands =
-        detectBands(roi.x, roi.x + roi.w) { x ->
+    columns.forEach { column ->
+      val lineBands =
+        detectBands(roi.y, roi.y + roi.h) { y ->
           var count = 0
-          for (y in line.start until line.end) {
+          for (x in column.start until column.end) {
             if (ink[y * image.width + x].toInt() != 0) count++
           }
           count >= 1
-        }
-      mergeCloseBands(wordBands, max(1, options.wordGap))
-        .mapNotNull { wordBand ->
-          val block = trimBlock(image, ink, Roi(wordBand.start, line.start, wordBand.end - wordBand.start, line.end - line.start))
-          if (block == null || block.w < 2 || block.h < 2) null else renderWordItem(image, block, options, textScale)
-        }.forEach { items += it }
+        }.filter { it.end - it.start >= 2 }
 
-      if (items.isNotEmpty() && items.last().type != "break") items += PdfPageReflowItemDto(type = "break")
+      lineBands.forEach { line ->
+        val wordBands =
+          detectBands(column.start, column.end) { x ->
+            var count = 0
+            for (y in line.start until line.end) {
+              if (ink[y * image.width + x].toInt() != 0) count++
+            }
+            count >= 1
+          }
+        mergeCloseBands(wordBands, max(1, options.wordGap))
+          .mapNotNull { wordBand ->
+            val block = horizontalWordBlock(image, ink, wordBand, line)
+            if (block == null || block.w < 2 || block.h < 2) null else renderWordItem(image, block, options, textScale)
+          }.forEach { items += it }
+
+        if (items.isNotEmpty() && items.last().type != "break") items += PdfPageReflowItemDto(type = "break")
+      }
     }
 
     return trimTrailingBreak(items)
+  }
+
+  private fun detectHorizontalColumns(
+    image: BufferedImage,
+    ink: ByteArray,
+    roi: Roi,
+    options: PdfPageReflowOptions,
+  ): List<LineBand> {
+    val columnCount = clamp(options.columnCount, 1, 4)
+    if (columnCount == 1) {
+      val column = trimHorizontalColumn(image, ink, LineBand(roi.x, roi.x + roi.w), roi)
+      return if (column.end - column.start >= 8) listOf(column) else listOf(LineBand(roi.x, roi.x + roi.w))
+    }
+
+    val colInk = IntArray(image.width)
+    for (x in roi.x until roi.x + roi.w) {
+      for (y in roi.y until roi.y + roi.h) {
+        if (ink[y * image.width + x].toInt() != 0) colInk[x]++
+      }
+    }
+
+    val boundaries = mutableListOf(roi.x)
+    for (i in 1 until columnCount) {
+      val target = roi.x + roi.w * i / columnCount
+      val split = detectHorizontalColumnSplit(colInk, roi, target, options)
+      if (split > boundaries.last() + 8) boundaries += split
+    }
+    boundaries += roi.x + roi.w
+
+    val columns =
+      boundaries
+        .dropLast(1)
+        .mapIndexed { index, start -> trimHorizontalColumn(image, ink, LineBand(start, boundaries[index + 1]), roi) }
+        .filter { it.end - it.start >= 8 }
+
+    return columns.ifEmpty { listOf(LineBand(roi.x, roi.x + roi.w)) }
+  }
+
+  private fun detectHorizontalColumnSplit(
+    colInk: IntArray,
+    roi: Roi,
+    target: Int,
+    options: PdfPageReflowOptions,
+  ): Int {
+    val center = clamp(target, roi.x + 8, roi.x + roi.w - 8)
+    val searchRadius = max(1, roi.w * 18 / 100)
+    val searchStart = max(roi.x + 8, center - searchRadius)
+    val searchEnd = min(roi.x + roi.w - 8, center + searchRadius)
+    val windowRadius = max(2, clamp(options.columnGap, 5, 80) / 2)
+    var bestSplit = center
+    var bestScore = Int.MAX_VALUE
+
+    for (x in searchStart..searchEnd) {
+      var score = 0
+      for (xx in max(roi.x, x - windowRadius)..min(roi.x + roi.w - 1, x + windowRadius)) {
+        score += colInk[xx]
+      }
+      if (score < bestScore || (score == bestScore && kotlin.math.abs(x - center) < kotlin.math.abs(bestSplit - center))) {
+        bestScore = score
+        bestSplit = x
+      }
+    }
+
+    return bestSplit
+  }
+
+  private fun trimHorizontalColumn(
+    image: BufferedImage,
+    ink: ByteArray,
+    column: LineBand,
+    roi: Roi,
+  ): LineBand {
+    var start = column.start
+    var end = column.end
+
+    for (x in column.start until column.end) {
+      if (columnHasInk(image, ink, x, roi)) {
+        start = x
+        break
+      }
+    }
+
+    for (x in column.end - 1 downTo column.start) {
+      if (columnHasInk(image, ink, x, roi)) {
+        end = x + 1
+        break
+      }
+    }
+
+    val padding = max(2, min(8, ((end - start) * 0.015).roundToInt()))
+    return LineBand(max(column.start, start - padding), min(column.end, end + padding))
+  }
+
+  private fun columnHasInk(
+    image: BufferedImage,
+    ink: ByteArray,
+    x: Int,
+    roi: Roi,
+  ): Boolean {
+    for (y in roi.y until roi.y + roi.h) {
+      if (ink[y * image.width + x].toInt() != 0) return true
+    }
+    return false
+  }
+
+  private fun horizontalWordBlock(
+    image: BufferedImage,
+    ink: ByteArray,
+    wordBand: LineBand,
+    line: LineBand,
+  ): Roi? {
+    var minX = image.width
+    var maxX = -1
+
+    for (x in wordBand.start until wordBand.end) {
+      for (y in line.start until line.end) {
+        if (ink[y * image.width + x].toInt() == 0) continue
+        minX = min(minX, x)
+        maxX = max(maxX, x)
+      }
+    }
+
+    if (maxX < minX) return null
+    val glyphHeight = line.end - line.start
+    val padding = max(2, min(6, (glyphHeight * 0.1).roundToInt()))
+    val x = max(0, minX - padding)
+    val right = min(image.width, maxX + 1 + padding)
+    return Roi(
+      x = x,
+      y = max(0, line.start - 1),
+      w = max(1, right - x),
+      h = min(image.height, line.end + 1) - max(0, line.start - 1),
+    )
   }
 
   private fun renderVerticalItems(

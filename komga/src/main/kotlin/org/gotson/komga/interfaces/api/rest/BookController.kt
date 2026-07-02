@@ -516,8 +516,14 @@ class BookController(
     autoCropBorder: Boolean,
     @RequestParam(value = "textScale", defaultValue = "40")
     textScale: Int,
+    @RequestParam(value = "columnCount", defaultValue = "1")
+    columnCount: Int,
+    @RequestParam(value = "skewCorrection", defaultValue = "0")
+    skewCorrection: Double,
     @RequestParam(value = "threshold", defaultValue = "185")
     threshold: Int,
+    @RequestParam(value = "columnGap", defaultValue = "15")
+    columnGap: Int,
     @RequestParam(value = "wordGap", defaultValue = "3")
     wordGap: Int,
     @RequestParam(value = "strokeStrength", defaultValue = "0.1")
@@ -526,6 +532,8 @@ class BookController(
     contrastEnhancement: Boolean,
     @RequestParam(value = "matchBackground", defaultValue = "false")
     matchBackground: Boolean,
+    @RequestParam(value = "blockSpacing", defaultValue = "6")
+    blockSpacing: Int,
     @RequestParam(value = "verticalText", defaultValue = "false")
     verticalText: Boolean,
     @RequestParam(value = "verticalDirection", defaultValue = "rtl")
@@ -556,11 +564,15 @@ class BookController(
               targetWidth = targetWidth,
               autoCropBorder = autoCropBorder,
               textScale = textScale,
+              columnCount = columnCount,
+              skewCorrection = skewCorrection,
               threshold = threshold,
+              columnGap = columnGap,
               wordGap = wordGap,
               strokeStrength = strokeStrength,
               contrastEnhancement = contrastEnhancement,
               matchBackground = matchBackground,
+              blockSpacing = blockSpacing,
               verticalText = verticalText,
               verticalDirection = if (verticalDirection == "ltr") "ltr" else "rtl",
               marginTop = marginTop,
@@ -621,8 +633,14 @@ class BookController(
     autoCropBorder: Boolean,
     @RequestParam(value = "textScale", defaultValue = "40")
     textScale: Int,
+    @RequestParam(value = "columnCount", defaultValue = "1")
+    columnCount: Int,
+    @RequestParam(value = "skewCorrection", defaultValue = "0")
+    skewCorrection: Double,
     @RequestParam(value = "threshold", defaultValue = "185")
     threshold: Int,
+    @RequestParam(value = "columnGap", defaultValue = "15")
+    columnGap: Int,
     @RequestParam(value = "wordGap", defaultValue = "3")
     wordGap: Int,
     @RequestParam(value = "strokeStrength", defaultValue = "0.1")
@@ -631,6 +649,8 @@ class BookController(
     contrastEnhancement: Boolean,
     @RequestParam(value = "matchBackground", defaultValue = "false")
     matchBackground: Boolean,
+    @RequestParam(value = "blockSpacing", defaultValue = "6")
+    blockSpacing: Int,
     @RequestParam(value = "verticalText", defaultValue = "false")
     verticalText: Boolean,
     @RequestParam(value = "verticalDirection", defaultValue = "rtl")
@@ -662,11 +682,15 @@ class BookController(
                 targetWidth = targetWidth,
                 autoCropBorder = autoCropBorder,
                 textScale = textScale,
+                columnCount = columnCount,
+                skewCorrection = skewCorrection,
                 threshold = threshold,
+                columnGap = columnGap,
                 wordGap = wordGap,
                 strokeStrength = strokeStrength,
                 contrastEnhancement = contrastEnhancement,
                 matchBackground = matchBackground,
+                blockSpacing = blockSpacing,
                 verticalText = verticalText,
                 verticalDirection = if (verticalDirection == "ltr") "ltr" else "rtl",
                 marginTop = marginTop,
