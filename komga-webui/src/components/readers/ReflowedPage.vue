@@ -34,6 +34,13 @@
             <span>重排</span>
           </button>
         </div>
+        <label class="reflow-processing-control">
+          <span>位置</span>
+          <select :value="serverReflow ? 'server' : 'local'" @change="setProcessingMode">
+            <option value="local">本地重排</option>
+            <option value="server">服务端重排</option>
+          </select>
+        </label>
         <span v-if="transferStatsLabel" class="reflow-transfer-stats">{{ transferStatsLabel }}</span>
         <button
           type="button"
@@ -59,13 +66,6 @@
           />
           <button type="button" class="reflow-step-control" @click="adjustTextScale(5)">+</button>
           <span class="reflow-font-value">{{ textScalePercent }}%</span>
-        </label>
-        <label class="reflow-column-control">
-          <span>重排位置</span>
-          <select :value="serverReflow ? 'server' : 'local'" @change="setProcessingMode">
-            <option value="local">本地重排</option>
-            <option value="server">服务端重排</option>
-          </select>
         </label>
         <label class="reflow-column-control">
           <span>排列模式</span>
@@ -3857,6 +3857,29 @@ export default Vue.extend({
   min-width: 0;
 }
 
+.reflow-processing-control {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #212121;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.reflow-processing-control select {
+  min-width: 88px;
+  height: 30px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #212121;
+  padding: 4px 6px;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
 .reflow-transfer-stats {
   flex: 0 0 auto;
   color: #424242;
@@ -4063,6 +4086,7 @@ export default Vue.extend({
 .reflowed-page-dark .reflow-spacing-control,
 .reflowed-page-dark .reflow-skew-control,
 .reflowed-page-dark .reflow-column-control,
+.reflowed-page-dark .reflow-processing-control,
 .reflowed-page-dark .reflow-parity-label,
 .reflowed-page-dark .reflow-page-indicator,
 .reflowed-page-dark .reflow-transfer-stats {
@@ -4071,6 +4095,7 @@ export default Vue.extend({
 
 .reflowed-page-dark .reflow-step-control,
 .reflowed-page-dark .reflow-column-control select,
+.reflowed-page-dark .reflow-processing-control select,
 .reflowed-page-dark .reflow-control {
   border-color: rgba(255, 255, 255, 0.22);
   background: rgba(48, 48, 48, 0.96);
