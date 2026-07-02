@@ -10,6 +10,7 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.util.Base64
 import javax.imageio.ImageIO
+import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.max
@@ -480,25 +481,207 @@ class PdfPageReflowService(
 
     val items = mutableListOf<PdfPageReflowItemDto>()
     columns.forEach { column ->
-      val wordBands =
-        detectBands(roi.y, roi.y + roi.h) { y ->
-          var count = 0
-          for (x in column.start until column.end) {
-            if (ink[y * image.width + x].toInt() != 0) count++
-          }
-          count >= 1
-        }
-
-      mergeCloseBands(wordBands, max(1, options.wordGap))
-        .mapNotNull { wordBand ->
-          val block = trimBlock(image, ink, Roi(column.start, wordBand.start, column.end - column.start, wordBand.end - wordBand.start))
-          if (block == null || block.w < 2 || block.h < 2) null else renderWordItem(image, block, options, textScale)
-        }.forEach { items += it }
+      verticalWordBlocks(image, ink, column, roi, options)
+        .filter { it.w >= 2 && it.h >= 2 && !isRuleLikeBlock(it) }
+        .map { renderVerticalWordItem(image, it, options, textScale) }
+        .forEach { items += it }
 
       if (items.isNotEmpty() && items.last().type != "break") items += PdfPageReflowItemDto(type = "break")
     }
 
     return trimTrailingBreak(items)
+  }
+
+  private fun verticalWordBlocks(
+    image: BufferedImage,
+    ink: ByteArray,
+    column: LineBand,
+    roi: Roi,
+    options: PdfPageReflowOptions,
+  ): List<Roi> {
+    val wordBands =
+      detectBands(roi.y, roi.y + roi.h) { y ->
+        var count = 0
+        for (x in column.start until column.end) {
+          if (ink[y * image.width + x].toInt() != 0) count++
+        }
+        count >= 1
+      }
+
+    val blocks =
+      mergeCloseBands(wordBands, max(1, options.wordGap))
+        .mapNotNull { wordBand ->
+          trimBlock(image, ink, Roi(column.start, wordBand.start, column.end - column.start, wordBand.end - wordBand.start))
+        }.filter { it.w >= 2 && it.h >= 2 }
+
+    return mergeVerticalAdornmentBlocks(
+      mergeVerticalGlyphFragments(blocks, image, ink, options),
+      options,
+    )
+  }
+
+  private fun mergeVerticalGlyphFragments(
+    blocks: List<Roi>,
+    image: BufferedImage,
+    ink: ByteArray,
+    options: PdfPageReflowOptions,
+  ): List<Roi> {
+    if (blocks.size <= 1) return blocks
+    val medianWidth = max(1.0, medianNumber(blocks.map { it.w.toDouble() }))
+    val detectedCharHeight = verticalCharacterSourceHeight(blocks)
+    val charHeight = max(detectedCharHeight, min(medianWidth * 1.2, medianWidth + 6))
+    val sorted = blocks.sortedWith(compareBy<Roi> { it.y }.thenBy { it.x })
+    val merged = mutableListOf<Roi>()
+    var current = sorted.first()
+
+    sorted.drop(1).forEach { next ->
+      if (shouldMergeVerticalGlyphFragments(current, next, charHeight, medianWidth, image, ink, options)) {
+        current = unionRoi(current, next)
+      } else {
+        merged += current
+        current = next
+      }
+    }
+
+    merged += current
+    return merged
+  }
+
+  private fun shouldMergeVerticalGlyphFragments(
+    top: Roi,
+    bottom: Roi,
+    charHeight: Double,
+    medianWidth: Double,
+    image: BufferedImage,
+    ink: ByteArray,
+    options: PdfPageReflowOptions,
+  ): Boolean {
+    val gap = bottom.y - (top.y + top.h)
+    val maxInternalGap = max(3.0, min(charHeight * 0.42, clamp(options.wordGap, 1, 30) * 3.5))
+    if (gap < 0 || gap > maxInternalGap) return false
+
+    val union = unionRoi(top, bottom)
+    val hasSmallFragment = top.h < charHeight * 0.58 || bottom.h < charHeight * 0.58 || top.w < medianWidth * 0.72 || bottom.w < medianWidth * 0.72
+    val singleGlyphHeightLimit = charHeight * if (hasSmallFragment) 1.85 else 1.42
+    if (union.h > singleGlyphHeightLimit) return false
+
+    val overlap = horizontalOverlap(top, bottom)
+    val minWidth = max(1, min(top.w, bottom.w))
+    val topCenter = top.x + top.w / 2.0
+    val bottomCenter = bottom.x + bottom.w / 2.0
+    val centerGap = abs(topCenter - bottomCenter)
+    val aligned = overlap >= minWidth * 0.2 || centerGap <= medianWidth * 0.6 || hasSmallFragment
+    if (!aligned) return false
+
+    val strictGapLimit = max(3.0, min(charHeight * 0.24, clamp(options.wordGap, 1, 30) * 2.2))
+    if (gap <= strictGapLimit) return true
+    return verticalFragmentSidesHaveInk(top, bottom, charHeight, image, ink)
+  }
+
+  private fun verticalFragmentSidesHaveInk(
+    top: Roi,
+    bottom: Roi,
+    charHeight: Double,
+    image: BufferedImage,
+    ink: ByteArray,
+  ): Boolean {
+    val search = max(3, min(10, (charHeight * 0.25).roundToInt()))
+    val xStart = min(top.x, bottom.x)
+    val xEnd = max(top.x + top.w, bottom.x + bottom.w)
+    val topInk = countInkInRect(image, ink, xStart, xEnd, max(top.y, top.y + top.h - search), top.y + top.h)
+    if (topInk <= 0) return false
+    return countInkInRect(image, ink, xStart, xEnd, bottom.y, min(bottom.y + bottom.h, bottom.y + search)) > 0
+  }
+
+  private fun mergeVerticalAdornmentBlocks(
+    blocks: List<Roi>,
+    options: PdfPageReflowOptions,
+  ): List<Roi> {
+    if (blocks.size <= 1) return blocks
+    val charHeight = verticalCharacterSourceHeight(blocks)
+    val medianWidth = medianNumber(blocks.map { it.w.toDouble() })
+    val maxAdornmentWidth = max(4.0, medianWidth * 0.45)
+    val maxAdornmentHeight = max(charHeight * 2.4, charHeight + 8)
+    val maxGap = max(6.0, clamp(options.columnGap, 5, 80) * 0.7)
+    val consumed = mutableSetOf<Int>()
+    val merged = blocks.map { it.copy() }.toMutableList()
+
+    blocks.forEachIndexed { index, block ->
+      if (index in consumed) return@forEachIndexed
+      if (!isVerticalAdornmentBlock(block, maxAdornmentWidth, maxAdornmentHeight) && !isHorizontalAdornmentBlock(block, charHeight, medianWidth)) return@forEachIndexed
+
+      val targetIndex = findVerticalAdornmentTarget(merged, index, maxGap)
+      if (targetIndex == null || targetIndex in consumed) return@forEachIndexed
+
+      consumed += index
+      merged[targetIndex] = unionRoi(merged[targetIndex], block)
+    }
+
+    return merged
+      .filterIndexed { index, _ -> index !in consumed }
+      .sortedWith(compareBy<Roi> { it.y }.thenBy { it.x })
+  }
+
+  private fun isVerticalAdornmentBlock(
+    block: Roi,
+    maxWidth: Double,
+    maxHeight: Double,
+  ): Boolean = block.w <= maxWidth && block.h <= maxHeight && block.h > block.w * 1.8
+
+  private fun isHorizontalAdornmentBlock(
+    block: Roi,
+    charHeight: Double,
+    medianWidth: Double,
+  ): Boolean {
+    val maxHeight = max(3.0, charHeight * 0.36)
+    val maxWidth = max(charHeight * 1.45, medianWidth * 2.2)
+    return block.h <= maxHeight && block.w <= maxWidth
+  }
+
+  private fun findVerticalAdornmentTarget(
+    blocks: List<Roi>,
+    sourceIndex: Int,
+    maxGap: Double,
+  ): Int? {
+    val source = blocks[sourceIndex]
+    var bestIndex: Int? = null
+    var bestScore = Double.MAX_VALUE
+
+    blocks.forEachIndexed { index, candidate ->
+      if (index == sourceIndex) return@forEachIndexed
+      if (candidate.w <= source.w && candidate.h <= source.h) return@forEachIndexed
+
+      val horizontalGap = horizontalBlockGap(source, candidate).toDouble()
+      val verticalGap = verticalBlockGap(source, candidate).toDouble()
+      val overlapY = verticalOverlap(source, candidate)
+      val overlapX = horizontalOverlap(source, candidate)
+      val minHeight = max(1, min(source.h, candidate.h))
+      val minWidth = max(1, min(source.w, candidate.w))
+      val sourceYCenter = source.y + source.h / 2.0
+      val candidateYCenter = candidate.y + candidate.h / 2.0
+      val sourceXCenter = source.x + source.w / 2.0
+      val candidateXCenter = candidate.x + candidate.w / 2.0
+      val sideAttached = horizontalGap <= maxGap && (overlapY >= minHeight * 0.25 || abs(sourceYCenter - candidateYCenter) <= minHeight * 0.7)
+      val stackedAttached = verticalGap <= maxGap && (overlapX >= minWidth * 0.25 || abs(sourceXCenter - candidateXCenter) <= max(source.w, candidate.w) * 0.7)
+      if (!sideAttached && !stackedAttached) return@forEachIndexed
+
+      val score = min(horizontalGap, verticalGap) + abs(sourceYCenter - candidateYCenter) * 0.2 + abs(sourceXCenter - candidateXCenter) * 0.2
+      if (score < bestScore) {
+        bestScore = score
+        bestIndex = index
+      }
+    }
+
+    return bestIndex
+  }
+
+  private fun verticalCharacterSourceHeight(blocks: List<Roi>): Double {
+    val heights =
+      blocks
+        .filter { it.w >= 2 && it.h >= 2 && !isRuleLikeBlock(it) }
+        .map { min(it.h.toDouble(), max(it.w * 1.8, it.w + 4.0)) }
+    if (heights.isEmpty()) return max(8.0, blocks.firstOrNull()?.w?.toDouble() ?: 8.0)
+    return max(8.0, medianNumber(heights))
   }
 
   private fun detectBands(
@@ -568,6 +751,36 @@ class PdfPageReflowService(
 
     if (maxX < minX || maxY < minY) return null
     return clampRoi(Roi(minX - 1, minY - 1, maxX - minX + 3, maxY - minY + 3), image.width, image.height)
+  }
+
+  private fun renderVerticalWordItem(
+    image: BufferedImage,
+    block: Roi,
+    options: PdfPageReflowOptions,
+    textScale: Double,
+  ): PdfPageReflowItemDto {
+    val horizontalPadding = max(2, min(8, (block.w * 0.18).roundToInt()))
+    val verticalPadding = max(2, min(6, (block.w * 0.14).roundToInt()))
+    val sourceX = max(0, block.x - horizontalPadding)
+    val sourceY = max(0, block.y - verticalPadding)
+    val sourceRight = min(image.width, block.x + block.w + horizontalPadding)
+    val sourceBottom = min(image.height, block.y + block.h + verticalPadding)
+    val source = Roi(sourceX, sourceY, max(1, sourceRight - sourceX), max(1, sourceBottom - sourceY))
+    val outputWidth = block.w + horizontalPadding * 2
+    val outputHeight = block.h + verticalPadding * 2
+    val offsetX = horizontalPadding - (block.x - source.x)
+    val offsetY = verticalPadding - (block.y - source.y)
+    val slice = copyPaddedSlice(image, source, outputWidth, outputHeight, offsetX, offsetY, options)
+
+    return PdfPageReflowItemDto(
+      type = "word",
+      src = encodePngDataUrl(slice),
+      x = block.x,
+      y = block.y,
+      w = outputWidth,
+      h = outputHeight,
+      height = outputHeight * textScale,
+    )
   }
 
   private fun renderWordItem(
@@ -641,6 +854,57 @@ class PdfPageReflowService(
     return output
   }
 
+  private fun copyPaddedSlice(
+    image: BufferedImage,
+    source: Roi,
+    outputWidth: Int,
+    outputHeight: Int,
+    offsetX: Int,
+    offsetY: Int,
+    options: PdfPageReflowOptions,
+  ): BufferedImage {
+    val output = BufferedImage(outputWidth, outputHeight, BufferedImage.TYPE_INT_ARGB)
+    val background = if (options.darkDisplay) Color.BLACK else Color.WHITE
+    val foreground = if (options.darkDisplay) Color.WHITE else Color.BLACK
+    val normalizeColors = options.darkDisplay || options.contrastEnhancement || options.matchBackground
+    val graphics = output.createGraphics()
+    graphics.color = background
+    graphics.fillRect(0, 0, outputWidth, outputHeight)
+
+    if (!normalizeColors) {
+      graphics.drawImage(
+        image,
+        offsetX,
+        offsetY,
+        offsetX + source.w,
+        offsetY + source.h,
+        source.x,
+        source.y,
+        source.x + source.w,
+        source.y + source.h,
+        null,
+      )
+      graphics.dispose()
+      return output
+    }
+
+    graphics.dispose()
+    val threshold = clamp(options.threshold, 50, 230)
+    for (y in 0 until source.h) {
+      val targetY = offsetY + y
+      if (targetY !in 0 until outputHeight) continue
+      for (x in 0 until source.w) {
+        val targetX = offsetX + x
+        if (targetX !in 0 until outputWidth) continue
+        val rgb = image.getRGB(source.x + x, source.y + y)
+        val color = if (isInk(rgb, threshold)) foreground else background
+        output.setRGB(targetX, targetY, color.rgb)
+      }
+    }
+
+    return output
+  }
+
   private fun encodePngDataUrl(image: BufferedImage): String {
     val bytes =
       ByteArrayOutputStream().use { out ->
@@ -693,6 +957,77 @@ class PdfPageReflowService(
     val blue = rgb and 0xff
     val luma = 0.299 * red + 0.587 * green + 0.114 * blue
     return luma < threshold
+  }
+
+  private fun isRuleLikeBlock(block: Roi): Boolean {
+    val longHorizontalRule = block.h <= 3 && block.w >= 48
+    val longVerticalRule = block.w <= 3 && block.h >= 48
+    return longHorizontalRule || longVerticalRule
+  }
+
+  private fun unionRoi(
+    a: Roi,
+    b: Roi,
+  ): Roi {
+    val left = min(a.x, b.x)
+    val top = min(a.y, b.y)
+    val right = max(a.x + a.w, b.x + b.w)
+    val bottom = max(a.y + a.h, b.y + b.h)
+    return Roi(left, top, right - left, bottom - top)
+  }
+
+  private fun horizontalOverlap(
+    a: Roi,
+    b: Roi,
+  ): Int = max(0, min(a.x + a.w, b.x + b.w) - max(a.x, b.x))
+
+  private fun verticalOverlap(
+    a: Roi,
+    b: Roi,
+  ): Int = max(0, min(a.y + a.h, b.y + b.h) - max(a.y, b.y))
+
+  private fun horizontalBlockGap(
+    a: Roi,
+    b: Roi,
+  ): Int =
+    when {
+      a.x + a.w < b.x -> b.x - (a.x + a.w)
+      b.x + b.w < a.x -> a.x - (b.x + b.w)
+      else -> 0
+    }
+
+  private fun verticalBlockGap(
+    a: Roi,
+    b: Roi,
+  ): Int =
+    when {
+      a.y + a.h < b.y -> b.y - (a.y + a.h)
+      b.y + b.h < a.y -> a.y - (b.y + b.h)
+      else -> 0
+    }
+
+  private fun countInkInRect(
+    image: BufferedImage,
+    ink: ByteArray,
+    xStart: Int,
+    xEnd: Int,
+    yStart: Int,
+    yEnd: Int,
+  ): Int {
+    var count = 0
+    for (y in max(0, yStart) until min(image.height, yEnd)) {
+      for (x in max(0, xStart) until min(image.width, xEnd)) {
+        if (ink[y * image.width + x].toInt() != 0) count++
+      }
+    }
+    return count
+  }
+
+  private fun medianNumber(values: List<Double>): Double {
+    if (values.isEmpty()) return 0.0
+    val sorted = values.sorted()
+    val middle = sorted.size / 2
+    return if (sorted.size % 2 == 1) sorted[middle] else (sorted[middle - 1] + sorted[middle]) / 2.0
   }
 
   private fun trimTrailingBreak(items: MutableList<PdfPageReflowItemDto>): List<PdfPageReflowItemDto> {
