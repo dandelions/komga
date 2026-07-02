@@ -29,6 +29,15 @@
         <div class="reflow-top-controls">
           <button
             type="button"
+            class="reflow-control reflow-icon-control reflow-collapse-control"
+            title="隐藏重排设置"
+            aria-label="隐藏重排设置"
+            @click="controlsCollapsed = true"
+          >
+            <v-icon small>mdi-chevron-double-up</v-icon>
+          </button>
+          <button
+            type="button"
             class="reflow-control reflow-icon-control reflow-toc-control"
             title="目录"
             aria-label="目录"
@@ -67,15 +76,6 @@
             </select>
           </label>
           <span v-if="transferStatsLabel" class="reflow-transfer-stats">{{ transferStatsLabel }}</span>
-          <button
-            type="button"
-            class="reflow-control reflow-icon-control reflow-collapse-control"
-            title="隐藏重排设置"
-            aria-label="隐藏重排设置"
-            @click="controlsCollapsed = true"
-          >
-            <v-icon small>mdi-chevron-double-up</v-icon>
-          </button>
         </div>
         <label class="reflow-font-control reflow-wide-control">
           <span>文字大小</span>
@@ -3989,9 +3989,9 @@ export default Vue.extend({
 }
 
 .reflow-controls-collapsed {
-  justify-content: center;
+  justify-content: flex-start;
   min-height: 20px;
-  padding: 2px 0;
+  padding: 2px 0 2px 6px;
   background: transparent;
   border-bottom: 0;
   overflow: visible;
@@ -4004,7 +4004,9 @@ export default Vue.extend({
   min-height: 18px;
   flex-basis: 28px;
   padding: 0;
+  border: 0;
   border-radius: 0 0 5px 5px;
+  background: transparent;
   opacity: 0.86;
   pointer-events: auto;
 }
@@ -4279,6 +4281,11 @@ export default Vue.extend({
   border-color: rgba(255, 255, 255, 0.22);
   background: rgba(48, 48, 48, 0.96);
   color: #eeeeee;
+}
+
+.reflowed-page-dark .reflow-pull-control {
+  border: 0;
+  background: transparent;
 }
 
 .reflowed-page-dark .reflow-column-control input[type="checkbox"] {
