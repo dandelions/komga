@@ -41,6 +41,7 @@ data class PdfPageReflowDto(
   val sourceWidth: Int,
   val sourceHeight: Int,
   val originalImageBytes: Long,
+  val uploadedImageBytes: Long,
   val transferBytes: Long,
   val processingTimeMs: Long,
   val items: List<PdfPageReflowItemDto>,
@@ -72,6 +73,11 @@ private data class LineBand(
   val end: Int,
 )
 
+private data class ImageReflowResult(
+  val pageBackground: String,
+  val items: List<PdfPageReflowItemDto>,
+)
+
 @Service
 class PdfPageReflowService(
   private val bookLifecycle: BookLifecycle,
@@ -90,33 +96,96 @@ class PdfPageReflowService(
         val image =
           ImageIO.read(ByteArrayInputStream(pageContent.bytes))
             ?: error("Unable to decode rendered PDF page")
-        val pageBackground = detectPageBackground(image)
-        val ink = buildInkMap(image, options)
-        val roi = detectRoi(ink, image.width, image.height, options)
-        val textScale = clamp(options.textScale.toDouble() / 100.0, 0.1, 1.4)
-        val items =
-          if (options.verticalText) {
-            renderVerticalItems(image, ink, roi, options, textScale)
-          } else {
-            renderHorizontalItems(image, ink, roi, options, textScale)
-          }.ifEmpty {
-            listOf(renderFallbackImage(image, roi, options, textScale))
-          }
+        val result = reflowImage(image, options, useWholeImage = false)
 
         response =
           PdfPageReflowDto(
             pageNumber = pageNumber,
-            pageBackground = pageBackground,
+            pageBackground = result.pageBackground,
             sourceWidth = image.width,
             sourceHeight = image.height,
             originalImageBytes = pageContent.bytes.size.toLong(),
+            uploadedImageBytes = 0,
             transferBytes = 0,
             processingTimeMs = 0,
-            items = items,
+            items = result.items,
           )
       }
 
     return response.copy(processingTimeMs = processingTimeMs)
+  }
+
+  fun reflowPreparedImages(
+    pageNumber: Int,
+    images: List<ByteArray>,
+    options: PdfPageReflowOptions,
+    sourceImageBytes: Long,
+    sourceWidth: Int,
+    sourceHeight: Int,
+    pageBackground: String?,
+    useWholeImage: Boolean,
+  ): PdfPageReflowDto {
+    require(images.isNotEmpty()) { "No page images were provided" }
+
+    var processingTimeMs = 0L
+    lateinit var response: PdfPageReflowDto
+
+    processingTimeMs =
+      measureTimeMillis {
+        val decodedImages =
+          images.map { bytes ->
+            ImageIO.read(ByteArrayInputStream(bytes))
+              ?: error("Unable to decode uploaded page image")
+          }
+        val results = decodedImages.map { image -> reflowImage(image, options, useWholeImage) }
+        val items =
+          results
+            .map { it.items }
+            .filter { it.isNotEmpty() }
+            .fold(mutableListOf<PdfPageReflowItemDto>()) { rendered, regionItems ->
+              if (rendered.isNotEmpty()) rendered += PdfPageReflowItemDto(type = "break")
+              rendered += regionItems
+              rendered
+            }
+        val fallbackImage = decodedImages.first()
+        val fallbackRoi = Roi(0, 0, fallbackImage.width, fallbackImage.height)
+
+        response =
+          PdfPageReflowDto(
+            pageNumber = pageNumber,
+            pageBackground = pageBackground?.takeIf { it.isNotBlank() } ?: results.firstOrNull()?.pageBackground ?: "#fff",
+            sourceWidth = sourceWidth.takeIf { it > 0 } ?: fallbackImage.width,
+            sourceHeight = sourceHeight.takeIf { it > 0 } ?: fallbackImage.height,
+            originalImageBytes = sourceImageBytes.takeIf { it > 0 } ?: images.sumOf { it.size.toLong() },
+            uploadedImageBytes = images.sumOf { it.size.toLong() },
+            transferBytes = 0,
+            processingTimeMs = 0,
+            items = items.ifEmpty { listOf(renderFallbackImage(fallbackImage, fallbackRoi, options, clamp(options.textScale.toDouble() / 100.0, 0.1, 1.4))) },
+          )
+      }
+
+    return response.copy(processingTimeMs = processingTimeMs)
+  }
+
+  private fun reflowImage(
+    image: BufferedImage,
+    options: PdfPageReflowOptions,
+    useWholeImage: Boolean,
+  ): ImageReflowResult {
+    val pageBackground = detectPageBackground(image)
+    val ink = buildInkMap(image, options)
+    val roi = if (useWholeImage) Roi(0, 0, image.width, image.height) else detectRoi(ink, image.width, image.height, options)
+    val textScale = clamp(options.textScale.toDouble() / 100.0, 0.1, 1.4)
+    val items =
+      if (options.verticalText) {
+        renderVerticalItems(image, ink, roi, options, textScale)
+      } else {
+        renderHorizontalItems(image, ink, roi, options, textScale)
+      }.ifEmpty {
+        listOf(renderFallbackImage(image, roi, options, textScale))
+      }
+
+    return ImageReflowResult(pageBackground, items)
   }
 
   private fun buildInkMap(

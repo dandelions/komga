@@ -590,6 +590,111 @@ class BookController(
       }
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
 
+  @Operation(summary = "Reflow uploaded PDF page image on the server", tags = [OpenApiConfiguration.TagNames.BOOK_PAGES])
+  @PostMapping(
+    value = ["api/v1/books/{bookId}/pages/{pageNumber}/reflow"],
+    consumes = [MediaType.MULTIPART_FORM_DATA_VALUE],
+    produces = [MediaType.APPLICATION_JSON_VALUE],
+  )
+  @PreAuthorize("hasRole('PAGE_STREAMING')")
+  fun postBookPageReflowByNumber(
+    @AuthenticationPrincipal principal: KomgaPrincipal,
+    @PathVariable bookId: String,
+    @PathVariable pageNumber: Int,
+    @RequestParam(value = "zero_based", defaultValue = "false")
+    zeroBasedIndex: Boolean,
+    @RequestParam(value = "images")
+    images: List<MultipartFile>,
+    @RequestParam(value = "sourceImageBytes", defaultValue = "0")
+    sourceImageBytes: Long,
+    @RequestParam(value = "sourceWidth", defaultValue = "0")
+    sourceWidth: Int,
+    @RequestParam(value = "sourceHeight", defaultValue = "0")
+    sourceHeight: Int,
+    @RequestParam(value = "pageBackground", required = false)
+    pageBackground: String?,
+    @RequestParam(value = "preparedRegions", defaultValue = "false")
+    preparedRegions: Boolean,
+    @RequestParam(value = "targetWidth", defaultValue = "0")
+    targetWidth: Int,
+    @RequestParam(value = "autoCropBorder", defaultValue = "true")
+    autoCropBorder: Boolean,
+    @RequestParam(value = "textScale", defaultValue = "40")
+    textScale: Int,
+    @RequestParam(value = "threshold", defaultValue = "185")
+    threshold: Int,
+    @RequestParam(value = "wordGap", defaultValue = "3")
+    wordGap: Int,
+    @RequestParam(value = "strokeStrength", defaultValue = "0.1")
+    strokeStrength: Double,
+    @RequestParam(value = "contrastEnhancement", defaultValue = "false")
+    contrastEnhancement: Boolean,
+    @RequestParam(value = "matchBackground", defaultValue = "false")
+    matchBackground: Boolean,
+    @RequestParam(value = "verticalText", defaultValue = "false")
+    verticalText: Boolean,
+    @RequestParam(value = "verticalDirection", defaultValue = "rtl")
+    verticalDirection: String,
+    @RequestParam(value = "marginTop", defaultValue = "0")
+    marginTop: Double,
+    @RequestParam(value = "marginRight", defaultValue = "0")
+    marginRight: Double,
+    @RequestParam(value = "marginBottom", defaultValue = "0")
+    marginBottom: Double,
+    @RequestParam(value = "marginLeft", defaultValue = "0")
+    marginLeft: Double,
+    @RequestParam(value = "darkDisplay", defaultValue = "false")
+    darkDisplay: Boolean,
+  ): ResponseEntity<ByteArray> =
+    bookRepository.findByIdOrNull(bookId)?.let { book ->
+      val media = mediaRepository.findById(book.id)
+      if (media.profile != MediaProfile.PDF) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Server reflow is only available for PDF books")
+      contentRestrictionChecker.checkContentRestriction(principal.user, book)
+
+      try {
+        val page = if (zeroBasedIndex) pageNumber + 1 else pageNumber
+        val response =
+          pdfPageReflowService.reflowPreparedImages(
+            pageNumber = page,
+            images = images.map { it.bytes },
+            options =
+              PdfPageReflowOptions(
+                targetWidth = targetWidth,
+                autoCropBorder = autoCropBorder,
+                textScale = textScale,
+                threshold = threshold,
+                wordGap = wordGap,
+                strokeStrength = strokeStrength,
+                contrastEnhancement = contrastEnhancement,
+                matchBackground = matchBackground,
+                verticalText = verticalText,
+                verticalDirection = if (verticalDirection == "ltr") "ltr" else "rtl",
+                marginTop = marginTop,
+                marginRight = marginRight,
+                marginBottom = marginBottom,
+                marginLeft = marginLeft,
+                darkDisplay = darkDisplay,
+              ),
+            sourceImageBytes = sourceImageBytes,
+            sourceWidth = sourceWidth,
+            sourceHeight = sourceHeight,
+            pageBackground = pageBackground,
+            useWholeImage = preparedRegions,
+          )
+        val body = serverReflowResponseBytes(response)
+
+        ResponseEntity
+          .ok()
+          .contentType(MediaType.APPLICATION_JSON)
+          .contentLength(body.size.toLong())
+          .body(body)
+      } catch (ex: IllegalArgumentException) {
+        throw ResponseStatusException(HttpStatus.BAD_REQUEST, ex.message)
+      } catch (ex: IllegalStateException) {
+        throw ResponseStatusException(HttpStatus.BAD_REQUEST, ex.message)
+      }
+    } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+
   private fun serverReflowResponseBytes(response: PdfPageReflowDto): ByteArray {
     val firstPass = objectMapper.writeValueAsBytes(response)
     val secondPass = objectMapper.writeValueAsBytes(response.copy(transferBytes = firstPass.size.toLong()))
