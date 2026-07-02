@@ -361,11 +361,12 @@ class PdfPageReflowService(
     options: PdfPageReflowOptions,
   ): ByteArray {
     val threshold = clamp(options.threshold, 50, 230)
+    val inkThreshold = adaptiveInkThreshold(threshold, estimateBackgroundLuma(image, Roi(0, 0, image.width, image.height)))
     val ink = ByteArray(image.width * image.height)
 
     for (y in 0 until image.height) {
       for (x in 0 until image.width) {
-        if (isInk(image.getRGB(x, y), threshold)) ink[y * image.width + x] = 1
+        if (isInk(image.getRGB(x, y), inkThreshold)) ink[y * image.width + x] = 1
       }
     }
 
@@ -1337,6 +1338,7 @@ class PdfPageReflowService(
     val background = if (options.darkDisplay) Color.BLACK else Color.WHITE
     val foreground = if (options.darkDisplay) Color.WHITE else Color.BLACK
     val threshold = clamp(options.threshold, 50, 230)
+    val inkThreshold = adaptiveInkThreshold(threshold, estimateBackgroundLuma(image, block))
 
     if (!normalizeColors) {
       val graphics = output.createGraphics()
@@ -1349,7 +1351,7 @@ class PdfPageReflowService(
     for (y in 0 until block.h) {
       for (x in 0 until block.w) {
         val rgb = image.getRGB(block.x + x, block.y + y)
-        val color = if (isInk(rgb, threshold)) foreground else background
+        val color = if (isInk(rgb, inkThreshold)) foreground else background
         output.setRGB(x, y, color.rgb)
       }
     }
@@ -1395,6 +1397,7 @@ class PdfPageReflowService(
 
     graphics.dispose()
     val threshold = clamp(options.threshold, 50, 230)
+    val inkThreshold = adaptiveInkThreshold(threshold, estimateBackgroundLuma(image, source))
     for (y in 0 until source.h) {
       val targetY = offsetY + y
       if (targetY !in 0 until outputHeight) continue
@@ -1402,7 +1405,7 @@ class PdfPageReflowService(
         val targetX = offsetX + x
         if (targetX !in 0 until outputWidth) continue
         val rgb = image.getRGB(source.x + x, source.y + y)
-        val color = if (isInk(rgb, threshold)) foreground else background
+        val color = if (isInk(rgb, inkThreshold)) foreground else background
         output.setRGB(targetX, targetY, color.rgb)
       }
     }
@@ -1698,17 +1701,56 @@ class PdfPageReflowService(
     return "rgb(${r / count}, ${g / count}, ${b / count})"
   }
 
+  private fun estimateBackgroundLuma(
+    image: BufferedImage,
+    roi: Roi,
+  ): Double {
+    val block = clampRoi(roi, image.width, image.height)
+    val bins = IntArray(32)
+    val sums = DoubleArray(32)
+    val pixels = max(1, block.w * block.h)
+    val step = max(1, kotlin.math.sqrt(pixels / 12000.0).roundToInt())
+
+    for (y in block.y until block.y + block.h step step) {
+      for (x in block.x until block.x + block.w step step) {
+        val rgb = image.getRGB(x, y)
+        val alpha = rgb ushr 24 and 0xff
+        if (alpha == 0) continue
+        val luma = pixelLuma(rgb)
+        val bin = clamp((luma / 8).toInt(), 0, bins.size - 1)
+        bins[bin]++
+        sums[bin] += luma
+      }
+    }
+
+    val bestBin = bins.indices.maxByOrNull { bins[it] } ?: return 255.0
+    if (bins[bestBin] == 0) return 255.0
+    return sums[bestBin] / bins[bestBin]
+  }
+
+  private fun adaptiveInkThreshold(
+    threshold: Int,
+    backgroundLuma: Double,
+  ): Int {
+    if (backgroundLuma <= 80.0) return threshold
+    val gap = max(12.0, min(28.0, backgroundLuma * 0.10))
+    return clamp(min(threshold.toDouble(), backgroundLuma - gap).roundToInt(), 1, 254)
+  }
+
   private fun isInk(
     rgb: Int,
     threshold: Int,
   ): Boolean {
     val alpha = rgb ushr 24 and 0xff
     if (alpha == 0) return false
+    return pixelLuma(rgb) < threshold
+  }
+
+  private fun pixelLuma(rgb: Int): Double {
     val red = rgb ushr 16 and 0xff
     val green = rgb ushr 8 and 0xff
     val blue = rgb and 0xff
-    val luma = 0.299 * red + 0.587 * green + 0.114 * blue
-    return luma < threshold
+    return 0.299 * red + 0.587 * green + 0.114 * blue
   }
 
   private fun isRuleLikeBlock(block: Roi): Boolean {

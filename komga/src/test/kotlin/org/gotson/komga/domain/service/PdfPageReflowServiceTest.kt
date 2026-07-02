@@ -85,6 +85,29 @@ class PdfPageReflowServiceTest {
     assertThat(response.originalImageBytes).isEqualTo(pageBytes.size.toLong())
   }
 
+  @Test
+  fun `given gray crop background when reflowing page then background is not treated as content`() {
+    val pageBytes = grayBackgroundPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+        cropRegions = listOf(PdfPageReflowRegion(x = 20, y = 20, w = 180, h = 100)),
+      )
+
+    val contentItems = response.items.filter { it.type == "word" || it.type == "image" }
+
+    assertThat(contentItems).isNotEmpty
+    assertThat(contentItems).allSatisfy {
+      assertThat(it.w).isLessThan(180)
+      assertThat(it.h).isLessThan(100)
+    }
+  }
+
   private fun defaultOptions() =
     PdfPageReflowOptions(
       targetWidth = 900,
@@ -117,6 +140,21 @@ class PdfPageReflowServiceTest {
     graphics.fillRect(50, 45, 10, 26)
     graphics.fillRect(75, 58, 25, 3)
     graphics.fillRect(115, 45, 10, 26)
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun grayBackgroundPage(): ByteArray {
+    val image = BufferedImage(220, 140, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color(180, 180, 180)
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color.BLACK
+    graphics.fillRect(95, 60, 10, 26)
+    graphics.fillRect(120, 73, 25, 3)
     graphics.dispose()
 
     val output = ByteArrayOutputStream()
