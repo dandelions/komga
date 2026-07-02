@@ -359,7 +359,7 @@ class CommonBookController(
                     .filename(book.path.name, StandardCharsets.UTF_8)
                     .build()
               },
-            ).contentType(getMediaTypeOrDefault(media.mediaType))
+            ).contentType(getBookDownloadMediaType(book, media))
             .contentLength(this.contentLength())
             .body(stream)
         }
@@ -368,6 +368,20 @@ class CommonBookController(
         throw ResponseStatusException(HttpStatus.NOT_FOUND, "File not found, it may have moved")
       }
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+
+  private fun getBookDownloadMediaType(
+    book: Book,
+    media: Media,
+  ): MediaType {
+    val extension = FilenameUtils.getExtension(book.path.name).lowercase()
+    val mediaType =
+      org.gotson.komga.domain.model.MediaType.entries
+        .firstOrNull { it.fileExtension == extension }
+        ?.type
+        ?: media.mediaType
+
+    return getMediaTypeOrDefault(mediaType)
+  }
 
   @Operation(summary = "Get book progression", description = "The Progression API is a proposed standard for OPDS 2 and Readium. It is used by the Epub Reader.", tags = [OpenApiConfiguration.TagNames.BOOK_WEBPUB])
   @GetMapping(

@@ -676,8 +676,11 @@ export default Vue.extend({
     thumbnailUrl(): string {
       return seriesThumbnailUrl(this.seriesId)
     },
+    bookFilename(): string {
+      return this.book.url.split(/[\\/]/).pop() || this.book.name
+    },
     fileUrl(): string {
-      return bookFileUrl(this.book.id)
+      return bookFileUrl(this.book.id, this.bookFilename)
     },
     format(): BookFormat {
       return getBookFormatFromMedia(this.book.media)
