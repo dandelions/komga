@@ -740,10 +740,13 @@ class BookController(
       }.orEmpty()
 
   private fun serverReflowResponseBytes(response: PdfPageReflowDto): ByteArray {
-    val firstPass = objectMapper.writeValueAsBytes(response)
-    val secondPass = objectMapper.writeValueAsBytes(response.copy(transferBytes = firstPass.size.toLong()))
-    if (secondPass.size == firstPass.size) return secondPass
-    return objectMapper.writeValueAsBytes(response.copy(transferBytes = secondPass.size.toLong()))
+    var transferBytes = response.transferBytes
+    repeat(5) {
+      val body = objectMapper.writeValueAsBytes(response.copy(transferBytes = transferBytes))
+      if (body.size.toLong() == transferBytes) return body
+      transferBytes = body.size.toLong()
+    }
+    return objectMapper.writeValueAsBytes(response.copy(transferBytes = transferBytes))
   }
 
   @Operation(summary = "Get book page thumbnail", description = "The image is resized to 300px on the largest dimension.", tags = [OpenApiConfiguration.TagNames.BOOK_PAGES])

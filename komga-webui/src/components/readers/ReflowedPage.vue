@@ -957,7 +957,7 @@ export default Vue.extend({
       this.imageSize = {w: payload.sourceWidth || 0, h: payload.sourceHeight || 0}
       this.pageBackground = payload.pageBackground || '#fff'
       this.reflowItems = Array.isArray(payload.items) ? payload.items : []
-      const responseBytes = this.utf8ByteLength(text)
+      const responseBytes = Number(payload.transferBytes) || this.utf8ByteLength(text)
       this.transferStats = {
         originalImageBytes: Number(payload.originalImageBytes) || 0,
         transferBytes: this.utf8ByteLength(requestUrl) + responseBytes,

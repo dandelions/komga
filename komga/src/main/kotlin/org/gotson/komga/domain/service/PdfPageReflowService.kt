@@ -140,7 +140,7 @@ class PdfPageReflowService(
             .ifEmpty { listOf(null) }
             .map { region ->
               val source = if (region == null) preparedPage else copyImageRegion(preparedPage, region, Color.WHITE)
-              downscaleServerImage(source) to (region != null)
+              downscaleServerImage(source) to false
             }
         val results = regionImages.map { (source, useWholeImage) -> reflowImage(source, options, useWholeImage) }
         val items =
@@ -423,6 +423,7 @@ class PdfPageReflowService(
 
       val lineBlocks =
         lineBands.mapNotNull { line ->
+          val lineBounds = tightHorizontalLineBounds(image, ink, column, line) ?: return@mapNotNull null
           val wordBands =
             detectBands(column.start, column.end) { x ->
               var count = 0
@@ -434,7 +435,7 @@ class PdfPageReflowService(
           val blocks =
             mergeCloseBands(wordBands, max(1, options.wordGap))
               .mapNotNull { wordBand ->
-                horizontalWordBlock(image, ink, wordBand, line)
+                horizontalWordBlock(image, ink, wordBand, line, lineBounds)
               }.filter { it.w >= 2 && it.h >= 2 }
               .let { mergeHorizontalGlyphFragments(it, line, image, ink, options) }
 
@@ -451,6 +452,7 @@ class PdfPageReflowService(
         }
 
         blocks
+          .map { expandShortHorizontalGlyphBlock(it, glyphHeight, image.height) }
           .map { renderWordItem(image, it, options, textScale) }
           .forEach { items += it }
 
@@ -588,34 +590,68 @@ class PdfPageReflowService(
     ink: ByteArray,
     wordBand: LineBand,
     line: LineBand,
+    lineBounds: LineBand,
   ): Roi? {
     var minX = image.width
-    var minY = image.height
     var maxX = -1
-    var maxY = -1
 
     for (x in wordBand.start until wordBand.end) {
       for (y in line.start until line.end) {
         if (ink[y * image.width + x].toInt() == 0) continue
         minX = min(minX, x)
-        minY = min(minY, y)
         maxX = max(maxX, x)
-        maxY = max(maxY, y)
       }
     }
 
     if (maxX < minX) return null
-    val glyphHeight = line.end - line.start
+    val glyphHeight = lineBounds.end - lineBounds.start
     val padding = max(2, min(6, (glyphHeight * 0.1).roundToInt()))
     val x = max(0, minX - padding)
     val right = min(image.width, maxX + 1 + padding)
-    val y = max(0, minY - 1)
-    val bottom = min(image.height, maxY + 2)
     return Roi(
       x = x,
-      y = y,
+      y = lineBounds.start,
       w = max(1, right - x),
-      h = max(1, bottom - y),
+      h = max(1, lineBounds.end - lineBounds.start),
+    )
+  }
+
+  private fun tightHorizontalLineBounds(
+    image: BufferedImage,
+    ink: ByteArray,
+    column: LineBand,
+    line: LineBand,
+  ): LineBand? {
+    var minY = image.height
+    var maxY = -1
+
+    for (y in line.start until line.end) {
+      for (x in column.start until column.end) {
+        if (ink[y * image.width + x].toInt() == 0) continue
+        minY = min(minY, y)
+        maxY = max(maxY, y)
+      }
+    }
+
+    if (maxY < minY) return null
+    return LineBand(
+      start = max(line.start, minY - 1),
+      end = min(line.end, maxY + 2),
+    )
+  }
+
+  private fun expandShortHorizontalGlyphBlock(
+    block: Roi,
+    glyphHeight: Double,
+    sourceHeight: Int,
+  ): Roi {
+    if (block.h >= glyphHeight * 0.45 || block.w < glyphHeight * 0.45) return block
+    val targetHeight = max(1, glyphHeight.roundToInt())
+    val center = block.y + block.h / 2.0
+    val y = clamp(floor(center - targetHeight / 2.0).toInt(), 0, max(0, sourceHeight - targetHeight))
+    return block.copy(
+      y = y,
+      h = min(sourceHeight - y, targetHeight),
     )
   }
 
