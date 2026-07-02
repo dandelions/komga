@@ -261,8 +261,11 @@
           :options="reflowOptions"
           :cached-items="cachedReflowItems(currentPage)"
           :cached-page-background="cachedReflowBackground(currentPage)"
+          :cached-transfer-stats="cachedReflowTransferStats(currentPage)"
           :cache-key="reflowCacheKey"
           :night-display="nightDisplay"
+          :server-reflow="reflowSettings.processingMode === 'server'"
+          :server-reflow-url="reflowPageUrl(currentPage)"
           :start-at-end="reflowStartAtEnd"
           :defer-reflow="reflowSetupMode"
           @text-scale-change="setReflowTextScale"
@@ -294,8 +297,11 @@
           :options="reflowOptions"
           :cached-items="cachedReflowItems(prefetchReflowPage)"
           :cached-page-background="cachedReflowBackground(prefetchReflowPage)"
+          :cached-transfer-stats="cachedReflowTransferStats(prefetchReflowPage)"
           :cache-key="reflowCacheKey"
           :night-display="nightDisplay"
+          :server-reflow="reflowSettings.processingMode === 'server'"
+          :server-reflow-url="reflowPageUrl(prefetchReflowPage)"
           preload
           @reflowed="cacheReflowPage"
         />
@@ -608,6 +614,13 @@
               </template>
               <template v-if="isPdf && reflowEnabled">
                 <v-list-item>
+                  <settings-select
+                    :items="reflowProcessingModes"
+                    v-model="reflowSettings.processingMode"
+                    label="重排位置"
+                  />
+                </v-list-item>
+                <v-list-item>
                   <settings-switch v-model="reflowSettings.autoCropBorder" label="Auto crop borders"/>
                 </v-list-item>
                 <v-list-item>
@@ -809,7 +822,7 @@ import ThumbnailExplorerDialog from '@/components/dialogs/ThumbnailExplorerDialo
 import ShortcutHelpDialog from '@/components/dialogs/ShortcutHelpDialog.vue'
 import {getBookTitleCompact} from '@/functions/book-title'
 import {checkImageSupport, ImageFeature} from '@/functions/check-image'
-import {bookPageUrl} from '@/functions/urls'
+import {bookPageReflowUrl, bookPageUrl} from '@/functions/urls'
 import {getFileFromUrl} from '@/functions/file'
 import {resizeImageFile} from '@/functions/resize-image'
 import {ReadingDirection} from '@/types/enum-books'
@@ -868,6 +881,7 @@ function defaultCropRegionsByParity(enabled: boolean = false): any {
 
 function defaultReflowSettings(): any {
   return {
+    processingMode: 'local',
     autoCropBorder: true,
     textScale: 40,
     columnCount: 1,
@@ -1032,6 +1046,10 @@ export default Vue.extend({
       reflowVerticalDirections: [
         {text: 'Right to left', value: 'rtl'},
         {text: 'Left to right', value: 'ltr'},
+      ],
+      reflowProcessingModes: [
+        {text: '本地重排', value: 'local'},
+        {text: '服务端重排', value: 'server'},
       ],
       paddingPercentages: Object.values(PaddingPercentage).map(x => ({
         text: x === 0 ? this.$i18n.t('bookreader.settings.side_padding_none').toString() : `${x}%`,
@@ -1271,6 +1289,7 @@ export default Vue.extend({
       return JSON.stringify({
         bookId: this.bookId,
         width: this.reflowTargetWidth,
+        processingMode: this.reflowSettings.processingMode,
         autoCropBorder: this.reflowSettings.autoCropBorder,
         textScale: this.reflowSettings.textScale,
         columnCount: this.reflowSettings.columnCount,
@@ -2210,6 +2229,7 @@ export default Vue.extend({
     },
     normalizedReflowSettings(settings: Record<string, any>): object {
       return {
+        processingMode: settings.processingMode === 'server' ? 'server' : 'local',
         autoCropBorder: typeof settings.autoCropBorder === 'boolean' ? settings.autoCropBorder : this.reflowSettings.autoCropBorder,
         textScale: this.clampReflowNumber(settings.textScale, 10, 140, this.reflowSettings.textScale),
         columnCount: Math.round(this.clampReflowNumber(settings.columnCount, 1, 4, this.reflowSettings.columnCount)),
@@ -2498,14 +2518,23 @@ export default Vue.extend({
       const entry = this.cachedReflowEntry(page)
       return Array.isArray(entry) ? '' : entry?.pageBackground || ''
     },
-    cacheReflowPage(payload: {pageNumber: number, cacheKey: string, items: any[], pageBackground?: string}) {
+    cachedReflowTransferStats(page: PageDtoWithUrl | undefined): any {
+      const entry = this.cachedReflowEntry(page)
+      return Array.isArray(entry) ? undefined : entry?.transferStats
+    },
+    cacheReflowPage(payload: {pageNumber: number, cacheKey: string, items: any[], pageBackground?: string, transferStats?: any}) {
       if (payload.cacheKey !== this.reflowCacheKey) return
       this.$set(this.reflowCache, this.reflowCacheEntryKey(payload.pageNumber, payload.cacheKey), {
         items: payload.items,
         pageBackground: payload.pageBackground || '',
+        transferStats: payload.transferStats,
       })
       this.pruneReflowCache()
       if (payload.pageNumber === this.page) this.scheduleNextReflowPrefetch()
+    },
+    reflowPageUrl(page: PageDtoWithUrl | undefined): string {
+      if (!page) return ''
+      return bookPageReflowUrl(this.bookId, page.number)
     },
     cacheCurrentReflowPage() {
       const reflow = this.$refs.reflowedPage as any

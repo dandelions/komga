@@ -1,5 +1,6 @@
 package org.gotson.komga.interfaces.api.rest
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
@@ -33,6 +34,9 @@ import org.gotson.komga.domain.persistence.ReadListRepository
 import org.gotson.komga.domain.persistence.ThumbnailBookRepository
 import org.gotson.komga.domain.service.BookAnalyzer
 import org.gotson.komga.domain.service.BookLifecycle
+import org.gotson.komga.domain.service.PdfPageReflowDto
+import org.gotson.komga.domain.service.PdfPageReflowOptions
+import org.gotson.komga.domain.service.PdfPageReflowService
 import org.gotson.komga.infrastructure.image.ImageAnalyzer
 import org.gotson.komga.infrastructure.jooq.UnpagedSorted
 import org.gotson.komga.infrastructure.mediacontainer.ContentDetector
@@ -115,6 +119,8 @@ class BookController(
   private val webPubGenerator: WebPubGenerator,
   private val contentRestrictionChecker: ContentRestrictionChecker,
   private val commonBookController: CommonBookController,
+  private val pdfPageReflowService: PdfPageReflowService,
+  private val objectMapper: ObjectMapper,
 ) {
   @Deprecated("use /v1/books/list instead")
   @PageableAsQueryParam
@@ -491,6 +497,105 @@ class BookController(
     @RequestParam(value = "contentNegotiation", defaultValue = "true")
     contentNegotiation: Boolean,
   ): ResponseEntity<ByteArray> = commonBookController.getBookPageInternal(bookId, if (zeroBasedIndex) pageNumber + 1 else pageNumber, convertTo, request, principal, if (contentNegotiation) acceptHeaders else null)
+
+  @Operation(summary = "Get server reflowed PDF page", tags = [OpenApiConfiguration.TagNames.BOOK_PAGES])
+  @GetMapping(
+    value = ["api/v1/books/{bookId}/pages/{pageNumber}/reflow"],
+    produces = [MediaType.APPLICATION_JSON_VALUE],
+  )
+  @PreAuthorize("hasRole('PAGE_STREAMING')")
+  fun getBookPageReflowByNumber(
+    @AuthenticationPrincipal principal: KomgaPrincipal,
+    @PathVariable bookId: String,
+    @PathVariable pageNumber: Int,
+    @RequestParam(value = "zero_based", defaultValue = "false")
+    zeroBasedIndex: Boolean,
+    @RequestParam(value = "targetWidth", defaultValue = "0")
+    targetWidth: Int,
+    @RequestParam(value = "autoCropBorder", defaultValue = "true")
+    autoCropBorder: Boolean,
+    @RequestParam(value = "textScale", defaultValue = "40")
+    textScale: Int,
+    @RequestParam(value = "threshold", defaultValue = "185")
+    threshold: Int,
+    @RequestParam(value = "wordGap", defaultValue = "3")
+    wordGap: Int,
+    @RequestParam(value = "strokeStrength", defaultValue = "0.1")
+    strokeStrength: Double,
+    @RequestParam(value = "contrastEnhancement", defaultValue = "false")
+    contrastEnhancement: Boolean,
+    @RequestParam(value = "matchBackground", defaultValue = "false")
+    matchBackground: Boolean,
+    @RequestParam(value = "verticalText", defaultValue = "false")
+    verticalText: Boolean,
+    @RequestParam(value = "verticalDirection", defaultValue = "rtl")
+    verticalDirection: String,
+    @RequestParam(value = "marginTop", defaultValue = "0")
+    marginTop: Double,
+    @RequestParam(value = "marginRight", defaultValue = "0")
+    marginRight: Double,
+    @RequestParam(value = "marginBottom", defaultValue = "0")
+    marginBottom: Double,
+    @RequestParam(value = "marginLeft", defaultValue = "0")
+    marginLeft: Double,
+    @RequestParam(value = "darkDisplay", defaultValue = "false")
+    darkDisplay: Boolean,
+  ): ResponseEntity<ByteArray> =
+    bookRepository.findByIdOrNull(bookId)?.let { book ->
+      val media = mediaRepository.findById(book.id)
+      if (media.profile != MediaProfile.PDF) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Server reflow is only available for PDF books")
+      contentRestrictionChecker.checkContentRestriction(principal.user, book)
+
+      try {
+        val page = if (zeroBasedIndex) pageNumber + 1 else pageNumber
+        val response =
+          pdfPageReflowService.reflowPage(
+            book,
+            page,
+            PdfPageReflowOptions(
+              targetWidth = targetWidth,
+              autoCropBorder = autoCropBorder,
+              textScale = textScale,
+              threshold = threshold,
+              wordGap = wordGap,
+              strokeStrength = strokeStrength,
+              contrastEnhancement = contrastEnhancement,
+              matchBackground = matchBackground,
+              verticalText = verticalText,
+              verticalDirection = if (verticalDirection == "ltr") "ltr" else "rtl",
+              marginTop = marginTop,
+              marginRight = marginRight,
+              marginBottom = marginBottom,
+              marginLeft = marginLeft,
+              darkDisplay = darkDisplay,
+            ),
+          )
+        val body = serverReflowResponseBytes(response)
+
+        ResponseEntity
+          .ok()
+          .contentType(MediaType.APPLICATION_JSON)
+          .contentLength(body.size.toLong())
+          .setNotModified(media)
+          .body(body)
+      } catch (_: IndexOutOfBoundsException) {
+        throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Page number does not exist")
+      } catch (ex: ImageConversionException) {
+        throw ResponseStatusException(HttpStatus.NOT_FOUND, ex.message)
+      } catch (_: MediaNotReadyException) {
+        throw ResponseStatusException(HttpStatus.NOT_FOUND, "Book analysis failed")
+      } catch (ex: NoSuchFileException) {
+        logger.warn(ex) { "File not found: $book" }
+        throw ResponseStatusException(HttpStatus.NOT_FOUND, "File not found, it may have moved")
+      }
+    } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+
+  private fun serverReflowResponseBytes(response: PdfPageReflowDto): ByteArray {
+    val firstPass = objectMapper.writeValueAsBytes(response)
+    val secondPass = objectMapper.writeValueAsBytes(response.copy(transferBytes = firstPass.size.toLong()))
+    if (secondPass.size == firstPass.size) return secondPass
+    return objectMapper.writeValueAsBytes(response.copy(transferBytes = secondPass.size.toLong()))
+  }
 
   @Operation(summary = "Get book page thumbnail", description = "The image is resized to 300px on the largest dimension.", tags = [OpenApiConfiguration.TagNames.BOOK_PAGES])
   @ApiResponse(content = [Content(schema = Schema(type = "string", format = "binary"))])

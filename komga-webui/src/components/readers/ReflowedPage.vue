@@ -34,6 +34,7 @@
             <span>重排</span>
           </button>
         </div>
+        <span v-if="transferStatsLabel" class="reflow-transfer-stats">{{ transferStatsLabel }}</span>
         <button
           type="button"
           class="reflow-control reflow-icon-control reflow-collapse-control"
@@ -412,6 +413,24 @@ type ReflowCachePayload = {
   cacheKey: string,
   items: ReflowItem[],
   pageBackground: string,
+  transferStats?: ReflowTransferStats,
+}
+
+type ReflowTransferStats = {
+  originalImageBytes: number,
+  transferBytes: number,
+  processingTimeMs?: number,
+}
+
+type ServerReflowResponse = {
+  pageNumber: number,
+  pageBackground: string,
+  sourceWidth: number,
+  sourceHeight: number,
+  originalImageBytes: number,
+  transferBytes: number,
+  processingTimeMs: number,
+  items: ReflowItem[],
 }
 
 type ReflowRegionSource = {
@@ -473,6 +492,10 @@ export default Vue.extend({
       type: String,
       default: '',
     },
+    cachedTransferStats: {
+      type: Object as () => ReflowTransferStats | undefined,
+      default: undefined,
+    },
     cacheKey: {
       type: String,
       default: '',
@@ -480,6 +503,14 @@ export default Vue.extend({
     nightDisplay: {
       type: Boolean,
       default: false,
+    },
+    serverReflow: {
+      type: Boolean,
+      default: false,
+    },
+    serverReflowUrl: {
+      type: String,
+      default: '',
     },
     preload: {
       type: Boolean,
@@ -508,6 +539,7 @@ export default Vue.extend({
       lastDetectionKey: '',
       objectUrl: '',
       objectUrlSource: '',
+      objectUrlBytes: 0,
       cropObjectUrl: '',
       cropObjectUrlSkewCorrection: 0,
       cropImageRequestId: 0,
@@ -516,6 +548,7 @@ export default Vue.extend({
       reflowPending: false,
       controlsCollapsed: true,
       imageSize: {w: 0, h: 0},
+      transferStats: undefined as ReflowTransferStats | undefined,
       cropMode: false,
       cropWarning: '',
       activeCropRegion: 0 as CropRegionIndex,
@@ -654,6 +687,11 @@ export default Vue.extend({
     },
     cropImageUrl(): string {
       return this.cropObjectUrl || this.objectUrl
+    },
+    transferStatsLabel(): string {
+      if (!this.transferStats) return ''
+      const processing = this.transferStats.processingTimeMs !== undefined ? ` / ${Math.round(this.transferStats.processingTimeMs)}ms` : ''
+      return `原图 ${this.formatBytes(this.transferStats.originalImageBytes)} / 传输 ${this.formatBytes(this.transferStats.transferBytes)}${processing}`
     },
     activeRoi(): Roi | undefined {
       return this.draftRoi || this.cropRoi
@@ -817,6 +855,7 @@ export default Vue.extend({
         this.revokeObjectUrl()
         this.reflowItems = this.cachedItems
         this.pageBackground = this.cachedPageBackground || '#fff'
+        this.transferStats = this.cachedTransferStats
         this.repaginate()
         this.lastDetectionKey = detectionKey
         this.loading = false
@@ -833,8 +872,14 @@ export default Vue.extend({
 
       this.loading = true
       this.reflowItems = []
+      this.transferStats = undefined
 
       try {
+        if (this.serverReflow) {
+          await this.runServerReflow(requestId, detectionKey)
+          return
+        }
+
         const image = await this.loadPageImage(this.page.url, requestId)
         if (requestId !== this.requestId) return
         this.imageSize = {w: image.naturalWidth, h: image.naturalHeight}
@@ -866,6 +911,7 @@ export default Vue.extend({
           regionItems.push(this.renderReflowItems(sourceCanvas, lines, imageRegions))
         }
         if (requestId !== this.requestId) return
+        this.transferStats = this.localTransferStats()
         this.reflowItems = this.joinRegionReflowItems(regionItems)
         this.repaginate()
         this.lastDetectionKey = detectionKey
@@ -877,6 +923,70 @@ export default Vue.extend({
       } finally {
         if (requestId === this.requestId) this.loading = false
       }
+    },
+    async runServerReflow(requestId: number, detectionKey: string) {
+      if (!this.serverReflowUrl) throw new Error('Server reflow URL is unavailable')
+
+      const response = await fetch(this.serverReflowRequestUrl(), {
+        credentials: 'include',
+        headers: {
+          Accept: 'application/json',
+        },
+      })
+      if (!response.ok) throw new Error(`Unable to reflow page on server: ${response.status}`)
+      const text = await response.text()
+      const payload = JSON.parse(text) as ServerReflowResponse
+      if (requestId !== this.requestId) return
+
+      this.revokeObjectUrl()
+      this.imageSize = {w: payload.sourceWidth || 0, h: payload.sourceHeight || 0}
+      this.pageBackground = payload.pageBackground || '#fff'
+      this.reflowItems = Array.isArray(payload.items) ? payload.items : []
+      this.transferStats = {
+        originalImageBytes: Number(payload.originalImageBytes) || 0,
+        transferBytes: Number(payload.transferBytes) || this.utf8ByteLength(text),
+        processingTimeMs: Number(payload.processingTimeMs) || 0,
+      }
+      this.repaginate()
+      this.lastDetectionKey = detectionKey
+      this.emitReflowed()
+    },
+    serverReflowRequestUrl(): string {
+      const params = new URLSearchParams()
+      params.set('targetWidth', String(Math.round(this.targetWidth || 0)))
+      params.set('autoCropBorder', String(this.options.autoCropBorder !== false))
+      params.set('textScale', String(this.textScalePercent))
+      params.set('threshold', String(this.clampNumber(this.options.threshold, 50, 230, THRESHOLD)))
+      params.set('wordGap', String(this.clampNumber(this.options.wordGap, 1, 30, WORD_GAP)))
+      params.set('strokeStrength', String(this.strokeStrength))
+      params.set('contrastEnhancement', String(this.contrastEnhancement))
+      params.set('matchBackground', String(this.matchBackground))
+      params.set('verticalText', String(this.verticalText))
+      params.set('verticalDirection', this.verticalDirection)
+      params.set('marginTop', String(this.clampPercent(this.options.marginTop)))
+      params.set('marginRight', String(this.clampPercent(this.options.marginRight)))
+      params.set('marginBottom', String(this.clampPercent(this.options.marginBottom)))
+      params.set('marginLeft', String(this.clampPercent(this.options.marginLeft)))
+      params.set('darkDisplay', String(this.darkDisplay))
+
+      const separator = this.serverReflowUrl.includes('?') ? '&' : '?'
+      return `${this.serverReflowUrl}${separator}${params.toString()}`
+    },
+    localTransferStats(): ReflowTransferStats {
+      return {
+        originalImageBytes: this.objectUrlBytes || 0,
+        transferBytes: this.objectUrlBytes || 0,
+      }
+    },
+    utf8ByteLength(value: string): number {
+      if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(value).length
+      return new Blob([value]).size
+    },
+    formatBytes(bytes: number): string {
+      const value = Number(bytes) || 0
+      if (value < 1024) return `${Math.round(value)}B`
+      if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)}KB`
+      return `${(value / 1024 / 1024).toFixed(2)}MB`
     },
     handleResize() {
       this.updateViewportMetrics()
@@ -1174,6 +1284,8 @@ export default Vue.extend({
       return JSON.stringify({
         page: this.page.number,
         url: this.page.url,
+        serverReflow: this.serverReflow,
+        serverReflowUrl: this.serverReflowUrl,
         autoCropBorder: this.options.autoCropBorder,
         columnCount: this.options.columnCount,
         skewCorrection: this.skewCorrection,
@@ -1203,6 +1315,7 @@ export default Vue.extend({
         cacheKey: this.cacheKey,
         items: this.reflowItems,
         pageBackground: this.pageBackground,
+        transferStats: this.transferStats,
       } as ReflowCachePayload)
     },
     currentCachePayload(): ReflowCachePayload | undefined {
@@ -1212,6 +1325,7 @@ export default Vue.extend({
         cacheKey: this.cacheKey,
         items: this.reflowItems,
         pageBackground: this.pageBackground,
+        transferStats: this.transferStats,
       }
     },
     rescaleReflowItems() {
@@ -1271,6 +1385,7 @@ export default Vue.extend({
         this.revokeCropObjectUrl(false)
         this.objectUrl = nextObjectUrl
         this.objectUrlSource = sourceUrl
+        this.objectUrlBytes = blob.size
         if (previousObjectUrl && previousObjectUrl !== nextObjectUrl) URL.revokeObjectURL(previousObjectUrl)
         return image
       } catch (e) {
@@ -1626,6 +1741,7 @@ export default Vue.extend({
       if (this.objectUrl) URL.revokeObjectURL(this.objectUrl)
       this.objectUrl = ''
       this.objectUrlSource = ''
+      this.objectUrlBytes = 0
     },
     revokeCropObjectUrl(cancelCropRequests: boolean = true) {
       if (cancelCropRequests) this.cropImageRequestId += 1
@@ -3648,6 +3764,15 @@ export default Vue.extend({
   min-width: 0;
 }
 
+.reflow-transfer-stats {
+  flex: 0 0 auto;
+  color: #424242;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
 .reflow-toc-control {
   margin-right: 0;
 }
@@ -3846,7 +3971,8 @@ export default Vue.extend({
 .reflowed-page-dark .reflow-skew-control,
 .reflowed-page-dark .reflow-column-control,
 .reflowed-page-dark .reflow-parity-label,
-.reflowed-page-dark .reflow-page-indicator {
+.reflowed-page-dark .reflow-page-indicator,
+.reflowed-page-dark .reflow-transfer-stats {
   color: #eeeeee;
 }
 
