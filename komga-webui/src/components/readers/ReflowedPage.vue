@@ -61,6 +61,13 @@
           <span class="reflow-font-value">{{ textScalePercent }}%</span>
         </label>
         <label class="reflow-column-control">
+          <span>重排位置</span>
+          <select :value="serverReflow ? 'server' : 'local'" @change="setProcessingMode">
+            <option value="local">本地重排</option>
+            <option value="server">服务端重排</option>
+          </select>
+        </label>
+        <label class="reflow-column-control">
           <span>排列模式</span>
           <select :value="controlVerticalText ? 'vertical' : 'horizontal'" @change="setVerticalText">
             <option value="horizontal">横排</option>
@@ -3445,6 +3452,10 @@ export default Vue.extend({
     },
     adjustTextScale(delta: number) {
       this.$emit('text-scale-change', this.clampNumber(this.textScalePercent + delta, 10, 140, WORD_SCALE * 100))
+    },
+    setProcessingMode(event: Event) {
+      const target = event.target as HTMLSelectElement
+      this.$emit('processing-mode-change', target.value === 'server' ? 'server' : 'local')
     },
     setColumnCount(event: Event) {
       const target = event.target as HTMLSelectElement

@@ -269,6 +269,7 @@
           :start-at-end="reflowStartAtEnd"
           :defer-reflow="reflowSetupMode"
           @text-scale-change="setReflowTextScale"
+          @processing-mode-change="setReflowProcessingMode"
           @column-count-change="setReflowColumnCount"
           @skew-correction-change="setReflowSkewCorrection"
           @vertical-text-change="setReflowVerticalText"
@@ -2461,6 +2462,9 @@ export default Vue.extend({
     },
     setReflowTextScale(textScale: number) {
       this.reflowSettings.textScale = textScale
+    },
+    setReflowProcessingMode(processingMode: string) {
+      this.reflowSettings.processingMode = processingMode === 'server' ? 'server' : 'local'
     },
     setReflowColumnCount(columnCount: number) {
       this.reflowSettings.columnCount = Math.round(Math.max(1, Math.min(4, columnCount)))
