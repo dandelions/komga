@@ -723,21 +723,7 @@ class BookController(
       }
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
 
-  private fun parsePdfReflowRegions(cropRegions: List<String>?): List<PdfPageReflowRegion> =
-    cropRegions
-      ?.mapNotNull { region ->
-        val values = region.split(",").mapNotNull { it.trim().toIntOrNull() }
-        if (values.size != 4 || values[2] <= 1 || values[3] <= 1) {
-          null
-        } else {
-          PdfPageReflowRegion(
-            x = values[0],
-            y = values[1],
-            w = values[2],
-            h = values[3],
-          )
-        }
-      }.orEmpty()
+  private fun parsePdfReflowRegions(cropRegions: List<String>?): List<PdfPageReflowRegion> = parsePdfReflowRegionParameters(cropRegions)
 
   private fun serverReflowResponseBytes(response: PdfPageReflowDto): ByteArray {
     var transferBytes = response.transferBytes
@@ -1025,3 +1011,21 @@ class BookController(
     taskEmitter.findBookThumbnailsToRegenerate(forBiggerResultOnly, LOWEST_PRIORITY)
   }
 }
+
+internal fun parsePdfReflowRegionParameters(cropRegions: List<String>?): List<PdfPageReflowRegion> =
+  cropRegions
+    ?.flatMap { it.split(",") }
+    ?.mapNotNull { it.trim().takeIf(String::isNotBlank)?.toIntOrNull() }
+    ?.chunked(4)
+    ?.mapNotNull { values ->
+      if (values.size != 4 || values[2] <= 1 || values[3] <= 1) {
+        null
+      } else {
+        PdfPageReflowRegion(
+          x = values[0],
+          y = values[1],
+          w = values[2],
+          h = values[3],
+        )
+      }
+    }.orEmpty()

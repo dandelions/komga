@@ -1295,6 +1295,7 @@ class PdfPageReflowService(
       val graphics = output.createGraphics()
       graphics.drawImage(image, 0, 0, block.w, block.h, block.x, block.y, block.x + block.w, block.y + block.h, null)
       graphics.dispose()
+      applyStrokeStrength(output, options)
       return output
     }
 
@@ -1306,6 +1307,7 @@ class PdfPageReflowService(
       }
     }
 
+    applyStrokeStrength(output, options)
     return output
   }
 
@@ -1340,6 +1342,7 @@ class PdfPageReflowService(
         null,
       )
       graphics.dispose()
+      applyStrokeStrength(output, options)
       return output
     }
 
@@ -1357,8 +1360,147 @@ class PdfPageReflowService(
       }
     }
 
+    applyStrokeStrength(output, options)
     return output
   }
+
+  private fun applyStrokeStrength(
+    image: BufferedImage,
+    options: PdfPageReflowOptions,
+  ) {
+    val strength = clamp(options.strokeStrength, 0.0, 3.0)
+    if (strength <= 0.0) return
+
+    val threshold = min(245, clamp(options.threshold, 50, 230) + 18)
+    var mask = ByteArray(image.width * image.height)
+    var maskIndexes = mutableListOf<Int>()
+
+    for (y in 0 until image.height) {
+      for (x in 0 until image.width) {
+        val index = y * image.width + x
+        val rgb = image.getRGB(x, y)
+        if (!isStrokeInk(rgb, threshold, options.darkDisplay)) continue
+        mask[index] = 1
+        maskIndexes += index
+      }
+    }
+
+    val fullPasses = floor(strength).toInt()
+    repeat(fullPasses) {
+      val expanded = expandedStrokeMask(mask, maskIndexes, image.width, image.height)
+      mask = expanded.first
+      maskIndexes = expanded.second
+    }
+
+    val foreground = if (options.darkDisplay) Color.WHITE else Color.BLACK
+    if (fullPasses > 0) applyStrokeMask(image, maskIndexes, foreground)
+
+    val fractional = strength - fullPasses
+    if (fractional > 0.0) applyFractionalStroke(image, maskIndexes, fractional, foreground)
+  }
+
+  private fun isStrokeInk(
+    rgb: Int,
+    threshold: Int,
+    lightForeground: Boolean,
+  ): Boolean {
+    val alpha = rgb ushr 24 and 0xff
+    if (alpha == 0) return false
+    val red = rgb ushr 16 and 0xff
+    val green = rgb ushr 8 and 0xff
+    val blue = rgb and 0xff
+    val luma = 0.299 * red + 0.587 * green + 0.114 * blue
+    return if (lightForeground) luma > 255 - threshold else luma < threshold
+  }
+
+  private fun expandedStrokeMask(
+    mask: ByteArray,
+    sourceIndexes: List<Int>,
+    width: Int,
+    height: Int,
+  ): Pair<ByteArray, MutableList<Int>> {
+    val expanded = mask.copyOf()
+    val indexes = sourceIndexes.toMutableList()
+
+    sourceIndexes.forEach { index ->
+      val y = index / width
+      val x = index - y * width
+      for (dy in -1..1) {
+        val ny = y + dy
+        if (ny !in 0 until height) continue
+        for (dx in -1..1) {
+          val nx = x + dx
+          if (nx !in 0 until width) continue
+          val nextIndex = ny * width + nx
+          if (expanded[nextIndex].toInt() != 0) continue
+          expanded[nextIndex] = 1
+          indexes += nextIndex
+        }
+      }
+    }
+
+    return expanded to indexes
+  }
+
+  private fun applyStrokeMask(
+    image: BufferedImage,
+    indexes: List<Int>,
+    foreground: Color,
+  ) {
+    val rgb = foreground.rgb
+    indexes.forEach { index ->
+      val y = index / image.width
+      val x = index - y * image.width
+      image.setRGB(x, y, rgb)
+    }
+  }
+
+  private fun applyFractionalStroke(
+    image: BufferedImage,
+    indexes: List<Int>,
+    strength: Double,
+    foreground: Color,
+  ) {
+    indexes.forEach { index ->
+      val y = index / image.width
+      val x = index - y * image.width
+      blendPixelToForeground(image, x, y, min(1.0, strength), foreground)
+
+      for (dy in -1..1) {
+        val ny = y + dy
+        if (ny !in 0 until image.height) continue
+        for (dx in -1..1) {
+          if (dx == 0 && dy == 0) continue
+          val nx = x + dx
+          if (nx !in 0 until image.width) continue
+          val influence = strength * if (abs(dx) + abs(dy) == 1) 0.7 else 0.45
+          blendPixelToForeground(image, nx, ny, influence, foreground)
+        }
+      }
+    }
+  }
+
+  private fun blendPixelToForeground(
+    image: BufferedImage,
+    x: Int,
+    y: Int,
+    influence: Double,
+    foreground: Color,
+  ) {
+    val clampedInfluence = clamp(influence, 0.0, 1.0)
+    val color = Color(image.getRGB(x, y), true)
+    val red = blendChannel(color.red, foreground.red, clampedInfluence)
+    val green = blendChannel(color.green, foreground.green, clampedInfluence)
+    val blue = blendChannel(color.blue, foreground.blue, clampedInfluence)
+    val alpha = max(color.alpha, (255 * clampedInfluence).roundToInt())
+    image.setRGB(x, y, Color(red, green, blue, alpha).rgb)
+  }
+
+  private fun blendChannel(
+    source: Int,
+    target: Int,
+    influence: Double,
+  ): Int = (source + (target - source) * influence).roundToInt()
 
   private fun encodeReflowDataUrl(
     image: BufferedImage,

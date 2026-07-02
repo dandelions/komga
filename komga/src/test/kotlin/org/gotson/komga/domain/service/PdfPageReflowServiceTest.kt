@@ -9,7 +9,9 @@ import org.gotson.komga.infrastructure.image.ImageType
 import org.junit.jupiter.api.Test
 import java.awt.Color
 import java.awt.image.BufferedImage
+import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.util.Base64
 import javax.imageio.ImageIO
 
 class PdfPageReflowServiceTest {
@@ -39,6 +41,30 @@ class PdfPageReflowServiceTest {
     assertThat(wordBlocks).hasSizeGreaterThanOrEqualTo(3)
     assertThat(heights.toSet()).hasSize(1)
     assertThat(heights.min()).isGreaterThanOrEqualTo(20)
+  }
+
+  @Test
+  fun `given stronger stroke when reflowing page then returned word image is bolder`() {
+    val pageBytes = horizontalShortGlyphPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+
+    val plain =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(strokeStrength = 0.0),
+        cropRegions = listOf(PdfPageReflowRegion(x = 40, y = 30, w = 120, h = 70)),
+      )
+    val bold =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(strokeStrength = 2.0),
+        cropRegions = listOf(PdfPageReflowRegion(x = 40, y = 30, w = 120, h = 70)),
+      )
+
+    assertThat(darkPixelCount(firstWordImage(bold))).isGreaterThan(darkPixelCount(firstWordImage(plain)))
   }
 
   private fun defaultOptions() =
@@ -78,5 +104,28 @@ class PdfPageReflowServiceTest {
     val output = ByteArrayOutputStream()
     ImageIO.write(image, "png", output)
     return output.toByteArray()
+  }
+
+  private fun firstWordImage(response: PdfPageReflowDto): BufferedImage {
+    val dataUrl = response.items.first { it.type == "word" }.src!!
+    val bytes = Base64.getDecoder().decode(dataUrl.substringAfter(","))
+    return ImageIO.read(ByteArrayInputStream(bytes))
+  }
+
+  private fun darkPixelCount(image: BufferedImage): Int {
+    var count = 0
+    for (y in 0 until image.height) {
+      for (x in 0 until image.width) {
+        val rgb = image.getRGB(x, y)
+        val alpha = rgb ushr 24 and 0xff
+        if (alpha == 0) continue
+        val red = rgb ushr 16 and 0xff
+        val green = rgb ushr 8 and 0xff
+        val blue = rgb and 0xff
+        val luma = 0.299 * red + 0.587 * green + 0.114 * blue
+        if (luma < 120) count++
+      }
+    }
+    return count
   }
 }
