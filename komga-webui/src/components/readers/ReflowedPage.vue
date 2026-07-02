@@ -5,6 +5,7 @@
       ref="reflowControls"
       class="reflow-controls"
       :class="{'reflow-controls-collapsed': controlsCollapsed}"
+      :style="reflowControlsStyle"
       @click.stop
       @touchstart.stop
       @touchmove.stop
@@ -15,18 +16,43 @@
       @pointerup.stop
       @pointercancel.stop
     >
-      <button
+      <div
         v-if="controlsCollapsed"
-        type="button"
-        class="reflow-control reflow-pull-control"
-        title="显示重排设置"
-        aria-label="显示重排设置"
-        @click="controlsCollapsed = false"
+        class="reflow-collapsed-controls"
       >
-        <v-icon x-small>mdi-chevron-down</v-icon>
-      </button>
+        <button type="button" class="reflow-control reflow-icon-control reflow-compact-control" title="返回" aria-label="返回" @click="$emit('back-to-book')">
+          <v-icon small>mdi-arrow-left</v-icon>
+        </button>
+        <button
+          type="button"
+          class="reflow-control reflow-icon-control reflow-compact-control"
+          :title="nightDisplay ? '白天模式' : '黑夜模式'"
+          :aria-label="nightDisplay ? '白天模式' : '黑夜模式'"
+          @click="$emit('toggle-night-display')"
+        >
+          <v-icon small>{{ nightDisplay ? 'mdi-white-balance-sunny' : 'mdi-weather-night' }}</v-icon>
+        </button>
+        <button type="button" class="reflow-control reflow-icon-control reflow-compact-control" title="目录" aria-label="目录" @click="$emit('show-pdf-toc')">
+          <v-icon small>mdi-menu</v-icon>
+        </button>
+        <button type="button" class="reflow-control reflow-icon-control reflow-compact-control" title="显示/隐藏标题栏" aria-label="显示/隐藏标题栏" @click="$emit('toggle-reader-toolbar')">
+          <v-icon small>mdi-format-title</v-icon>
+        </button>
+        <button
+          type="button"
+          class="reflow-control reflow-pull-control"
+          title="显示重排设置"
+          aria-label="显示重排设置"
+          @click="controlsCollapsed = false"
+        >
+          <v-icon x-small>mdi-chevron-down</v-icon>
+        </button>
+      </div>
       <template v-else>
         <div class="reflow-top-controls">
+          <button type="button" class="reflow-control reflow-icon-control reflow-compact-control" title="返回" aria-label="返回" @click="$emit('back-to-book')">
+            <v-icon small>mdi-arrow-left</v-icon>
+          </button>
           <button
             type="button"
             class="reflow-control reflow-icon-control reflow-collapse-control"
@@ -54,11 +80,16 @@
           >
             <v-icon small>{{ nightDisplay ? 'mdi-white-balance-sunny' : 'mdi-weather-night' }}</v-icon>
           </button>
+          <button
+            type="button"
+            class="reflow-control reflow-icon-control reflow-compact-control"
+            title="显示/隐藏标题栏"
+            aria-label="显示/隐藏标题栏"
+            @click="$emit('toggle-reader-toolbar')"
+          >
+            <v-icon small>mdi-format-title</v-icon>
+          </button>
           <div class="reflow-navigation-controls">
-            <button type="button" class="reflow-control reflow-nav-control" @click="$emit('back-to-book')">
-              <v-icon small>mdi-arrow-left</v-icon>
-              <span>返回</span>
-            </button>
             <button type="button" class="reflow-control reflow-nav-control reflow-exit-control" @click="exitReflow">
               <v-icon small>mdi-exit-to-app</v-icon>
               <span>退出重排</span>
@@ -572,6 +603,10 @@ export default Vue.extend({
       type: String,
       default: '',
     },
+    controlsTopOffset: {
+      type: Number,
+      default: 0,
+    },
     preload: {
       type: Boolean,
       default: false,
@@ -702,6 +737,11 @@ export default Vue.extend({
     },
     controlBlockSpacing(): number {
       return this.clampNumber(this.pendingBlockSpacing, 0, 24, 6)
+    },
+    reflowControlsStyle(): object {
+      return {
+        top: `${Math.max(0, Math.round(this.controlsTopOffset))}px`,
+      }
     },
     reflowWrapperStyle(): object {
       const style = {
@@ -4012,7 +4052,7 @@ export default Vue.extend({
 .reflow-controls {
   position: sticky;
   top: 0;
-  z-index: 4;
+  z-index: 50;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -4031,12 +4071,19 @@ export default Vue.extend({
 
 .reflow-controls-collapsed {
   justify-content: flex-start;
-  min-height: 20px;
-  padding: 2px 0 2px 6px;
+  min-height: 34px;
+  padding: 3px 0 3px 6px;
   background: transparent;
   border-bottom: 0;
   overflow: visible;
   pointer-events: none;
+}
+
+.reflow-collapsed-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  pointer-events: auto;
 }
 
 .reflow-pull-control {
@@ -4050,6 +4097,13 @@ export default Vue.extend({
   background: transparent;
   opacity: 0.86;
   pointer-events: auto;
+}
+
+.reflow-compact-control {
+  width: 30px;
+  height: 30px;
+  flex-basis: 30px;
+  padding: 0;
 }
 
 .reflow-top-controls {

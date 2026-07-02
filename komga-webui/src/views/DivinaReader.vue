@@ -238,16 +238,19 @@
           v-if="!reflowCropMode"
           @click="k2OutsidePreviousPage"
           class="reflow-click-left"
+          :style="reflowClickLayerStyle"
         />
         <div
           v-if="!reflowCropMode"
           @click="k2OutsideNextPage"
           class="reflow-click-right"
+          :style="reflowClickLayerStyle"
         />
         <div
           v-if="!reflowCropMode"
           @click="reflowOutsideCenterClick"
           class="reflow-click-center"
+          :style="reflowClickLayerStyle"
         />
       </div>
 
@@ -269,6 +272,7 @@
           :night-display="nightDisplay"
           :server-reflow="reflowSettings.processingMode === 'server'"
           :server-reflow-url="reflowPageUrl(currentPage)"
+          :controls-top-offset="reflowControlsTopOffset"
           :start-at-end="reflowStartAtEnd"
           :defer-reflow="reflowSetupMode"
           @text-scale-change="setReflowTextScale"
@@ -293,6 +297,7 @@
           @source-next="reflowSourceNextPage"
           @show-pdf-toc="openPdfToc"
           @toggle-night-display="toggleNightDisplay"
+          @toggle-reader-toolbar="toggleToolbars"
           @back-to-book="closeBook"
         />
         <reflowed-page
@@ -309,6 +314,7 @@
           :night-display="nightDisplay"
           :server-reflow="reflowSettings.processingMode === 'server'"
           :server-reflow-url="reflowPageUrl(prefetchReflowPage)"
+          :controls-top-offset="0"
           preload
           @reflowed="cacheReflowPage"
         />
@@ -317,16 +323,19 @@
           v-if="reflowMode && !reflowCropMode"
           @click="reflowOutsidePreviousPage"
           class="reflow-click-left"
+          :style="reflowClickLayerStyle"
         />
         <div
           v-if="reflowMode && !reflowCropMode"
           @click="reflowOutsideNextPage"
           class="reflow-click-right"
+          :style="reflowClickLayerStyle"
         />
         <div
           v-if="reflowMode && !reflowCropMode"
           @click="reflowOutsideCenterClick"
           class="reflow-click-center"
+          :style="reflowClickLayerStyle"
         />
       </div>
 
@@ -1313,6 +1322,17 @@ export default Vue.extend({
     },
     reflowOptions(): object {
       return this.reflowSettings
+    },
+    reflowControlsTopOffset(): number {
+      return this.showToolbars ? 48 : 0
+    },
+    reflowClickLayerStyle(): object {
+      const toolbarOffset = this.showToolbars ? '48px' : '0'
+      return {
+        top: toolbarOffset,
+        bottom: toolbarOffset,
+        height: 'auto',
+      }
     },
     reflowTouchHandlers(): object {
       return {
@@ -2878,7 +2898,7 @@ export default Vue.extend({
 </script>
 <style scoped>
 .settings {
-  z-index: 2;
+  z-index: 100;
 }
 
 .full-height {
