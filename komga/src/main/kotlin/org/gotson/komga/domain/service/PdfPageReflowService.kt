@@ -109,6 +109,18 @@ private data class InkMetrics(
   val inkCount: Int,
 )
 
+private data class HorizontalTextLine(
+  val column: LineBand,
+  val line: LineBand,
+  val blocks: List<Roi>,
+)
+
+private data class VerticalTextLine(
+  val column: LineBand,
+  val line: LineBand,
+  val blocks: List<Roi>,
+)
+
 private data class EncodedReflowImage(
   val mimeType: String,
   val bytes: ByteArray,
@@ -458,18 +470,17 @@ class PdfPageReflowService(
   ): List<PdfPageReflowItemDto> {
     val items = mutableListOf<PdfPageReflowItemDto>()
     val columns = detectHorizontalColumns(image, ink, roi, options)
+    val detectedLines =
+      columns.flatMap { column ->
+        val lineBands =
+          detectBands(roi.y, roi.y + roi.h) { y ->
+            var count = 0
+            for (x in column.start until column.end) {
+              if (ink[y * image.width + x].toInt() != 0) count++
+            }
+            count >= 1
+          }.filter { it.end - it.start >= 2 }
 
-    columns.forEach { column ->
-      val lineBands =
-        detectBands(roi.y, roi.y + roi.h) { y ->
-          var count = 0
-          for (x in column.start until column.end) {
-            if (ink[y * image.width + x].toInt() != 0) count++
-          }
-          count >= 1
-        }.filter { it.end - it.start >= 2 }
-
-      val lineBlocks =
         lineBands.mapNotNull { line ->
           val lineBounds = tightHorizontalLineBounds(image, ink, column, line) ?: return@mapNotNull null
           val wordBands =
@@ -487,47 +498,70 @@ class PdfPageReflowService(
               }.filter { it.w >= 2 && it.h >= 2 }
               .let { mergeHorizontalGlyphFragments(it, line, image, ink, options) }
 
-          if (blocks.isEmpty()) null else line to blocks
+          if (blocks.isEmpty()) null else HorizontalTextLine(column, line, blocks)
         }
-      val glyphHeight = horizontalCharacterSourceHeight(lineBlocks.flatMap { it.second })
-
-      lineBlocks.forEach { (line, detectedBlocks) ->
-        val blocks = filterNoiseBlocks(detectedBlocks, glyphHeight, image, ink, options, horizontal = true)
-        if (blocks.isEmpty()) return@forEach
-
-        if (blocks.isNotEmpty()) {
-          horizontalIndentItem(blocks, column, options, textScale)?.let { items += it }
-        }
-
-        blocks
-          .map { expandShortHorizontalGlyphBlock(it, glyphHeight, image.height) }
-          .map { renderWordItem(image, it, options, textScale) }
-          .forEach { items += it }
-
-        if (items.isNotEmpty() && items.last().type != "break") items += PdfPageReflowItemDto(type = "break")
       }
+    val glyphHeight = horizontalCharacterSourceHeight(detectedLines.flatMap { it.blocks })
+    val lines =
+      detectedLines.mapNotNull { line ->
+        val blocks = filterNoiseBlocks(line.blocks, glyphHeight, image, ink, options, horizontal = true)
+        if (blocks.isEmpty()) null else line.copy(blocks = blocks)
+      }
+
+    lines.forEachIndexed { index, line ->
+      val startParagraph = isHorizontalParagraphStart(line, lines.getOrNull(index - 1))
+      val indent = if (startParagraph) horizontalLineIndentSourceWidth(line) else 0
+
+      if (startParagraph && items.isNotEmpty()) appendBreakIfNeeded(items)
+      if (indent > 0) items += horizontalIndentItem(indent, options, textScale)
+
+      line.blocks
+        .map { expandShortHorizontalGlyphBlock(it, glyphHeight, image.height) }
+        .map { renderWordItem(image, it, options, textScale) }
+        .forEach { items += it }
     }
 
     return trimTrailingBreak(items)
   }
 
   private fun horizontalIndentItem(
-    blocks: List<Roi>,
-    column: LineBand,
+    sourceWidth: Int,
     options: PdfPageReflowOptions,
     textScale: Double,
-  ): PdfPageReflowItemDto? {
-    val first = blocks.minByOrNull { it.x } ?: return null
-    val rawIndent = max(0, first.x - column.start)
-    val indentThreshold = max(8.0, first.h * 0.3)
-    if (rawIndent < indentThreshold) return null
-    val scaled = rawIndent * textScale
+  ): PdfPageReflowItemDto {
+    val scaled = sourceWidth * textScale
     val maxIndent = if (options.targetWidth > 32) max(0.0, (options.targetWidth - 32) * 0.45) else scaled
     return PdfPageReflowItemDto(
       type = "indent",
-      sourceWidth = rawIndent,
+      sourceWidth = sourceWidth,
       width = min(maxIndent, scaled),
     )
+  }
+
+  private fun isHorizontalParagraphStart(
+    line: HorizontalTextLine,
+    previousLine: HorizontalTextLine?,
+  ): Boolean {
+    if (previousLine == null) return true
+    if (line.column.start != previousLine.column.start || line.column.end != previousLine.column.end) return true
+
+    val currentHeight = line.blocks.firstOrNull()?.h ?: (line.line.end - line.line.start)
+    val indent = rawHorizontalLineIndent(line)
+    val previousIndent = rawHorizontalLineIndent(previousLine)
+    val indentThreshold = max(8.0, currentHeight * 0.6)
+    return indent > previousIndent + indentThreshold
+  }
+
+  private fun rawHorizontalLineIndent(line: HorizontalTextLine): Int {
+    val first = line.blocks.minByOrNull { it.x } ?: return 0
+    return max(0, first.x - line.column.start)
+  }
+
+  private fun horizontalLineIndentSourceWidth(line: HorizontalTextLine): Int {
+    val first = line.blocks.minByOrNull { it.x } ?: return 0
+    val rawIndent = rawHorizontalLineIndent(line)
+    val indentThreshold = max(8.0, first.h * 0.3)
+    return if (rawIndent < indentThreshold) 0 else rawIndent
   }
 
   private fun detectHorizontalColumns(
@@ -807,45 +841,99 @@ class PdfPageReflowService(
         .sortedBy { (it.start + it.end) / 2 }
         .let { if (options.verticalDirection == "ltr") it else it.reversed() }
 
-    val columnBlocks =
+    val detectedLines =
       columns.map { column ->
-        column to
-          verticalWordBlocks(image, ink, column, roi, options)
-            .filter { it.w >= 2 && it.h >= 2 && !isRuleLikeBlock(it) }
+        VerticalTextLine(
+          column = column,
+          line = LineBand(roi.y, roi.y + roi.h),
+          blocks =
+            verticalWordBlocks(image, ink, column, roi, options)
+              .filter { it.w >= 2 && it.h >= 2 && !isRuleLikeBlock(it) },
+        )
       }
-    val glyphHeight = verticalCharacterSourceHeight(columnBlocks.flatMap { it.second })
+    val glyphHeight = verticalCharacterSourceHeight(detectedLines.flatMap { it.blocks })
+    val filteredLines =
+      detectedLines.mapNotNull { line ->
+        val blocks = filterNoiseBlocks(line.blocks, glyphHeight, image, ink, options, horizontal = false)
+        if (blocks.isEmpty()) null else line.copy(blocks = blocks)
+      }
+    val textBounds = verticalTextBounds(filteredLines)
+    val lines = if (textBounds == null) filteredLines else filteredLines.map { it.copy(line = textBounds) }
 
     val items = mutableListOf<PdfPageReflowItemDto>()
-    columnBlocks.forEach { (_, detectedBlocks) ->
-      val blocks = filterNoiseBlocks(detectedBlocks, glyphHeight, image, ink, options, horizontal = false)
-      if (blocks.isEmpty()) return@forEach
+    lines.forEachIndexed { index, line ->
+      val startParagraph = isVerticalParagraphStart(line, lines.getOrNull(index - 1))
+      if (startParagraph && items.isNotEmpty()) appendBreakIfNeeded(items)
 
-      verticalIndentItem(blocks, roi, textScale)?.let { items += it }
+      val indent =
+        if (startParagraph) {
+          max(verticalLineIndentSourceHeight(line), verticalParagraphIndentSourceHeight(line))
+        } else {
+          verticalLineIndentSourceHeight(line)
+        }
+      if (indent > 0) items += verticalIndentItem(indent, textScale)
 
-      blocks
+      line.blocks
         .map { renderVerticalWordItem(image, it, options, textScale) }
         .forEach { items += it }
-
-      if (items.isNotEmpty() && items.last().type != "break") items += PdfPageReflowItemDto(type = "break")
     }
 
     return trimTrailingBreak(items)
   }
 
   private fun verticalIndentItem(
-    blocks: List<Roi>,
-    roi: Roi,
+    sourceHeight: Int,
     textScale: Double,
-  ): PdfPageReflowItemDto? {
-    val first = blocks.minByOrNull { it.y } ?: return null
-    val rawIndent = max(0, first.y - roi.y)
-    val indentThreshold = max(6.0, first.w * 0.3)
-    if (rawIndent < indentThreshold) return null
-    return PdfPageReflowItemDto(
+  ): PdfPageReflowItemDto =
+    PdfPageReflowItemDto(
       type = "indent",
-      sourceWidth = rawIndent,
-      width = rawIndent * textScale,
+      sourceWidth = sourceHeight,
+      width = sourceHeight * textScale,
     )
+
+  private fun verticalTextBounds(lines: List<VerticalTextLine>): LineBand? {
+    var top = Int.MAX_VALUE
+    var bottom = 0
+
+    lines.forEach { line ->
+      line.blocks.forEach { block ->
+        if (isRuleLikeBlock(block)) return@forEach
+        top = min(top, block.y)
+        bottom = max(bottom, block.y + block.h)
+      }
+    }
+
+    if (top == Int.MAX_VALUE || bottom <= top) return null
+    return LineBand(top, bottom)
+  }
+
+  private fun isVerticalParagraphStart(
+    line: VerticalTextLine,
+    previousLine: VerticalTextLine?,
+  ): Boolean {
+    if (previousLine == null) return false
+    val previousBottom = verticalLineBottom(previousLine) ?: return false
+    val blankTail = previousLine.line.end - previousBottom
+    val characterHeight =
+      max(
+        verticalCharacterSourceHeight(line.blocks),
+        verticalCharacterSourceHeight(previousLine.blocks),
+      )
+    return blankTail >= max(6.0, characterHeight * 2.0)
+  }
+
+  private fun verticalLineBottom(line: VerticalTextLine): Int? =
+    line.blocks
+      .filter { !isRuleLikeBlock(it) }
+      .maxOfOrNull { it.y + it.h }
+
+  private fun verticalParagraphIndentSourceHeight(line: VerticalTextLine): Int = (verticalCharacterSourceHeight(line.blocks) * 2).roundToInt()
+
+  private fun verticalLineIndentSourceHeight(line: VerticalTextLine): Int {
+    val first = line.blocks.minByOrNull { it.y } ?: return 0
+    val rawIndent = max(0, first.y - line.line.start)
+    val indentThreshold = max(6.0, first.w * 0.3)
+    return if (rawIndent < indentThreshold) 0 else rawIndent
   }
 
   private fun filterNoiseBlocks(
@@ -1829,6 +1917,10 @@ class PdfPageReflowService(
       items.removeAt(items.lastIndex)
     }
     return items
+  }
+
+  private fun appendBreakIfNeeded(items: MutableList<PdfPageReflowItemDto>) {
+    if (items.isNotEmpty() && items.last().type != "break") items += PdfPageReflowItemDto(type = "break")
   }
 
   private fun clampRoi(

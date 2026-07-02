@@ -108,6 +108,55 @@ class PdfPageReflowServiceTest {
     }
   }
 
+  @Test
+  fun `given horizontal lines without indent when reflowing page then lines stay in same paragraph`() {
+    val pageBytes = horizontalParagraphPage(secondLineIndent = 0)
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+      )
+
+    assertThat(response.items.count { it.type == "break" }).isEqualTo(0)
+    assertThat(response.items.filter { it.type == "word" }).hasSizeGreaterThanOrEqualTo(4)
+  }
+
+  @Test
+  fun `given horizontal indented line when reflowing page then new paragraph starts before it`() {
+    val pageBytes = horizontalParagraphPage(secondLineIndent = 30)
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+      )
+
+    assertThat(response.items.map { it.type }).containsSubsequence("break", "indent", "word")
+  }
+
+  @Test
+  fun `given vertical line with long tail blank when reflowing page then next line starts a paragraph`() {
+    val pageBytes = verticalParagraphPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(verticalText = true),
+      )
+
+    assertThat(response.items.map { it.type }).containsSubsequence("break", "indent", "word")
+  }
+
   private fun defaultOptions() =
     PdfPageReflowOptions(
       targetWidth = 900,
@@ -155,6 +204,38 @@ class PdfPageReflowServiceTest {
     graphics.color = Color.BLACK
     graphics.fillRect(95, 60, 10, 26)
     graphics.fillRect(120, 73, 25, 3)
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun horizontalParagraphPage(secondLineIndent: Int): ByteArray {
+    val image = BufferedImage(180, 150, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color.BLACK
+    listOf(30, 56, 82).forEach { x ->
+      graphics.fillRect(x, 30, 12, 18)
+      graphics.fillRect(x + secondLineIndent, 86, 12, 18)
+    }
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun verticalParagraphPage(): ByteArray {
+    val image = BufferedImage(140, 150, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color.BLACK
+    listOf(20, 42).forEach { y -> graphics.fillRect(90, y, 10, 12) }
+    listOf(20, 42, 64, 86, 108).forEach { y -> graphics.fillRect(50, y, 10, 12) }
     graphics.dispose()
 
     val output = ByteArrayOutputStream()
