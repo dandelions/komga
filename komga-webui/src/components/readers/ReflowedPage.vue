@@ -131,6 +131,12 @@
           <span>背景跟随底色</span>
           <input type="checkbox" :checked="matchBackground" @change="setMatchBackground"/>
         </label>
+        <label class="reflow-column-control">
+          <span>字块质量</span>
+          <select :value="controlImageQuality" @change="setImageQuality">
+            <option v-for="quality in imageQualityOptions" :key="quality" :value="quality">{{ quality }}%</option>
+          </select>
+        </label>
         <label class="reflow-stroke-control">
           <span>字体宽度</span>
           <button type="button" class="reflow-step-control" @click="adjustStrokeStrength(-0.1)">-</button>
@@ -360,6 +366,7 @@ type ReflowOptions = {
   strokeStrength: number,
   contrastEnhancement: boolean,
   matchBackground: boolean,
+  imageQuality: number,
   blockSpacing: number,
   verticalText: boolean,
   verticalDirection: VerticalDirection,
@@ -496,6 +503,7 @@ type ReflowOptionsSnapshot = {
   verticalText: boolean,
   verticalDirection: VerticalDirection,
   strokeStrength: number,
+  imageQuality: number,
   blockSpacing: number,
   cropRoisKey: string,
 }
@@ -508,6 +516,8 @@ const WORD_SCALE = 0.4
 const MIN_CROP_SIZE = 15
 const MIN_INDENT = 8
 const REFLOW_CONTROLS_HEIGHT = 48
+const DEFAULT_REFLOW_IMAGE_QUALITY = 80
+const REFLOW_IMAGE_QUALITY_OPTIONS = [90, 80, 70, 60, 50, 40]
 const VIEWPORT_PAGE_BUFFER = 40
 const SPLIT_GUARD_BAND = 5
 const DETECTION_FULL_RES_MAX_PIXELS = 6000000
@@ -618,6 +628,7 @@ export default Vue.extend({
       pendingVerticalText: false,
       pendingVerticalDirection: 'rtl' as VerticalDirection,
       pendingStrokeStrength: 0.1,
+      pendingImageQuality: DEFAULT_REFLOW_IMAGE_QUALITY,
       pendingBlockSpacing: 6,
       optionsSnapshot: undefined as ReflowOptionsSnapshot | undefined,
       forceReflowOnce: false,
@@ -652,6 +663,12 @@ export default Vue.extend({
     strokeStrength(): number {
       return this.clampNumber(this.options.strokeStrength, 0.1, 3, 0.1)
     },
+    imageQuality(): number {
+      return this.normalizedImageQuality(this.options.imageQuality)
+    },
+    imageQualityOptions(): number[] {
+      return REFLOW_IMAGE_QUALITY_OPTIONS
+    },
     contrastEnhancement(): boolean {
       return this.options.contrastEnhancement === true
     },
@@ -679,6 +696,9 @@ export default Vue.extend({
     },
     controlStrokeStrength(): number {
       return this.roundStrokeStrength(this.pendingStrokeStrength)
+    },
+    controlImageQuality(): number {
+      return this.normalizedImageQuality(this.pendingImageQuality)
     },
     controlBlockSpacing(): number {
       return this.clampNumber(this.pendingBlockSpacing, 0, 24, 6)
@@ -873,6 +893,7 @@ export default Vue.extend({
       if (force || !previous || snapshot.verticalText !== previous.verticalText) this.pendingVerticalText = snapshot.verticalText
       if (force || !previous || snapshot.verticalDirection !== previous.verticalDirection) this.pendingVerticalDirection = snapshot.verticalDirection
       if (force || !previous || snapshot.strokeStrength !== previous.strokeStrength) this.pendingStrokeStrength = snapshot.strokeStrength
+      if (force || !previous || snapshot.imageQuality !== previous.imageQuality) this.pendingImageQuality = snapshot.imageQuality
       if (force || !previous || snapshot.blockSpacing !== previous.blockSpacing) this.pendingBlockSpacing = snapshot.blockSpacing
       if (force || !previous || snapshot.cropRoisKey !== previous.cropRoisKey) this.syncCropRoisFromOptions()
       this.optionsSnapshot = snapshot
@@ -885,6 +906,7 @@ export default Vue.extend({
         verticalText: this.options.verticalText === true,
         verticalDirection: this.options.verticalDirection === 'ltr' ? 'ltr' : 'rtl',
         strokeStrength: this.roundStrokeStrength(this.options.strokeStrength),
+        imageQuality: this.normalizedImageQuality(this.options.imageQuality),
         blockSpacing: this.clampNumber(this.options.blockSpacing, 0, 24, 6),
         cropRoisKey: JSON.stringify(this.options.cropRoisByParity || {}),
       }
@@ -1032,6 +1054,7 @@ export default Vue.extend({
       params.set('strokeStrength', String(this.strokeStrength))
       params.set('contrastEnhancement', String(this.contrastEnhancement))
       params.set('matchBackground', String(this.matchBackground))
+      params.set('imageQuality', String(this.imageQuality))
       params.set('blockSpacing', String(this.blockSpacing))
       params.set('verticalText', String(this.verticalText))
       params.set('verticalDirection', this.verticalDirection)
@@ -1371,6 +1394,7 @@ export default Vue.extend({
         strokeStrength: this.options.strokeStrength,
         contrastEnhancement: this.options.contrastEnhancement,
         matchBackground: this.options.matchBackground,
+        imageQuality: this.imageQuality,
         verticalText: this.options.verticalText,
         verticalDirection: this.options.verticalDirection,
         marginTop: this.options.marginTop,
@@ -1382,7 +1406,7 @@ export default Vue.extend({
         deskewDetectionVersion: 9,
         imageExclusionVersion: 3,
         detectionScaleVersion: 3,
-        darkWordRenderVersion: 3,
+        darkWordRenderVersion: 4,
       })
     },
     emitReflowed() {
@@ -1506,6 +1530,9 @@ export default Vue.extend({
     fillWordSliceBackground(context: CanvasRenderingContext2D, width: number, height: number) {
       context.fillStyle = this.wordOutputBackground()
       context.fillRect(0, 0, width, height)
+    },
+    reflowSliceDataUrl(canvas: HTMLCanvasElement): string {
+      return canvas.toDataURL('image/jpeg', this.imageQuality / 100)
     },
     enhanceSourceCanvas(context: CanvasRenderingContext2D, width: number, height: number) {
       if (!this.contrastEnhancement || this.darkDisplay) return
@@ -2520,12 +2547,12 @@ export default Vue.extend({
       isInk: (x: number, y: number) => boolean,
     ): boolean {
       const gap = bottom.y - (top.y + top.h)
-      const maxInternalGap = Math.max(3, Math.min(charHeight * 0.42, this.clampNumber(this.options.wordGap, 1, 30, WORD_GAP) * 3.5))
+      const maxInternalGap = Math.max(3, Math.min(charHeight * 0.5, this.clampNumber(this.options.wordGap, 1, 30, WORD_GAP) * 4))
       if (gap < 0 || gap > maxInternalGap) return false
 
       const union = this.unionWordBlocks(top, bottom)
       const hasSmallFragment = top.h < charHeight * 0.58 || bottom.h < charHeight * 0.58 || top.w < medianWidth * 0.72 || bottom.w < medianWidth * 0.72
-      const singleGlyphHeightLimit = charHeight * (hasSmallFragment ? 1.85 : 1.42)
+      const singleGlyphHeightLimit = charHeight * (hasSmallFragment ? 2.05 : 1.42)
       if (union.h > singleGlyphHeightLimit) return false
 
       const overlap = this.horizontalOverlap(top, bottom)
@@ -2533,10 +2560,10 @@ export default Vue.extend({
       const topCenter = top.x + top.w / 2
       const bottomCenter = bottom.x + bottom.w / 2
       const centerGap = Math.abs(topCenter - bottomCenter)
-      const aligned = overlap >= minWidth * 0.2 || centerGap <= medianWidth * 0.6 || hasSmallFragment
+      const aligned = overlap >= minWidth * 0.2 || centerGap <= medianWidth * 0.68 || hasSmallFragment
       if (!aligned) return false
 
-      const strictGapLimit = Math.max(3, Math.min(charHeight * 0.24, this.clampNumber(this.options.wordGap, 1, 30, WORD_GAP) * 2.2))
+      const strictGapLimit = Math.max(3, Math.min(charHeight * 0.28, this.clampNumber(this.options.wordGap, 1, 30, WORD_GAP) * 2.6))
       if (gap <= strictGapLimit) return true
       return this.verticalFragmentSidesHaveInk(top, bottom, charHeight, isInk)
     },
@@ -2945,7 +2972,7 @@ export default Vue.extend({
       isInk?: (x: number, y: number) => boolean,
     ): boolean {
       const gap = right.x - (left.x + left.w)
-      const maxInternalGap = Math.max(3, Math.min(glyphHeight * 0.42, this.clampNumber(this.options.wordGap, 1, 30, WORD_GAP) * 3.5))
+      const maxInternalGap = Math.max(3, Math.min(glyphHeight * 0.5, this.clampNumber(this.options.wordGap, 1, 30, WORD_GAP) * 4))
       if (gap < 0 || gap > maxInternalGap) return false
 
       const union = this.unionWordBlocks(left, right)
@@ -2956,15 +2983,20 @@ export default Vue.extend({
       const rightCenter = right.y + right.h / 2
       const centerGap = Math.abs(leftCenter - rightCenter)
       const hasSmallFragment = left.h < glyphHeight * 0.58 || right.h < glyphHeight * 0.58 || left.w < glyphHeight * 0.42 || right.w < glyphHeight * 0.42
-      const singleGlyphWidthLimit = glyphHeight * (hasSmallFragment ? 1.85 : 1.42)
+      const hasNarrowVerticalStroke = this.isNarrowHorizontalVerticalStroke(left, glyphHeight) || this.isNarrowHorizontalVerticalStroke(right, glyphHeight)
+      const singleGlyphWidthLimit = glyphHeight * (hasSmallFragment || hasNarrowVerticalStroke ? 2.25 : 1.42)
       if (union.w > singleGlyphWidthLimit) return false
 
-      const aligned = overlap >= minHeight * 0.2 || centerGap <= glyphHeight * 0.52 || hasSmallFragment
+      const aligned = overlap >= minHeight * 0.2 || centerGap <= glyphHeight * 0.56 || hasSmallFragment || hasNarrowVerticalStroke
       if (!aligned) return false
 
       const strictGapLimit = Math.max(3, Math.min(glyphHeight * 0.24, this.clampNumber(this.options.wordGap, 1, 30, WORD_GAP) * 2.2))
-      if (!isInk || gap <= strictGapLimit) return true
+      const narrowStrokeGapLimit = Math.max(strictGapLimit, Math.min(glyphHeight * 0.55, this.clampNumber(this.options.wordGap, 1, 30, WORD_GAP) * 4))
+      if (!isInk || gap <= strictGapLimit || (hasNarrowVerticalStroke && gap <= narrowStrokeGapLimit)) return true
       return this.horizontalFragmentSidesHaveInk(left, right, lineBounds, glyphHeight, isInk)
+    },
+    isNarrowHorizontalVerticalStroke(block: WordBlock, glyphHeight: number): boolean {
+      return block.w <= Math.max(4, glyphHeight * 0.18) && block.h >= glyphHeight * 0.42
     },
     horizontalFragmentSidesHaveInk(
       left: WordBlock,
@@ -3217,7 +3249,7 @@ export default Vue.extend({
           rendered.push({
             ...renderBlock,
             type: 'word',
-            src: sliceCanvas.toDataURL('image/png'),
+            src: this.reflowSliceDataUrl(sliceCanvas),
             height: renderBlock.h * this.textScale(),
           })
         })
@@ -3293,7 +3325,7 @@ export default Vue.extend({
       return {
         ...source,
         type: 'image',
-        src: sliceCanvas.toDataURL('image/png'),
+        src: this.reflowSliceDataUrl(sliceCanvas),
         sourceWidth: source.w,
         sourceHeight: source.h,
         ...this.scaledImageDimensions(source.w, source.h),
@@ -3388,7 +3420,7 @@ export default Vue.extend({
             w: renderBlock.outputWidth,
             h: renderBlock.outputHeight,
             type: 'word',
-            src: sliceCanvas.toDataURL('image/png'),
+            src: this.reflowSliceDataUrl(sliceCanvas),
             height: renderBlock.outputHeight * this.textScale(),
           })
         })
@@ -3667,6 +3699,10 @@ export default Vue.extend({
     adjustStrokeStrength(delta: number) {
       this.pendingStrokeStrength = this.roundStrokeStrength(this.controlStrokeStrength + delta)
     },
+    setImageQuality(event: Event) {
+      const target = event.target as HTMLSelectElement
+      this.pendingImageQuality = this.normalizedImageQuality(Number(target.value))
+    },
     setContrastEnhancement(event: Event) {
       const target = event.target as HTMLInputElement
       this.$emit('contrast-enhancement-change', target.checked)
@@ -3688,6 +3724,7 @@ export default Vue.extend({
       this.$emit('vertical-text-change', this.controlVerticalText)
       this.$emit('vertical-direction-change', this.controlVerticalDirection)
       this.$emit('stroke-strength-change', this.controlStrokeStrength)
+      this.$emit('image-quality-change', this.controlImageQuality)
       this.$emit('block-spacing-change', this.controlBlockSpacing)
       this.$emit('crop-rois-change', this.cropRoisPayload())
       if (this.deferReflow) {
@@ -3710,6 +3747,10 @@ export default Vue.extend({
     },
     roundStrokeStrength(value: number): number {
       return Math.round(this.clampNumber(value, 0.1, 3, 0.1) * 10) / 10
+    },
+    normalizedImageQuality(value: number): number {
+      const quality = Math.round(this.clampNumber(Number(value), 40, 90, DEFAULT_REFLOW_IMAGE_QUALITY) / 10) * 10
+      return REFLOW_IMAGE_QUALITY_OPTIONS.includes(quality) ? quality : DEFAULT_REFLOW_IMAGE_QUALITY
     },
     exitReflow() {
       this.controlsCollapsed = true

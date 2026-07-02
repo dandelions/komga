@@ -14,6 +14,13 @@ class BookControllerReflowTest {
   }
 
   @Test
+  fun `given image quality when normalizing reflow quality then supported tenth is returned`() {
+    assertThat(normalizePdfReflowImageQuality(93)).isEqualTo(90)
+    assertThat(normalizePdfReflowImageQuality(76)).isEqualTo(80)
+    assertThat(normalizePdfReflowImageQuality(35)).isEqualTo(40)
+  }
+
+  @Test
   fun `given comma separated crop region when parsing reflow regions then region is preserved`() {
     val regions = parsePdfReflowRegionParameters(listOf("10,20,30,40"))
 

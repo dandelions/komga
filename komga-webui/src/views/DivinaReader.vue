@@ -278,6 +278,7 @@
           @vertical-text-change="setReflowVerticalText"
           @vertical-direction-change="setReflowVerticalDirection"
           @stroke-strength-change="setReflowStrokeStrength"
+          @image-quality-change="setReflowImageQuality"
           @contrast-enhancement-change="setReflowContrastEnhancement"
           @match-background-change="setReflowMatchBackground"
           @block-spacing-change="setReflowBlockSpacing"
@@ -655,6 +656,13 @@
                   <settings-switch v-model="reflowSettings.matchBackground" label="背景跟随底色"/>
                 </v-list-item>
                 <v-list-item>
+                  <settings-select
+                    :items="reflowImageQualities"
+                    v-model="reflowSettings.imageQuality"
+                    label="字块质量"
+                  />
+                </v-list-item>
+                <v-list-item>
                   <settings-switch v-model="reflowSettings.verticalText" label="Vertical text"/>
                 </v-list-item>
                 <v-list-item v-if="reflowSettings.verticalText">
@@ -917,6 +925,7 @@ function defaultReflowSettings(): any {
     strokeStrength: 0.1,
     contrastEnhancement: false,
     matchBackground: false,
+    imageQuality: 80,
     blockSpacing: 6,
     verticalText: false,
     verticalDirection: 'rtl',
@@ -1078,6 +1087,10 @@ export default Vue.extend({
         {text: '本地重排', value: 'local'},
         {text: '服务端重排', value: 'server'},
       ],
+      reflowImageQualities: [90, 80, 70, 60, 50, 40].map(value => ({
+        text: `${value}%`,
+        value,
+      })),
       paddingPercentages: Object.values(PaddingPercentage).map(x => ({
         text: x === 0 ? this.$i18n.t('bookreader.settings.side_padding_none').toString() : `${x}%`,
         value: x,
@@ -1328,6 +1341,7 @@ export default Vue.extend({
         strokeStrength: this.reflowSettings.strokeStrength,
         contrastEnhancement: this.reflowSettings.contrastEnhancement,
         matchBackground: this.reflowSettings.matchBackground,
+        imageQuality: this.reflowSettings.imageQuality,
         verticalText: this.reflowSettings.verticalText,
         verticalDirection: this.reflowSettings.verticalDirection,
         marginTop: this.reflowSettings.marginTop,
@@ -2338,6 +2352,7 @@ export default Vue.extend({
         strokeStrength: Math.round(this.clampReflowNumber(settings.strokeStrength, 0.1, 3, this.reflowSettings.strokeStrength) * 10) / 10,
         contrastEnhancement: settings.contrastEnhancement === true,
         matchBackground: settings.matchBackground === true,
+        imageQuality: this.normalizedReflowImageQuality(settings.imageQuality),
         blockSpacing: Math.round(this.clampReflowNumber(settings.blockSpacing, 0, 24, this.reflowSettings.blockSpacing)),
         verticalText: typeof settings.verticalText === 'boolean' ? settings.verticalText : this.reflowSettings.verticalText,
         verticalDirection: settings.verticalDirection === 'ltr' ? 'ltr' : 'rtl',
@@ -2414,6 +2429,10 @@ export default Vue.extend({
       const numberValue = Number(value)
       if (!Number.isFinite(numberValue)) return 0
       return Math.round(this.clampReflowNumber(numberValue, -10, 10, 0) * 2) / 2
+    },
+    normalizedReflowImageQuality(value: any): number {
+      const quality = Math.round(this.clampReflowNumber(value, 40, 90, 80) / 10) * 10
+      return [90, 80, 70, 60, 50, 40].includes(quality) ? quality : 80
     },
     reflowCropRoisOverlap(a: any, b: any): boolean {
       return a.x < b.x + b.w &&
@@ -2601,6 +2620,9 @@ export default Vue.extend({
     },
     setReflowStrokeStrength(strokeStrength: number) {
       this.reflowSettings.strokeStrength = Math.round(Math.max(0.1, Math.min(3, strokeStrength)) * 10) / 10
+    },
+    setReflowImageQuality(imageQuality: number) {
+      this.reflowSettings.imageQuality = this.normalizedReflowImageQuality(imageQuality)
     },
     setReflowContrastEnhancement(contrastEnhancement: boolean) {
       this.reflowSettings.contrastEnhancement = contrastEnhancement === true

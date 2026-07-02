@@ -109,6 +109,23 @@ class PdfPageReflowServiceTest {
   }
 
   @Test
+  fun `given image quality when reflowing page then word block uses jpeg encoding`() {
+    val pageBytes = horizontalShortGlyphPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(imageQuality = 60),
+        cropRegions = listOf(PdfPageReflowRegion(x = 40, y = 30, w = 120, h = 70)),
+      )
+
+    assertThat(response.items.first { it.type == "word" }.src).startsWith("data:image/jpeg;base64,")
+  }
+
+  @Test
   fun `given horizontal lines without indent when reflowing page then lines stay in same paragraph`() {
     val pageBytes = horizontalParagraphPage(secondLineIndent = 0)
     val book = makeBook("book")

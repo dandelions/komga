@@ -536,6 +536,8 @@ class BookController(
     contrastEnhancement: Boolean,
     @RequestParam(value = "matchBackground", defaultValue = "false")
     matchBackground: Boolean,
+    @RequestParam(value = "imageQuality", defaultValue = "80")
+    imageQuality: Int,
     @RequestParam(value = "blockSpacing", defaultValue = "6")
     blockSpacing: Int,
     @RequestParam(value = "verticalText", defaultValue = "false")
@@ -578,6 +580,7 @@ class BookController(
               strokeStrength = strokeStrength,
               contrastEnhancement = contrastEnhancement,
               matchBackground = matchBackground,
+              imageQuality = normalizePdfReflowImageQuality(imageQuality),
               blockSpacing = blockSpacing,
               verticalText = verticalText,
               verticalDirection = if (verticalDirection == "ltr") "ltr" else "rtl",
@@ -659,6 +662,8 @@ class BookController(
     contrastEnhancement: Boolean,
     @RequestParam(value = "matchBackground", defaultValue = "false")
     matchBackground: Boolean,
+    @RequestParam(value = "imageQuality", defaultValue = "80")
+    imageQuality: Int,
     @RequestParam(value = "blockSpacing", defaultValue = "6")
     blockSpacing: Int,
     @RequestParam(value = "verticalText", defaultValue = "false")
@@ -700,6 +705,7 @@ class BookController(
                 strokeStrength = strokeStrength,
                 contrastEnhancement = contrastEnhancement,
                 matchBackground = matchBackground,
+                imageQuality = normalizePdfReflowImageQuality(imageQuality),
                 blockSpacing = blockSpacing,
                 verticalText = verticalText,
                 verticalDirection = if (verticalDirection == "ltr") "ltr" else "rtl",
@@ -1046,5 +1052,7 @@ internal fun normalizePdfReflowRotation(rotation: Int): Int {
     else -> 0
   }
 }
+
+internal fun normalizePdfReflowImageQuality(imageQuality: Int): Int = (imageQuality.coerceIn(40, 90) / 10.0).roundToInt() * 10
 
 private fun Int.floorMod(modulus: Int): Int = ((this % modulus) + modulus) % modulus

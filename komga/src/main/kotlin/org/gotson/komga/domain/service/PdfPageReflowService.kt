@@ -29,7 +29,6 @@ private const val REFLOW_INLINE_TARGET_MAX_BYTES = 220 * 1024
 private const val REFLOW_INLINE_MAX_PIXELS = 1_400_000
 private const val REFLOW_INLINE_MAX_SIDE = 1800
 private const val REFLOW_INLINE_MIN_SCALE = 0.35
-private val REFLOW_INLINE_JPEG_QUALITIES = listOf(0.86f, 0.72f, 0.58f, 0.44f)
 
 data class PdfPageReflowOptions(
   val targetWidth: Int,
@@ -43,6 +42,7 @@ data class PdfPageReflowOptions(
   val strokeStrength: Double,
   val contrastEnhancement: Boolean,
   val matchBackground: Boolean,
+  val imageQuality: Int = 80,
   val blockSpacing: Int,
   val verticalText: Boolean,
   val verticalDirection: String,
@@ -774,7 +774,7 @@ class PdfPageReflowService(
   ): Boolean {
     val gap = right.x - (left.x + left.w)
     val wordGap = clamp(options.wordGap, 1, 30)
-    val maxInternalGap = max(3.0, min(glyphHeight * 0.42, wordGap * 3.5))
+    val maxInternalGap = max(3.0, min(glyphHeight * 0.5, wordGap * 4.0))
     if (gap < 0 || gap > maxInternalGap) return false
 
     val union = unionRoi(left, right)
@@ -789,14 +789,14 @@ class PdfPageReflowService(
         left.w < glyphHeight * 0.42 ||
         right.w < glyphHeight * 0.42
     val hasNarrowVerticalStroke = isNarrowHorizontalVerticalStroke(left, glyphHeight) || isNarrowHorizontalVerticalStroke(right, glyphHeight)
-    val singleGlyphWidthLimit = glyphHeight * if (hasSmallFragment || hasNarrowVerticalStroke) 2.15 else 1.42
+    val singleGlyphWidthLimit = glyphHeight * if (hasSmallFragment || hasNarrowVerticalStroke) 2.25 else 1.42
     if (union.w > singleGlyphWidthLimit) return false
 
-    val aligned = overlap >= minHeight * 0.2 || centerGap <= glyphHeight * 0.52 || hasSmallFragment || hasNarrowVerticalStroke
+    val aligned = overlap >= minHeight * 0.2 || centerGap <= glyphHeight * 0.56 || hasSmallFragment || hasNarrowVerticalStroke
     if (!aligned) return false
 
     val strictGapLimit = max(3.0, min(glyphHeight * 0.24, wordGap * 2.2))
-    val narrowStrokeGapLimit = max(strictGapLimit, min(glyphHeight * 0.5, wordGap * 3.8))
+    val narrowStrokeGapLimit = max(strictGapLimit, min(glyphHeight * 0.55, wordGap * 4.0))
     if (gap <= strictGapLimit || (hasNarrowVerticalStroke && gap <= narrowStrokeGapLimit)) return true
     return horizontalFragmentSidesHaveInk(left, right, line, glyphHeight, image, ink)
   }
@@ -1147,12 +1147,12 @@ class PdfPageReflowService(
     options: PdfPageReflowOptions,
   ): Boolean {
     val gap = bottom.y - (top.y + top.h)
-    val maxInternalGap = max(3.0, min(charHeight * 0.42, clamp(options.wordGap, 1, 30) * 3.5))
+    val maxInternalGap = max(3.0, min(charHeight * 0.5, clamp(options.wordGap, 1, 30) * 4.0))
     if (gap < 0 || gap > maxInternalGap) return false
 
     val union = unionRoi(top, bottom)
     val hasSmallFragment = top.h < charHeight * 0.58 || bottom.h < charHeight * 0.58 || top.w < medianWidth * 0.72 || bottom.w < medianWidth * 0.72
-    val singleGlyphHeightLimit = charHeight * if (hasSmallFragment) 1.85 else 1.42
+    val singleGlyphHeightLimit = charHeight * if (hasSmallFragment) 2.05 else 1.42
     if (union.h > singleGlyphHeightLimit) return false
 
     val overlap = horizontalOverlap(top, bottom)
@@ -1160,10 +1160,10 @@ class PdfPageReflowService(
     val topCenter = top.x + top.w / 2.0
     val bottomCenter = bottom.x + bottom.w / 2.0
     val centerGap = abs(topCenter - bottomCenter)
-    val aligned = overlap >= minWidth * 0.2 || centerGap <= medianWidth * 0.6 || hasSmallFragment
+    val aligned = overlap >= minWidth * 0.2 || centerGap <= medianWidth * 0.68 || hasSmallFragment
     if (!aligned) return false
 
-    val strictGapLimit = max(3.0, min(charHeight * 0.24, clamp(options.wordGap, 1, 30) * 2.2))
+    val strictGapLimit = max(3.0, min(charHeight * 0.28, clamp(options.wordGap, 1, 30) * 2.6))
     if (gap <= strictGapLimit) return true
     return verticalFragmentSidesHaveInk(top, bottom, charHeight, image, ink)
   }
@@ -1646,7 +1646,7 @@ class PdfPageReflowService(
     allowResize: Boolean,
   ): String {
     val background = if (options.darkDisplay) Color.BLACK else Color.WHITE
-    val encoded = bestReflowEncoding(image, background, allowResize)
+    val encoded = bestReflowEncoding(image, background, allowResize, normalizedImageQuality(options))
     return "data:${encoded.mimeType};base64,${Base64.getEncoder().encodeToString(encoded.bytes)}"
   }
 
@@ -1654,12 +1654,17 @@ class PdfPageReflowService(
     image: BufferedImage,
     background: Color,
     allowResize: Boolean,
+    quality: Float,
   ): EncodedReflowImage {
+    if (!allowResize) {
+      encodeJpegBytes(image, quality, background)?.let { return EncodedReflowImage("image/jpeg", it) }
+    }
+
     var best = EncodedReflowImage("image/png", encodePngBytes(image))
     if (best.bytes.size <= REFLOW_INLINE_DIRECT_PNG_MAX_BYTES) return best
 
-    REFLOW_INLINE_JPEG_QUALITIES.forEach { quality ->
-      encodeJpegBytes(image, quality, background)?.let { bytes ->
+    reflowJpegQualities(quality).forEach { candidateQuality ->
+      encodeJpegBytes(image, candidateQuality, background)?.let { bytes ->
         if (bytes.size < best.bytes.size) best = EncodedReflowImage("image/jpeg", bytes)
       }
     }
@@ -1671,14 +1676,25 @@ class PdfPageReflowService(
 
     val scaled = scaledReflowImage(image, scale, background)
     var scaledBest = EncodedReflowImage("image/png", encodePngBytes(scaled))
-    REFLOW_INLINE_JPEG_QUALITIES.forEach { quality ->
-      encodeJpegBytes(scaled, quality, background)?.let { bytes ->
+    reflowJpegQualities(quality).forEach { candidateQuality ->
+      encodeJpegBytes(scaled, candidateQuality, background)?.let { bytes ->
         if (bytes.size < scaledBest.bytes.size) scaledBest = EncodedReflowImage("image/jpeg", bytes)
       }
     }
 
     return if (scaledBest.bytes.size < best.bytes.size) scaledBest else best
   }
+
+  private fun normalizedImageQuality(options: PdfPageReflowOptions): Float = (clamp(options.imageQuality, 40, 90) / 100.0).toFloat()
+
+  private fun reflowJpegQualities(maxQuality: Float): List<Float> =
+    listOf(
+      maxQuality,
+      min(maxQuality, 0.72f),
+      min(maxQuality, 0.58f),
+      min(maxQuality, 0.44f),
+      min(maxQuality, 0.40f),
+    ).distinct()
 
   private fun encodePngBytes(image: BufferedImage): ByteArray =
     ByteArrayOutputStream().use { out ->
