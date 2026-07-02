@@ -11,7 +11,9 @@ import java.awt.image.BufferedImage
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.util.Base64
+import javax.imageio.IIOImage
 import javax.imageio.ImageIO
+import javax.imageio.ImageWriteParam
 import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.floor
@@ -22,6 +24,12 @@ import kotlin.system.measureTimeMillis
 
 private const val SERVER_REFLOW_MAX_PIXELS = 8_000_000
 private const val SERVER_REFLOW_MAX_SIDE = 3600
+private const val REFLOW_INLINE_DIRECT_PNG_MAX_BYTES = 64 * 1024
+private const val REFLOW_INLINE_TARGET_MAX_BYTES = 220 * 1024
+private const val REFLOW_INLINE_MAX_PIXELS = 1_400_000
+private const val REFLOW_INLINE_MAX_SIDE = 1800
+private const val REFLOW_INLINE_MIN_SCALE = 0.35
+private val REFLOW_INLINE_JPEG_QUALITIES = listOf(0.86f, 0.72f, 0.58f, 0.44f)
 
 data class PdfPageReflowOptions(
   val targetWidth: Int,
@@ -93,6 +101,11 @@ private data class LineBand(
 private data class ImageReflowResult(
   val pageBackground: String,
   val items: List<PdfPageReflowItemDto>,
+)
+
+private data class EncodedReflowImage(
+  val mimeType: String,
+  val bytes: ByteArray,
 )
 
 @Service
@@ -1044,7 +1057,7 @@ class PdfPageReflowService(
 
     return PdfPageReflowItemDto(
       type = "word",
-      src = encodePngDataUrl(slice),
+      src = encodeReflowDataUrl(slice, options, allowResize = false),
       x = block.x,
       y = block.y,
       w = outputWidth,
@@ -1062,7 +1075,7 @@ class PdfPageReflowService(
     val slice = copySlice(image, block, options)
     return PdfPageReflowItemDto(
       type = "word",
-      src = encodePngDataUrl(slice),
+      src = encodeReflowDataUrl(slice, options, allowResize = false),
       x = block.x,
       y = block.y,
       w = block.w,
@@ -1082,7 +1095,7 @@ class PdfPageReflowService(
     val scale = min(textScale, maxWidth / roi.w)
     return PdfPageReflowItemDto(
       type = "image",
-      src = encodePngDataUrl(slice),
+      src = encodeReflowDataUrl(slice, options, allowResize = true),
       x = roi.x,
       y = roi.y,
       w = roi.w,
@@ -1175,13 +1188,121 @@ class PdfPageReflowService(
     return output
   }
 
-  private fun encodePngDataUrl(image: BufferedImage): String {
-    val bytes =
+  private fun encodeReflowDataUrl(
+    image: BufferedImage,
+    options: PdfPageReflowOptions,
+    allowResize: Boolean,
+  ): String {
+    val background = if (options.darkDisplay) Color.BLACK else Color.WHITE
+    val encoded = bestReflowEncoding(image, background, allowResize)
+    return "data:${encoded.mimeType};base64,${Base64.getEncoder().encodeToString(encoded.bytes)}"
+  }
+
+  private fun bestReflowEncoding(
+    image: BufferedImage,
+    background: Color,
+    allowResize: Boolean,
+  ): EncodedReflowImage {
+    var best = EncodedReflowImage("image/png", encodePngBytes(image))
+    if (best.bytes.size <= REFLOW_INLINE_DIRECT_PNG_MAX_BYTES) return best
+
+    REFLOW_INLINE_JPEG_QUALITIES.forEach { quality ->
+      encodeJpegBytes(image, quality, background)?.let { bytes ->
+        if (bytes.size < best.bytes.size) best = EncodedReflowImage("image/jpeg", bytes)
+      }
+    }
+
+    if (!allowResize || best.bytes.size <= REFLOW_INLINE_TARGET_MAX_BYTES) return best
+
+    val scale = reflowReturnScale(image, best.bytes.size)
+    if (scale >= 0.99) return best
+
+    val scaled = scaledReflowImage(image, scale, background)
+    var scaledBest = EncodedReflowImage("image/png", encodePngBytes(scaled))
+    REFLOW_INLINE_JPEG_QUALITIES.forEach { quality ->
+      encodeJpegBytes(scaled, quality, background)?.let { bytes ->
+        if (bytes.size < scaledBest.bytes.size) scaledBest = EncodedReflowImage("image/jpeg", bytes)
+      }
+    }
+
+    return if (scaledBest.bytes.size < best.bytes.size) scaledBest else best
+  }
+
+  private fun encodePngBytes(image: BufferedImage): ByteArray =
+    ByteArrayOutputStream().use { out ->
+      ImageIO.write(image, "PNG", out)
+      out.toByteArray()
+    }
+
+  private fun encodeJpegBytes(
+    image: BufferedImage,
+    quality: Float,
+    background: Color,
+  ): ByteArray? {
+    val writers = ImageIO.getImageWritersByFormatName("jpeg")
+    if (!writers.hasNext()) return null
+
+    val writer = writers.next()
+    return try {
       ByteArrayOutputStream().use { out ->
-        ImageIO.write(image, "PNG", out)
+        val imageOutput = ImageIO.createImageOutputStream(out) ?: return null
+        imageOutput.use {
+          writer.output = it
+          val writeParam = writer.defaultWriteParam
+          if (writeParam.canWriteCompressed()) {
+            writeParam.compressionMode = ImageWriteParam.MODE_EXPLICIT
+            writeParam.compressionQuality = quality
+          }
+          writer.write(null, IIOImage(jpegCompatibleImage(image, background), null, null), writeParam)
+        }
         out.toByteArray()
       }
-    return "data:image/png;base64,${Base64.getEncoder().encodeToString(bytes)}"
+    } finally {
+      writer.dispose()
+    }
+  }
+
+  private fun jpegCompatibleImage(
+    image: BufferedImage,
+    background: Color,
+  ): BufferedImage {
+    if (image.type == BufferedImage.TYPE_INT_RGB) return image
+    val output = BufferedImage(image.width, image.height, BufferedImage.TYPE_INT_RGB)
+    val graphics = output.createGraphics()
+    graphics.color = background
+    graphics.fillRect(0, 0, output.width, output.height)
+    graphics.drawImage(image, 0, 0, null)
+    graphics.dispose()
+    return output
+  }
+
+  private fun reflowReturnScale(
+    image: BufferedImage,
+    currentBytes: Int,
+  ): Double {
+    val pixels = max(1L, image.width.toLong() * image.height.toLong())
+    val maxSideScale = REFLOW_INLINE_MAX_SIDE.toDouble() / max(image.width, image.height)
+    val pixelScale = kotlin.math.sqrt(REFLOW_INLINE_MAX_PIXELS.toDouble() / pixels)
+    val byteScale = kotlin.math.sqrt(REFLOW_INLINE_TARGET_MAX_BYTES.toDouble() / max(1, currentBytes))
+    return max(REFLOW_INLINE_MIN_SCALE, min(1.0, min(maxSideScale, min(pixelScale, byteScale))))
+  }
+
+  private fun scaledReflowImage(
+    image: BufferedImage,
+    scale: Double,
+    background: Color,
+  ): BufferedImage {
+    val width = max(1, (image.width * scale).roundToInt())
+    val height = max(1, (image.height * scale).roundToInt())
+    val output = BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB)
+    val graphics = output.createGraphics()
+    graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC)
+    graphics.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY)
+    graphics.color = background
+    graphics.fillRect(0, 0, width, height)
+    graphics.drawImage(image, 0, 0, width, height, null)
+    graphics.dispose()
+    return output
   }
 
   private fun detectPageBackground(image: BufferedImage): String {
