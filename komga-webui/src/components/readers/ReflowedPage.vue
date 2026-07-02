@@ -369,6 +369,11 @@ type WordBlock = {
   h: number,
 }
 
+type InkBlockMetrics = {
+  bounds: WordBlock,
+  inkCount: number,
+}
+
 type ImageRegion = Roi
 
 type RenderedWordBlock = WordBlock & {
@@ -1809,7 +1814,7 @@ export default Vue.extend({
       })
 
       return {
-        lines: wordLines,
+        lines: this.filterHorizontalNoiseLines(wordLines, isInk),
         imageRegions,
       }
     },
@@ -2296,7 +2301,7 @@ export default Vue.extend({
         return this.verticalDirection === 'rtl' ? centerB - centerA : centerA - centerB
       })
 
-      const lines = orderedColumns
+      const rawLines = orderedColumns
         .map(column => {
           const words = this.mergeVerticalAdornmentBlocks(this.mergeVerticalGlyphFragments(this.detectVerticalBlocks(isInk, column, roi), isInk))
           return {
@@ -2306,6 +2311,7 @@ export default Vue.extend({
           }
         })
         .filter(line => line.words.length > 0)
+      const lines = this.filterVerticalNoiseLines(rawLines, isInk)
 
       const textBounds = this.verticalTextBounds(lines)
       if (!textBounds) return lines
@@ -2514,6 +2520,11 @@ export default Vue.extend({
     horizontalBlockGap(a: WordBlock, b: WordBlock): number {
       if (a.x + a.w < b.x) return b.x - (a.x + a.w)
       if (b.x + b.w < a.x) return a.x - (b.x + b.w)
+      return 0
+    },
+    verticalBlockGap(a: WordBlock, b: WordBlock): number {
+      if (a.y + a.h < b.y) return b.y - (a.y + a.h)
+      if (b.y + b.h < a.y) return a.y - (b.y + b.h)
       return 0
     },
     horizontalOverlap(a: WordBlock, b: WordBlock): number {
@@ -2916,6 +2927,113 @@ export default Vue.extend({
         }
       }
       return count
+    },
+    filterHorizontalNoiseLines(lines: WordLine[], isInk: (x: number, y: number) => boolean): WordLine[] {
+      const glyphSize = this.horizontalGlyphSourceHeight(lines)
+      return lines
+        .map(line => ({
+          ...line,
+          words: this.filterNoiseBlocks(line.words, glyphSize, isInk, true),
+        }))
+        .filter(line => line.words.length > 0)
+    },
+    filterVerticalNoiseLines(lines: WordLine[], isInk: (x: number, y: number) => boolean): WordLine[] {
+      const blocks = lines.flatMap(line => line.words)
+      const glyphSize = blocks.length > 0
+        ? this.verticalCharacterSourceHeight({column: {start: 0, end: 0}, line: {start: 0, end: 0}, words: blocks})
+        : 8
+      return lines
+        .map(line => ({
+          ...line,
+          words: this.filterNoiseBlocks(line.words, glyphSize, isInk, false),
+        }))
+        .filter(line => line.words.length > 0)
+    },
+    filterNoiseBlocks(blocks: WordBlock[], glyphSize: number, isInk: (x: number, y: number) => boolean, horizontal: boolean): WordBlock[] {
+      const normalizedGlyphSize = Math.max(8, glyphSize)
+      const metricsByIndex = blocks.map(block => this.inkBlockMetrics(block, isInk))
+      return blocks.filter((block, index) =>
+        !this.isIsolatedNoiseBlock(index, blocks, metricsByIndex, normalizedGlyphSize, horizontal),
+      )
+    },
+    isIsolatedNoiseBlock(
+      index: number,
+      blocks: WordBlock[],
+      metricsByIndex: Array<InkBlockMetrics | undefined>,
+      glyphSize: number,
+      horizontal: boolean,
+    ): boolean {
+      const metrics = metricsByIndex[index]
+      if (!metrics) return true
+      if (!this.isTinySparseNoise(metrics, glyphSize)) return false
+      return !this.hasNearbyReflowBlock(metrics, index, blocks, metricsByIndex, glyphSize, horizontal)
+    },
+    inkBlockMetrics(block: WordBlock, isInk: (x: number, y: number) => boolean): InkBlockMetrics | undefined {
+      let minX = block.x + block.w
+      let minY = block.y + block.h
+      let maxX = block.x - 1
+      let maxY = block.y - 1
+      let inkCount = 0
+
+      for (let y = block.y; y < block.y + block.h; y++) {
+        for (let x = block.x; x < block.x + block.w; x++) {
+          if (!isInk(x, y)) continue
+          minX = Math.min(minX, x)
+          minY = Math.min(minY, y)
+          maxX = Math.max(maxX, x)
+          maxY = Math.max(maxY, y)
+          inkCount++
+        }
+      }
+
+      if (inkCount === 0) return undefined
+      return {
+        bounds: {x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1},
+        inkCount,
+      }
+    },
+    isTinySparseNoise(metrics: InkBlockMetrics, glyphSize: number): boolean {
+      const bounds = metrics.bounds
+      const smallSide = Math.max(5, glyphSize * 0.3)
+      const sparseInk = Math.max(8, Math.round(glyphSize * 0.45))
+      const veryTiny = bounds.w <= 3 && bounds.h <= 3 && metrics.inkCount <= 5
+      const tinySparse = bounds.w <= smallSide && bounds.h <= smallSide && metrics.inkCount <= sparseInk
+      const hairlineSpeck = Math.min(bounds.w, bounds.h) <= 2 &&
+        Math.max(bounds.w, bounds.h) <= Math.max(6, glyphSize * 0.45) &&
+        metrics.inkCount <= sparseInk
+      return veryTiny || tinySparse || hairlineSpeck
+    },
+    hasNearbyReflowBlock(
+      metrics: InkBlockMetrics,
+      index: number,
+      blocks: WordBlock[],
+      metricsByIndex: Array<InkBlockMetrics | undefined>,
+      glyphSize: number,
+      horizontal: boolean,
+    ): boolean {
+      const maxGap = Math.max(6, glyphSize * 0.95, this.clampNumber(this.options.wordGap, 1, 30, WORD_GAP) * 2.5)
+      const punctuationClusterGap = Math.max(4, glyphSize * 0.35)
+
+      return blocks.some((_, otherIndex) => {
+        if (otherIndex === index) return false
+        const otherMetrics = metricsByIndex[otherIndex]
+        if (!otherMetrics) return false
+        const otherTiny = this.isTinySparseNoise(otherMetrics, glyphSize)
+
+        if (horizontal) {
+          const gap = this.horizontalBlockGap(metrics.bounds, otherMetrics.bounds)
+          const overlap = this.verticalOverlap(metrics.bounds, otherMetrics.bounds)
+          const centerGap = Math.abs((metrics.bounds.y + metrics.bounds.h / 2) - (otherMetrics.bounds.y + otherMetrics.bounds.h / 2))
+          const aligned = overlap > 0 || centerGap <= glyphSize * 0.72
+          return gap <= maxGap && aligned && (!otherTiny || gap <= punctuationClusterGap)
+        }
+
+        const gap = this.verticalBlockGap(metrics.bounds, otherMetrics.bounds)
+        const overlap = this.horizontalOverlap(metrics.bounds, otherMetrics.bounds)
+        const centerGap = Math.abs((metrics.bounds.x + metrics.bounds.w / 2) - (otherMetrics.bounds.x + otherMetrics.bounds.w / 2))
+        const aligned = overlap > 0 || centerGap <= glyphSize * 0.72
+        return gap <= maxGap && aligned && (!otherTiny || gap <= punctuationClusterGap)
+      })
     },
     tightLineBounds(isInk: (x: number, y: number) => boolean, column: Column, line: Line): {top: number, bottom: number} | undefined {
       let minY = line.end

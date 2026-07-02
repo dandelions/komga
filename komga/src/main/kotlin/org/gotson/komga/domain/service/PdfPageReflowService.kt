@@ -103,6 +103,11 @@ private data class ImageReflowResult(
   val items: List<PdfPageReflowItemDto>,
 )
 
+private data class InkMetrics(
+  val bounds: Roi,
+  val inkCount: Int,
+)
+
 private data class EncodedReflowImage(
   val mimeType: String,
   val bytes: ByteArray,
@@ -416,21 +421,30 @@ class PdfPageReflowService(
           count >= 1
         }.filter { it.end - it.start >= 2 }
 
-      lineBands.forEach { line ->
-        val wordBands =
-          detectBands(column.start, column.end) { x ->
-            var count = 0
-            for (y in line.start until line.end) {
-              if (ink[y * image.width + x].toInt() != 0) count++
+      val lineBlocks =
+        lineBands.mapNotNull { line ->
+          val wordBands =
+            detectBands(column.start, column.end) { x ->
+              var count = 0
+              for (y in line.start until line.end) {
+                if (ink[y * image.width + x].toInt() != 0) count++
+              }
+              count >= 1
             }
-            count >= 1
-          }
-        val blocks =
-          mergeCloseBands(wordBands, max(1, options.wordGap))
-            .mapNotNull { wordBand ->
-              horizontalWordBlock(image, ink, wordBand, line)
-            }.filter { it.w >= 2 && it.h >= 2 }
-            .let { mergeHorizontalGlyphFragments(it, line, image, ink, options) }
+          val blocks =
+            mergeCloseBands(wordBands, max(1, options.wordGap))
+              .mapNotNull { wordBand ->
+                horizontalWordBlock(image, ink, wordBand, line)
+              }.filter { it.w >= 2 && it.h >= 2 }
+              .let { mergeHorizontalGlyphFragments(it, line, image, ink, options) }
+
+          if (blocks.isEmpty()) null else line to blocks
+        }
+      val glyphHeight = horizontalCharacterSourceHeight(lineBlocks.flatMap { it.second })
+
+      lineBlocks.forEach { (line, detectedBlocks) ->
+        val blocks = filterNoiseBlocks(detectedBlocks, glyphHeight, image, ink, options, horizontal = true)
+        if (blocks.isEmpty()) return@forEach
 
         if (blocks.isNotEmpty()) {
           horizontalIndentItem(blocks, column, options, textScale)?.let { items += it }
@@ -709,15 +723,20 @@ class PdfPageReflowService(
         .sortedBy { (it.start + it.end) / 2 }
         .let { if (options.verticalDirection == "ltr") it else it.reversed() }
 
-    val items = mutableListOf<PdfPageReflowItemDto>()
-    columns.forEach { column ->
-      val blocks =
-        verticalWordBlocks(image, ink, column, roi, options)
-          .filter { it.w >= 2 && it.h >= 2 && !isRuleLikeBlock(it) }
-
-      if (blocks.isNotEmpty()) {
-        verticalIndentItem(blocks, roi, textScale)?.let { items += it }
+    val columnBlocks =
+      columns.map { column ->
+        column to
+          verticalWordBlocks(image, ink, column, roi, options)
+            .filter { it.w >= 2 && it.h >= 2 && !isRuleLikeBlock(it) }
       }
+    val glyphHeight = verticalCharacterSourceHeight(columnBlocks.flatMap { it.second })
+
+    val items = mutableListOf<PdfPageReflowItemDto>()
+    columnBlocks.forEach { (_, detectedBlocks) ->
+      val blocks = filterNoiseBlocks(detectedBlocks, glyphHeight, image, ink, options, horizontal = false)
+      if (blocks.isEmpty()) return@forEach
+
+      verticalIndentItem(blocks, roi, textScale)?.let { items += it }
 
       blocks
         .map { renderVerticalWordItem(image, it, options, textScale) }
@@ -743,6 +762,123 @@ class PdfPageReflowService(
       sourceWidth = rawIndent,
       width = rawIndent * textScale,
     )
+  }
+
+  private fun filterNoiseBlocks(
+    blocks: List<Roi>,
+    glyphSize: Double,
+    image: BufferedImage,
+    ink: ByteArray,
+    options: PdfPageReflowOptions,
+    horizontal: Boolean,
+  ): List<Roi> {
+    if (blocks.isEmpty()) return blocks
+    val normalizedGlyphSize = max(8.0, glyphSize)
+    val metricsByIndex = blocks.map { inkMetrics(image, ink, it) }
+    return blocks.filterIndexed { index, _ ->
+      !isIsolatedNoiseBlock(index, blocks, metricsByIndex, normalizedGlyphSize, options, horizontal)
+    }
+  }
+
+  private fun isIsolatedNoiseBlock(
+    index: Int,
+    blocks: List<Roi>,
+    metricsByIndex: List<InkMetrics?>,
+    glyphSize: Double,
+    options: PdfPageReflowOptions,
+    horizontal: Boolean,
+  ): Boolean {
+    val metrics = metricsByIndex[index] ?: return true
+    if (!isTinySparseNoise(metrics, glyphSize)) return false
+    return !hasNearbyReflowBlock(metrics, index, blocks, metricsByIndex, glyphSize, options, horizontal)
+  }
+
+  private fun inkMetrics(
+    image: BufferedImage,
+    ink: ByteArray,
+    block: Roi,
+  ): InkMetrics? {
+    val roi = clampRoi(block, image.width, image.height)
+    var minX = roi.x + roi.w
+    var minY = roi.y + roi.h
+    var maxX = roi.x - 1
+    var maxY = roi.y - 1
+    var inkCount = 0
+
+    for (y in roi.y until roi.y + roi.h) {
+      for (x in roi.x until roi.x + roi.w) {
+        if (ink[y * image.width + x].toInt() == 0) continue
+        minX = min(minX, x)
+        minY = min(minY, y)
+        maxX = max(maxX, x)
+        maxY = max(maxY, y)
+        inkCount++
+      }
+    }
+
+    if (inkCount == 0) return null
+    return InkMetrics(
+      bounds = Roi(minX, minY, maxX - minX + 1, maxY - minY + 1),
+      inkCount = inkCount,
+    )
+  }
+
+  private fun isTinySparseNoise(
+    metrics: InkMetrics,
+    glyphSize: Double,
+  ): Boolean {
+    val bounds = metrics.bounds
+    val smallSide = max(5.0, glyphSize * 0.3)
+    val sparseInk = max(8.0, (glyphSize * 0.45).roundToInt().toDouble())
+    val veryTiny = bounds.w <= 3 && bounds.h <= 3 && metrics.inkCount <= 5
+    val tinySparse = bounds.w <= smallSide && bounds.h <= smallSide && metrics.inkCount <= sparseInk
+    val hairlineSpeck =
+      min(bounds.w, bounds.h) <= 2 &&
+        max(bounds.w, bounds.h) <= max(6.0, glyphSize * 0.45) &&
+        metrics.inkCount <= sparseInk
+    return veryTiny || tinySparse || hairlineSpeck
+  }
+
+  private fun hasNearbyReflowBlock(
+    metrics: InkMetrics,
+    index: Int,
+    blocks: List<Roi>,
+    metricsByIndex: List<InkMetrics?>,
+    glyphSize: Double,
+    options: PdfPageReflowOptions,
+    horizontal: Boolean,
+  ): Boolean {
+    val maxGap = max(6.0, max(glyphSize * 0.95, clamp(options.wordGap, 1, 30) * 2.5))
+    val punctuationClusterGap = max(4.0, glyphSize * 0.35)
+
+    return blocks.withIndex().any { (otherIndex, _) ->
+      if (otherIndex == index) return@any false
+      val otherMetrics = metricsByIndex[otherIndex] ?: return@any false
+      val otherTiny = isTinySparseNoise(otherMetrics, glyphSize)
+
+      if (horizontal) {
+        val gap = horizontalBlockGap(metrics.bounds, otherMetrics.bounds).toDouble()
+        val overlap = verticalOverlap(metrics.bounds, otherMetrics.bounds)
+        val centerGap = abs((metrics.bounds.y + metrics.bounds.h / 2.0) - (otherMetrics.bounds.y + otherMetrics.bounds.h / 2.0))
+        val aligned = overlap > 0 || centerGap <= glyphSize * 0.72
+        return@any gap <= maxGap && aligned && (!otherTiny || gap <= punctuationClusterGap)
+      }
+
+      val gap = verticalBlockGap(metrics.bounds, otherMetrics.bounds).toDouble()
+      val overlap = horizontalOverlap(metrics.bounds, otherMetrics.bounds)
+      val centerGap = abs((metrics.bounds.x + metrics.bounds.w / 2.0) - (otherMetrics.bounds.x + otherMetrics.bounds.w / 2.0))
+      val aligned = overlap > 0 || centerGap <= glyphSize * 0.72
+      gap <= maxGap && aligned && (!otherTiny || gap <= punctuationClusterGap)
+    }
+  }
+
+  private fun horizontalCharacterSourceHeight(blocks: List<Roi>): Double {
+    val heights =
+      blocks
+        .filter { it.w >= 2 && it.h >= 2 && !isRuleLikeBlock(it) }
+        .map { it.h.toDouble() }
+    if (heights.isEmpty()) return 8.0
+    return max(8.0, medianNumber(heights))
   }
 
   private fun mergeCloseVerticalColumns(
