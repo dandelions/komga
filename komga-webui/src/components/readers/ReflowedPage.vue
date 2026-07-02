@@ -1,58 +1,82 @@
 <template>
   <div class="reflowed-page" :class="{'reflowed-page-dark': $vuetify.theme.dark || nightDisplay}">
-    <div v-if="!preload" ref="reflowControls" class="reflow-controls" @click.stop>
-      <div class="reflow-top-controls">
-        <button
-          type="button"
-          class="reflow-control reflow-icon-control reflow-toc-control"
-          title="目录"
-          aria-label="目录"
-          @click="$emit('show-pdf-toc')"
-        >
-          <v-icon small>mdi-menu</v-icon>
-        </button>
-        <button
-          type="button"
-          class="reflow-control reflow-icon-control"
-          :title="nightDisplay ? '白天模式' : '黑夜模式'"
-          :aria-label="nightDisplay ? '白天模式' : '黑夜模式'"
-          @click="$emit('toggle-night-display')"
-        >
-          <v-icon small>{{ nightDisplay ? 'mdi-white-balance-sunny' : 'mdi-weather-night' }}</v-icon>
-        </button>
-        <div class="reflow-navigation-controls">
-          <button type="button" class="reflow-control reflow-nav-control" @click="$emit('back-to-book')">
-            <v-icon small>mdi-arrow-left</v-icon>
-            <span>返回</span>
+    <div
+      v-if="!preload"
+      ref="reflowControls"
+      class="reflow-controls"
+      :class="{'reflow-controls-collapsed': controlsCollapsed}"
+      @click.stop
+      @touchstart.stop
+      @touchmove.stop
+      @touchend.stop
+      @touchcancel.stop
+      @pointerdown.stop
+      @pointermove.stop
+      @pointerup.stop
+      @pointercancel.stop
+    >
+      <button
+        v-if="controlsCollapsed"
+        type="button"
+        class="reflow-control reflow-pull-control"
+        title="显示重排设置"
+        aria-label="显示重排设置"
+        @click="controlsCollapsed = false"
+      >
+        <v-icon x-small>mdi-chevron-down</v-icon>
+      </button>
+      <template v-else>
+        <div class="reflow-top-controls">
+          <button
+            type="button"
+            class="reflow-control reflow-icon-control reflow-toc-control"
+            title="目录"
+            aria-label="目录"
+            @click="$emit('show-pdf-toc')"
+          >
+            <v-icon small>mdi-menu</v-icon>
           </button>
-          <button type="button" class="reflow-control reflow-nav-control reflow-exit-control" @click="exitReflow">
-            <v-icon small>mdi-exit-to-app</v-icon>
-            <span>退出重排</span>
+          <button
+            type="button"
+            class="reflow-control reflow-icon-control"
+            :title="nightDisplay ? '白天模式' : '黑夜模式'"
+            :aria-label="nightDisplay ? '白天模式' : '黑夜模式'"
+            @click="$emit('toggle-night-display')"
+          >
+            <v-icon small>{{ nightDisplay ? 'mdi-white-balance-sunny' : 'mdi-weather-night' }}</v-icon>
           </button>
-          <button type="button" class="reflow-control reflow-nav-control reflow-apply-control" @click="applyReflowSettings">
-            <v-icon small>mdi-refresh</v-icon>
-            <span>重排</span>
+          <div class="reflow-navigation-controls">
+            <button type="button" class="reflow-control reflow-nav-control" @click="$emit('back-to-book')">
+              <v-icon small>mdi-arrow-left</v-icon>
+              <span>返回</span>
+            </button>
+            <button type="button" class="reflow-control reflow-nav-control reflow-exit-control" @click="exitReflow">
+              <v-icon small>mdi-exit-to-app</v-icon>
+              <span>退出重排</span>
+            </button>
+            <button type="button" class="reflow-control reflow-nav-control reflow-apply-control" @click="applyReflowSettings">
+              <v-icon small>mdi-refresh</v-icon>
+              <span>重排</span>
+            </button>
+          </div>
+          <label class="reflow-processing-control">
+            <span>位置</span>
+            <select :value="serverReflow ? 'server' : 'local'" @change="setProcessingMode">
+              <option value="local">本地重排</option>
+              <option value="server">服务端重排</option>
+            </select>
+          </label>
+          <span v-if="transferStatsLabel" class="reflow-transfer-stats">{{ transferStatsLabel }}</span>
+          <button
+            type="button"
+            class="reflow-control reflow-icon-control reflow-collapse-control"
+            title="隐藏重排设置"
+            aria-label="隐藏重排设置"
+            @click="controlsCollapsed = true"
+          >
+            <v-icon small>mdi-chevron-double-up</v-icon>
           </button>
         </div>
-        <label class="reflow-processing-control">
-          <span>位置</span>
-          <select :value="serverReflow ? 'server' : 'local'" @change="setProcessingMode">
-            <option value="local">本地重排</option>
-            <option value="server">服务端重排</option>
-          </select>
-        </label>
-        <span v-if="transferStatsLabel" class="reflow-transfer-stats">{{ transferStatsLabel }}</span>
-        <button
-          type="button"
-          class="reflow-control reflow-icon-control reflow-collapse-control"
-          :title="controlsCollapsed ? '显示控制项' : '隐藏控制项'"
-          :aria-label="controlsCollapsed ? '显示控制项' : '隐藏控制项'"
-          @click="controlsCollapsed = !controlsCollapsed"
-        >
-          <v-icon small>{{ controlsCollapsed ? 'mdi-chevron-double-down' : 'mdi-chevron-double-up' }}</v-icon>
-        </button>
-      </div>
-      <template v-if="!controlsCollapsed">
         <label class="reflow-font-control reflow-wide-control">
           <span>文字大小</span>
           <button type="button" class="reflow-step-control" @click="adjustTextScale(-5)">-</button>
@@ -233,12 +257,12 @@
         />
       </div>
     </div>
-    <div v-else-if="loading" class="reflow-status">Reflowing...</div>
-    <div v-else-if="error" class="reflow-status">
+    <div v-else-if="loading" class="reflow-status" @click="collapseControls">Reflowing...</div>
+    <div v-else-if="error" class="reflow-status" @click="collapseControls">
       <div>Unable to reflow this page</div>
       <div v-if="errorMessage" class="reflow-error">{{ errorMessage }}</div>
     </div>
-    <div v-else-if="deferReflow" class="reflow-setup-preview">
+    <div v-else-if="deferReflow" class="reflow-setup-preview" @click="collapseControls">
       <img
         :src="page.url"
         class="reflow-setup-image"
@@ -247,7 +271,7 @@
         @dragstart.prevent
       />
     </div>
-    <div v-else class="reflow-wrapper" :class="{'vertical-reflow-wrapper': verticalText}" :style="reflowWrapperStyle">
+    <div v-else class="reflow-wrapper" :class="{'vertical-reflow-wrapper': verticalText}" :style="reflowWrapperStyle" @click="collapseControls">
       <div v-if="reflowItems.length === 0" class="reflow-status">No text blocks detected</div>
       <template v-for="(item, i) in visibleItems">
         <span
@@ -836,6 +860,11 @@ export default Vue.extend({
     this.revokeObjectUrl()
   },
   methods: {
+    collapseControls(): boolean {
+      if (this.controlsCollapsed || this.cropMode) return false
+      this.controlsCollapsed = true
+      return true
+    },
     syncPendingOptionsFromProps(force: boolean = false) {
       const snapshot = this.optionsSnapshotFromProps()
       const previous = this.optionsSnapshot
@@ -3959,6 +3988,27 @@ export default Vue.extend({
   pointer-events: auto;
 }
 
+.reflow-controls-collapsed {
+  justify-content: center;
+  min-height: 20px;
+  padding: 2px 0;
+  background: transparent;
+  border-bottom: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.reflow-pull-control {
+  width: 28px;
+  height: 18px;
+  min-height: 18px;
+  flex-basis: 28px;
+  padding: 0;
+  border-radius: 0 0 5px 5px;
+  opacity: 0.86;
+  pointer-events: auto;
+}
+
 .reflow-top-controls {
   flex: 0 0 100%;
   min-width: 100%;
@@ -4199,6 +4249,11 @@ export default Vue.extend({
 .reflowed-page-dark .reflow-controls {
   background: rgba(30, 30, 30, 0.96);
   border-bottom-color: rgba(255, 255, 255, 0.14);
+}
+
+.reflowed-page-dark .reflow-controls-collapsed {
+  background: transparent;
+  border-bottom: 0;
 }
 
 .reflowed-page-dark {

@@ -1,7 +1,30 @@
 <template>
   <div class="k2-reflowed-page" :class="{'k2-reflowed-page-dark': $vuetify.theme.dark || nightDisplay}">
-    <div ref="k2Controls" class="k2-controls" @click.stop>
-      <template v-if="!controlsCollapsed">
+    <div
+      ref="k2Controls"
+      class="k2-controls"
+      :class="{'k2-controls-collapsed': controlsCollapsed}"
+      @click.stop
+      @touchstart.stop
+      @touchmove.stop
+      @touchend.stop
+      @touchcancel.stop
+      @pointerdown.stop
+      @pointermove.stop
+      @pointerup.stop
+      @pointercancel.stop
+    >
+      <button
+        v-if="controlsCollapsed"
+        type="button"
+        class="k2-action k2-pull-action"
+        title="显示重排设置"
+        aria-label="显示重排设置"
+        @click="controlsCollapsed = false"
+      >
+        <v-icon x-small>mdi-chevron-down</v-icon>
+      </button>
+      <template v-else>
         <label class="k2-control k2-wide-control">
           <span>Text</span>
           <button type="button" @click="adjustTextScale(-5)">-</button>
@@ -62,28 +85,28 @@
           </button>
           <button type="button" class="k2-action" @click="exitK2Reflow">Exit K2</button>
         </div>
+        <button type="button" class="k2-action" @click="$emit('back-to-book')">
+          Back to details
+        </button>
+        <button type="button" class="k2-action" @click="$emit('show-pdf-toc')">
+          {{ $t('browse_book.pdf_toc') }}
+        </button>
+        <button
+          type="button"
+          class="k2-action"
+          :title="nightDisplay ? '白天模式' : '黑夜模式'"
+          :aria-label="nightDisplay ? '白天模式' : '黑夜模式'"
+          @click="$emit('toggle-night-display')"
+        >
+          <v-icon small>{{ nightDisplay ? 'mdi-white-balance-sunny' : 'mdi-weather-night' }}</v-icon>
+        </button>
+        <button type="button" class="k2-action k2-apply-action" @click="applyK2Reflow">
+          重排
+        </button>
+        <button type="button" class="k2-action k2-collapse-action" @click="controlsCollapsed = true">
+          Hide controls
+        </button>
       </template>
-      <button type="button" class="k2-action" @click="$emit('back-to-book')">
-        Back to details
-      </button>
-      <button type="button" class="k2-action" @click="$emit('show-pdf-toc')">
-        {{ $t('browse_book.pdf_toc') }}
-      </button>
-      <button
-        type="button"
-        class="k2-action"
-        :title="nightDisplay ? '白天模式' : '黑夜模式'"
-        :aria-label="nightDisplay ? '白天模式' : '黑夜模式'"
-        @click="$emit('toggle-night-display')"
-      >
-        <v-icon small>{{ nightDisplay ? 'mdi-white-balance-sunny' : 'mdi-weather-night' }}</v-icon>
-      </button>
-      <button type="button" class="k2-action k2-apply-action" @click="applyK2Reflow">
-        重排
-      </button>
-      <button type="button" class="k2-action k2-collapse-action" @click="controlsCollapsed = !controlsCollapsed">
-        {{ controlsCollapsed ? 'Show controls' : 'Hide controls' }}
-      </button>
     </div>
 
     <div
@@ -114,12 +137,12 @@
         />
       </div>
     </div>
-    <div v-else-if="loading" class="k2-status">K2 reflowing...</div>
-    <div v-else-if="error" class="k2-status">
+    <div v-else-if="loading" class="k2-status" @click="collapseControls">K2 reflowing...</div>
+    <div v-else-if="error" class="k2-status" @click="collapseControls">
       <div>Unable to K2 reflow this page</div>
       <div class="k2-error">{{ errorMessage }}</div>
     </div>
-    <div v-else class="k2-output" :style="k2OutputStyle">
+    <div v-else class="k2-output" :style="k2OutputStyle" @click="collapseControls">
       <div v-if="items.length === 0" class="k2-status">No text blocks detected</div>
       <template v-for="(item, index) in visibleItems">
         <span v-if="item.type === 'break'" :key="`break-${index}`" class="k2-break"/>
@@ -399,6 +422,11 @@ export default Vue.extend({
     this.revokeObjectUrl()
   },
   methods: {
+    collapseControls(): boolean {
+      if (this.controlsCollapsed || this.cropMode) return false
+      this.controlsCollapsed = true
+      return true
+    },
     syncSettingsFromProps() {
       this.textScalePercent = this.clampNumber(Number(this.settings.textScale), 20, 160, DEFAULT_TEXT_SCALE)
       this.maxColumns = Math.round(this.clampNumber(Number(this.settings.maxColumns), 1, 4, 2))
@@ -2070,6 +2098,16 @@ export default Vue.extend({
   overflow-y: visible;
 }
 
+.k2-controls-collapsed {
+  justify-content: center;
+  min-height: 20px;
+  padding: 2px 0;
+  background: transparent;
+  border-bottom: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
 .k2-control {
   flex: 0 0 280px;
   min-width: 280px;
@@ -2134,6 +2172,17 @@ export default Vue.extend({
   color: #9e9e9e;
 }
 
+.k2-pull-action {
+  width: 28px;
+  height: 18px;
+  min-height: 18px;
+  flex-basis: 28px;
+  padding: 0;
+  border-radius: 0 0 5px 5px;
+  opacity: 0.86;
+  pointer-events: auto;
+}
+
 .k2-value {
   min-width: 44px;
   text-align: right;
@@ -2151,6 +2200,11 @@ export default Vue.extend({
 .k2-reflowed-page-dark .k2-controls {
   background: rgba(30, 30, 30, 0.96);
   border-bottom-color: rgba(255, 255, 255, 0.14);
+}
+
+.k2-reflowed-page-dark .k2-controls-collapsed {
+  background: transparent;
+  border-bottom: 0;
 }
 
 .k2-reflowed-page-dark .k2-control,

@@ -236,17 +236,17 @@
 
         <div
           v-if="!reflowCropMode"
-          @click="k2PreviousPage"
+          @click="k2OutsidePreviousPage"
           class="reflow-click-left"
         />
         <div
           v-if="!reflowCropMode"
-          @click="k2NextPage"
+          @click="k2OutsideNextPage"
           class="reflow-click-right"
         />
         <div
           v-if="!reflowCropMode"
-          @click="toggleToolbars()"
+          @click="reflowOutsideCenterClick"
           class="reflow-click-center"
         />
       </div>
@@ -314,17 +314,17 @@
 
         <div
           v-if="reflowMode && !reflowCropMode"
-          @click="reflowPreviousPage"
+          @click="reflowOutsidePreviousPage"
           class="reflow-click-left"
         />
         <div
           v-if="reflowMode && !reflowCropMode"
-          @click="reflowNextPage"
+          @click="reflowOutsideNextPage"
           class="reflow-click-right"
         />
         <div
           v-if="reflowMode && !reflowCropMode"
-          @click="toggleToolbars()"
+          @click="reflowOutsideCenterClick"
           class="reflow-click-center"
         />
       </div>
@@ -2507,6 +2507,30 @@ export default Vue.extend({
       this.reflowCropMode = false
       this.reflowStartAtEnd = false
       this.clearReflowPrefetch()
+    },
+    collapseActiveReflowControls(): boolean {
+      const reflow = (this.k2ReflowMode ? this.$refs.k2ReflowedPage : this.$refs.reflowedPage) as any
+      return reflow?.collapseControls?.() === true
+    },
+    reflowOutsideCenterClick() {
+      if (this.collapseActiveReflowControls()) return
+      this.toggleToolbars()
+    },
+    reflowOutsidePreviousPage() {
+      if (this.collapseActiveReflowControls()) return
+      this.reflowPreviousPage()
+    },
+    reflowOutsideNextPage() {
+      if (this.collapseActiveReflowControls()) return
+      this.reflowNextPage()
+    },
+    k2OutsidePreviousPage() {
+      if (this.collapseActiveReflowControls()) return
+      this.k2PreviousPage()
+    },
+    k2OutsideNextPage() {
+      if (this.collapseActiveReflowControls()) return
+      this.k2NextPage()
     },
     k2PreviousPage() {
       const reflow = this.$refs.k2ReflowedPage as any
