@@ -988,7 +988,7 @@ export default Vue.extend({
       this.enhanceSourceCanvas(context, canvas.width, canvas.height)
 
       const deskewedCanvas = this.skewCorrection === 0 ? canvas : this.skewCorrectedCanvas(canvas, this.skewCorrection)
-      const cropRois = this.reflowCropRois()
+      const cropRois = this.uploadReflowCropRois()
       const preparedRegions = cropRois.some(roi => !!roi)
       const formData = new FormData()
       let uploadedImageBytes = 0
@@ -1367,7 +1367,7 @@ export default Vue.extend({
         marginRight: this.options.marginRight,
         marginBottom: this.options.marginBottom,
         marginLeft: this.options.marginLeft,
-        cropRois: this.effectiveCropRois(this.pageParity),
+        cropRois: this.currentReflowCropRois(this.pageParity),
         darkDisplay: this.darkDisplay,
         deskewDetectionVersion: 9,
         imageExclusionVersion: 3,
@@ -2188,8 +2188,23 @@ export default Vue.extend({
       return roi
     },
     reflowCropRois(): Array<Roi | undefined> {
-      const rois = this.nonOverlappingCropRois(this.effectiveCropRois(this.pageParity)).filter((roi): roi is Roi => !!roi)
+      const rois = this.currentReflowCropRois(this.pageParity).filter((roi): roi is Roi => !!roi)
       return rois.length > 0 ? rois : [undefined]
+    },
+    uploadReflowCropRois(): Array<Roi | undefined> {
+      const rois = this.currentReflowCropRois(this.pageParity).filter((roi): roi is Roi => !!roi)
+      return rois.length > 0 ? rois : [undefined]
+    },
+    currentReflowCropRois(parity: PageParity): Array<Roi | undefined> {
+      const rois = this.effectiveCropRois(parity).slice(0, 2)
+      if (parity === this.pageParity && this.draftRoi && this.draftRoi.w > MIN_CROP_SIZE && this.draftRoi.h > MIN_CROP_SIZE) {
+        rois[this.activeCropRegion] = this.draftRoi
+      }
+      const activeStoredRoi = this.cropRoisByParity[parity]?.[this.activeCropRegion]
+      if (parity === this.pageParity && activeStoredRoi && this.explicitCropRoisByParity[parity]?.[this.activeCropRegion]) {
+        rois[this.activeCropRegion] = activeStoredRoi
+      }
+      return this.nonOverlappingCropRois(rois)
     },
     joinRegionReflowItems(regionItems: ReflowItem[][]): ReflowItem[] {
       const rendered = [] as ReflowItem[]
