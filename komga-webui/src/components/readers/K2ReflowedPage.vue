@@ -19,6 +19,15 @@
           </select>
         </label>
         <label class="k2-control k2-compact">
+          <span>旋转</span>
+          <select :value="normalizedRotation(rotation)" @change="setRotation">
+            <option value="-90">-90°</option>
+            <option value="0">0°</option>
+            <option value="90">+90°</option>
+            <option value="180">180°</option>
+          </select>
+        </label>
+        <label class="k2-control k2-compact">
           <span>Threshold</span>
           <input type="range" min="50" max="230" step="1" :value="threshold" @input="setThreshold"/>
           <span class="k2-value">{{ threshold }}</span>
@@ -226,6 +235,10 @@ export default Vue.extend({
       type: Number,
       required: true,
     },
+    rotation: {
+      type: Number,
+      default: 0,
+    },
     startAtEnd: {
       type: Boolean,
       default: false,
@@ -289,6 +302,14 @@ export default Vue.extend({
       immediate: true,
     },
     targetWidth() {
+      this.reflow()
+    },
+    rotation() {
+      this.revokeObjectUrl()
+      if (this.cropMode) {
+        this.ensureCropImage()
+        return
+      }
       this.reflow()
     },
     startAtEnd() {
@@ -489,22 +510,31 @@ export default Vue.extend({
     },
     async loadPageImage(url: string, requestId?: number): Promise<HTMLImageElement> {
       const sourceUrl = this.pageImageUrl(url)
-      if (this.objectUrl && this.objectUrlSource === sourceUrl) return this.decodeImageUrl(this.objectUrl)
+      const rotation = this.normalizedRotation(this.rotation)
+      const sourceKey = `${sourceUrl}#rotation=${rotation}`
+      if (this.objectUrl && this.objectUrlSource === sourceKey) return this.decodeImageUrl(this.objectUrl)
 
       const response = await fetch(sourceUrl, {credentials: 'include'})
       if (!response.ok) throw new Error(`Unable to load page: ${response.status}`)
       const blob = await response.blob()
       if (blob.type && !blob.type.startsWith('image/')) throw new Error(`Page response is not an image: ${blob.type}`)
-      const nextObjectUrl = URL.createObjectURL(blob)
+      const rawObjectUrl = URL.createObjectURL(blob)
+      let nextObjectUrl = rawObjectUrl
       try {
-        const image = await this.decodeImageUrl(nextObjectUrl)
+        let image = await this.decodeImageUrl(rawObjectUrl)
+        if (rotation) {
+          const rotatedUrl = await this.canvasObjectUrl(this.rotatedImageCanvas(image, rotation))
+          URL.revokeObjectURL(rawObjectUrl)
+          nextObjectUrl = rotatedUrl
+          image = await this.decodeImageUrl(nextObjectUrl)
+        }
         if (requestId !== undefined && requestId !== this.requestId) {
           URL.revokeObjectURL(nextObjectUrl)
           return image
         }
         const previousObjectUrl = this.objectUrl
         this.objectUrl = nextObjectUrl
-        this.objectUrlSource = sourceUrl
+        this.objectUrlSource = sourceKey
         if (previousObjectUrl && previousObjectUrl !== nextObjectUrl) URL.revokeObjectURL(previousObjectUrl)
         return image
       } catch (e) {
@@ -520,9 +550,42 @@ export default Vue.extend({
         image.src = url
       })
     },
+    canvasObjectUrl(canvas: HTMLCanvasElement): Promise<string> {
+      return new Promise((resolve, reject) => {
+        canvas.toBlob(blob => {
+          if (blob) resolve(URL.createObjectURL(blob))
+          else reject(new Error('Unable to encode rotated page image'))
+        }, 'image/jpeg', 0.95)
+      })
+    },
     pageImageUrl(url: string): string {
       const separator = url.includes('?') ? '&' : '?'
       return `${url}${separator}contentNegotiation=false`
+    },
+    rotatedImageCanvas(image: HTMLImageElement, degrees: number): HTMLCanvasElement {
+      const rotation = this.normalizedRotation(degrees)
+      const quarterTurn = Math.abs(rotation) === 90
+      const canvas = document.createElement('canvas')
+      canvas.width = quarterTurn ? image.naturalHeight : image.naturalWidth
+      canvas.height = quarterTurn ? image.naturalWidth : image.naturalHeight
+      const context = this.canvasContext(canvas, true)
+      if (!context) return canvas
+      context.fillStyle = this.pageBackground || '#fff'
+      context.fillRect(0, 0, canvas.width, canvas.height)
+      context.translate(canvas.width / 2, canvas.height / 2)
+      context.rotate(rotation * Math.PI / 180)
+      context.drawImage(image, -image.naturalWidth / 2, -image.naturalHeight / 2)
+      return canvas
+    },
+    normalizedRotation(value: number): number {
+      const numberValue = Number(value)
+      if (!Number.isFinite(numberValue)) return 0
+      const rounded = Math.round(numberValue / 90) * 90
+      const normalized = ((rounded % 360) + 360) % 360
+      if (normalized === 90) return 90
+      if (normalized === 180) return 180
+      if (normalized === 270) return -90
+      return 0
     },
     canvasContext(canvas: HTMLCanvasElement, willReadFrequently: boolean = false): CanvasRenderingContext2D | null {
       if (willReadFrequently) return canvas.getContext('2d', {willReadFrequently: true})
@@ -1800,6 +1863,10 @@ export default Vue.extend({
       const target = event.target as HTMLSelectElement
       this.maxColumns = Math.round(this.clampNumber(Number(target.value), 1, 4, 2))
       this.emitSettingsChange()
+    },
+    setRotation(event: Event) {
+      const target = event.target as HTMLSelectElement
+      this.$emit('rotation-change', this.normalizedRotation(Number(target.value)))
     },
     setThreshold(event: Event) {
       const target = event.target as HTMLInputElement

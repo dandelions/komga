@@ -67,6 +67,24 @@ class PdfPageReflowServiceTest {
     assertThat(darkPixelCount(firstWordImage(bold))).isGreaterThan(darkPixelCount(firstWordImage(plain)))
   }
 
+  @Test
+  fun `given rotation when reflowing page then source dimensions are rotated`() {
+    val pageBytes = horizontalShortGlyphPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(rotation = 90),
+      )
+
+    assertThat(response.sourceWidth).isEqualTo(120)
+    assertThat(response.sourceHeight).isEqualTo(220)
+    assertThat(response.originalImageBytes).isEqualTo(pageBytes.size.toLong())
+  }
+
   private fun defaultOptions() =
     PdfPageReflowOptions(
       targetWidth = 900,

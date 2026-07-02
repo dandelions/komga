@@ -90,6 +90,15 @@
             <option value="4">4</option>
           </select>
         </label>
+        <label class="reflow-column-control">
+          <span>旋转</span>
+          <select :value="normalizedRotation(rotation)" @change="setRotation">
+            <option value="-90">-90°</option>
+            <option value="0">0°</option>
+            <option value="90">+90°</option>
+            <option value="180">180°</option>
+          </select>
+        </label>
         <label class="reflow-column-control reflow-checkbox-control">
           <span>文字/背景增强</span>
           <input type="checkbox" :checked="contrastEnhancement" @change="setContrastEnhancement"/>
@@ -493,6 +502,10 @@ export default Vue.extend({
       type: Number,
       required: true,
     },
+    rotation: {
+      type: Number,
+      default: 0,
+    },
     options: {
       type: Object as () => ReflowOptions,
       required: true,
@@ -769,6 +782,15 @@ export default Vue.extend({
       if (this.deferReflow || this.cropMode) return
       this.reflow()
     },
+    rotation() {
+      this.revokeObjectUrl()
+      if (this.cropMode) {
+        this.ensureCropImage(this.controlSkewCorrection)
+        return
+      }
+      if (this.deferReflow) return
+      this.reflow()
+    },
     cachedItems: {
       handler() {
         if (this.deferReflow || this.cropMode) return
@@ -970,6 +992,7 @@ export default Vue.extend({
     serverReflowRequestUrl(): string {
       const params = new URLSearchParams()
       params.set('targetWidth', String(Math.round(this.targetWidth || 0)))
+      params.set('rotation', String(this.normalizedRotation(this.rotation)))
       params.set('autoCropBorder', String(this.options.autoCropBorder !== false))
       params.set('textScale', String(this.textScalePercent))
       params.set('columnCount', String(this.columnCount))
@@ -1309,6 +1332,7 @@ export default Vue.extend({
         url: this.page.url,
         serverReflow: this.serverReflow,
         serverReflowUrl: this.serverReflowUrl,
+        rotation: this.normalizedRotation(this.rotation),
         autoCropBorder: this.options.autoCropBorder,
         columnCount: this.options.columnCount,
         skewCorrection: this.skewCorrection,
@@ -1391,15 +1415,24 @@ export default Vue.extend({
     },
     async loadPageImage(url: string, requestId?: number): Promise<HTMLImageElement> {
       const sourceUrl = this.pageImageUrl(url)
-      if (this.objectUrl && this.objectUrlSource === sourceUrl) return this.decodeImageUrl(this.objectUrl)
+      const rotation = this.normalizedRotation(this.rotation)
+      const sourceKey = `${sourceUrl}#rotation=${rotation}`
+      if (this.objectUrl && this.objectUrlSource === sourceKey) return this.decodeImageUrl(this.objectUrl)
 
       const response = await fetch(sourceUrl, {credentials: 'include'})
       if (!response.ok) throw new Error(`Unable to load page: ${response.status}`)
       const blob = await response.blob()
       if (blob.type && !blob.type.startsWith('image/')) throw new Error(`Page response is not an image: ${blob.type}`)
-      const nextObjectUrl = URL.createObjectURL(blob)
+      const rawObjectUrl = URL.createObjectURL(blob)
+      let nextObjectUrl = rawObjectUrl
       try {
-        const image = await this.decodeImageUrl(nextObjectUrl)
+        let image = await this.decodeImageUrl(rawObjectUrl)
+        if (rotation) {
+          const rotatedUrl = await this.canvasObjectUrl(this.rotatedImageCanvas(image, rotation))
+          URL.revokeObjectURL(rawObjectUrl)
+          nextObjectUrl = rotatedUrl
+          image = await this.decodeImageUrl(nextObjectUrl)
+        }
         if (requestId !== undefined && requestId !== this.requestId) {
           URL.revokeObjectURL(nextObjectUrl)
           return image
@@ -1407,7 +1440,7 @@ export default Vue.extend({
         const previousObjectUrl = this.objectUrl
         this.revokeCropObjectUrl(false)
         this.objectUrl = nextObjectUrl
-        this.objectUrlSource = sourceUrl
+        this.objectUrlSource = sourceKey
         this.objectUrlBytes = blob.size
         if (previousObjectUrl && previousObjectUrl !== nextObjectUrl) URL.revokeObjectURL(previousObjectUrl)
         return image
@@ -1762,6 +1795,31 @@ export default Vue.extend({
       context.rotate(degrees * Math.PI / 180)
       context.drawImage(sourceCanvas, -sourceCanvas.width / 2, -sourceCanvas.height / 2)
       return correctedCanvas
+    },
+    rotatedImageCanvas(image: HTMLImageElement, degrees: number): HTMLCanvasElement {
+      const rotation = this.normalizedRotation(degrees)
+      const quarterTurn = Math.abs(rotation) === 90
+      const canvas = document.createElement('canvas')
+      canvas.width = quarterTurn ? image.naturalHeight : image.naturalWidth
+      canvas.height = quarterTurn ? image.naturalWidth : image.naturalHeight
+      const context = this.canvasContext(canvas, true)
+      if (!context) return canvas
+      context.fillStyle = this.pageBackground || '#fff'
+      context.fillRect(0, 0, canvas.width, canvas.height)
+      context.translate(canvas.width / 2, canvas.height / 2)
+      context.rotate(rotation * Math.PI / 180)
+      context.drawImage(image, -image.naturalWidth / 2, -image.naturalHeight / 2)
+      return canvas
+    },
+    normalizedRotation(value: number): number {
+      const numberValue = Number(value)
+      if (!Number.isFinite(numberValue)) return 0
+      const rounded = Math.round(numberValue / 90) * 90
+      const normalized = ((rounded % 360) + 360) % 360
+      if (normalized === 90) return 90
+      if (normalized === 180) return 180
+      if (normalized === 270) return -90
+      return 0
     },
     revokeObjectUrl(cancelCropRequests: boolean = true) {
       this.revokeCropObjectUrl(cancelCropRequests)
@@ -3537,6 +3595,10 @@ export default Vue.extend({
     setProcessingMode(event: Event) {
       const target = event.target as HTMLSelectElement
       this.$emit('processing-mode-change', target.value === 'server' ? 'server' : 'local')
+    },
+    setRotation(event: Event) {
+      const target = event.target as HTMLSelectElement
+      this.$emit('rotation-change', this.normalizedRotation(Number(target.value)))
     },
     setColumnCount(event: Event) {
       const target = event.target as HTMLSelectElement

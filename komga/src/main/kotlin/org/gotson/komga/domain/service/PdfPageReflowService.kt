@@ -51,6 +51,7 @@ data class PdfPageReflowOptions(
   val marginBottom: Double,
   val marginLeft: Double,
   val darkDisplay: Boolean,
+  val rotation: Int = 0,
 )
 
 data class PdfPageReflowRegion(
@@ -132,8 +133,9 @@ class PdfPageReflowService(
         val image =
           ImageIO.read(ByteArrayInputStream(pageContent.bytes))
             ?: error("Unable to decode rendered PDF page")
-        val pageBackground = detectPageBackground(image)
-        val preparedPage = skewCorrectedImage(image, options.skewCorrection, Color.WHITE)
+        val rotatedImage = rotatedImage(image, options.rotation)
+        val pageBackground = detectPageBackground(rotatedImage)
+        val preparedPage = skewCorrectedImage(rotatedImage, options.skewCorrection, Color.WHITE)
         val regionImages =
           cropRegions
             .mapNotNull { it.toRoi(preparedPage.width, preparedPage.height) }
@@ -157,8 +159,8 @@ class PdfPageReflowService(
           PdfPageReflowDto(
             pageNumber = pageNumber,
             pageBackground = results.firstOrNull()?.pageBackground ?: pageBackground,
-            sourceWidth = image.width,
-            sourceHeight = image.height,
+            sourceWidth = rotatedImage.width,
+            sourceHeight = rotatedImage.height,
             originalImageBytes = pageContent.bytes.size.toLong(),
             uploadedImageBytes = 0,
             transferBytes = 0,
@@ -188,10 +190,11 @@ class PdfPageReflowService(
     processingTimeMs =
       measureTimeMillis {
         val decodedImages =
-          images.map { bytes ->
-            ImageIO.read(ByteArrayInputStream(bytes))
-              ?: error("Unable to decode uploaded page image")
-          }
+          images
+            .map { bytes ->
+              ImageIO.read(ByteArrayInputStream(bytes))
+                ?: error("Unable to decode uploaded page image")
+            }.map { rotatedImage(it, options.rotation) }
         val results = decodedImages.map { image -> reflowImage(image, options, useWholeImage) }
         val items =
           results
@@ -204,13 +207,14 @@ class PdfPageReflowService(
             }
         val fallbackImage = decodedImages.first()
         val fallbackRoi = Roi(0, 0, fallbackImage.width, fallbackImage.height)
+        val sourceDimensions = rotatedSourceDimensions(sourceWidth, sourceHeight, options.rotation, fallbackImage)
 
         response =
           PdfPageReflowDto(
             pageNumber = pageNumber,
             pageBackground = pageBackground?.takeIf { it.isNotBlank() } ?: results.firstOrNull()?.pageBackground ?: "#fff",
-            sourceWidth = sourceWidth.takeIf { it > 0 } ?: fallbackImage.width,
-            sourceHeight = sourceHeight.takeIf { it > 0 } ?: fallbackImage.height,
+            sourceWidth = sourceDimensions.first,
+            sourceHeight = sourceDimensions.second,
             originalImageBytes = sourceImageBytes.takeIf { it > 0 } ?: images.sumOf { it.size.toLong() },
             uploadedImageBytes = images.sumOf { it.size.toLong() },
             transferBytes = 0,
@@ -254,6 +258,49 @@ class PdfPageReflowService(
     graphics.drawImage(image, transform, null)
     graphics.dispose()
     return output
+  }
+
+  private fun rotatedImage(
+    image: BufferedImage,
+    rotation: Int,
+  ): BufferedImage {
+    val normalizedRotation = normalizeRotation(rotation)
+    if (normalizedRotation == 0) return image
+
+    val quarterTurn = abs(normalizedRotation) == 90
+    val outputWidth = if (quarterTurn) image.height else image.width
+    val outputHeight = if (quarterTurn) image.width else image.height
+    val output = BufferedImage(outputWidth, outputHeight, BufferedImage.TYPE_INT_ARGB)
+    val graphics = output.createGraphics()
+    graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC)
+    graphics.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY)
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, output.width, output.height)
+    graphics.translate(output.width / 2.0, output.height / 2.0)
+    graphics.rotate(Math.toRadians(normalizedRotation.toDouble()))
+    graphics.drawImage(image, -image.width / 2, -image.height / 2, null)
+    graphics.dispose()
+    return output
+  }
+
+  private fun rotatedSourceDimensions(
+    sourceWidth: Int,
+    sourceHeight: Int,
+    rotation: Int,
+    fallbackImage: BufferedImage,
+  ): Pair<Int, Int> {
+    if (sourceWidth <= 0 || sourceHeight <= 0) return fallbackImage.width to fallbackImage.height
+    return if (abs(normalizeRotation(rotation)) == 90) sourceHeight to sourceWidth else sourceWidth to sourceHeight
+  }
+
+  private fun normalizeRotation(rotation: Int): Int {
+    val normalized = ((rotation / 90.0).roundToInt() * 90).floorMod(360)
+    return when (normalized) {
+      90 -> 90
+      180 -> 180
+      270 -> -90
+      else -> 0
+    }
   }
 
   private fun copyImageRegion(
@@ -1767,4 +1814,6 @@ class PdfPageReflowService(
     minimum: Double,
     maximum: Double,
   ): Double = max(minimum, min(maximum, value))
+
+  private fun Int.floorMod(modulus: Int): Int = ((this % modulus) + modulus) % modulus
 }

@@ -176,6 +176,10 @@ export default Vue.extend({
       type: String,
       default: 'none',
     },
+    rotation: {
+      type: Number,
+      default: 0,
+    },
     skewCorrection: {
       type: Number,
       default: 0,
@@ -210,6 +214,10 @@ export default Vue.extend({
       immediate: true,
     },
     skewCorrection() {
+      this.revokeDeskewedPageUrls()
+      this.$nextTick(this.ensureLoadedDeskewedPageUrls)
+    },
+    rotation() {
       this.revokeDeskewedPageUrls()
       this.$nextTick(this.ensureLoadedDeskewedPageUrls)
     },
@@ -499,10 +507,16 @@ export default Vue.extend({
       }
     },
     pageRatio(page: PageDtoWithUrl): number | undefined {
-      const width = Number(page.width)
-      const height = Number(page.height)
+      const width = this.displayPageWidth(page)
+      const height = this.displayPageHeight(page)
       if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return undefined
       return width / height
+    },
+    displayPageWidth(page: PageDtoWithUrl): number {
+      return Math.abs(this.normalizedRotation(this.rotation)) === 90 ? Number(page.height) : Number(page.width)
+    },
+    displayPageHeight(page: PageDtoWithUrl): number {
+      return Math.abs(this.normalizedRotation(this.rotation)) === 90 ? Number(page.width) : Number(page.height)
     },
     cropSegmentViewportSpan(crop: CropRegion, pageRatio: number, axis: CropSegmentAxis): number {
       const viewportWidth = Math.max(1, this.$vuetify.breakpoint.width)
@@ -634,9 +648,10 @@ export default Vue.extend({
       return Math.max(0, Math.min(100, numberValue))
     },
     async ensureDeskewedPageUrl(page: PageDtoWithUrl, event: Event) {
+      const rotation = this.normalizedRotation(this.rotation)
       const angle = this.skewCorrection || 0
       const contrastEnhancement = this.contrastEnhancement
-      if ((!angle && !this.contrastEnhancement) || this.deskewedPageUrls[page.number] || this.deskewedPagePending[page.number]) return
+      if ((!rotation && !angle && !this.contrastEnhancement) || this.deskewedPageUrls[page.number] || this.deskewedPagePending[page.number]) return
 
       const image = event.target as HTMLImageElement
       if (!image?.complete || image.naturalWidth <= 0) return
@@ -645,18 +660,19 @@ export default Vue.extend({
       try {
         const pageIsCurrent = this.isCurrentSpreadPage(page.number)
         if (!pageIsCurrent) await this.waitForReaderIdle()
-        if (this.skewCorrection !== angle || this.contrastEnhancement !== contrastEnhancement || this.deskewedPageUrls[page.number]) return
-        const canvas = this.processedPageCanvas(image, angle)
+        if (this.normalizedRotation(this.rotation) !== rotation || this.skewCorrection !== angle || this.contrastEnhancement !== contrastEnhancement || this.deskewedPageUrls[page.number]) return
+        const canvas = this.processedPageCanvas(image, rotation, angle)
         const url = await this.canvasObjectUrl(canvas)
-        if (this.skewCorrection === angle && this.contrastEnhancement === contrastEnhancement) this.$set(this.deskewedPageUrls, page.number, url)
+        if (this.normalizedRotation(this.rotation) === rotation && this.skewCorrection === angle && this.contrastEnhancement === contrastEnhancement) this.$set(this.deskewedPageUrls, page.number, url)
         else URL.revokeObjectURL(url)
       } catch (e) {
       } finally {
         this.$delete(this.deskewedPagePending, page.number)
       }
     },
-    processedPageCanvas(image: HTMLImageElement, degrees: number): HTMLCanvasElement {
-      const canvas = degrees ? this.skewCorrectedCanvas(image, degrees) : this.sourceImageCanvas(image)
+    processedPageCanvas(image: HTMLImageElement, rotation: number, skewCorrection: number): HTMLCanvasElement {
+      const rotatedCanvas = rotation ? this.rotatedImageCanvas(image, rotation) : this.sourceImageCanvas(image)
+      const canvas = skewCorrection ? this.skewCorrectedCanvas(rotatedCanvas, skewCorrection) : rotatedCanvas
       if (this.contrastEnhancement) {
         const context = canvas.getContext('2d')
         if (context) enhanceTextContrast(context, canvas.width, canvas.height, {enabled: true})
@@ -674,18 +690,43 @@ export default Vue.extend({
       context.drawImage(image, 0, 0)
       return canvas
     },
-    skewCorrectedCanvas(image: HTMLImageElement, degrees: number): HTMLCanvasElement {
+    rotatedImageCanvas(image: HTMLImageElement, degrees: number): HTMLCanvasElement {
+      const rotation = this.normalizedRotation(degrees)
+      const quarterTurn = Math.abs(rotation) === 90
       const canvas = document.createElement('canvas')
-      canvas.width = image.naturalWidth
-      canvas.height = image.naturalHeight
+      canvas.width = quarterTurn ? image.naturalHeight : image.naturalWidth
+      canvas.height = quarterTurn ? image.naturalWidth : image.naturalHeight
+      const context = canvas.getContext('2d')
+      if (!context) return canvas
+      context.fillStyle = '#fff'
+      context.fillRect(0, 0, canvas.width, canvas.height)
+      context.translate(canvas.width / 2, canvas.height / 2)
+      context.rotate(rotation * Math.PI / 180)
+      context.drawImage(image, -image.naturalWidth / 2, -image.naturalHeight / 2)
+      return canvas
+    },
+    skewCorrectedCanvas(sourceCanvas: HTMLCanvasElement, degrees: number): HTMLCanvasElement {
+      const canvas = document.createElement('canvas')
+      canvas.width = sourceCanvas.width
+      canvas.height = sourceCanvas.height
       const context = canvas.getContext('2d')
       if (!context) return canvas
       context.fillStyle = '#fff'
       context.fillRect(0, 0, canvas.width, canvas.height)
       context.translate(canvas.width / 2, canvas.height / 2)
       context.rotate(degrees * Math.PI / 180)
-      context.drawImage(image, -image.naturalWidth / 2, -image.naturalHeight / 2)
+      context.drawImage(sourceCanvas, -sourceCanvas.width / 2, -sourceCanvas.height / 2)
       return canvas
+    },
+    normalizedRotation(value: number): number {
+      const numberValue = Number(value)
+      if (!Number.isFinite(numberValue)) return 0
+      const rounded = Math.round(numberValue / 90) * 90
+      const normalized = ((rounded % 360) + 360) % 360
+      if (normalized === 90) return 90
+      if (normalized === 180) return 180
+      if (normalized === 270) return -90
+      return 0
     },
     canvasObjectUrl(canvas: HTMLCanvasElement): Promise<string> {
       return new Promise((resolve, reject) => {
@@ -701,7 +742,7 @@ export default Vue.extend({
       this.deskewedPagePending = {}
     },
     ensureLoadedDeskewedPageUrls() {
-      if (!this.skewCorrection && !this.contrastEnhancement) return
+      if (!this.normalizedRotation(this.rotation) && !this.skewCorrection && !this.contrastEnhancement) return
       const images = Array.from(this.$el.querySelectorAll('img[data-page-number]')) as HTMLImageElement[]
       images.forEach(image => {
         const pageNumber = Number(image.dataset.pageNumber)

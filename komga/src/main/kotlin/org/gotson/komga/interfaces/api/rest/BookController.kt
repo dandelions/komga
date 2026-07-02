@@ -99,6 +99,7 @@ import org.springframework.web.server.ResponseStatusException
 import java.nio.file.NoSuchFileException
 import java.time.LocalDate
 import java.time.ZoneOffset
+import kotlin.math.roundToInt
 
 private val logger = KotlinLogging.logger {}
 
@@ -513,6 +514,8 @@ class BookController(
     zeroBasedIndex: Boolean,
     @RequestParam(value = "targetWidth", defaultValue = "0")
     targetWidth: Int,
+    @RequestParam(value = "rotation", defaultValue = "0")
+    rotation: Int,
     @RequestParam(value = "autoCropBorder", defaultValue = "true")
     autoCropBorder: Boolean,
     @RequestParam(value = "textScale", defaultValue = "40")
@@ -583,6 +586,7 @@ class BookController(
               marginBottom = marginBottom,
               marginLeft = marginLeft,
               darkDisplay = darkDisplay,
+              rotation = normalizePdfReflowRotation(rotation),
             ),
             cropRegions = parsePdfReflowRegions(cropRegions),
           )
@@ -633,6 +637,8 @@ class BookController(
     preparedRegions: Boolean,
     @RequestParam(value = "targetWidth", defaultValue = "0")
     targetWidth: Int,
+    @RequestParam(value = "rotation", defaultValue = "0")
+    rotation: Int,
     @RequestParam(value = "autoCropBorder", defaultValue = "true")
     autoCropBorder: Boolean,
     @RequestParam(value = "textScale", defaultValue = "40")
@@ -702,6 +708,7 @@ class BookController(
                 marginBottom = marginBottom,
                 marginLeft = marginLeft,
                 darkDisplay = darkDisplay,
+                rotation = normalizePdfReflowRotation(rotation),
               ),
             sourceImageBytes = sourceImageBytes,
             sourceWidth = sourceWidth,
@@ -1029,3 +1036,15 @@ internal fun parsePdfReflowRegionParameters(cropRegions: List<String>?): List<Pd
         )
       }
     }.orEmpty()
+
+internal fun normalizePdfReflowRotation(rotation: Int): Int {
+  val normalized = ((rotation / 90.0).roundToInt() * 90).floorMod(360)
+  return when (normalized) {
+    90 -> 90
+    180 -> 180
+    270 -> -90
+    else -> 0
+  }
+}
+
+private fun Int.floorMod(modulus: Int): Int = ((this % modulus) + modulus) % modulus

@@ -217,6 +217,7 @@
           ref="k2ReflowedPage"
           :page="currentPage"
           :target-width="reflowTargetWidth"
+          :rotation="readerRotation"
           :start-at-end="k2ReflowStartAtEnd"
           :crop-rois-by-parity="reflowSettings.cropRoisByParity"
           :settings="reflowSettings.k2Settings"
@@ -227,6 +228,7 @@
           @crop-mode-change="setReflowCropMode"
           @crop-rois-change="setReflowCropRois"
           @settings-change="setK2ReflowSettings"
+          @rotation-change="setReaderRotation"
           @show-pdf-toc="openPdfToc"
           @toggle-night-display="toggleNightDisplay"
           @back-to-book="closeBook"
@@ -258,6 +260,7 @@
           ref="reflowedPage"
           :page="currentPage"
           :target-width="reflowTargetWidth"
+          :rotation="readerRotation"
           :options="reflowOptions"
           :cached-items="cachedReflowItems(currentPage)"
           :cached-page-background="cachedReflowBackground(currentPage)"
@@ -278,6 +281,7 @@
           @contrast-enhancement-change="setReflowContrastEnhancement"
           @match-background-change="setReflowMatchBackground"
           @block-spacing-change="setReflowBlockSpacing"
+          @rotation-change="setReaderRotation"
           @crop-mode-change="setReflowCropMode"
           @crop-rois-change="setReflowCropRois"
           @start-reflow="startReflowMode"
@@ -295,6 +299,7 @@
           class="reflow-prefetch"
           :page="prefetchReflowPage"
           :target-width="reflowTargetWidth"
+          :rotation="readerRotation"
           :options="reflowOptions"
           :cached-items="cachedReflowItems(prefetchReflowPage)"
           :cached-page-background="cachedReflowBackground(prefetchReflowPage)"
@@ -334,6 +339,7 @@
           :sidePadding="sidePadding"
           :page-margin="pageMargin"
           :image-filter="normalReaderImageFilter"
+          :rotation="readerRotation"
           :skew-correction="readerSkewCorrection"
           :contrast-enhancement="readerContrastEnhancement"
           :crop-regions-by-parity="readerCropRegionsByParity"
@@ -357,6 +363,7 @@
         :swipe="readerSwipeEnabled"
         :left-navigation-action="pagedLeftNavigationAction"
         :image-filter="normalReaderImageFilter"
+        :rotation="readerRotation"
         :skew-correction="readerSkewCorrection"
         :contrast-enhancement="readerContrastEnhancement"
         :crop-regions-by-parity="readerCropRegionsByParity"
@@ -521,6 +528,23 @@
             </v-list-item>
             <v-list-item v-if="!activeReflowMode">
               <settings-switch v-model="readerContrastEnhancement" label="文字/背景增强"/>
+            </v-list-item>
+            <v-list-item v-if="isPdf">
+              <div class="reader-rotation-setting">
+                <span class="mr-2 text-caption">旋转</span>
+                <v-btn small class="mr-1" :color="readerRotation === -90 ? 'primary' : undefined" @click="setReaderRotation(-90)">
+                  -90°
+                </v-btn>
+                <v-btn small class="mr-1" :color="readerRotation === 0 ? 'primary' : undefined" @click="setReaderRotation(0)">
+                  0°
+                </v-btn>
+                <v-btn small class="mr-1" :color="readerRotation === 90 ? 'primary' : undefined" @click="setReaderRotation(90)">
+                  +90°
+                </v-btn>
+                <v-btn small :color="readerRotation === 180 ? 'primary' : undefined" @click="setReaderRotation(180)">
+                  180°
+                </v-btn>
+              </div>
             </v-list-item>
             <v-list-item v-if="!activeReflowMode">
               <v-slider
@@ -917,6 +941,7 @@ function defaultReflowSettings(): any {
 function defaultReaderImageSettings(): any {
   return {
     strokeStrength: 0,
+    rotation: 0,
     skewCorrection: 0,
     contrastEnhancement: false,
     cropRegionsByParity: defaultCropRegionsByParity(false),
@@ -999,6 +1024,7 @@ export default Vue.extend({
         readingDirection: ReadingDirection.LEFT_TO_RIGHT,
         backgroundColor: 'black',
         strokeStrength: 0,
+        rotation: 0,
         skewCorrection: 0,
         contrastEnhancement: false,
         cropRegionsByParity: defaultCropRegionsByParity(false),
@@ -1291,6 +1317,7 @@ export default Vue.extend({
         bookId: this.bookId,
         width: this.reflowTargetWidth,
         processingMode: this.reflowSettings.processingMode,
+        rotation: this.readerRotation,
         autoCropBorder: this.reflowSettings.autoCropBorder,
         textScale: this.reflowSettings.textScale,
         columnCount: this.reflowSettings.columnCount,
@@ -1401,6 +1428,22 @@ export default Vue.extend({
         if (changed) this.revokeReaderDeskewedPageUrls()
       },
     },
+    readerRotation: {
+      get: function (): number {
+        return this.normalizedReaderRotation(this.settings.rotation)
+      },
+      set: function (rotation: number): void {
+        const normalized = this.normalizedReaderRotation(rotation)
+        const changed = this.normalizedReaderRotation(this.settings.rotation) !== normalized
+        this.settings.rotation = normalized
+        this.saveReaderImageSettings()
+        if (changed) this.readerRotationChanged()
+      },
+    },
+    readerRotationLabel(): string {
+      const rotation = this.readerRotation
+      return rotation > 0 ? `+${rotation}°` : `${rotation}°`
+    },
     readerSkewCorrection: {
       get: function (): number {
         return this.settings.skewCorrection
@@ -1499,6 +1542,26 @@ export default Vue.extend({
     emptyReaderCropRegionsByParity(enabled: boolean = false): any {
       return defaultCropRegionsByParity(enabled)
     },
+    normalizedReaderRotation(value: any): number {
+      const numberValue = Number(value)
+      if (!Number.isFinite(numberValue)) return 0
+      const rounded = Math.round(numberValue / 90) * 90
+      const normalized = ((rounded % 360) + 360) % 360
+      if (normalized === 90) return 90
+      if (normalized === 180) return 180
+      if (normalized === 270) return -90
+      return 0
+    },
+    setReaderRotation(rotation: number) {
+      this.readerRotation = rotation
+    },
+    readerRotationChanged() {
+      this.revokeReaderDeskewedPageUrls()
+      this.revokeReaderCropImageUrl()
+      this.reflowCache = {}
+      this.clearReflowPrefetch()
+      if (this.readerCropMode) this.$nextTick(this.prepareReaderCropImage)
+    },
     readerImageSettingsStorageKey(bookId: string = this.readerImageSettingsBookId || this.bookId): string {
       return `${READER_IMAGE_SETTINGS_STORAGE_PREFIX}${bookId}`
     },
@@ -1524,13 +1587,15 @@ export default Vue.extend({
     },
     applyReaderImageSettings(settings: Record<string, any>) {
       const normalized = this.normalizedReaderImageSettings(settings)
+      const previousRotation = this.normalizedReaderRotation(this.settings.rotation)
       const previousSkew = this.settings.skewCorrection
       const previousContrastEnhancement = this.settings.contrastEnhancement
       this.settings.strokeStrength = normalized.strokeStrength
+      this.settings.rotation = normalized.rotation
       this.settings.skewCorrection = normalized.skewCorrection
       this.settings.contrastEnhancement = normalized.contrastEnhancement
       this.$set(this.settings, 'cropRegionsByParity', normalized.cropRegionsByParity)
-      if (previousSkew !== normalized.skewCorrection || previousContrastEnhancement !== normalized.contrastEnhancement) this.revokeReaderDeskewedPageUrls()
+      if (previousRotation !== normalized.rotation || previousSkew !== normalized.skewCorrection || previousContrastEnhancement !== normalized.contrastEnhancement) this.revokeReaderDeskewedPageUrls()
       this.readerCropMode = false
       this.readerCropDraft = undefined
       this.readerCropDrawing = false
@@ -1541,6 +1606,7 @@ export default Vue.extend({
       settings = settings || {}
       return {
         strokeStrength: Math.round(Math.max(0, Math.min(3, Number(settings.strokeStrength) || 0)) * 10) / 10,
+        rotation: this.normalizedReaderRotation(settings.rotation),
         skewCorrection: this.normalizedReaderSkewCorrection(settings.skewCorrection),
         contrastEnhancement: settings.contrastEnhancement === true,
         cropRegionsByParity: this.normalizedReaderCropRegionsByParity(settings.cropRegionsByParity),
@@ -1758,8 +1824,9 @@ export default Vue.extend({
     async prepareReaderCropImage() {
       const requestId = this.readerCropImageRequestId + 1
       this.readerCropImageRequestId = requestId
+      const rotation = this.readerRotation
       const angle = this.readerSkewCorrection || 0
-      if (!angle || !this.currentPage?.url) {
+      if ((!rotation && !angle) || !this.currentPage?.url) {
         this.revokeReaderCropImageUrl()
         return
       }
@@ -1767,9 +1834,9 @@ export default Vue.extend({
       try {
         const image = await this.loadReaderCropImage(this.currentPage.url)
         if (requestId !== this.readerCropImageRequestId) return
-        const canvas = this.skewCorrectedReaderCropCanvas(image, angle)
+        const canvas = this.processedReaderCropCanvas(image, rotation, angle)
         const url = await this.readerCropCanvasObjectUrl(canvas)
-        if (requestId === this.readerCropImageRequestId && this.readerSkewCorrection === angle) {
+        if (requestId === this.readerCropImageRequestId && this.readerRotation === rotation && this.readerSkewCorrection === angle) {
           const previousUrl = this.readerCropImageUrl
           this.readerCropImageUrl = url
           if (previousUrl && previousUrl !== url) URL.revokeObjectURL(previousUrl)
@@ -1791,7 +1858,11 @@ export default Vue.extend({
         image.src = url
       })
     },
-    skewCorrectedReaderCropCanvas(image: HTMLImageElement, degrees: number): HTMLCanvasElement {
+    processedReaderCropCanvas(image: HTMLImageElement, rotation: number, skewCorrection: number): HTMLCanvasElement {
+      const rotatedCanvas = rotation ? this.rotatedReaderImageCanvas(image, rotation) : this.sourceReaderImageCanvas(image)
+      return skewCorrection ? this.skewCorrectedReaderCropCanvas(rotatedCanvas, skewCorrection) : rotatedCanvas
+    },
+    sourceReaderImageCanvas(image: HTMLImageElement): HTMLCanvasElement {
       const canvas = document.createElement('canvas')
       canvas.width = image.naturalWidth
       canvas.height = image.naturalHeight
@@ -1799,9 +1870,35 @@ export default Vue.extend({
       if (!context) return canvas
       context.fillStyle = '#fff'
       context.fillRect(0, 0, canvas.width, canvas.height)
+      context.drawImage(image, 0, 0)
+      return canvas
+    },
+    rotatedReaderImageCanvas(image: HTMLImageElement, degrees: number): HTMLCanvasElement {
+      const rotation = this.normalizedReaderRotation(degrees)
+      const quarterTurn = Math.abs(rotation) === 90
+      const canvas = document.createElement('canvas')
+      canvas.width = quarterTurn ? image.naturalHeight : image.naturalWidth
+      canvas.height = quarterTurn ? image.naturalWidth : image.naturalHeight
+      const context = canvas.getContext('2d')
+      if (!context) return canvas
+      context.fillStyle = '#fff'
+      context.fillRect(0, 0, canvas.width, canvas.height)
+      context.translate(canvas.width / 2, canvas.height / 2)
+      context.rotate(rotation * Math.PI / 180)
+      context.drawImage(image, -image.naturalWidth / 2, -image.naturalHeight / 2)
+      return canvas
+    },
+    skewCorrectedReaderCropCanvas(sourceCanvas: HTMLCanvasElement, degrees: number): HTMLCanvasElement {
+      const canvas = document.createElement('canvas')
+      canvas.width = sourceCanvas.width
+      canvas.height = sourceCanvas.height
+      const context = canvas.getContext('2d')
+      if (!context) return canvas
+      context.fillStyle = '#fff'
+      context.fillRect(0, 0, canvas.width, canvas.height)
       context.translate(canvas.width / 2, canvas.height / 2)
       context.rotate(degrees * Math.PI / 180)
-      context.drawImage(image, -image.naturalWidth / 2, -image.naturalHeight / 2)
+      context.drawImage(sourceCanvas, -sourceCanvas.width / 2, -sourceCanvas.height / 2)
       return canvas
     },
     readerCropCanvasObjectUrl(canvas: HTMLCanvasElement): Promise<string> {
@@ -2828,6 +2925,13 @@ export default Vue.extend({
   color: #fff;
   font-size: 13px;
   font-weight: 600;
+}
+
+.reader-rotation-setting {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 
 .reader-crop-skew-control {
