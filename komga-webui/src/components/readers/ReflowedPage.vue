@@ -441,15 +441,6 @@ type ServerReflowResponse = {
   items: ReflowItem[],
 }
 
-type ServerReflowUpload = {
-  formData: FormData,
-  sourceWidth: number,
-  sourceHeight: number,
-  originalImageBytes: number,
-  uploadedImageBytes: number,
-  preparedRegions: boolean,
-}
-
 type ReflowRegionSource = {
   canvas: HTMLCanvasElement,
   detectionRoi?: Roi,
@@ -485,10 +476,6 @@ const DETECTION_FULL_RES_MAX_PIXELS = 6000000
 const DETECTION_MAX_SIDE = 2800
 const DETECTION_MAX_PIXELS = 5000000
 const DETECTION_MIN_SCALE = 0.4
-const SERVER_REFLOW_UPLOAD_MAX_BYTES = 8 * 1024 * 1024
-const SERVER_REFLOW_UPLOAD_MAX_PIXELS = 8000000
-const SERVER_REFLOW_UPLOAD_MIN_SCALE = 0.35
-const SERVER_REFLOW_UPLOAD_QUALITIES = [0.86, 0.72, 0.58]
 
 export default Vue.extend({
   name: 'ReflowedPage',
@@ -712,7 +699,7 @@ export default Vue.extend({
     transferStatsLabel(): string {
       if (!this.transferStats) return ''
       const processing = this.transferStats.processingTimeMs !== undefined ? ` / ${Math.round(this.transferStats.processingTimeMs)}ms` : ''
-      return `原图 ${this.formatBytes(this.transferStats.originalImageBytes)} / 传输 ${this.formatBytes(this.transferStats.transferBytes)}${processing}`
+      return `源页 ${this.formatBytes(this.transferStats.originalImageBytes)} / 交互 ${this.formatBytes(this.transferStats.transferBytes)}${processing}`
     },
     activeRoi(): Roi | undefined {
       return this.draftRoi || this.cropRoi
@@ -948,18 +935,15 @@ export default Vue.extend({
     async runServerReflow(requestId: number, detectionKey: string) {
       if (!this.serverReflowUrl) throw new Error('Server reflow URL is unavailable')
 
-      const upload = await this.prepareServerReflowUpload(requestId)
-      if (requestId !== this.requestId) return
+      const requestUrl = this.serverReflowRequestUrl()
 
-      const response = await fetch(this.serverReflowRequestUrl(upload), {
-        method: 'POST',
+      const response = await fetch(requestUrl, {
+        method: 'GET',
         credentials: 'include',
         headers: {
           Accept: 'application/json',
         },
-        body: upload.formData,
       })
-      if (response.status === 413) throw new Error('服务端重排上传图片过大，请缩小截取区域或降低页面分辨率')
       if (!response.ok) throw new Error(`Unable to reflow page on server: ${response.status}`)
       const text = await response.text()
       const payload = JSON.parse(text) as ServerReflowResponse
@@ -970,52 +954,15 @@ export default Vue.extend({
       this.reflowItems = Array.isArray(payload.items) ? payload.items : []
       const responseBytes = this.utf8ByteLength(text)
       this.transferStats = {
-        originalImageBytes: upload.originalImageBytes || Number(payload.originalImageBytes) || 0,
-        transferBytes: (upload.originalImageBytes || 0) + upload.uploadedImageBytes + responseBytes,
+        originalImageBytes: Number(payload.originalImageBytes) || 0,
+        transferBytes: this.utf8ByteLength(requestUrl) + responseBytes,
         processingTimeMs: Number(payload.processingTimeMs) || 0,
       }
       this.repaginate()
       this.lastDetectionKey = detectionKey
       this.emitReflowed()
     },
-    async prepareServerReflowUpload(requestId: number): Promise<ServerReflowUpload> {
-      const image = await this.loadPageImage(this.page.url, requestId)
-      if (requestId !== this.requestId) throw new Error('Reflow request was superseded')
-
-      this.imageSize = {w: image.naturalWidth, h: image.naturalHeight}
-      const canvas = document.createElement('canvas')
-      canvas.width = image.naturalWidth
-      canvas.height = image.naturalHeight
-      const context = this.canvasContext(canvas, true)
-      if (!context) throw new Error('Canvas is unavailable')
-      context.drawImage(image, 0, 0)
-      this.pageBackground = this.detectPageBackground(context, canvas.width, canvas.height)
-      this.enhanceSourceCanvas(context, canvas.width, canvas.height)
-
-      const deskewedCanvas = this.skewCorrection === 0 ? canvas : this.skewCorrectedCanvas(canvas, this.skewCorrection)
-      const cropRois = this.uploadReflowCropRois()
-      const preparedRegions = cropRois.some(roi => !!roi)
-      const formData = new FormData()
-      let uploadedImageBytes = 0
-
-      for (let index = 0; index < cropRois.length; index++) {
-        if (requestId !== this.requestId) throw new Error('Reflow request was superseded')
-        const regionSource = this.reflowRegionSource(deskewedCanvas, cropRois[index])
-        const blob = await this.serverReflowUploadBlob(regionSource.canvas)
-        uploadedImageBytes += blob.size
-        formData.append('images', blob, `page-${this.page.number}-region-${index + 1}.jpg`)
-      }
-
-      return {
-        formData,
-        sourceWidth: image.naturalWidth,
-        sourceHeight: image.naturalHeight,
-        originalImageBytes: this.objectUrlBytes || 0,
-        uploadedImageBytes,
-        preparedRegions,
-      }
-    },
-    serverReflowRequestUrl(upload?: ServerReflowUpload): string {
+    serverReflowRequestUrl(): string {
       const params = new URLSearchParams()
       params.set('targetWidth', String(Math.round(this.targetWidth || 0)))
       params.set('autoCropBorder', String(this.options.autoCropBorder !== false))
@@ -1036,13 +983,9 @@ export default Vue.extend({
       params.set('marginBottom', String(this.clampPercent(this.options.marginBottom)))
       params.set('marginLeft', String(this.clampPercent(this.options.marginLeft)))
       params.set('darkDisplay', String(this.darkDisplay))
-      if (upload) {
-        params.set('sourceImageBytes', String(upload.originalImageBytes || 0))
-        params.set('sourceWidth', String(upload.sourceWidth || 0))
-        params.set('sourceHeight', String(upload.sourceHeight || 0))
-        params.set('pageBackground', this.pageBackground || '')
-        params.set('preparedRegions', String(upload.preparedRegions))
-      }
+      this.reflowCropRois()
+        .filter((roi): roi is Roi => !!roi)
+        .forEach(roi => params.append('cropRegion', `${Math.round(roi.x)},${Math.round(roi.y)},${Math.round(roi.w)},${Math.round(roi.h)}`))
 
       const separator = this.serverReflowUrl.includes('?') ? '&' : '?'
       return `${this.serverReflowUrl}${separator}${params.toString()}`
@@ -1050,7 +993,7 @@ export default Vue.extend({
     localTransferStats(): ReflowTransferStats {
       return {
         originalImageBytes: this.objectUrlBytes || 0,
-        transferBytes: this.objectUrlBytes || 0,
+        transferBytes: 0,
       }
     },
     utf8ByteLength(value: string): number {
@@ -1757,56 +1700,6 @@ export default Vue.extend({
         }, type, quality)
       })
     },
-    async serverReflowUploadBlob(canvas: HTMLCanvasElement): Promise<Blob> {
-      const uploadCanvas = this.serverReflowUploadCanvas(canvas)
-      let bestBlob = await this.canvasBlob(uploadCanvas, 'image/jpeg', SERVER_REFLOW_UPLOAD_QUALITIES[0])
-      if (bestBlob.size <= SERVER_REFLOW_UPLOAD_MAX_BYTES) return bestBlob
-
-      for (const quality of SERVER_REFLOW_UPLOAD_QUALITIES.slice(1)) {
-        const blob = await this.canvasBlob(uploadCanvas, 'image/jpeg', quality)
-        if (blob.size < bestBlob.size) bestBlob = blob
-        if (blob.size <= SERVER_REFLOW_UPLOAD_MAX_BYTES) return blob
-      }
-
-      const scale = this.serverReflowUploadScale(uploadCanvas, bestBlob.size)
-      if (scale >= 0.99) return bestBlob
-
-      const scaledCanvas = this.scaledServerReflowUploadCanvas(uploadCanvas, scale)
-      for (const quality of SERVER_REFLOW_UPLOAD_QUALITIES) {
-        const blob = await this.canvasBlob(scaledCanvas, 'image/jpeg', quality)
-        if (blob.size < bestBlob.size) bestBlob = blob
-        if (blob.size <= SERVER_REFLOW_UPLOAD_MAX_BYTES) return blob
-      }
-
-      return bestBlob
-    },
-    serverReflowUploadCanvas(canvas: HTMLCanvasElement): HTMLCanvasElement {
-      const uploadCanvas = document.createElement('canvas')
-      uploadCanvas.width = canvas.width
-      uploadCanvas.height = canvas.height
-      const context = this.canvasContext(uploadCanvas, true)
-      if (!context) return canvas
-      context.fillStyle = this.pageBackground || '#fff'
-      context.fillRect(0, 0, uploadCanvas.width, uploadCanvas.height)
-      context.drawImage(canvas, 0, 0)
-      return uploadCanvas
-    },
-    serverReflowUploadScale(canvas: HTMLCanvasElement, blobSize: number): number {
-      const pixelScale = Math.sqrt(SERVER_REFLOW_UPLOAD_MAX_PIXELS / Math.max(1, canvas.width * canvas.height))
-      const byteScale = Math.sqrt(SERVER_REFLOW_UPLOAD_MAX_BYTES / Math.max(1, blobSize))
-      return Math.max(SERVER_REFLOW_UPLOAD_MIN_SCALE, Math.min(1, pixelScale, byteScale))
-    },
-    scaledServerReflowUploadCanvas(canvas: HTMLCanvasElement, scale: number): HTMLCanvasElement {
-      const scaledCanvas = document.createElement('canvas')
-      scaledCanvas.width = Math.max(1, Math.round(canvas.width * scale))
-      scaledCanvas.height = Math.max(1, Math.round(canvas.height * scale))
-      const context = this.canvasContext(scaledCanvas, true)
-      if (!context) return canvas
-      context.imageSmoothingEnabled = true
-      context.imageSmoothingQuality = 'high'
-      context.drawImage(canvas, 0, 0, scaledCanvas.width, scaledCanvas.height)
-      return scaledCanvas
-    },
     reflowRegionSource(sourceCanvas: HTMLCanvasElement, cropRoi?: Roi): ReflowRegionSource {
       if (!cropRoi) return {canvas: sourceCanvas}
 
@@ -2247,10 +2140,6 @@ export default Vue.extend({
       return roi
     },
     reflowCropRois(): Array<Roi | undefined> {
-      const rois = this.currentReflowCropRois(this.pageParity).filter((roi): roi is Roi => !!roi)
-      return rois.length > 0 ? rois : [undefined]
-    },
-    uploadReflowCropRois(): Array<Roi | undefined> {
       const rois = this.currentReflowCropRois(this.pageParity).filter((roi): roi is Roi => !!roi)
       return rois.length > 0 ? rois : [undefined]
     },

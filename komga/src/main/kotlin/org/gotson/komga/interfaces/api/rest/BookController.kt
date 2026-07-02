@@ -36,6 +36,7 @@ import org.gotson.komga.domain.service.BookAnalyzer
 import org.gotson.komga.domain.service.BookLifecycle
 import org.gotson.komga.domain.service.PdfPageReflowDto
 import org.gotson.komga.domain.service.PdfPageReflowOptions
+import org.gotson.komga.domain.service.PdfPageReflowRegion
 import org.gotson.komga.domain.service.PdfPageReflowService
 import org.gotson.komga.infrastructure.image.ImageAnalyzer
 import org.gotson.komga.infrastructure.jooq.UnpagedSorted
@@ -548,6 +549,8 @@ class BookController(
     marginLeft: Double,
     @RequestParam(value = "darkDisplay", defaultValue = "false")
     darkDisplay: Boolean,
+    @RequestParam(value = "cropRegion", required = false)
+    cropRegions: List<String>?,
   ): ResponseEntity<ByteArray> =
     bookRepository.findByIdOrNull(bookId)?.let { book ->
       val media = mediaRepository.findById(book.id)
@@ -581,6 +584,7 @@ class BookController(
               marginLeft = marginLeft,
               darkDisplay = darkDisplay,
             ),
+            cropRegions = parsePdfReflowRegions(cropRegions),
           )
         val body = serverReflowResponseBytes(response)
 
@@ -718,6 +722,22 @@ class BookController(
         throw ResponseStatusException(HttpStatus.BAD_REQUEST, ex.message)
       }
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+
+  private fun parsePdfReflowRegions(cropRegions: List<String>?): List<PdfPageReflowRegion> =
+    cropRegions
+      ?.mapNotNull { region ->
+        val values = region.split(",").mapNotNull { it.trim().toIntOrNull() }
+        if (values.size != 4 || values[2] <= 1 || values[3] <= 1) {
+          null
+        } else {
+          PdfPageReflowRegion(
+            x = values[0],
+            y = values[1],
+            w = values[2],
+            h = values[3],
+          )
+        }
+      }.orEmpty()
 
   private fun serverReflowResponseBytes(response: PdfPageReflowDto): ByteArray {
     val firstPass = objectMapper.writeValueAsBytes(response)
