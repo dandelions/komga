@@ -843,10 +843,18 @@ class PdfPageReflowService(
     ink: ByteArray,
     options: PdfPageReflowOptions,
   ): Boolean {
-    val gap = right.x - (left.x + left.w)
+    val rawGap = right.x - (left.x + left.w)
+    val gap = max(0, rawGap)
     val wordGap = clamp(options.wordGap, 1, 30)
-    val maxInternalGap = max(3.0, min(glyphHeight * 0.5, wordGap * 4.0))
-    if (gap < 0 || gap > maxInternalGap) return false
+    val baseInternalGap = max(3.0, min(glyphHeight * 0.5, wordGap * 4.0))
+    val highResolutionInternalGap =
+      if (glyphHeight >= 36) {
+        max(baseInternalGap, min(glyphHeight * 0.4, max(30.0, wordGap * 8.0)))
+      } else {
+        baseInternalGap
+      }
+    val maxInternalGap = min(glyphHeight * 0.5, highResolutionInternalGap)
+    if (rawGap > maxInternalGap) return false
 
     val union = unionRoi(left, right)
     val overlap = verticalOverlap(left, right)
@@ -869,7 +877,8 @@ class PdfPageReflowService(
     val strictGapLimit = max(3.0, min(glyphHeight * 0.24, wordGap * 2.2))
     val narrowStrokeGapLimit = max(strictGapLimit, min(glyphHeight * 0.55, wordGap * 4.0))
     if (gap <= strictGapLimit || (hasNarrowVerticalStroke && gap <= narrowStrokeGapLimit)) return true
-    return horizontalFragmentSidesHaveInk(left, right, line, glyphHeight, image, ink)
+    val compactSingleGlyph = hasSmallFragment && union.w <= glyphHeight * 1.28
+    return compactSingleGlyph && horizontalFragmentSidesHaveInk(left, right, line, glyphHeight, image, ink)
   }
 
   private fun isNarrowHorizontalVerticalStroke(
@@ -1217,9 +1226,18 @@ class PdfPageReflowService(
     ink: ByteArray,
     options: PdfPageReflowOptions,
   ): Boolean {
-    val gap = bottom.y - (top.y + top.h)
-    val maxInternalGap = max(3.0, min(charHeight * 0.5, clamp(options.wordGap, 1, 30) * 4.0))
-    if (gap < 0 || gap > maxInternalGap) return false
+    val rawGap = bottom.y - (top.y + top.h)
+    val gap = max(0, rawGap)
+    val wordGap = clamp(options.wordGap, 1, 30)
+    val baseInternalGap = max(3.0, min(charHeight * 0.5, wordGap * 4.0))
+    val highResolutionInternalGap =
+      if (charHeight >= 36) {
+        max(baseInternalGap, min(charHeight * 0.4, max(30.0, wordGap * 8.0)))
+      } else {
+        baseInternalGap
+      }
+    val maxInternalGap = min(charHeight * 0.5, highResolutionInternalGap)
+    if (rawGap > maxInternalGap) return false
 
     val union = unionRoi(top, bottom)
     val hasSmallFragment = top.h < charHeight * 0.58 || bottom.h < charHeight * 0.58 || top.w < medianWidth * 0.72 || bottom.w < medianWidth * 0.72
@@ -1234,9 +1252,10 @@ class PdfPageReflowService(
     val aligned = overlap >= minWidth * 0.2 || centerGap <= medianWidth * 0.68 || hasSmallFragment
     if (!aligned) return false
 
-    val strictGapLimit = max(3.0, min(charHeight * 0.28, clamp(options.wordGap, 1, 30) * 2.6))
+    val strictGapLimit = max(3.0, min(charHeight * 0.28, wordGap * 2.6))
     if (gap <= strictGapLimit) return true
-    return verticalFragmentSidesHaveInk(top, bottom, charHeight, image, ink)
+    val compactSingleGlyph = hasSmallFragment && union.h <= charHeight * 1.35
+    return compactSingleGlyph && verticalFragmentSidesHaveInk(top, bottom, charHeight, image, ink)
   }
 
   private fun verticalFragmentSidesHaveInk(

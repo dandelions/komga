@@ -2586,9 +2586,15 @@ export default Vue.extend({
       medianWidth: number,
       isInk: (x: number, y: number) => boolean,
     ): boolean {
-      const gap = bottom.y - (top.y + top.h)
-      const maxInternalGap = Math.max(3, Math.min(charHeight * 0.5, this.clampNumber(this.options.wordGap, 1, 30, WORD_GAP) * 4))
-      if (gap < 0 || gap > maxInternalGap) return false
+      const rawGap = bottom.y - (top.y + top.h)
+      const gap = Math.max(0, rawGap)
+      const wordGap = this.clampNumber(this.options.wordGap, 1, 30, WORD_GAP)
+      const baseInternalGap = Math.max(3, Math.min(charHeight * 0.5, wordGap * 4))
+      const highResolutionInternalGap = charHeight >= 36
+        ? Math.max(baseInternalGap, Math.min(charHeight * 0.4, Math.max(30, wordGap * 8)))
+        : baseInternalGap
+      const maxInternalGap = Math.min(charHeight * 0.5, highResolutionInternalGap)
+      if (rawGap > maxInternalGap) return false
 
       const union = this.unionWordBlocks(top, bottom)
       const hasSmallFragment = top.h < charHeight * 0.58 || bottom.h < charHeight * 0.58 || top.w < medianWidth * 0.72 || bottom.w < medianWidth * 0.72
@@ -2603,9 +2609,10 @@ export default Vue.extend({
       const aligned = overlap >= minWidth * 0.2 || centerGap <= medianWidth * 0.68 || hasSmallFragment
       if (!aligned) return false
 
-      const strictGapLimit = Math.max(3, Math.min(charHeight * 0.28, this.clampNumber(this.options.wordGap, 1, 30, WORD_GAP) * 2.6))
+      const strictGapLimit = Math.max(3, Math.min(charHeight * 0.28, wordGap * 2.6))
       if (gap <= strictGapLimit) return true
-      return this.verticalFragmentSidesHaveInk(top, bottom, charHeight, isInk)
+      const compactSingleGlyph = hasSmallFragment && union.h <= charHeight * 1.35
+      return compactSingleGlyph && this.verticalFragmentSidesHaveInk(top, bottom, charHeight, isInk)
     },
     verticalFragmentSidesHaveInk(
       top: WordBlock,
@@ -3011,9 +3018,15 @@ export default Vue.extend({
       lineBounds: {top: number, bottom: number},
       isInk?: (x: number, y: number) => boolean,
     ): boolean {
-      const gap = right.x - (left.x + left.w)
-      const maxInternalGap = Math.max(3, Math.min(glyphHeight * 0.5, this.clampNumber(this.options.wordGap, 1, 30, WORD_GAP) * 4))
-      if (gap < 0 || gap > maxInternalGap) return false
+      const rawGap = right.x - (left.x + left.w)
+      const gap = Math.max(0, rawGap)
+      const wordGap = this.clampNumber(this.options.wordGap, 1, 30, WORD_GAP)
+      const baseInternalGap = Math.max(3, Math.min(glyphHeight * 0.5, wordGap * 4))
+      const highResolutionInternalGap = glyphHeight >= 36
+        ? Math.max(baseInternalGap, Math.min(glyphHeight * 0.4, Math.max(30, wordGap * 8)))
+        : baseInternalGap
+      const maxInternalGap = Math.min(glyphHeight * 0.5, highResolutionInternalGap)
+      if (rawGap > maxInternalGap) return false
 
       const union = this.unionWordBlocks(left, right)
 
@@ -3030,10 +3043,11 @@ export default Vue.extend({
       const aligned = overlap >= minHeight * 0.2 || centerGap <= glyphHeight * 0.56 || hasSmallFragment || hasNarrowVerticalStroke
       if (!aligned) return false
 
-      const strictGapLimit = Math.max(3, Math.min(glyphHeight * 0.24, this.clampNumber(this.options.wordGap, 1, 30, WORD_GAP) * 2.2))
-      const narrowStrokeGapLimit = Math.max(strictGapLimit, Math.min(glyphHeight * 0.55, this.clampNumber(this.options.wordGap, 1, 30, WORD_GAP) * 4))
+      const strictGapLimit = Math.max(3, Math.min(glyphHeight * 0.24, wordGap * 2.2))
+      const narrowStrokeGapLimit = Math.max(strictGapLimit, Math.min(glyphHeight * 0.55, wordGap * 4))
       if (!isInk || gap <= strictGapLimit || (hasNarrowVerticalStroke && gap <= narrowStrokeGapLimit)) return true
-      return this.horizontalFragmentSidesHaveInk(left, right, lineBounds, glyphHeight, isInk)
+      const compactSingleGlyph = hasSmallFragment && union.w <= glyphHeight * 1.28
+      return compactSingleGlyph && this.horizontalFragmentSidesHaveInk(left, right, lineBounds, glyphHeight, isInk)
     },
     isNarrowHorizontalVerticalStroke(block: WordBlock, glyphHeight: number): boolean {
       return block.w <= Math.max(4, glyphHeight * 0.18) && block.h >= glyphHeight * 0.42

@@ -45,6 +45,40 @@ class PdfPageReflowServiceTest {
   }
 
   @Test
+  fun `given high resolution horizontal glyph split by internal blank when reflowing page then fragments are merged`() {
+    val pageBytes = highResolutionHorizontalFragmentGlyphPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+        cropRegions = listOf(PdfPageReflowRegion(x = 30, y = 20, w = 130, h = 110)),
+      )
+
+    assertThat(response.items.filter { it.type == "word" }).hasSize(1)
+  }
+
+  @Test
+  fun `given high resolution vertical glyph split by internal blank when reflowing page then fragments are merged`() {
+    val pageBytes = highResolutionVerticalFragmentGlyphPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(verticalText = true),
+        cropRegions = listOf(PdfPageReflowRegion(x = 35, y = 20, w = 120, h = 130)),
+      )
+
+    assertThat(response.items.filter { it.type == "word" }).hasSize(1)
+  }
+
+  @Test
   fun `given same page and options when reflowing from cache then page is rendered once`() {
     val pageBytes = horizontalShortGlyphPage()
     val book = makeBook("book")
@@ -247,6 +281,44 @@ class PdfPageReflowServiceTest {
     graphics.color = Color.BLACK
     graphics.fillRect(95, 60, 10, 26)
     graphics.fillRect(120, 73, 25, 3)
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun highResolutionHorizontalFragmentGlyphPage(): ByteArray {
+    val image = BufferedImage(190, 150, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color.BLACK
+    graphics.fillRect(55, 38, 6, 74)
+    graphics.fillRect(65, 44, 12, 5)
+    graphics.fillRect(65, 70, 12, 5)
+    graphics.fillRect(65, 96, 12, 5)
+    graphics.fillRect(97, 38, 6, 74)
+    graphics.fillRect(82, 44, 15, 5)
+    graphics.fillRect(82, 70, 15, 5)
+    graphics.fillRect(82, 96, 15, 5)
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun highResolutionVerticalFragmentGlyphPage(): ByteArray {
+    val image = BufferedImage(190, 170, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color.BLACK
+    graphics.fillRect(70, 38, 52, 6)
+    graphics.fillRect(78, 50, 36, 10)
+    graphics.fillRect(70, 80, 52, 6)
+    graphics.fillRect(78, 92, 36, 10)
     graphics.dispose()
 
     val output = ByteArrayOutputStream()
