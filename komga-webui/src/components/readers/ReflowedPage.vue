@@ -35,8 +35,11 @@
         <button type="button" class="reflow-control reflow-icon-control reflow-compact-control" title="目录" aria-label="目录" @click="$emit('show-pdf-toc')">
           <v-icon small>mdi-menu</v-icon>
         </button>
-        <button type="button" class="reflow-control reflow-icon-control reflow-compact-control" title="显示/隐藏标题栏" aria-label="显示/隐藏标题栏" @click="$emit('toggle-reader-toolbar')">
-          <v-icon small>mdi-format-title</v-icon>
+        <button type="button" class="reflow-control reflow-icon-control reflow-compact-control" title="重排" aria-label="重排" @click="applyReflowSettings">
+          <v-icon small>mdi-refresh</v-icon>
+        </button>
+        <button type="button" class="reflow-control reflow-icon-control reflow-compact-control" title="退出重排" aria-label="退出重排" @click="exitReflow">
+          <v-icon small>mdi-exit-to-app</v-icon>
         </button>
         <button
           type="button"
@@ -79,15 +82,6 @@
             @click="$emit('toggle-night-display')"
           >
             <v-icon small>{{ nightDisplay ? 'mdi-white-balance-sunny' : 'mdi-weather-night' }}</v-icon>
-          </button>
-          <button
-            type="button"
-            class="reflow-control reflow-icon-control reflow-compact-control"
-            title="显示/隐藏标题栏"
-            aria-label="显示/隐藏标题栏"
-            @click="$emit('toggle-reader-toolbar')"
-          >
-            <v-icon small>mdi-format-title</v-icon>
           </button>
           <div class="reflow-navigation-controls">
             <button type="button" class="reflow-control reflow-nav-control reflow-exit-control" @click="exitReflow">
@@ -213,21 +207,21 @@
             <span class="reflow-font-value">{{ controlSkewCorrectionLabel }}</span>
           </label>
           <div class="reflow-region-controls">
+            <label class="reflow-region-count-control">
+              <span>区域数</span>
+              <select :value="cropRegionCount" @change="setCropRegionCount">
+                <option v-for="count in cropRegionCountOptions" :key="count" :value="count">{{ count }}</option>
+              </select>
+            </label>
             <button
+              v-for="region in cropRegionIndexes"
+              :key="region"
               type="button"
               class="reflow-control reflow-region-control"
-              :class="{'reflow-region-active': activeCropRegion === 0}"
-              @click="setActiveCropRegion(0)"
+              :class="{'reflow-region-active': activeCropRegion === region}"
+              @click="setActiveCropRegion(region)"
             >
-              区域 1
-            </button>
-            <button
-              type="button"
-              class="reflow-control reflow-region-control"
-              :class="{'reflow-region-active': activeCropRegion === 1}"
-              @click="setActiveCropRegion(1)"
-            >
-              区域 2
+              区域 {{ region + 1 }}
             </button>
           </div>
           <button type="button" class="reflow-control" @click="toggleCropMode">
@@ -406,6 +400,7 @@ type ReflowOptions = {
   marginBottom: number,
   marginLeft: number,
   cropRoisByParity?: Partial<Record<PageParity, Roi | null | undefined>> & {
+    regionCount?: number,
     regions?: Partial<Record<PageParity, Array<Roi | null | undefined>>>,
     explicit?: Partial<Record<PageParity, boolean>>,
     explicitRegions?: Partial<Record<PageParity, boolean[]>>,
@@ -421,7 +416,7 @@ type Roi = {
 
 type PageParity = 'odd' | 'even'
 type VerticalDirection = 'ltr' | 'rtl'
-type CropRegionIndex = 0 | 1
+type CropRegionIndex = number
 
 type Column = {
   start: number,
@@ -547,6 +542,7 @@ const WORD_GAP = 3
 const BLOCK_PADDING = 1
 const WORD_SCALE = 0.4
 const MIN_CROP_SIZE = 15
+const MAX_CROP_REGIONS = 8
 const MIN_INDENT = 8
 const REFLOW_CONTROLS_HEIGHT = 48
 const DEFAULT_REFLOW_IMAGE_QUALITY = 80
@@ -649,15 +645,16 @@ export default Vue.extend({
       cropMode: false,
       cropWarning: '',
       activeCropRegion: 0 as CropRegionIndex,
+      cropRegionCount: 2,
       drawingCrop: false,
       cropStart: {x: 0, y: 0},
       cropRoisByParity: {
-        odd: [undefined, undefined],
-        even: [undefined, undefined],
+        odd: Array(MAX_CROP_REGIONS).fill(undefined),
+        even: Array(MAX_CROP_REGIONS).fill(undefined),
       } as Record<PageParity, Array<Roi | undefined>>,
       explicitCropRoisByParity: {
-        odd: [false, false],
-        even: [false, false],
+        odd: Array(MAX_CROP_REGIONS).fill(false),
+        even: Array(MAX_CROP_REGIONS).fill(false),
       } as Record<PageParity, boolean[]>,
       draftRoi: undefined as Roi | undefined,
       pendingColumnCount: 1,
@@ -791,6 +788,12 @@ export default Vue.extend({
     pageParityShortLabel(): string {
       return this.pageParity === 'even' ? '偶数' : '奇数'
     },
+    cropRegionCountOptions(): number[] {
+      return Array.from({length: MAX_CROP_REGIONS}, (_, index) => index + 1)
+    },
+    cropRegionIndexes(): CropRegionIndex[] {
+      return Array.from({length: this.cropRegionCount}, (_, index) => index)
+    },
     selectAreaLabel(): string {
       return this.cropMode ? '完成' : `截取${this.pageParityShortLabel}区域${this.activeCropRegion + 1}`
     },
@@ -812,7 +815,7 @@ export default Vue.extend({
     cropRects(): CropRect[] {
       if (!this.imageSize.w || !this.imageSize.h) return []
       const rois = this.effectiveCropRois(this.pageParity)
-      return ([0, 1] as CropRegionIndex[])
+      return this.cropRegionIndexes
         .map(region => {
           const roi = region === this.activeCropRegion ? this.activeRoi : rois[region]
           if (!roi) return undefined
@@ -2307,7 +2310,7 @@ export default Vue.extend({
       return rois.length > 0 ? rois : [undefined]
     },
     currentReflowCropRois(parity: PageParity): Array<Roi | undefined> {
-      const rois = this.effectiveCropRois(parity).slice(0, 2)
+      const rois = this.effectiveCropRois(parity).slice(0, this.cropRegionCount)
       if (parity === this.pageParity && this.draftRoi && this.draftRoi.w > MIN_CROP_SIZE && this.draftRoi.h > MIN_CROP_SIZE) {
         rois[this.activeCropRegion] = this.draftRoi
       }
@@ -2332,27 +2335,33 @@ export default Vue.extend({
       const even = this.normalizedStoredRegions(rois, 'even')
       const oddExplicit = this.normalizedStoredExplicitRegions(rois, 'odd', odd)
       const evenExplicit = this.normalizedStoredExplicitRegions(rois, 'even', even)
+      this.cropRegionCount = this.normalizedCropRegionCount((rois as any).regionCount)
+      if (this.activeCropRegion >= this.cropRegionCount) this.activeCropRegion = this.cropRegionCount - 1
       this.$set(this.cropRoisByParity, 'odd', odd)
       this.$set(this.cropRoisByParity, 'even', even)
       this.$set(this.explicitCropRoisByParity, 'odd', oddExplicit)
       this.$set(this.explicitCropRoisByParity, 'even', evenExplicit)
+    },
+    normalizedCropRegionCount(value: any): number {
+      const numberValue = Number(value)
+      if (!Number.isFinite(numberValue)) return 2
+      return Math.max(1, Math.min(MAX_CROP_REGIONS, Math.round(numberValue)))
     },
     effectiveCropRoi(parity: PageParity, region: CropRegionIndex): Roi | undefined {
       if (!this.explicitCropRoisByParity[parity]?.[region]) return undefined
       return this.cropRoisByParity[parity]?.[region]
     },
     effectiveCropRois(parity: PageParity): Array<Roi | undefined> {
-      return ([0, 1] as CropRegionIndex[]).map(region => this.effectiveCropRoi(parity, region))
+      return this.cropRegionIndexes.map(region => this.effectiveCropRoi(parity, region))
     },
     normalizedStoredRegions(
       rois: Partial<Record<PageParity, Roi | null | undefined>> & {regions?: Partial<Record<PageParity, Array<Roi | null | undefined>>>},
       parity: PageParity,
     ): Array<Roi | undefined> {
       const regions = rois.regions?.[parity] || []
-      const normalized = [
-        this.normalizedStoredRoi(regions[0]) || this.normalizedStoredRoi(rois[parity]),
-        this.normalizedStoredRoi(regions[1]),
-      ]
+      const normalized = Array.from({length: MAX_CROP_REGIONS}, (_, index) =>
+        this.normalizedStoredRoi(regions[index]) || (index === 0 ? this.normalizedStoredRoi(rois[parity]) : undefined),
+      )
       return this.nonOverlappingCropRois(normalized)
     },
     normalizedStoredExplicitRegions(
@@ -2364,10 +2373,11 @@ export default Vue.extend({
       regions: Array<Roi | undefined>,
     ): boolean[] {
       const explicitRegions = rois.explicitRegions?.[parity] || []
-      return [
-        regions[0] ? (explicitRegions[0] ?? rois.explicit?.[parity]) !== false : false,
-        regions[1] ? explicitRegions[1] !== false : false,
-      ]
+      return Array.from({length: MAX_CROP_REGIONS}, (_, index) => {
+        if (!regions[index]) return false
+        if (index === 0) return (explicitRegions[0] ?? rois.explicit?.[parity]) !== false
+        return explicitRegions[index] !== false
+      })
     },
     normalizedStoredRoi(value: Roi | null | undefined): Roi | undefined {
       if (!value) return undefined
@@ -2382,6 +2392,7 @@ export default Vue.extend({
       const odd = this.payloadRegions('odd')
       const even = this.payloadRegions('even')
       return {
+        regionCount: this.cropRegionCount,
         odd: odd[0],
         even: even[0],
         regions: {
@@ -2393,20 +2404,24 @@ export default Vue.extend({
           even: this.explicitCropRoisByParity.even[0],
         },
         explicitRegions: {
-          odd: this.explicitCropRoisByParity.odd.slice(0, 2),
-          even: this.explicitCropRoisByParity.even.slice(0, 2),
+          odd: this.explicitCropRoisByParity.odd.slice(0, this.cropRegionCount),
+          even: this.explicitCropRoisByParity.even.slice(0, this.cropRegionCount),
         },
       }
     },
     payloadRegions(parity: PageParity): Array<Roi | null> {
-      return ([0, 1] as CropRegionIndex[]).map(region => {
+      return this.cropRegionIndexes.map(region => {
         const roi = this.cropRoisByParity[parity][region]
         return this.explicitCropRoisByParity[parity][region] && roi ? {...roi} : null
       })
     },
     nonOverlappingCropRois(rois: Array<Roi | undefined>): Array<Roi | undefined> {
-      const normalized = rois.slice(0, 2)
-      if (normalized[0] && normalized[1] && this.cropRegionsOverlap(normalized[0], normalized[1])) normalized[1] = undefined
+      const normalized = rois.slice(0, MAX_CROP_REGIONS)
+      normalized.forEach((roi, index) => {
+        if (!roi) return
+        const overlapsPrevious = normalized.slice(0, index).some(previous => !!previous && this.cropRegionsOverlap(previous, roi))
+        if (overlapsPrevious) normalized[index] = undefined
+      })
       return normalized
     },
     cropRegionsOverlap(a: Roi, b: Roi): boolean {
@@ -3814,7 +3829,16 @@ export default Vue.extend({
       this.controlsCollapsed = true
       this.$emit('exit-reflow')
     },
+    setCropRegionCount(event: Event) {
+      const target = event.target as HTMLSelectElement
+      const count = this.normalizedCropRegionCount(target.value)
+      this.cropRegionCount = count
+      if (this.activeCropRegion >= count) this.activeCropRegion = count - 1
+      this.cropWarning = ''
+      this.$emit('crop-rois-change', this.cropRoisPayload())
+    },
     setActiveCropRegion(region: CropRegionIndex) {
+      if (region < 0 || region >= this.cropRegionCount) return
       this.activeCropRegion = region
       this.draftRoi = undefined
       this.drawingCrop = false
@@ -3869,8 +3893,9 @@ export default Vue.extend({
       const roi = this.normalizedRoi(this.cropStart, this.cropPoint(event))
       this.draftRoi = undefined
       if (roi.w > MIN_CROP_SIZE && roi.h > MIN_CROP_SIZE) {
-        if (this.overlapsOtherCropRegion(roi)) {
-          this.cropWarning = `区域 ${this.activeCropRegion + 1} 不能与区域 ${this.activeCropRegion === 0 ? 2 : 1} 重叠`
+        const overlappingRegion = this.overlappingCropRegion(roi)
+        if (overlappingRegion !== undefined) {
+          this.cropWarning = `区域 ${this.activeCropRegion + 1} 不能与区域 ${overlappingRegion + 1} 重叠`
           event.preventDefault()
           return
         }
@@ -3913,10 +3938,12 @@ export default Vue.extend({
         height: `${roi.h / this.imageSize.h * 100}%`,
       }
     },
-    overlapsOtherCropRegion(roi: Roi): boolean {
-      const otherRegion = this.activeCropRegion === 0 ? 1 : 0
-      const otherRoi = this.effectiveCropRoi(this.pageParity, otherRegion)
-      return !!otherRoi && this.cropRegionsOverlap(roi, otherRoi)
+    overlappingCropRegion(roi: Roi): CropRegionIndex | undefined {
+      return this.cropRegionIndexes.find(region => {
+        if (region === this.activeCropRegion) return false
+        const otherRoi = this.effectiveCropRoi(this.pageParity, region)
+        return !!otherRoi && this.cropRegionsOverlap(roi, otherRoi)
+      })
     },
     setCurrentCropRoi(roi: Roi | undefined) {
       const rois = this.cropRoisByParity[this.pageParity].slice()
@@ -4204,6 +4231,28 @@ export default Vue.extend({
   gap: 4px;
 }
 
+.reflow-region-count-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #212121;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.reflow-region-count-control select {
+  min-width: 44px;
+  height: 28px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #212121;
+  padding: 3px 5px;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
 .reflow-region-control {
   padding-left: 8px;
   padding-right: 8px;
@@ -4380,6 +4429,7 @@ export default Vue.extend({
 .reflowed-page-dark .reflow-spacing-control,
 .reflowed-page-dark .reflow-skew-control,
 .reflowed-page-dark .reflow-column-control,
+.reflowed-page-dark .reflow-region-count-control,
 .reflowed-page-dark .reflow-processing-control,
 .reflowed-page-dark .reflow-parity-label,
 .reflowed-page-dark .reflow-page-indicator,
@@ -4389,6 +4439,7 @@ export default Vue.extend({
 
 .reflowed-page-dark .reflow-step-control,
 .reflowed-page-dark .reflow-column-control select,
+.reflowed-page-dark .reflow-region-count-control select,
 .reflowed-page-dark .reflow-processing-control select,
 .reflowed-page-dark .reflow-control {
   border-color: rgba(255, 255, 255, 0.22);
@@ -4406,6 +4457,7 @@ export default Vue.extend({
 }
 
 .reflowed-page-dark .reflow-column-control select:disabled,
+.reflowed-page-dark .reflow-region-count-control select:disabled,
 .reflowed-page-dark .reflow-control:disabled {
   color: #9e9e9e;
 }

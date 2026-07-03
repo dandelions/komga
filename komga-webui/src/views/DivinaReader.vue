@@ -902,23 +902,25 @@ const READER_IMAGE_SETTINGS_STORAGE_PREFIX = 'komga.readerImageSettings.'
 const REFLOW_CACHE_RADIUS = 4
 const REFLOW_PREFETCH_COUNT = 3
 const REFLOW_PREFETCH_DELAY_MS = 800
+const MAX_REFLOW_CROP_REGIONS = 8
 
 function defaultCropRegionsByParity(enabled: boolean = false): any {
   return {
     enabled,
+    regionCount: 2,
     odd: null,
     even: null,
     regions: {
-      odd: [null, null],
-      even: [null, null],
+      odd: Array(MAX_REFLOW_CROP_REGIONS).fill(null),
+      even: Array(MAX_REFLOW_CROP_REGIONS).fill(null),
     },
     explicit: {
       odd: false,
       even: false,
     },
     explicitRegions: {
-      odd: [false, false],
-      even: [false, false],
+      odd: Array(MAX_REFLOW_CROP_REGIONS).fill(false),
+      even: Array(MAX_REFLOW_CROP_REGIONS).fill(false),
     },
   }
 }
@@ -2402,11 +2404,13 @@ export default Vue.extend({
       }
     },
     normalizedReflowCropRois(cropRoisByParity: any): Record<string, any> {
+      const regionCount = this.normalizedReflowCropRegionCount(cropRoisByParity?.regionCount)
       const odd = this.normalizedReflowCropRegionRois(cropRoisByParity, 'odd')
       const even = this.normalizedReflowCropRegionRois(cropRoisByParity, 'even')
       const oddExplicit = this.normalizedReflowCropRegionExplicit(cropRoisByParity, 'odd', odd)
       const evenExplicit = this.normalizedReflowCropRegionExplicit(cropRoisByParity, 'even', even)
       return {
+        regionCount,
         odd: odd[0],
         even: even[0],
         regions: {
@@ -2423,22 +2427,31 @@ export default Vue.extend({
         },
       }
     },
+    normalizedReflowCropRegionCount(value: any): number {
+      const numberValue = Number(value)
+      if (!Number.isFinite(numberValue)) return 2
+      return Math.max(1, Math.min(MAX_REFLOW_CROP_REGIONS, Math.round(numberValue)))
+    },
     normalizedReflowCropRegionRois(cropRoisByParity: any, parity: 'odd' | 'even'): Array<object | null> {
       const regions = cropRoisByParity?.regions?.[parity] || []
-      const normalized = [
-        this.normalizedReflowCropRoi(regions[0]) || this.normalizedReflowCropRoi(cropRoisByParity?.[parity]),
-        this.normalizedReflowCropRoi(regions[1]),
-      ]
-      if (normalized[0] && normalized[1] && this.reflowCropRoisOverlap(normalized[0], normalized[1])) normalized[1] = null
+      const normalized = Array.from({length: MAX_REFLOW_CROP_REGIONS}, (_, index) =>
+        this.normalizedReflowCropRoi(regions[index]) || (index === 0 ? this.normalizedReflowCropRoi(cropRoisByParity?.[parity]) : null),
+      )
+      normalized.forEach((roi, index) => {
+        if (!roi) return
+        const overlapsPrevious = normalized.slice(0, index).some(previous => !!previous && this.reflowCropRoisOverlap(previous, roi))
+        if (overlapsPrevious) normalized[index] = null
+      })
       return normalized
     },
     normalizedReflowCropRegionExplicit(cropRoisByParity: any, parity: 'odd' | 'even', regions: Array<object | null>): boolean[] {
       const explicit = cropRoisByParity?.explicit || {}
       const explicitRegions = cropRoisByParity?.explicitRegions?.[parity] || []
-      return [
-        regions[0] ? (explicitRegions[0] ?? explicit[parity]) !== false : false,
-        regions[1] ? explicitRegions[1] !== false : false,
-      ]
+      return Array.from({length: MAX_REFLOW_CROP_REGIONS}, (_, index) => {
+        if (!regions[index]) return false
+        if (index === 0) return (explicitRegions[0] ?? explicit[parity]) !== false
+        return explicitRegions[index] !== false
+      })
     },
     normalizedReflowCropRoi(roi: any): object | null {
       if (!roi) return null
@@ -2663,6 +2676,7 @@ export default Vue.extend({
     },
     setReflowCropRois(cropRoisByParity: Record<string, any>) {
       const normalized = this.normalizedReflowCropRois(cropRoisByParity)
+      this.$set(this.reflowSettings.cropRoisByParity, 'regionCount', normalized.regionCount)
       this.$set(this.reflowSettings.cropRoisByParity, 'odd', normalized.odd)
       this.$set(this.reflowSettings.cropRoisByParity, 'even', normalized.even)
       this.$set(this.reflowSettings.cropRoisByParity, 'regions', normalized.regions)
