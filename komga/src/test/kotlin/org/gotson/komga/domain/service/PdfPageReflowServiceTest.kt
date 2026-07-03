@@ -2,6 +2,7 @@ package org.gotson.komga.domain.service
 
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.gotson.komga.domain.model.TypedBytes
 import org.gotson.komga.domain.model.makeBook
@@ -41,6 +42,31 @@ class PdfPageReflowServiceTest {
     assertThat(wordBlocks).hasSizeGreaterThanOrEqualTo(3)
     assertThat(heights.toSet()).hasSize(1)
     assertThat(heights.min()).isGreaterThanOrEqualTo(20)
+  }
+
+  @Test
+  fun `given same page and options when reflowing from cache then page is rendered once`() {
+    val pageBytes = horizontalShortGlyphPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+
+    val first =
+      pdfPageReflowService.reflowPageCached(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+        cropRegions = listOf(PdfPageReflowRegion(x = 40, y = 30, w = 120, h = 70)),
+      )
+    val second =
+      pdfPageReflowService.reflowPageCached(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+        cropRegions = listOf(PdfPageReflowRegion(x = 40, y = 30, w = 120, h = 70)),
+      )
+
+    assertThat(second.items).isEqualTo(first.items)
+    verify(exactly = 1) { bookLifecycle.getBookPage(book, 1, ImageType.PNG) }
   }
 
   @Test

@@ -1,6 +1,8 @@
 package org.gotson.komga.domain.service
 
 import com.fasterxml.jackson.annotation.JsonInclude
+import com.github.benmanes.caffeine.cache.Caffeine
+import jakarta.annotation.PreDestroy
 import org.gotson.komga.domain.model.Book
 import org.gotson.komga.infrastructure.image.ImageType
 import org.springframework.stereotype.Service
@@ -11,6 +13,10 @@ import java.awt.image.BufferedImage
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.util.Base64
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.TimeUnit
 import javax.imageio.IIOImage
 import javax.imageio.ImageIO
 import javax.imageio.ImageWriteParam
@@ -126,10 +132,75 @@ private data class EncodedReflowImage(
   val bytes: ByteArray,
 )
 
+private data class PdfPageReflowCacheKey(
+  val bookId: String,
+  val fileLastModified: String,
+  val fileSize: Long,
+  val pageNumber: Int,
+  val options: PdfPageReflowOptions,
+  val cropRegions: List<PdfPageReflowRegion>,
+)
+
 @Service
 class PdfPageReflowService(
   private val bookLifecycle: BookLifecycle,
 ) {
+  private val reflowPageCache =
+    Caffeine
+      .newBuilder()
+      .maximumSize(96)
+      .expireAfterAccess(15, TimeUnit.MINUTES)
+      .build<PdfPageReflowCacheKey, PdfPageReflowDto>()
+
+  private val inFlightReflows = ConcurrentHashMap<PdfPageReflowCacheKey, CompletableFuture<PdfPageReflowDto>>()
+
+  fun reflowPageCached(
+    book: Book,
+    pageNumber: Int,
+    options: PdfPageReflowOptions,
+    cropRegions: List<PdfPageReflowRegion> = emptyList(),
+  ): PdfPageReflowDto {
+    val key =
+      PdfPageReflowCacheKey(
+        bookId = book.id,
+        fileLastModified = book.fileLastModified.toString(),
+        fileSize = book.fileSize,
+        pageNumber = pageNumber,
+        options = options,
+        cropRegions = cropRegions,
+      )
+    reflowPageCache.getIfPresent(key)?.let { return it }
+
+    val currentFuture = CompletableFuture<PdfPageReflowDto>()
+    val existingFuture = inFlightReflows.putIfAbsent(key, currentFuture)
+    if (existingFuture != null) return existingFuture.awaitReflow()
+
+    return try {
+      val response = reflowPage(book, pageNumber, options, cropRegions)
+      reflowPageCache.put(key, response)
+      currentFuture.complete(response)
+      response
+    } catch (e: Exception) {
+      currentFuture.completeExceptionally(e)
+      throw e
+    } finally {
+      inFlightReflows.remove(key, currentFuture)
+    }
+  }
+
+  private fun CompletableFuture<PdfPageReflowDto>.awaitReflow(): PdfPageReflowDto =
+    try {
+      get()
+    } catch (e: ExecutionException) {
+      throw e.cause ?: e
+    }
+
+  @PreDestroy
+  fun clearReflowCache() {
+    reflowPageCache.invalidateAll()
+    inFlightReflows.clear()
+  }
+
   fun reflowPage(
     book: Book,
     pageNumber: Int,

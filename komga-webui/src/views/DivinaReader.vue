@@ -301,19 +301,20 @@
           @back-to-book="closeBook"
         />
         <reflowed-page
-          v-if="reflowMode && prefetchReflowPage"
+          v-for="prefetchPage in prefetchReflowPages"
+          :key="`reflow-prefetch-${prefetchPage.number}-${reflowCacheKey}`"
           class="reflow-prefetch"
-          :page="prefetchReflowPage"
+          :page="prefetchPage"
           :target-width="reflowTargetWidth"
           :rotation="readerRotation"
           :options="reflowOptions"
-          :cached-items="cachedReflowItems(prefetchReflowPage)"
-          :cached-page-background="cachedReflowBackground(prefetchReflowPage)"
-          :cached-transfer-stats="cachedReflowTransferStats(prefetchReflowPage)"
+          :cached-items="cachedReflowItems(prefetchPage)"
+          :cached-page-background="cachedReflowBackground(prefetchPage)"
+          :cached-transfer-stats="cachedReflowTransferStats(prefetchPage)"
           :cache-key="reflowCacheKey"
           :night-display="nightDisplay"
           :server-reflow="reflowSettings.processingMode === 'server'"
-          :server-reflow-url="reflowPageUrl(prefetchReflowPage)"
+          :server-reflow-url="reflowPageUrl(prefetchPage)"
           :controls-top-offset="0"
           preload
           @reflowed="cacheReflowPage"
@@ -899,6 +900,7 @@ import {CLIENT_SETTING, ClientSettingUserUpdateDto} from '@/types/komga-clientse
 const REFLOW_SETTINGS_STORAGE_PREFIX = 'komga.pdfReflowSettings.'
 const READER_IMAGE_SETTINGS_STORAGE_PREFIX = 'komga.readerImageSettings.'
 const REFLOW_CACHE_RADIUS = 4
+const REFLOW_PREFETCH_COUNT = 3
 const REFLOW_PREFETCH_DELAY_MS = 800
 
 function defaultCropRegionsByParity(enabled: boolean = false): any {
@@ -1024,7 +1026,7 @@ export default Vue.extend({
       loadingReaderImageSettings: false,
       saveReaderImageSettingsServerDebounced: undefined as undefined | ((bookId?: string, settings?: Record<string, any>) => void),
       reflowCache: {} as Record<string, any>,
-      reflowPrefetchPage: 0,
+      reflowPrefetchPages: [] as number[],
       reflowPrefetchTimer: undefined as number | undefined,
       reflowPrefetchIdleHandle: undefined as number | undefined,
       reflowSettings: defaultReflowSettings(),
@@ -1267,9 +1269,11 @@ export default Vue.extend({
       if (!this.reflowMode || this.continuousReader || this.page >= this.pagesCount) return undefined
       return this.pages[this.page]
     },
-    prefetchReflowPage(): PageDtoWithUrl | undefined {
-      if (this.reflowPrefetchPage <= 0) return undefined
-      return this.pages[this.reflowPrefetchPage - 1]
+    prefetchReflowPages(): PageDtoWithUrl[] {
+      if (!this.reflowMode) return []
+      return this.reflowPrefetchPages
+        .map(pageNumber => this.pages[pageNumber - 1])
+        .filter((page): page is PageDtoWithUrl => !!page)
     },
     isPdf(): boolean {
       return this.book.media?.mediaProfile === 'PDF'
@@ -2720,7 +2724,7 @@ export default Vue.extend({
     },
     forceCurrentReflow() {
       this.clearReflowPrefetch()
-      this.reflowPrefetchPage = 0
+      this.reflowPrefetchPages = []
       if (this.currentPage?.number) this.clearReflowCacheForPage(this.currentPage.number)
       this.$nextTick(() => {
         const reflow = this.$refs.reflowedPage as any
@@ -2746,18 +2750,23 @@ export default Vue.extend({
         else window.clearTimeout(this.reflowPrefetchIdleHandle)
         this.reflowPrefetchIdleHandle = undefined
       }
-      this.reflowPrefetchPage = 0
+      this.reflowPrefetchPages = []
     },
     scheduleNextReflowPrefetch() {
       this.clearReflowPrefetch()
       if (!this.nextReflowPage || this.reflowCropMode) return
       const sourcePage = this.page
-      const nextPageNumber = this.nextReflowPage.number
+      const nextPageNumbers =
+        Array
+          .from({length: REFLOW_PREFETCH_COUNT}, (_, index) => sourcePage + index + 1)
+          .filter(pageNumber => pageNumber <= this.pagesCount)
+          .filter(pageNumber => !this.cachedReflowItems(this.pages[pageNumber - 1]))
+      if (nextPageNumbers.length === 0) return
       this.reflowPrefetchTimer = window.setTimeout(() => {
         this.reflowPrefetchTimer = undefined
         const startPrefetch = () => {
           this.reflowPrefetchIdleHandle = undefined
-          if (this.page === sourcePage && this.nextReflowPage?.number === nextPageNumber && !this.reflowCropMode) this.reflowPrefetchPage = nextPageNumber
+          if (this.page === sourcePage && !this.reflowCropMode) this.reflowPrefetchPages = nextPageNumbers
         }
         const requestIdleCallback = (window as any).requestIdleCallback
         if (requestIdleCallback) {

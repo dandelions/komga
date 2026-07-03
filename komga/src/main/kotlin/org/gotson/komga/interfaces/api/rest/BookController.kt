@@ -564,34 +564,37 @@ class BookController(
 
       try {
         val page = if (zeroBasedIndex) pageNumber + 1 else pageNumber
+        val options =
+          PdfPageReflowOptions(
+            targetWidth = targetWidth,
+            autoCropBorder = autoCropBorder,
+            textScale = textScale,
+            columnCount = columnCount,
+            skewCorrection = skewCorrection,
+            threshold = threshold,
+            columnGap = columnGap,
+            wordGap = wordGap,
+            strokeStrength = strokeStrength,
+            contrastEnhancement = contrastEnhancement,
+            matchBackground = matchBackground,
+            imageQuality = normalizePdfReflowImageQuality(imageQuality),
+            blockSpacing = blockSpacing,
+            verticalText = verticalText,
+            verticalDirection = if (verticalDirection == "ltr") "ltr" else "rtl",
+            marginTop = marginTop,
+            marginRight = marginRight,
+            marginBottom = marginBottom,
+            marginLeft = marginLeft,
+            darkDisplay = darkDisplay,
+            rotation = normalizePdfReflowRotation(rotation),
+          )
+        val parsedCropRegions = parsePdfReflowRegions(cropRegions)
         val response =
-          pdfPageReflowService.reflowPage(
+          pdfPageReflowService.reflowPageCached(
             book,
             page,
-            PdfPageReflowOptions(
-              targetWidth = targetWidth,
-              autoCropBorder = autoCropBorder,
-              textScale = textScale,
-              columnCount = columnCount,
-              skewCorrection = skewCorrection,
-              threshold = threshold,
-              columnGap = columnGap,
-              wordGap = wordGap,
-              strokeStrength = strokeStrength,
-              contrastEnhancement = contrastEnhancement,
-              matchBackground = matchBackground,
-              imageQuality = normalizePdfReflowImageQuality(imageQuality),
-              blockSpacing = blockSpacing,
-              verticalText = verticalText,
-              verticalDirection = if (verticalDirection == "ltr") "ltr" else "rtl",
-              marginTop = marginTop,
-              marginRight = marginRight,
-              marginBottom = marginBottom,
-              marginLeft = marginLeft,
-              darkDisplay = darkDisplay,
-              rotation = normalizePdfReflowRotation(rotation),
-            ),
-            cropRegions = parsePdfReflowRegions(cropRegions),
+            options,
+            cropRegions = parsedCropRegions,
           )
         val body = serverReflowResponseBytes(response)
 
