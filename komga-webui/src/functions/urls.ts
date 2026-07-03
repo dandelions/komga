@@ -35,6 +35,10 @@ export function bookPageUrl(bookId: string, page: number, convertTo?: string): s
   return url
 }
 
+export function bookPageReflowUrl(bookId: string, page: number): string {
+  return `${urls.originNoSlash}/api/v1/books/${bookId}/pages/${page}/reflow`
+}
+
 export function bookPageThumbnailUrl(bookId: string, page: number): string {
   return `${urls.originNoSlash}/api/v1/books/${bookId}/pages/${page}/thumbnail`
 }

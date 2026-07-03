@@ -1,7 +1,30 @@
 <template>
   <div class="k2-reflowed-page" :class="{'k2-reflowed-page-dark': $vuetify.theme.dark || nightDisplay}">
-    <div ref="k2Controls" class="k2-controls" @click.stop>
-      <template v-if="!controlsCollapsed">
+    <div
+      ref="k2Controls"
+      class="k2-controls"
+      :class="{'k2-controls-collapsed': controlsCollapsed}"
+      @click.stop
+      @touchstart.stop
+      @touchmove.stop
+      @touchend.stop
+      @touchcancel.stop
+      @pointerdown.stop
+      @pointermove.stop
+      @pointerup.stop
+      @pointercancel.stop
+    >
+      <button
+        v-if="controlsCollapsed"
+        type="button"
+        class="k2-action k2-pull-action"
+        title="显示重排设置"
+        aria-label="显示重排设置"
+        @click="controlsCollapsed = false"
+      >
+        <v-icon x-small>mdi-chevron-down</v-icon>
+      </button>
+      <template v-else>
         <label class="k2-control k2-wide-control">
           <span>Text</span>
           <button type="button" @click="adjustTextScale(-5)">-</button>
@@ -16,6 +39,15 @@
             <option value="2">2</option>
             <option value="3">3</option>
             <option value="4">4</option>
+          </select>
+        </label>
+        <label class="k2-control k2-compact">
+          <span>旋转</span>
+          <select :value="normalizedRotation(rotation)" @change="setRotation">
+            <option value="-90">-90°</option>
+            <option value="0">0°</option>
+            <option value="90">+90°</option>
+            <option value="180">180°</option>
           </select>
         </label>
         <label class="k2-control k2-compact">
@@ -53,28 +85,28 @@
           </button>
           <button type="button" class="k2-action" @click="exitK2Reflow">Exit K2</button>
         </div>
+        <button type="button" class="k2-action" @click="$emit('back-to-book')">
+          Back to details
+        </button>
+        <button type="button" class="k2-action" @click="$emit('show-pdf-toc')">
+          {{ $t('browse_book.pdf_toc') }}
+        </button>
+        <button
+          type="button"
+          class="k2-action"
+          :title="nightDisplay ? '白天模式' : '黑夜模式'"
+          :aria-label="nightDisplay ? '白天模式' : '黑夜模式'"
+          @click="$emit('toggle-night-display')"
+        >
+          <v-icon small>{{ nightDisplay ? 'mdi-white-balance-sunny' : 'mdi-weather-night' }}</v-icon>
+        </button>
+        <button type="button" class="k2-action k2-apply-action" @click="applyK2Reflow">
+          重排
+        </button>
+        <button type="button" class="k2-action k2-collapse-action" @click="controlsCollapsed = true">
+          Hide controls
+        </button>
       </template>
-      <button type="button" class="k2-action" @click="$emit('back-to-book')">
-        Back to details
-      </button>
-      <button type="button" class="k2-action" @click="$emit('show-pdf-toc')">
-        {{ $t('browse_book.pdf_toc') }}
-      </button>
-      <button
-        type="button"
-        class="k2-action"
-        :title="nightDisplay ? '白天模式' : '黑夜模式'"
-        :aria-label="nightDisplay ? '白天模式' : '黑夜模式'"
-        @click="$emit('toggle-night-display')"
-      >
-        <v-icon small>{{ nightDisplay ? 'mdi-white-balance-sunny' : 'mdi-weather-night' }}</v-icon>
-      </button>
-      <button type="button" class="k2-action k2-apply-action" @click="applyK2Reflow">
-        重排
-      </button>
-      <button type="button" class="k2-action k2-collapse-action" @click="controlsCollapsed = !controlsCollapsed">
-        {{ controlsCollapsed ? 'Show controls' : 'Hide controls' }}
-      </button>
     </div>
 
     <div
@@ -105,12 +137,12 @@
         />
       </div>
     </div>
-    <div v-else-if="loading" class="k2-status">K2 reflowing...</div>
-    <div v-else-if="error" class="k2-status">
+    <div v-else-if="loading" class="k2-status" @click="collapseControls">K2 reflowing...</div>
+    <div v-else-if="error" class="k2-status" @click="collapseControls">
       <div>Unable to K2 reflow this page</div>
       <div class="k2-error">{{ errorMessage }}</div>
     </div>
-    <div v-else class="k2-output" :style="k2OutputStyle">
+    <div v-else class="k2-output" :style="k2OutputStyle" @click="collapseControls">
       <div v-if="items.length === 0" class="k2-status">No text blocks detected</div>
       <template v-for="(item, index) in visibleItems">
         <span v-if="item.type === 'break'" :key="`break-${index}`" class="k2-break"/>
@@ -226,6 +258,10 @@ export default Vue.extend({
       type: Number,
       required: true,
     },
+    rotation: {
+      type: Number,
+      default: 0,
+    },
     startAtEnd: {
       type: Boolean,
       default: false,
@@ -289,6 +325,14 @@ export default Vue.extend({
       immediate: true,
     },
     targetWidth() {
+      this.reflow()
+    },
+    rotation() {
+      this.revokeObjectUrl()
+      if (this.cropMode) {
+        this.ensureCropImage()
+        return
+      }
       this.reflow()
     },
     startAtEnd() {
@@ -378,6 +422,11 @@ export default Vue.extend({
     this.revokeObjectUrl()
   },
   methods: {
+    collapseControls(): boolean {
+      if (this.controlsCollapsed || this.cropMode) return false
+      this.controlsCollapsed = true
+      return true
+    },
     syncSettingsFromProps() {
       this.textScalePercent = this.clampNumber(Number(this.settings.textScale), 20, 160, DEFAULT_TEXT_SCALE)
       this.maxColumns = Math.round(this.clampNumber(Number(this.settings.maxColumns), 1, 4, 2))
@@ -489,22 +538,31 @@ export default Vue.extend({
     },
     async loadPageImage(url: string, requestId?: number): Promise<HTMLImageElement> {
       const sourceUrl = this.pageImageUrl(url)
-      if (this.objectUrl && this.objectUrlSource === sourceUrl) return this.decodeImageUrl(this.objectUrl)
+      const rotation = this.normalizedRotation(this.rotation)
+      const sourceKey = `${sourceUrl}#rotation=${rotation}`
+      if (this.objectUrl && this.objectUrlSource === sourceKey) return this.decodeImageUrl(this.objectUrl)
 
       const response = await fetch(sourceUrl, {credentials: 'include'})
       if (!response.ok) throw new Error(`Unable to load page: ${response.status}`)
       const blob = await response.blob()
       if (blob.type && !blob.type.startsWith('image/')) throw new Error(`Page response is not an image: ${blob.type}`)
-      const nextObjectUrl = URL.createObjectURL(blob)
+      const rawObjectUrl = URL.createObjectURL(blob)
+      let nextObjectUrl = rawObjectUrl
       try {
-        const image = await this.decodeImageUrl(nextObjectUrl)
+        let image = await this.decodeImageUrl(rawObjectUrl)
+        if (rotation) {
+          const rotatedUrl = await this.canvasObjectUrl(this.rotatedImageCanvas(image, rotation))
+          URL.revokeObjectURL(rawObjectUrl)
+          nextObjectUrl = rotatedUrl
+          image = await this.decodeImageUrl(nextObjectUrl)
+        }
         if (requestId !== undefined && requestId !== this.requestId) {
           URL.revokeObjectURL(nextObjectUrl)
           return image
         }
         const previousObjectUrl = this.objectUrl
         this.objectUrl = nextObjectUrl
-        this.objectUrlSource = sourceUrl
+        this.objectUrlSource = sourceKey
         if (previousObjectUrl && previousObjectUrl !== nextObjectUrl) URL.revokeObjectURL(previousObjectUrl)
         return image
       } catch (e) {
@@ -520,9 +578,42 @@ export default Vue.extend({
         image.src = url
       })
     },
+    canvasObjectUrl(canvas: HTMLCanvasElement): Promise<string> {
+      return new Promise((resolve, reject) => {
+        canvas.toBlob(blob => {
+          if (blob) resolve(URL.createObjectURL(blob))
+          else reject(new Error('Unable to encode rotated page image'))
+        }, 'image/jpeg', 0.95)
+      })
+    },
     pageImageUrl(url: string): string {
       const separator = url.includes('?') ? '&' : '?'
       return `${url}${separator}contentNegotiation=false`
+    },
+    rotatedImageCanvas(image: HTMLImageElement, degrees: number): HTMLCanvasElement {
+      const rotation = this.normalizedRotation(degrees)
+      const quarterTurn = Math.abs(rotation) === 90
+      const canvas = document.createElement('canvas')
+      canvas.width = quarterTurn ? image.naturalHeight : image.naturalWidth
+      canvas.height = quarterTurn ? image.naturalWidth : image.naturalHeight
+      const context = this.canvasContext(canvas, true)
+      if (!context) return canvas
+      context.fillStyle = this.pageBackground || '#fff'
+      context.fillRect(0, 0, canvas.width, canvas.height)
+      context.translate(canvas.width / 2, canvas.height / 2)
+      context.rotate(rotation * Math.PI / 180)
+      context.drawImage(image, -image.naturalWidth / 2, -image.naturalHeight / 2)
+      return canvas
+    },
+    normalizedRotation(value: number): number {
+      const numberValue = Number(value)
+      if (!Number.isFinite(numberValue)) return 0
+      const rounded = Math.round(numberValue / 90) * 90
+      const normalized = ((rounded % 360) + 360) % 360
+      if (normalized === 90) return 90
+      if (normalized === 180) return 180
+      if (normalized === 270) return -90
+      return 0
     },
     canvasContext(canvas: HTMLCanvasElement, willReadFrequently: boolean = false): CanvasRenderingContext2D | null {
       if (willReadFrequently) return canvas.getContext('2d', {willReadFrequently: true})
@@ -1801,6 +1892,10 @@ export default Vue.extend({
       this.maxColumns = Math.round(this.clampNumber(Number(target.value), 1, 4, 2))
       this.emitSettingsChange()
     },
+    setRotation(event: Event) {
+      const target = event.target as HTMLSelectElement
+      this.$emit('rotation-change', this.normalizedRotation(Number(target.value)))
+    },
     setThreshold(event: Event) {
       const target = event.target as HTMLInputElement
       this.threshold = this.clampNumber(Number(target.value), 50, 230, DEFAULT_THRESHOLD)
@@ -2003,6 +2098,16 @@ export default Vue.extend({
   overflow-y: visible;
 }
 
+.k2-controls-collapsed {
+  justify-content: center;
+  min-height: 20px;
+  padding: 2px 0;
+  background: transparent;
+  border-bottom: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
 .k2-control {
   flex: 0 0 280px;
   min-width: 280px;
@@ -2067,6 +2172,17 @@ export default Vue.extend({
   color: #9e9e9e;
 }
 
+.k2-pull-action {
+  width: 28px;
+  height: 18px;
+  min-height: 18px;
+  flex-basis: 28px;
+  padding: 0;
+  border-radius: 0 0 5px 5px;
+  opacity: 0.86;
+  pointer-events: auto;
+}
+
 .k2-value {
   min-width: 44px;
   text-align: right;
@@ -2084,6 +2200,11 @@ export default Vue.extend({
 .k2-reflowed-page-dark .k2-controls {
   background: rgba(30, 30, 30, 0.96);
   border-bottom-color: rgba(255, 255, 255, 0.14);
+}
+
+.k2-reflowed-page-dark .k2-controls-collapsed {
+  background: transparent;
+  border-bottom: 0;
 }
 
 .k2-reflowed-page-dark .k2-control,

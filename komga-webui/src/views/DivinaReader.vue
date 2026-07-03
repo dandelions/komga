@@ -217,6 +217,7 @@
           ref="k2ReflowedPage"
           :page="currentPage"
           :target-width="reflowTargetWidth"
+          :rotation="readerRotation"
           :start-at-end="k2ReflowStartAtEnd"
           :crop-rois-by-parity="reflowSettings.cropRoisByParity"
           :settings="reflowSettings.k2Settings"
@@ -227,6 +228,7 @@
           @crop-mode-change="setReflowCropMode"
           @crop-rois-change="setReflowCropRois"
           @settings-change="setK2ReflowSettings"
+          @rotation-change="setReaderRotation"
           @show-pdf-toc="openPdfToc"
           @toggle-night-display="toggleNightDisplay"
           @back-to-book="closeBook"
@@ -234,18 +236,21 @@
 
         <div
           v-if="!reflowCropMode"
-          @click="k2PreviousPage"
+          @click="k2OutsidePreviousPage"
           class="reflow-click-left"
+          :style="reflowClickLayerStyle"
         />
         <div
           v-if="!reflowCropMode"
-          @click="k2NextPage"
+          @click="k2OutsideNextPage"
           class="reflow-click-right"
+          :style="reflowClickLayerStyle"
         />
         <div
           v-if="!reflowCropMode"
-          @click="toggleToolbars()"
+          @click="reflowOutsideCenterClick"
           class="reflow-click-center"
+          :style="reflowClickLayerStyle"
         />
       </div>
 
@@ -258,22 +263,30 @@
           ref="reflowedPage"
           :page="currentPage"
           :target-width="reflowTargetWidth"
+          :rotation="readerRotation"
           :options="reflowOptions"
           :cached-items="cachedReflowItems(currentPage)"
           :cached-page-background="cachedReflowBackground(currentPage)"
+          :cached-transfer-stats="cachedReflowTransferStats(currentPage)"
           :cache-key="reflowCacheKey"
           :night-display="nightDisplay"
+          :server-reflow="reflowSettings.processingMode === 'server'"
+          :server-reflow-url="reflowPageUrl(currentPage)"
+          :controls-top-offset="reflowControlsTopOffset"
           :start-at-end="reflowStartAtEnd"
           :defer-reflow="reflowSetupMode"
           @text-scale-change="setReflowTextScale"
+          @processing-mode-change="setReflowProcessingMode"
           @column-count-change="setReflowColumnCount"
           @skew-correction-change="setReflowSkewCorrection"
           @vertical-text-change="setReflowVerticalText"
           @vertical-direction-change="setReflowVerticalDirection"
           @stroke-strength-change="setReflowStrokeStrength"
+          @image-quality-change="setReflowImageQuality"
           @contrast-enhancement-change="setReflowContrastEnhancement"
           @match-background-change="setReflowMatchBackground"
           @block-spacing-change="setReflowBlockSpacing"
+          @rotation-change="setReaderRotation"
           @crop-mode-change="setReflowCropMode"
           @crop-rois-change="setReflowCropRois"
           @start-reflow="startReflowMode"
@@ -284,36 +297,46 @@
           @source-next="reflowSourceNextPage"
           @show-pdf-toc="openPdfToc"
           @toggle-night-display="toggleNightDisplay"
+          @toggle-reader-toolbar="toggleToolbars"
           @back-to-book="closeBook"
         />
         <reflowed-page
-          v-if="reflowMode && prefetchReflowPage"
+          v-for="prefetchPage in prefetchReflowPages"
+          :key="`reflow-prefetch-${prefetchPage.number}-${reflowCacheKey}`"
           class="reflow-prefetch"
-          :page="prefetchReflowPage"
+          :page="prefetchPage"
           :target-width="reflowTargetWidth"
+          :rotation="readerRotation"
           :options="reflowOptions"
-          :cached-items="cachedReflowItems(prefetchReflowPage)"
-          :cached-page-background="cachedReflowBackground(prefetchReflowPage)"
+          :cached-items="cachedReflowItems(prefetchPage)"
+          :cached-page-background="cachedReflowBackground(prefetchPage)"
+          :cached-transfer-stats="cachedReflowTransferStats(prefetchPage)"
           :cache-key="reflowCacheKey"
           :night-display="nightDisplay"
+          :server-reflow="reflowSettings.processingMode === 'server'"
+          :server-reflow-url="reflowPageUrl(prefetchPage)"
+          :controls-top-offset="0"
           preload
           @reflowed="cacheReflowPage"
         />
 
         <div
           v-if="reflowMode && !reflowCropMode"
-          @click="reflowPreviousPage"
+          @click="reflowOutsidePreviousPage"
           class="reflow-click-left"
+          :style="reflowClickLayerStyle"
         />
         <div
           v-if="reflowMode && !reflowCropMode"
-          @click="reflowNextPage"
+          @click="reflowOutsideNextPage"
           class="reflow-click-right"
+          :style="reflowClickLayerStyle"
         />
         <div
           v-if="reflowMode && !reflowCropMode"
-          @click="toggleToolbars()"
+          @click="reflowOutsideCenterClick"
           class="reflow-click-center"
+          :style="reflowClickLayerStyle"
         />
       </div>
 
@@ -327,6 +350,7 @@
           :sidePadding="sidePadding"
           :page-margin="pageMargin"
           :image-filter="normalReaderImageFilter"
+          :rotation="readerRotation"
           :skew-correction="readerSkewCorrection"
           :contrast-enhancement="readerContrastEnhancement"
           :crop-regions-by-parity="readerCropRegionsByParity"
@@ -350,6 +374,7 @@
         :swipe="readerSwipeEnabled"
         :left-navigation-action="pagedLeftNavigationAction"
         :image-filter="normalReaderImageFilter"
+        :rotation="readerRotation"
         :skew-correction="readerSkewCorrection"
         :contrast-enhancement="readerContrastEnhancement"
         :crop-regions-by-parity="readerCropRegionsByParity"
@@ -515,6 +540,23 @@
             <v-list-item v-if="!activeReflowMode">
               <settings-switch v-model="readerContrastEnhancement" label="文字/背景增强"/>
             </v-list-item>
+            <v-list-item v-if="isPdf">
+              <div class="reader-rotation-setting">
+                <span class="mr-2 text-caption">旋转</span>
+                <v-btn small class="mr-1" :color="readerRotation === -90 ? 'primary' : undefined" @click="setReaderRotation(-90)">
+                  -90°
+                </v-btn>
+                <v-btn small class="mr-1" :color="readerRotation === 0 ? 'primary' : undefined" @click="setReaderRotation(0)">
+                  0°
+                </v-btn>
+                <v-btn small class="mr-1" :color="readerRotation === 90 ? 'primary' : undefined" @click="setReaderRotation(90)">
+                  +90°
+                </v-btn>
+                <v-btn small :color="readerRotation === 180 ? 'primary' : undefined" @click="setReaderRotation(180)">
+                  180°
+                </v-btn>
+              </div>
+            </v-list-item>
             <v-list-item v-if="!activeReflowMode">
               <v-slider
                 v-model="readerSkewCorrection"
@@ -608,6 +650,13 @@
               </template>
               <template v-if="isPdf && reflowEnabled">
                 <v-list-item>
+                  <settings-select
+                    :items="reflowProcessingModes"
+                    v-model="reflowSettings.processingMode"
+                    label="重排位置"
+                  />
+                </v-list-item>
+                <v-list-item>
                   <settings-switch v-model="reflowSettings.autoCropBorder" label="Auto crop borders"/>
                 </v-list-item>
                 <v-list-item>
@@ -615,6 +664,13 @@
                 </v-list-item>
                 <v-list-item>
                   <settings-switch v-model="reflowSettings.matchBackground" label="背景跟随底色"/>
+                </v-list-item>
+                <v-list-item>
+                  <settings-select
+                    :items="reflowImageQualities"
+                    v-model="reflowSettings.imageQuality"
+                    label="字块质量"
+                  />
                 </v-list-item>
                 <v-list-item>
                   <settings-switch v-model="reflowSettings.verticalText" label="Vertical text"/>
@@ -809,7 +865,7 @@ import ThumbnailExplorerDialog from '@/components/dialogs/ThumbnailExplorerDialo
 import ShortcutHelpDialog from '@/components/dialogs/ShortcutHelpDialog.vue'
 import {getBookTitleCompact} from '@/functions/book-title'
 import {checkImageSupport, ImageFeature} from '@/functions/check-image'
-import {bookPageUrl} from '@/functions/urls'
+import {bookPageReflowUrl, bookPageUrl} from '@/functions/urls'
 import {getFileFromUrl} from '@/functions/file'
 import {resizeImageFile} from '@/functions/resize-image'
 import {ReadingDirection} from '@/types/enum-books'
@@ -844,30 +900,34 @@ import {CLIENT_SETTING, ClientSettingUserUpdateDto} from '@/types/komga-clientse
 const REFLOW_SETTINGS_STORAGE_PREFIX = 'komga.pdfReflowSettings.'
 const READER_IMAGE_SETTINGS_STORAGE_PREFIX = 'komga.readerImageSettings.'
 const REFLOW_CACHE_RADIUS = 4
+const REFLOW_PREFETCH_COUNT = 3
 const REFLOW_PREFETCH_DELAY_MS = 800
+const MAX_REFLOW_CROP_REGIONS = 8
 
 function defaultCropRegionsByParity(enabled: boolean = false): any {
   return {
     enabled,
+    regionCount: 2,
     odd: null,
     even: null,
     regions: {
-      odd: [null, null],
-      even: [null, null],
+      odd: Array(MAX_REFLOW_CROP_REGIONS).fill(null),
+      even: Array(MAX_REFLOW_CROP_REGIONS).fill(null),
     },
     explicit: {
       odd: false,
       even: false,
     },
     explicitRegions: {
-      odd: [false, false],
-      even: [false, false],
+      odd: Array(MAX_REFLOW_CROP_REGIONS).fill(false),
+      even: Array(MAX_REFLOW_CROP_REGIONS).fill(false),
     },
   }
 }
 
 function defaultReflowSettings(): any {
   return {
+    processingMode: 'local',
     autoCropBorder: true,
     textScale: 40,
     columnCount: 1,
@@ -878,6 +938,7 @@ function defaultReflowSettings(): any {
     strokeStrength: 0.1,
     contrastEnhancement: false,
     matchBackground: false,
+    imageQuality: 80,
     blockSpacing: 6,
     verticalText: false,
     verticalDirection: 'rtl',
@@ -902,6 +963,7 @@ function defaultReflowSettings(): any {
 function defaultReaderImageSettings(): any {
   return {
     strokeStrength: 0,
+    rotation: 0,
     skewCorrection: 0,
     contrastEnhancement: false,
     cropRegionsByParity: defaultCropRegionsByParity(false),
@@ -966,7 +1028,7 @@ export default Vue.extend({
       loadingReaderImageSettings: false,
       saveReaderImageSettingsServerDebounced: undefined as undefined | ((bookId?: string, settings?: Record<string, any>) => void),
       reflowCache: {} as Record<string, any>,
-      reflowPrefetchPage: 0,
+      reflowPrefetchPages: [] as number[],
       reflowPrefetchTimer: undefined as number | undefined,
       reflowPrefetchIdleHandle: undefined as number | undefined,
       reflowSettings: defaultReflowSettings(),
@@ -984,6 +1046,7 @@ export default Vue.extend({
         readingDirection: ReadingDirection.LEFT_TO_RIGHT,
         backgroundColor: 'black',
         strokeStrength: 0,
+        rotation: 0,
         skewCorrection: 0,
         contrastEnhancement: false,
         cropRegionsByParity: defaultCropRegionsByParity(false),
@@ -1033,6 +1096,14 @@ export default Vue.extend({
         {text: 'Right to left', value: 'rtl'},
         {text: 'Left to right', value: 'ltr'},
       ],
+      reflowProcessingModes: [
+        {text: '本地重排', value: 'local'},
+        {text: '服务端重排', value: 'server'},
+      ],
+      reflowImageQualities: [90, 80, 70, 60, 50, 40].map(value => ({
+        text: `${value}%`,
+        value,
+      })),
       paddingPercentages: Object.values(PaddingPercentage).map(x => ({
         text: x === 0 ? this.$i18n.t('bookreader.settings.side_padding_none').toString() : `${x}%`,
         value: x,
@@ -1200,9 +1271,11 @@ export default Vue.extend({
       if (!this.reflowMode || this.continuousReader || this.page >= this.pagesCount) return undefined
       return this.pages[this.page]
     },
-    prefetchReflowPage(): PageDtoWithUrl | undefined {
-      if (this.reflowPrefetchPage <= 0) return undefined
-      return this.pages[this.reflowPrefetchPage - 1]
+    prefetchReflowPages(): PageDtoWithUrl[] {
+      if (!this.reflowMode) return []
+      return this.reflowPrefetchPages
+        .map(pageNumber => this.pages[pageNumber - 1])
+        .filter((page): page is PageDtoWithUrl => !!page)
     },
     isPdf(): boolean {
       return this.book.media?.mediaProfile === 'PDF'
@@ -1256,6 +1329,17 @@ export default Vue.extend({
     reflowOptions(): object {
       return this.reflowSettings
     },
+    reflowControlsTopOffset(): number {
+      return this.showToolbars ? 48 : 0
+    },
+    reflowClickLayerStyle(): object {
+      const toolbarOffset = this.showToolbars ? '48px' : '0'
+      return {
+        top: toolbarOffset,
+        bottom: toolbarOffset,
+        height: 'auto',
+      }
+    },
     reflowTouchHandlers(): object {
       return {
         left: this.reflowSwipeLeft,
@@ -1271,6 +1355,8 @@ export default Vue.extend({
       return JSON.stringify({
         bookId: this.bookId,
         width: this.reflowTargetWidth,
+        processingMode: this.reflowSettings.processingMode,
+        rotation: this.readerRotation,
         autoCropBorder: this.reflowSettings.autoCropBorder,
         textScale: this.reflowSettings.textScale,
         columnCount: this.reflowSettings.columnCount,
@@ -1281,6 +1367,7 @@ export default Vue.extend({
         strokeStrength: this.reflowSettings.strokeStrength,
         contrastEnhancement: this.reflowSettings.contrastEnhancement,
         matchBackground: this.reflowSettings.matchBackground,
+        imageQuality: this.reflowSettings.imageQuality,
         verticalText: this.reflowSettings.verticalText,
         verticalDirection: this.reflowSettings.verticalDirection,
         marginTop: this.reflowSettings.marginTop,
@@ -1381,6 +1468,22 @@ export default Vue.extend({
         if (changed) this.revokeReaderDeskewedPageUrls()
       },
     },
+    readerRotation: {
+      get: function (): number {
+        return this.normalizedReaderRotation(this.settings.rotation)
+      },
+      set: function (rotation: number): void {
+        const normalized = this.normalizedReaderRotation(rotation)
+        const changed = this.normalizedReaderRotation(this.settings.rotation) !== normalized
+        this.settings.rotation = normalized
+        this.saveReaderImageSettings()
+        if (changed) this.readerRotationChanged()
+      },
+    },
+    readerRotationLabel(): string {
+      const rotation = this.readerRotation
+      return rotation > 0 ? `+${rotation}°` : `${rotation}°`
+    },
     readerSkewCorrection: {
       get: function (): number {
         return this.settings.skewCorrection
@@ -1479,6 +1582,26 @@ export default Vue.extend({
     emptyReaderCropRegionsByParity(enabled: boolean = false): any {
       return defaultCropRegionsByParity(enabled)
     },
+    normalizedReaderRotation(value: any): number {
+      const numberValue = Number(value)
+      if (!Number.isFinite(numberValue)) return 0
+      const rounded = Math.round(numberValue / 90) * 90
+      const normalized = ((rounded % 360) + 360) % 360
+      if (normalized === 90) return 90
+      if (normalized === 180) return 180
+      if (normalized === 270) return -90
+      return 0
+    },
+    setReaderRotation(rotation: number) {
+      this.readerRotation = rotation
+    },
+    readerRotationChanged() {
+      this.revokeReaderDeskewedPageUrls()
+      this.revokeReaderCropImageUrl()
+      this.reflowCache = {}
+      this.clearReflowPrefetch()
+      if (this.readerCropMode) this.$nextTick(this.prepareReaderCropImage)
+    },
     readerImageSettingsStorageKey(bookId: string = this.readerImageSettingsBookId || this.bookId): string {
       return `${READER_IMAGE_SETTINGS_STORAGE_PREFIX}${bookId}`
     },
@@ -1504,13 +1627,15 @@ export default Vue.extend({
     },
     applyReaderImageSettings(settings: Record<string, any>) {
       const normalized = this.normalizedReaderImageSettings(settings)
+      const previousRotation = this.normalizedReaderRotation(this.settings.rotation)
       const previousSkew = this.settings.skewCorrection
       const previousContrastEnhancement = this.settings.contrastEnhancement
       this.settings.strokeStrength = normalized.strokeStrength
+      this.settings.rotation = normalized.rotation
       this.settings.skewCorrection = normalized.skewCorrection
       this.settings.contrastEnhancement = normalized.contrastEnhancement
       this.$set(this.settings, 'cropRegionsByParity', normalized.cropRegionsByParity)
-      if (previousSkew !== normalized.skewCorrection || previousContrastEnhancement !== normalized.contrastEnhancement) this.revokeReaderDeskewedPageUrls()
+      if (previousRotation !== normalized.rotation || previousSkew !== normalized.skewCorrection || previousContrastEnhancement !== normalized.contrastEnhancement) this.revokeReaderDeskewedPageUrls()
       this.readerCropMode = false
       this.readerCropDraft = undefined
       this.readerCropDrawing = false
@@ -1521,6 +1646,7 @@ export default Vue.extend({
       settings = settings || {}
       return {
         strokeStrength: Math.round(Math.max(0, Math.min(3, Number(settings.strokeStrength) || 0)) * 10) / 10,
+        rotation: this.normalizedReaderRotation(settings.rotation),
         skewCorrection: this.normalizedReaderSkewCorrection(settings.skewCorrection),
         contrastEnhancement: settings.contrastEnhancement === true,
         cropRegionsByParity: this.normalizedReaderCropRegionsByParity(settings.cropRegionsByParity),
@@ -1738,8 +1864,9 @@ export default Vue.extend({
     async prepareReaderCropImage() {
       const requestId = this.readerCropImageRequestId + 1
       this.readerCropImageRequestId = requestId
+      const rotation = this.readerRotation
       const angle = this.readerSkewCorrection || 0
-      if (!angle || !this.currentPage?.url) {
+      if ((!rotation && !angle) || !this.currentPage?.url) {
         this.revokeReaderCropImageUrl()
         return
       }
@@ -1747,9 +1874,9 @@ export default Vue.extend({
       try {
         const image = await this.loadReaderCropImage(this.currentPage.url)
         if (requestId !== this.readerCropImageRequestId) return
-        const canvas = this.skewCorrectedReaderCropCanvas(image, angle)
+        const canvas = this.processedReaderCropCanvas(image, rotation, angle)
         const url = await this.readerCropCanvasObjectUrl(canvas)
-        if (requestId === this.readerCropImageRequestId && this.readerSkewCorrection === angle) {
+        if (requestId === this.readerCropImageRequestId && this.readerRotation === rotation && this.readerSkewCorrection === angle) {
           const previousUrl = this.readerCropImageUrl
           this.readerCropImageUrl = url
           if (previousUrl && previousUrl !== url) URL.revokeObjectURL(previousUrl)
@@ -1771,7 +1898,11 @@ export default Vue.extend({
         image.src = url
       })
     },
-    skewCorrectedReaderCropCanvas(image: HTMLImageElement, degrees: number): HTMLCanvasElement {
+    processedReaderCropCanvas(image: HTMLImageElement, rotation: number, skewCorrection: number): HTMLCanvasElement {
+      const rotatedCanvas = rotation ? this.rotatedReaderImageCanvas(image, rotation) : this.sourceReaderImageCanvas(image)
+      return skewCorrection ? this.skewCorrectedReaderCropCanvas(rotatedCanvas, skewCorrection) : rotatedCanvas
+    },
+    sourceReaderImageCanvas(image: HTMLImageElement): HTMLCanvasElement {
       const canvas = document.createElement('canvas')
       canvas.width = image.naturalWidth
       canvas.height = image.naturalHeight
@@ -1779,9 +1910,35 @@ export default Vue.extend({
       if (!context) return canvas
       context.fillStyle = '#fff'
       context.fillRect(0, 0, canvas.width, canvas.height)
+      context.drawImage(image, 0, 0)
+      return canvas
+    },
+    rotatedReaderImageCanvas(image: HTMLImageElement, degrees: number): HTMLCanvasElement {
+      const rotation = this.normalizedReaderRotation(degrees)
+      const quarterTurn = Math.abs(rotation) === 90
+      const canvas = document.createElement('canvas')
+      canvas.width = quarterTurn ? image.naturalHeight : image.naturalWidth
+      canvas.height = quarterTurn ? image.naturalWidth : image.naturalHeight
+      const context = canvas.getContext('2d')
+      if (!context) return canvas
+      context.fillStyle = '#fff'
+      context.fillRect(0, 0, canvas.width, canvas.height)
+      context.translate(canvas.width / 2, canvas.height / 2)
+      context.rotate(rotation * Math.PI / 180)
+      context.drawImage(image, -image.naturalWidth / 2, -image.naturalHeight / 2)
+      return canvas
+    },
+    skewCorrectedReaderCropCanvas(sourceCanvas: HTMLCanvasElement, degrees: number): HTMLCanvasElement {
+      const canvas = document.createElement('canvas')
+      canvas.width = sourceCanvas.width
+      canvas.height = sourceCanvas.height
+      const context = canvas.getContext('2d')
+      if (!context) return canvas
+      context.fillStyle = '#fff'
+      context.fillRect(0, 0, canvas.width, canvas.height)
       context.translate(canvas.width / 2, canvas.height / 2)
       context.rotate(degrees * Math.PI / 180)
-      context.drawImage(image, -image.naturalWidth / 2, -image.naturalHeight / 2)
+      context.drawImage(sourceCanvas, -sourceCanvas.width / 2, -sourceCanvas.height / 2)
       return canvas
     },
     readerCropCanvasObjectUrl(canvas: HTMLCanvasElement): Promise<string> {
@@ -2210,6 +2367,7 @@ export default Vue.extend({
     },
     normalizedReflowSettings(settings: Record<string, any>): object {
       return {
+        processingMode: settings.processingMode === 'server' ? 'server' : 'local',
         autoCropBorder: typeof settings.autoCropBorder === 'boolean' ? settings.autoCropBorder : this.reflowSettings.autoCropBorder,
         textScale: this.clampReflowNumber(settings.textScale, 10, 140, this.reflowSettings.textScale),
         columnCount: Math.round(this.clampReflowNumber(settings.columnCount, 1, 4, this.reflowSettings.columnCount)),
@@ -2220,6 +2378,7 @@ export default Vue.extend({
         strokeStrength: Math.round(this.clampReflowNumber(settings.strokeStrength, 0.1, 3, this.reflowSettings.strokeStrength) * 10) / 10,
         contrastEnhancement: settings.contrastEnhancement === true,
         matchBackground: settings.matchBackground === true,
+        imageQuality: this.normalizedReflowImageQuality(settings.imageQuality),
         blockSpacing: Math.round(this.clampReflowNumber(settings.blockSpacing, 0, 24, this.reflowSettings.blockSpacing)),
         verticalText: typeof settings.verticalText === 'boolean' ? settings.verticalText : this.reflowSettings.verticalText,
         verticalDirection: settings.verticalDirection === 'ltr' ? 'ltr' : 'rtl',
@@ -2245,11 +2404,13 @@ export default Vue.extend({
       }
     },
     normalizedReflowCropRois(cropRoisByParity: any): Record<string, any> {
+      const regionCount = this.normalizedReflowCropRegionCount(cropRoisByParity?.regionCount)
       const odd = this.normalizedReflowCropRegionRois(cropRoisByParity, 'odd')
       const even = this.normalizedReflowCropRegionRois(cropRoisByParity, 'even')
       const oddExplicit = this.normalizedReflowCropRegionExplicit(cropRoisByParity, 'odd', odd)
       const evenExplicit = this.normalizedReflowCropRegionExplicit(cropRoisByParity, 'even', even)
       return {
+        regionCount,
         odd: odd[0],
         even: even[0],
         regions: {
@@ -2266,22 +2427,31 @@ export default Vue.extend({
         },
       }
     },
+    normalizedReflowCropRegionCount(value: any): number {
+      const numberValue = Number(value)
+      if (!Number.isFinite(numberValue)) return 2
+      return Math.max(1, Math.min(MAX_REFLOW_CROP_REGIONS, Math.round(numberValue)))
+    },
     normalizedReflowCropRegionRois(cropRoisByParity: any, parity: 'odd' | 'even'): Array<object | null> {
       const regions = cropRoisByParity?.regions?.[parity] || []
-      const normalized = [
-        this.normalizedReflowCropRoi(regions[0]) || this.normalizedReflowCropRoi(cropRoisByParity?.[parity]),
-        this.normalizedReflowCropRoi(regions[1]),
-      ]
-      if (normalized[0] && normalized[1] && this.reflowCropRoisOverlap(normalized[0], normalized[1])) normalized[1] = null
+      const normalized = Array.from({length: MAX_REFLOW_CROP_REGIONS}, (_, index) =>
+        this.normalizedReflowCropRoi(regions[index]) || (index === 0 ? this.normalizedReflowCropRoi(cropRoisByParity?.[parity]) : null),
+      )
+      normalized.forEach((roi, index) => {
+        if (!roi) return
+        const overlapsPrevious = normalized.slice(0, index).some(previous => !!previous && this.reflowCropRoisOverlap(previous, roi))
+        if (overlapsPrevious) normalized[index] = null
+      })
       return normalized
     },
     normalizedReflowCropRegionExplicit(cropRoisByParity: any, parity: 'odd' | 'even', regions: Array<object | null>): boolean[] {
       const explicit = cropRoisByParity?.explicit || {}
       const explicitRegions = cropRoisByParity?.explicitRegions?.[parity] || []
-      return [
-        regions[0] ? (explicitRegions[0] ?? explicit[parity]) !== false : false,
-        regions[1] ? explicitRegions[1] !== false : false,
-      ]
+      return Array.from({length: MAX_REFLOW_CROP_REGIONS}, (_, index) => {
+        if (!regions[index]) return false
+        if (index === 0) return (explicitRegions[0] ?? explicit[parity]) !== false
+        return explicitRegions[index] !== false
+      })
     },
     normalizedReflowCropRoi(roi: any): object | null {
       if (!roi) return null
@@ -2296,6 +2466,10 @@ export default Vue.extend({
       const numberValue = Number(value)
       if (!Number.isFinite(numberValue)) return 0
       return Math.round(this.clampReflowNumber(numberValue, -10, 10, 0) * 2) / 2
+    },
+    normalizedReflowImageQuality(value: any): number {
+      const quality = Math.round(this.clampReflowNumber(value, 40, 90, 80) / 10) * 10
+      return [90, 80, 70, 60, 50, 40].includes(quality) ? quality : 80
     },
     reflowCropRoisOverlap(a: any, b: any): boolean {
       return a.x < b.x + b.w &&
@@ -2390,6 +2564,30 @@ export default Vue.extend({
       this.reflowStartAtEnd = false
       this.clearReflowPrefetch()
     },
+    collapseActiveReflowControls(): boolean {
+      const reflow = (this.k2ReflowMode ? this.$refs.k2ReflowedPage : this.$refs.reflowedPage) as any
+      return reflow?.collapseControls?.() === true
+    },
+    reflowOutsideCenterClick() {
+      if (this.collapseActiveReflowControls()) return
+      this.toggleToolbars()
+    },
+    reflowOutsidePreviousPage() {
+      if (this.collapseActiveReflowControls()) return
+      this.reflowPreviousPage()
+    },
+    reflowOutsideNextPage() {
+      if (this.collapseActiveReflowControls()) return
+      this.reflowNextPage()
+    },
+    k2OutsidePreviousPage() {
+      if (this.collapseActiveReflowControls()) return
+      this.k2PreviousPage()
+    },
+    k2OutsideNextPage() {
+      if (this.collapseActiveReflowControls()) return
+      this.k2NextPage()
+    },
     k2PreviousPage() {
       const reflow = this.$refs.k2ReflowedPage as any
       reflow?.previousPage?.()
@@ -2442,6 +2640,9 @@ export default Vue.extend({
     setReflowTextScale(textScale: number) {
       this.reflowSettings.textScale = textScale
     },
+    setReflowProcessingMode(processingMode: string) {
+      this.reflowSettings.processingMode = processingMode === 'server' ? 'server' : 'local'
+    },
     setReflowColumnCount(columnCount: number) {
       this.reflowSettings.columnCount = Math.round(Math.max(1, Math.min(4, columnCount)))
     },
@@ -2456,6 +2657,9 @@ export default Vue.extend({
     },
     setReflowStrokeStrength(strokeStrength: number) {
       this.reflowSettings.strokeStrength = Math.round(Math.max(0.1, Math.min(3, strokeStrength)) * 10) / 10
+    },
+    setReflowImageQuality(imageQuality: number) {
+      this.reflowSettings.imageQuality = this.normalizedReflowImageQuality(imageQuality)
     },
     setReflowContrastEnhancement(contrastEnhancement: boolean) {
       this.reflowSettings.contrastEnhancement = contrastEnhancement === true
@@ -2472,6 +2676,7 @@ export default Vue.extend({
     },
     setReflowCropRois(cropRoisByParity: Record<string, any>) {
       const normalized = this.normalizedReflowCropRois(cropRoisByParity)
+      this.$set(this.reflowSettings.cropRoisByParity, 'regionCount', normalized.regionCount)
       this.$set(this.reflowSettings.cropRoisByParity, 'odd', normalized.odd)
       this.$set(this.reflowSettings.cropRoisByParity, 'even', normalized.even)
       this.$set(this.reflowSettings.cropRoisByParity, 'regions', normalized.regions)
@@ -2498,14 +2703,23 @@ export default Vue.extend({
       const entry = this.cachedReflowEntry(page)
       return Array.isArray(entry) ? '' : entry?.pageBackground || ''
     },
-    cacheReflowPage(payload: {pageNumber: number, cacheKey: string, items: any[], pageBackground?: string}) {
+    cachedReflowTransferStats(page: PageDtoWithUrl | undefined): any {
+      const entry = this.cachedReflowEntry(page)
+      return Array.isArray(entry) ? undefined : entry?.transferStats
+    },
+    cacheReflowPage(payload: {pageNumber: number, cacheKey: string, items: any[], pageBackground?: string, transferStats?: any}) {
       if (payload.cacheKey !== this.reflowCacheKey) return
       this.$set(this.reflowCache, this.reflowCacheEntryKey(payload.pageNumber, payload.cacheKey), {
         items: payload.items,
         pageBackground: payload.pageBackground || '',
+        transferStats: payload.transferStats,
       })
       this.pruneReflowCache()
       if (payload.pageNumber === this.page) this.scheduleNextReflowPrefetch()
+    },
+    reflowPageUrl(page: PageDtoWithUrl | undefined): string {
+      if (!page) return ''
+      return bookPageReflowUrl(this.bookId, page.number)
     },
     cacheCurrentReflowPage() {
       const reflow = this.$refs.reflowedPage as any
@@ -2524,7 +2738,7 @@ export default Vue.extend({
     },
     forceCurrentReflow() {
       this.clearReflowPrefetch()
-      this.reflowPrefetchPage = 0
+      this.reflowPrefetchPages = []
       if (this.currentPage?.number) this.clearReflowCacheForPage(this.currentPage.number)
       this.$nextTick(() => {
         const reflow = this.$refs.reflowedPage as any
@@ -2550,18 +2764,23 @@ export default Vue.extend({
         else window.clearTimeout(this.reflowPrefetchIdleHandle)
         this.reflowPrefetchIdleHandle = undefined
       }
-      this.reflowPrefetchPage = 0
+      this.reflowPrefetchPages = []
     },
     scheduleNextReflowPrefetch() {
       this.clearReflowPrefetch()
       if (!this.nextReflowPage || this.reflowCropMode) return
       const sourcePage = this.page
-      const nextPageNumber = this.nextReflowPage.number
+      const nextPageNumbers =
+        Array
+          .from({length: REFLOW_PREFETCH_COUNT}, (_, index) => sourcePage + index + 1)
+          .filter(pageNumber => pageNumber <= this.pagesCount)
+          .filter(pageNumber => !this.cachedReflowItems(this.pages[pageNumber - 1]))
+      if (nextPageNumbers.length === 0) return
       this.reflowPrefetchTimer = window.setTimeout(() => {
         this.reflowPrefetchTimer = undefined
         const startPrefetch = () => {
           this.reflowPrefetchIdleHandle = undefined
-          if (this.page === sourcePage && this.nextReflowPage?.number === nextPageNumber && !this.reflowCropMode) this.reflowPrefetchPage = nextPageNumber
+          if (this.page === sourcePage && !this.reflowCropMode) this.reflowPrefetchPages = nextPageNumbers
         }
         const requestIdleCallback = (window as any).requestIdleCallback
         if (requestIdleCallback) {
@@ -2702,7 +2921,7 @@ export default Vue.extend({
 </script>
 <style scoped>
 .settings {
-  z-index: 2;
+  z-index: 100;
 }
 
 .full-height {
@@ -2795,6 +3014,13 @@ export default Vue.extend({
   color: #fff;
   font-size: 13px;
   font-weight: 600;
+}
+
+.reader-rotation-setting {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 
 .reader-crop-skew-control {

@@ -1,5 +1,6 @@
 package org.gotson.komga.interfaces.api.rest
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
@@ -33,6 +34,10 @@ import org.gotson.komga.domain.persistence.ReadListRepository
 import org.gotson.komga.domain.persistence.ThumbnailBookRepository
 import org.gotson.komga.domain.service.BookAnalyzer
 import org.gotson.komga.domain.service.BookLifecycle
+import org.gotson.komga.domain.service.PdfPageReflowDto
+import org.gotson.komga.domain.service.PdfPageReflowOptions
+import org.gotson.komga.domain.service.PdfPageReflowRegion
+import org.gotson.komga.domain.service.PdfPageReflowService
 import org.gotson.komga.infrastructure.image.ImageAnalyzer
 import org.gotson.komga.infrastructure.jooq.UnpagedSorted
 import org.gotson.komga.infrastructure.mediacontainer.ContentDetector
@@ -94,6 +99,7 @@ import org.springframework.web.server.ResponseStatusException
 import java.nio.file.NoSuchFileException
 import java.time.LocalDate
 import java.time.ZoneOffset
+import kotlin.math.roundToInt
 
 private val logger = KotlinLogging.logger {}
 
@@ -115,6 +121,8 @@ class BookController(
   private val webPubGenerator: WebPubGenerator,
   private val contentRestrictionChecker: ContentRestrictionChecker,
   private val commonBookController: CommonBookController,
+  private val pdfPageReflowService: PdfPageReflowService,
+  private val objectMapper: ObjectMapper,
 ) {
   @Deprecated("use /v1/books/list instead")
   @PageableAsQueryParam
@@ -492,6 +500,257 @@ class BookController(
     contentNegotiation: Boolean,
   ): ResponseEntity<ByteArray> = commonBookController.getBookPageInternal(bookId, if (zeroBasedIndex) pageNumber + 1 else pageNumber, convertTo, request, principal, if (contentNegotiation) acceptHeaders else null)
 
+  @Operation(summary = "Get server reflowed PDF page", tags = [OpenApiConfiguration.TagNames.BOOK_PAGES])
+  @GetMapping(
+    value = ["api/v1/books/{bookId}/pages/{pageNumber}/reflow"],
+    produces = [MediaType.APPLICATION_JSON_VALUE],
+  )
+  @PreAuthorize("hasRole('PAGE_STREAMING')")
+  fun getBookPageReflowByNumber(
+    @AuthenticationPrincipal principal: KomgaPrincipal,
+    @PathVariable bookId: String,
+    @PathVariable pageNumber: Int,
+    @RequestParam(value = "zero_based", defaultValue = "false")
+    zeroBasedIndex: Boolean,
+    @RequestParam(value = "targetWidth", defaultValue = "0")
+    targetWidth: Int,
+    @RequestParam(value = "rotation", defaultValue = "0")
+    rotation: Int,
+    @RequestParam(value = "autoCropBorder", defaultValue = "true")
+    autoCropBorder: Boolean,
+    @RequestParam(value = "textScale", defaultValue = "40")
+    textScale: Int,
+    @RequestParam(value = "columnCount", defaultValue = "1")
+    columnCount: Int,
+    @RequestParam(value = "skewCorrection", defaultValue = "0")
+    skewCorrection: Double,
+    @RequestParam(value = "threshold", defaultValue = "185")
+    threshold: Int,
+    @RequestParam(value = "columnGap", defaultValue = "15")
+    columnGap: Int,
+    @RequestParam(value = "wordGap", defaultValue = "3")
+    wordGap: Int,
+    @RequestParam(value = "strokeStrength", defaultValue = "0.1")
+    strokeStrength: Double,
+    @RequestParam(value = "contrastEnhancement", defaultValue = "false")
+    contrastEnhancement: Boolean,
+    @RequestParam(value = "matchBackground", defaultValue = "false")
+    matchBackground: Boolean,
+    @RequestParam(value = "imageQuality", defaultValue = "80")
+    imageQuality: Int,
+    @RequestParam(value = "blockSpacing", defaultValue = "6")
+    blockSpacing: Int,
+    @RequestParam(value = "verticalText", defaultValue = "false")
+    verticalText: Boolean,
+    @RequestParam(value = "verticalDirection", defaultValue = "rtl")
+    verticalDirection: String,
+    @RequestParam(value = "marginTop", defaultValue = "0")
+    marginTop: Double,
+    @RequestParam(value = "marginRight", defaultValue = "0")
+    marginRight: Double,
+    @RequestParam(value = "marginBottom", defaultValue = "0")
+    marginBottom: Double,
+    @RequestParam(value = "marginLeft", defaultValue = "0")
+    marginLeft: Double,
+    @RequestParam(value = "darkDisplay", defaultValue = "false")
+    darkDisplay: Boolean,
+    @RequestParam(value = "cropRegion", required = false)
+    cropRegions: List<String>?,
+  ): ResponseEntity<ByteArray> =
+    bookRepository.findByIdOrNull(bookId)?.let { book ->
+      val media = mediaRepository.findById(book.id)
+      if (media.profile != MediaProfile.PDF) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Server reflow is only available for PDF books")
+      contentRestrictionChecker.checkContentRestriction(principal.user, book)
+
+      try {
+        val page = if (zeroBasedIndex) pageNumber + 1 else pageNumber
+        val options =
+          PdfPageReflowOptions(
+            targetWidth = targetWidth,
+            autoCropBorder = autoCropBorder,
+            textScale = textScale,
+            columnCount = columnCount,
+            skewCorrection = skewCorrection,
+            threshold = threshold,
+            columnGap = columnGap,
+            wordGap = wordGap,
+            strokeStrength = strokeStrength,
+            contrastEnhancement = contrastEnhancement,
+            matchBackground = matchBackground,
+            imageQuality = normalizePdfReflowImageQuality(imageQuality),
+            blockSpacing = blockSpacing,
+            verticalText = verticalText,
+            verticalDirection = if (verticalDirection == "ltr") "ltr" else "rtl",
+            marginTop = marginTop,
+            marginRight = marginRight,
+            marginBottom = marginBottom,
+            marginLeft = marginLeft,
+            darkDisplay = darkDisplay,
+            rotation = normalizePdfReflowRotation(rotation),
+          )
+        val parsedCropRegions = parsePdfReflowRegions(cropRegions)
+        val response =
+          pdfPageReflowService.reflowPageCached(
+            book,
+            page,
+            options,
+            cropRegions = parsedCropRegions,
+          )
+        val body = serverReflowResponseBytes(response)
+
+        ResponseEntity
+          .ok()
+          .contentType(MediaType.APPLICATION_JSON)
+          .contentLength(body.size.toLong())
+          .setNotModified(media)
+          .body(body)
+      } catch (_: IndexOutOfBoundsException) {
+        throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Page number does not exist")
+      } catch (ex: ImageConversionException) {
+        throw ResponseStatusException(HttpStatus.NOT_FOUND, ex.message)
+      } catch (_: MediaNotReadyException) {
+        throw ResponseStatusException(HttpStatus.NOT_FOUND, "Book analysis failed")
+      } catch (ex: NoSuchFileException) {
+        logger.warn(ex) { "File not found: $book" }
+        throw ResponseStatusException(HttpStatus.NOT_FOUND, "File not found, it may have moved")
+      }
+    } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+
+  @Operation(summary = "Reflow uploaded PDF page image on the server", tags = [OpenApiConfiguration.TagNames.BOOK_PAGES])
+  @PostMapping(
+    value = ["api/v1/books/{bookId}/pages/{pageNumber}/reflow"],
+    consumes = [MediaType.MULTIPART_FORM_DATA_VALUE],
+    produces = [MediaType.APPLICATION_JSON_VALUE],
+  )
+  @PreAuthorize("hasRole('PAGE_STREAMING')")
+  fun postBookPageReflowByNumber(
+    @AuthenticationPrincipal principal: KomgaPrincipal,
+    @PathVariable bookId: String,
+    @PathVariable pageNumber: Int,
+    @RequestParam(value = "zero_based", defaultValue = "false")
+    zeroBasedIndex: Boolean,
+    @RequestParam(value = "images")
+    images: List<MultipartFile>,
+    @RequestParam(value = "sourceImageBytes", defaultValue = "0")
+    sourceImageBytes: Long,
+    @RequestParam(value = "sourceWidth", defaultValue = "0")
+    sourceWidth: Int,
+    @RequestParam(value = "sourceHeight", defaultValue = "0")
+    sourceHeight: Int,
+    @RequestParam(value = "pageBackground", required = false)
+    pageBackground: String?,
+    @RequestParam(value = "preparedRegions", defaultValue = "false")
+    preparedRegions: Boolean,
+    @RequestParam(value = "targetWidth", defaultValue = "0")
+    targetWidth: Int,
+    @RequestParam(value = "rotation", defaultValue = "0")
+    rotation: Int,
+    @RequestParam(value = "autoCropBorder", defaultValue = "true")
+    autoCropBorder: Boolean,
+    @RequestParam(value = "textScale", defaultValue = "40")
+    textScale: Int,
+    @RequestParam(value = "columnCount", defaultValue = "1")
+    columnCount: Int,
+    @RequestParam(value = "skewCorrection", defaultValue = "0")
+    skewCorrection: Double,
+    @RequestParam(value = "threshold", defaultValue = "185")
+    threshold: Int,
+    @RequestParam(value = "columnGap", defaultValue = "15")
+    columnGap: Int,
+    @RequestParam(value = "wordGap", defaultValue = "3")
+    wordGap: Int,
+    @RequestParam(value = "strokeStrength", defaultValue = "0.1")
+    strokeStrength: Double,
+    @RequestParam(value = "contrastEnhancement", defaultValue = "false")
+    contrastEnhancement: Boolean,
+    @RequestParam(value = "matchBackground", defaultValue = "false")
+    matchBackground: Boolean,
+    @RequestParam(value = "imageQuality", defaultValue = "80")
+    imageQuality: Int,
+    @RequestParam(value = "blockSpacing", defaultValue = "6")
+    blockSpacing: Int,
+    @RequestParam(value = "verticalText", defaultValue = "false")
+    verticalText: Boolean,
+    @RequestParam(value = "verticalDirection", defaultValue = "rtl")
+    verticalDirection: String,
+    @RequestParam(value = "marginTop", defaultValue = "0")
+    marginTop: Double,
+    @RequestParam(value = "marginRight", defaultValue = "0")
+    marginRight: Double,
+    @RequestParam(value = "marginBottom", defaultValue = "0")
+    marginBottom: Double,
+    @RequestParam(value = "marginLeft", defaultValue = "0")
+    marginLeft: Double,
+    @RequestParam(value = "darkDisplay", defaultValue = "false")
+    darkDisplay: Boolean,
+  ): ResponseEntity<ByteArray> =
+    bookRepository.findByIdOrNull(bookId)?.let { book ->
+      val media = mediaRepository.findById(book.id)
+      if (media.profile != MediaProfile.PDF) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Server reflow is only available for PDF books")
+      contentRestrictionChecker.checkContentRestriction(principal.user, book)
+
+      try {
+        val page = if (zeroBasedIndex) pageNumber + 1 else pageNumber
+        val response =
+          pdfPageReflowService.reflowPreparedImages(
+            pageNumber = page,
+            images = images.map { it.bytes },
+            options =
+              PdfPageReflowOptions(
+                targetWidth = targetWidth,
+                autoCropBorder = autoCropBorder,
+                textScale = textScale,
+                columnCount = columnCount,
+                skewCorrection = skewCorrection,
+                threshold = threshold,
+                columnGap = columnGap,
+                wordGap = wordGap,
+                strokeStrength = strokeStrength,
+                contrastEnhancement = contrastEnhancement,
+                matchBackground = matchBackground,
+                imageQuality = normalizePdfReflowImageQuality(imageQuality),
+                blockSpacing = blockSpacing,
+                verticalText = verticalText,
+                verticalDirection = if (verticalDirection == "ltr") "ltr" else "rtl",
+                marginTop = marginTop,
+                marginRight = marginRight,
+                marginBottom = marginBottom,
+                marginLeft = marginLeft,
+                darkDisplay = darkDisplay,
+                rotation = normalizePdfReflowRotation(rotation),
+              ),
+            sourceImageBytes = sourceImageBytes,
+            sourceWidth = sourceWidth,
+            sourceHeight = sourceHeight,
+            pageBackground = pageBackground,
+            useWholeImage = preparedRegions,
+          )
+        val body = serverReflowResponseBytes(response)
+
+        ResponseEntity
+          .ok()
+          .contentType(MediaType.APPLICATION_JSON)
+          .contentLength(body.size.toLong())
+          .body(body)
+      } catch (ex: IllegalArgumentException) {
+        throw ResponseStatusException(HttpStatus.BAD_REQUEST, ex.message)
+      } catch (ex: IllegalStateException) {
+        throw ResponseStatusException(HttpStatus.BAD_REQUEST, ex.message)
+      }
+    } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+
+  private fun parsePdfReflowRegions(cropRegions: List<String>?): List<PdfPageReflowRegion> = parsePdfReflowRegionParameters(cropRegions)
+
+  private fun serverReflowResponseBytes(response: PdfPageReflowDto): ByteArray {
+    var transferBytes = response.transferBytes
+    repeat(5) {
+      val body = objectMapper.writeValueAsBytes(response.copy(transferBytes = transferBytes))
+      if (body.size.toLong() == transferBytes) return body
+      transferBytes = body.size.toLong()
+    }
+    return objectMapper.writeValueAsBytes(response.copy(transferBytes = transferBytes))
+  }
+
   @Operation(summary = "Get book page thumbnail", description = "The image is resized to 300px on the largest dimension.", tags = [OpenApiConfiguration.TagNames.BOOK_PAGES])
   @ApiResponse(content = [Content(schema = Schema(type = "string", format = "binary"))])
   @GetMapping(
@@ -768,3 +1027,35 @@ class BookController(
     taskEmitter.findBookThumbnailsToRegenerate(forBiggerResultOnly, LOWEST_PRIORITY)
   }
 }
+
+internal fun parsePdfReflowRegionParameters(cropRegions: List<String>?): List<PdfPageReflowRegion> =
+  cropRegions
+    ?.flatMap { it.split(",") }
+    ?.mapNotNull { it.trim().takeIf(String::isNotBlank)?.toIntOrNull() }
+    ?.chunked(4)
+    ?.mapNotNull { values ->
+      if (values.size != 4 || values[2] <= 1 || values[3] <= 1) {
+        null
+      } else {
+        PdfPageReflowRegion(
+          x = values[0],
+          y = values[1],
+          w = values[2],
+          h = values[3],
+        )
+      }
+    }.orEmpty()
+
+internal fun normalizePdfReflowRotation(rotation: Int): Int {
+  val normalized = ((rotation / 90.0).roundToInt() * 90).floorMod(360)
+  return when (normalized) {
+    90 -> 90
+    180 -> 180
+    270 -> -90
+    else -> 0
+  }
+}
+
+internal fun normalizePdfReflowImageQuality(imageQuality: Int): Int = (imageQuality.coerceIn(40, 90) / 10.0).roundToInt() * 10
+
+private fun Int.floorMod(modulus: Int): Int = ((this % modulus) + modulus) % modulus

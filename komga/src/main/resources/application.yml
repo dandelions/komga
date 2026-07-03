@@ -57,6 +57,10 @@ spring:
   http:
     codecs:
       max-in-memory-size: 10MB
+  servlet:
+    multipart:
+      max-file-size: 64MB
+      max-request-size: 128MB
 
 server:
   servlet.session.timeout: 7d

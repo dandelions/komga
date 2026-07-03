@@ -1,50 +1,107 @@
 <template>
   <div class="reflowed-page" :class="{'reflowed-page-dark': $vuetify.theme.dark || nightDisplay}">
-    <div v-if="!preload" ref="reflowControls" class="reflow-controls" @click.stop>
-      <div class="reflow-top-controls">
-        <button
-          type="button"
-          class="reflow-control reflow-icon-control reflow-toc-control"
-          title="目录"
-          aria-label="目录"
-          @click="$emit('show-pdf-toc')"
-        >
-          <v-icon small>mdi-menu</v-icon>
+    <div
+      v-if="!preload"
+      ref="reflowControls"
+      class="reflow-controls"
+      :class="{'reflow-controls-collapsed': controlsCollapsed}"
+      :style="reflowControlsStyle"
+      @click.stop
+      @touchstart.stop
+      @touchmove.stop
+      @touchend.stop
+      @touchcancel.stop
+      @pointerdown.stop
+      @pointermove.stop
+      @pointerup.stop
+      @pointercancel.stop
+    >
+      <div
+        v-if="controlsCollapsed"
+        class="reflow-collapsed-controls"
+      >
+        <button type="button" class="reflow-control reflow-icon-control reflow-compact-control" title="返回" aria-label="返回" @click="$emit('back-to-book')">
+          <v-icon small>mdi-arrow-left</v-icon>
         </button>
         <button
           type="button"
-          class="reflow-control reflow-icon-control"
+          class="reflow-control reflow-icon-control reflow-compact-control"
           :title="nightDisplay ? '白天模式' : '黑夜模式'"
           :aria-label="nightDisplay ? '白天模式' : '黑夜模式'"
           @click="$emit('toggle-night-display')"
         >
           <v-icon small>{{ nightDisplay ? 'mdi-white-balance-sunny' : 'mdi-weather-night' }}</v-icon>
         </button>
-        <div class="reflow-navigation-controls">
-          <button type="button" class="reflow-control reflow-nav-control" @click="$emit('back-to-book')">
-            <v-icon small>mdi-arrow-left</v-icon>
-            <span>返回</span>
-          </button>
-          <button type="button" class="reflow-control reflow-nav-control reflow-exit-control" @click="exitReflow">
-            <v-icon small>mdi-exit-to-app</v-icon>
-            <span>退出重排</span>
-          </button>
-          <button type="button" class="reflow-control reflow-nav-control reflow-apply-control" @click="applyReflowSettings">
-            <v-icon small>mdi-refresh</v-icon>
-            <span>重排</span>
-          </button>
-        </div>
+        <button type="button" class="reflow-control reflow-icon-control reflow-compact-control" title="目录" aria-label="目录" @click="$emit('show-pdf-toc')">
+          <v-icon small>mdi-menu</v-icon>
+        </button>
+        <button type="button" class="reflow-control reflow-icon-control reflow-compact-control" title="重排" aria-label="重排" @click="applyReflowSettings">
+          <v-icon small>mdi-refresh</v-icon>
+        </button>
+        <button type="button" class="reflow-control reflow-icon-control reflow-compact-control" title="退出重排" aria-label="退出重排" @click="exitReflow">
+          <v-icon small>mdi-exit-to-app</v-icon>
+        </button>
         <button
           type="button"
-          class="reflow-control reflow-icon-control reflow-collapse-control"
-          :title="controlsCollapsed ? '显示控制项' : '隐藏控制项'"
-          :aria-label="controlsCollapsed ? '显示控制项' : '隐藏控制项'"
-          @click="controlsCollapsed = !controlsCollapsed"
+          class="reflow-control reflow-pull-control"
+          title="显示重排设置"
+          aria-label="显示重排设置"
+          @click="controlsCollapsed = false"
         >
-          <v-icon small>{{ controlsCollapsed ? 'mdi-chevron-double-down' : 'mdi-chevron-double-up' }}</v-icon>
+          <v-icon x-small>mdi-chevron-down</v-icon>
         </button>
       </div>
-      <template v-if="!controlsCollapsed">
+      <template v-else>
+        <div class="reflow-top-controls">
+          <button type="button" class="reflow-control reflow-icon-control reflow-compact-control" title="返回" aria-label="返回" @click="$emit('back-to-book')">
+            <v-icon small>mdi-arrow-left</v-icon>
+          </button>
+          <button
+            type="button"
+            class="reflow-control reflow-icon-control reflow-collapse-control"
+            title="隐藏重排设置"
+            aria-label="隐藏重排设置"
+            @click="controlsCollapsed = true"
+          >
+            <v-icon small>mdi-chevron-double-up</v-icon>
+          </button>
+          <button
+            type="button"
+            class="reflow-control reflow-icon-control reflow-toc-control"
+            title="目录"
+            aria-label="目录"
+            @click="$emit('show-pdf-toc')"
+          >
+            <v-icon small>mdi-menu</v-icon>
+          </button>
+          <button
+            type="button"
+            class="reflow-control reflow-icon-control"
+            :title="nightDisplay ? '白天模式' : '黑夜模式'"
+            :aria-label="nightDisplay ? '白天模式' : '黑夜模式'"
+            @click="$emit('toggle-night-display')"
+          >
+            <v-icon small>{{ nightDisplay ? 'mdi-white-balance-sunny' : 'mdi-weather-night' }}</v-icon>
+          </button>
+          <div class="reflow-navigation-controls">
+            <button type="button" class="reflow-control reflow-nav-control reflow-exit-control" @click="exitReflow">
+              <v-icon small>mdi-exit-to-app</v-icon>
+              <span>退出重排</span>
+            </button>
+            <button type="button" class="reflow-control reflow-nav-control reflow-apply-control" @click="applyReflowSettings">
+              <v-icon small>mdi-refresh</v-icon>
+              <span>重排</span>
+            </button>
+          </div>
+          <label class="reflow-processing-control">
+            <span>位置</span>
+            <select :value="serverReflow ? 'server' : 'local'" @change="setProcessingMode">
+              <option value="local">本地重排</option>
+              <option value="server">服务端重排</option>
+            </select>
+          </label>
+          <span v-if="transferStatsLabel" class="reflow-transfer-stats">{{ transferStatsLabel }}</span>
+        </div>
         <label class="reflow-font-control reflow-wide-control">
           <span>文字大小</span>
           <button type="button" class="reflow-step-control" @click="adjustTextScale(-5)">-</button>
@@ -82,6 +139,15 @@
             <option value="4">4</option>
           </select>
         </label>
+        <label class="reflow-column-control">
+          <span>旋转</span>
+          <select :value="normalizedRotation(rotation)" @change="setRotation">
+            <option value="-90">-90°</option>
+            <option value="0">0°</option>
+            <option value="90">+90°</option>
+            <option value="180">180°</option>
+          </select>
+        </label>
         <label class="reflow-column-control reflow-checkbox-control">
           <span>文字/背景增强</span>
           <input type="checkbox" :checked="contrastEnhancement" @change="setContrastEnhancement"/>
@@ -89,6 +155,12 @@
         <label class="reflow-column-control reflow-checkbox-control">
           <span>背景跟随底色</span>
           <input type="checkbox" :checked="matchBackground" @change="setMatchBackground"/>
+        </label>
+        <label class="reflow-column-control">
+          <span>字块质量</span>
+          <select :value="controlImageQuality" @change="setImageQuality">
+            <option v-for="quality in imageQualityOptions" :key="quality" :value="quality">{{ quality }}%</option>
+          </select>
         </label>
         <label class="reflow-stroke-control">
           <span>字体宽度</span>
@@ -135,21 +207,21 @@
             <span class="reflow-font-value">{{ controlSkewCorrectionLabel }}</span>
           </label>
           <div class="reflow-region-controls">
+            <label class="reflow-region-count-control">
+              <span>区域数</span>
+              <select :value="cropRegionCount" @change="setCropRegionCount">
+                <option v-for="count in cropRegionCountOptions" :key="count" :value="count">{{ count }}</option>
+              </select>
+            </label>
             <button
+              v-for="region in cropRegionIndexes"
+              :key="region"
               type="button"
               class="reflow-control reflow-region-control"
-              :class="{'reflow-region-active': activeCropRegion === 0}"
-              @click="setActiveCropRegion(0)"
+              :class="{'reflow-region-active': activeCropRegion === region}"
+              @click="setActiveCropRegion(region)"
             >
-              区域 1
-            </button>
-            <button
-              type="button"
-              class="reflow-control reflow-region-control"
-              :class="{'reflow-region-active': activeCropRegion === 1}"
-              @click="setActiveCropRegion(1)"
-            >
-              区域 2
+              区域 {{ region + 1 }}
             </button>
           </div>
           <button type="button" class="reflow-control" @click="toggleCropMode">
@@ -216,12 +288,12 @@
         />
       </div>
     </div>
-    <div v-else-if="loading" class="reflow-status">Reflowing...</div>
-    <div v-else-if="error" class="reflow-status">
+    <div v-else-if="loading" class="reflow-status" @click="collapseControls">Reflowing...</div>
+    <div v-else-if="error" class="reflow-status" @click="collapseControls">
       <div>Unable to reflow this page</div>
       <div v-if="errorMessage" class="reflow-error">{{ errorMessage }}</div>
     </div>
-    <div v-else-if="deferReflow" class="reflow-setup-preview">
+    <div v-else-if="deferReflow" class="reflow-setup-preview" @click="collapseControls">
       <img
         :src="page.url"
         class="reflow-setup-image"
@@ -230,7 +302,7 @@
         @dragstart.prevent
       />
     </div>
-    <div v-else class="reflow-wrapper" :class="{'vertical-reflow-wrapper': verticalText}" :style="reflowWrapperStyle">
+    <div v-else class="reflow-wrapper" :class="{'vertical-reflow-wrapper': verticalText}" :style="reflowWrapperStyle" @click="collapseControls">
       <div v-if="reflowItems.length === 0" class="reflow-status">No text blocks detected</div>
       <template v-for="(item, i) in visibleItems">
         <span
@@ -319,6 +391,7 @@ type ReflowOptions = {
   strokeStrength: number,
   contrastEnhancement: boolean,
   matchBackground: boolean,
+  imageQuality: number,
   blockSpacing: number,
   verticalText: boolean,
   verticalDirection: VerticalDirection,
@@ -327,6 +400,7 @@ type ReflowOptions = {
   marginBottom: number,
   marginLeft: number,
   cropRoisByParity?: Partial<Record<PageParity, Roi | null | undefined>> & {
+    regionCount?: number,
     regions?: Partial<Record<PageParity, Array<Roi | null | undefined>>>,
     explicit?: Partial<Record<PageParity, boolean>>,
     explicitRegions?: Partial<Record<PageParity, boolean[]>>,
@@ -342,7 +416,7 @@ type Roi = {
 
 type PageParity = 'odd' | 'even'
 type VerticalDirection = 'ltr' | 'rtl'
-type CropRegionIndex = 0 | 1
+type CropRegionIndex = number
 
 type Column = {
   start: number,
@@ -359,6 +433,11 @@ type WordBlock = {
   y: number,
   w: number,
   h: number,
+}
+
+type InkBlockMetrics = {
+  bounds: WordBlock,
+  inkCount: number,
 }
 
 type ImageRegion = Roi
@@ -412,6 +491,27 @@ type ReflowCachePayload = {
   cacheKey: string,
   items: ReflowItem[],
   pageBackground: string,
+  transferStats?: ReflowTransferStats,
+}
+
+type ReflowTransferStats = {
+  originalImageBytes: number,
+  transferBytes: number,
+  encodedImageBytes?: number,
+  processingTimeMs?: number,
+}
+
+type ServerReflowResponse = {
+  pageNumber: number,
+  pageBackground: string,
+  sourceWidth: number,
+  sourceHeight: number,
+  originalImageBytes: number,
+  uploadedImageBytes?: number,
+  transferBytes: number,
+  encodedImageBytes?: number,
+  processingTimeMs: number,
+  items: ReflowItem[],
 }
 
 type ReflowRegionSource = {
@@ -431,6 +531,7 @@ type ReflowOptionsSnapshot = {
   verticalText: boolean,
   verticalDirection: VerticalDirection,
   strokeStrength: number,
+  imageQuality: number,
   blockSpacing: number,
   cropRoisKey: string,
 }
@@ -441,8 +542,11 @@ const WORD_GAP = 3
 const BLOCK_PADDING = 1
 const WORD_SCALE = 0.4
 const MIN_CROP_SIZE = 15
+const MAX_CROP_REGIONS = 8
 const MIN_INDENT = 8
 const REFLOW_CONTROLS_HEIGHT = 48
+const DEFAULT_REFLOW_IMAGE_QUALITY = 80
+const REFLOW_IMAGE_QUALITY_OPTIONS = [90, 80, 70, 60, 50, 40]
 const VIEWPORT_PAGE_BUFFER = 40
 const SPLIT_GUARD_BAND = 5
 const DETECTION_FULL_RES_MAX_PIXELS = 6000000
@@ -461,6 +565,10 @@ export default Vue.extend({
       type: Number,
       required: true,
     },
+    rotation: {
+      type: Number,
+      default: 0,
+    },
     options: {
       type: Object as () => ReflowOptions,
       required: true,
@@ -473,6 +581,10 @@ export default Vue.extend({
       type: String,
       default: '',
     },
+    cachedTransferStats: {
+      type: Object as () => ReflowTransferStats | undefined,
+      default: undefined,
+    },
     cacheKey: {
       type: String,
       default: '',
@@ -480,6 +592,18 @@ export default Vue.extend({
     nightDisplay: {
       type: Boolean,
       default: false,
+    },
+    serverReflow: {
+      type: Boolean,
+      default: false,
+    },
+    serverReflowUrl: {
+      type: String,
+      default: '',
+    },
+    controlsTopOffset: {
+      type: Number,
+      default: 0,
     },
     preload: {
       type: Boolean,
@@ -508,6 +632,7 @@ export default Vue.extend({
       lastDetectionKey: '',
       objectUrl: '',
       objectUrlSource: '',
+      objectUrlBytes: 0,
       cropObjectUrl: '',
       cropObjectUrlSkewCorrection: 0,
       cropImageRequestId: 0,
@@ -516,18 +641,20 @@ export default Vue.extend({
       reflowPending: false,
       controlsCollapsed: true,
       imageSize: {w: 0, h: 0},
+      transferStats: undefined as ReflowTransferStats | undefined,
       cropMode: false,
       cropWarning: '',
       activeCropRegion: 0 as CropRegionIndex,
+      cropRegionCount: 2,
       drawingCrop: false,
       cropStart: {x: 0, y: 0},
       cropRoisByParity: {
-        odd: [undefined, undefined],
-        even: [undefined, undefined],
+        odd: Array(MAX_CROP_REGIONS).fill(undefined),
+        even: Array(MAX_CROP_REGIONS).fill(undefined),
       } as Record<PageParity, Array<Roi | undefined>>,
       explicitCropRoisByParity: {
-        odd: [false, false],
-        even: [false, false],
+        odd: Array(MAX_CROP_REGIONS).fill(false),
+        even: Array(MAX_CROP_REGIONS).fill(false),
       } as Record<PageParity, boolean[]>,
       draftRoi: undefined as Roi | undefined,
       pendingColumnCount: 1,
@@ -535,6 +662,7 @@ export default Vue.extend({
       pendingVerticalText: false,
       pendingVerticalDirection: 'rtl' as VerticalDirection,
       pendingStrokeStrength: 0.1,
+      pendingImageQuality: DEFAULT_REFLOW_IMAGE_QUALITY,
       pendingBlockSpacing: 6,
       optionsSnapshot: undefined as ReflowOptionsSnapshot | undefined,
       forceReflowOnce: false,
@@ -569,6 +697,12 @@ export default Vue.extend({
     strokeStrength(): number {
       return this.clampNumber(this.options.strokeStrength, 0.1, 3, 0.1)
     },
+    imageQuality(): number {
+      return this.normalizedImageQuality(this.options.imageQuality)
+    },
+    imageQualityOptions(): number[] {
+      return REFLOW_IMAGE_QUALITY_OPTIONS
+    },
     contrastEnhancement(): boolean {
       return this.options.contrastEnhancement === true
     },
@@ -597,8 +731,16 @@ export default Vue.extend({
     controlStrokeStrength(): number {
       return this.roundStrokeStrength(this.pendingStrokeStrength)
     },
+    controlImageQuality(): number {
+      return this.normalizedImageQuality(this.pendingImageQuality)
+    },
     controlBlockSpacing(): number {
       return this.clampNumber(this.pendingBlockSpacing, 0, 24, 6)
+    },
+    reflowControlsStyle(): object {
+      return {
+        top: `${Math.max(0, Math.round(this.controlsTopOffset))}px`,
+      }
     },
     reflowWrapperStyle(): object {
       const style = {
@@ -646,6 +788,12 @@ export default Vue.extend({
     pageParityShortLabel(): string {
       return this.pageParity === 'even' ? '偶数' : '奇数'
     },
+    cropRegionCountOptions(): number[] {
+      return Array.from({length: MAX_CROP_REGIONS}, (_, index) => index + 1)
+    },
+    cropRegionIndexes(): CropRegionIndex[] {
+      return Array.from({length: this.cropRegionCount}, (_, index) => index)
+    },
     selectAreaLabel(): string {
       return this.cropMode ? '完成' : `截取${this.pageParityShortLabel}区域${this.activeCropRegion + 1}`
     },
@@ -655,13 +803,19 @@ export default Vue.extend({
     cropImageUrl(): string {
       return this.cropObjectUrl || this.objectUrl
     },
+    transferStatsLabel(): string {
+      if (!this.transferStats) return ''
+      const processing = this.transferStats.processingTimeMs !== undefined ? ` / ${Math.round(this.transferStats.processingTimeMs)}ms` : ''
+      const encodedImages = this.transferStats.encodedImageBytes !== undefined ? ` / 字块 ${this.formatBytes(this.transferStats.encodedImageBytes)}` : ''
+      return `源页 ${this.formatBytes(this.transferStats.originalImageBytes)} / 交互 ${this.formatBytes(this.transferStats.transferBytes)}${encodedImages}${processing}`
+    },
     activeRoi(): Roi | undefined {
       return this.draftRoi || this.cropRoi
     },
     cropRects(): CropRect[] {
       if (!this.imageSize.w || !this.imageSize.h) return []
       const rois = this.effectiveCropRois(this.pageParity)
-      return ([0, 1] as CropRegionIndex[])
+      return this.cropRegionIndexes
         .map(region => {
           const roi = region === this.activeCropRegion ? this.activeRoi : rois[region]
           if (!roi) return undefined
@@ -718,6 +872,15 @@ export default Vue.extend({
       if (this.deferReflow || this.cropMode) return
       this.reflow()
     },
+    rotation() {
+      this.revokeObjectUrl()
+      if (this.cropMode) {
+        this.ensureCropImage(this.controlSkewCorrection)
+        return
+      }
+      if (this.deferReflow) return
+      this.reflow()
+    },
     cachedItems: {
       handler() {
         if (this.deferReflow || this.cropMode) return
@@ -763,6 +926,11 @@ export default Vue.extend({
     this.revokeObjectUrl()
   },
   methods: {
+    collapseControls(): boolean {
+      if (this.controlsCollapsed || this.cropMode) return false
+      this.controlsCollapsed = true
+      return true
+    },
     syncPendingOptionsFromProps(force: boolean = false) {
       const snapshot = this.optionsSnapshotFromProps()
       const previous = this.optionsSnapshot
@@ -771,6 +939,7 @@ export default Vue.extend({
       if (force || !previous || snapshot.verticalText !== previous.verticalText) this.pendingVerticalText = snapshot.verticalText
       if (force || !previous || snapshot.verticalDirection !== previous.verticalDirection) this.pendingVerticalDirection = snapshot.verticalDirection
       if (force || !previous || snapshot.strokeStrength !== previous.strokeStrength) this.pendingStrokeStrength = snapshot.strokeStrength
+      if (force || !previous || snapshot.imageQuality !== previous.imageQuality) this.pendingImageQuality = snapshot.imageQuality
       if (force || !previous || snapshot.blockSpacing !== previous.blockSpacing) this.pendingBlockSpacing = snapshot.blockSpacing
       if (force || !previous || snapshot.cropRoisKey !== previous.cropRoisKey) this.syncCropRoisFromOptions()
       this.optionsSnapshot = snapshot
@@ -783,6 +952,7 @@ export default Vue.extend({
         verticalText: this.options.verticalText === true,
         verticalDirection: this.options.verticalDirection === 'ltr' ? 'ltr' : 'rtl',
         strokeStrength: this.roundStrokeStrength(this.options.strokeStrength),
+        imageQuality: this.normalizedImageQuality(this.options.imageQuality),
         blockSpacing: this.clampNumber(this.options.blockSpacing, 0, 24, 6),
         cropRoisKey: JSON.stringify(this.options.cropRoisByParity || {}),
       }
@@ -817,6 +987,7 @@ export default Vue.extend({
         this.revokeObjectUrl()
         this.reflowItems = this.cachedItems
         this.pageBackground = this.cachedPageBackground || '#fff'
+        this.transferStats = this.cachedTransferStats
         this.repaginate()
         this.lastDetectionKey = detectionKey
         this.loading = false
@@ -833,8 +1004,14 @@ export default Vue.extend({
 
       this.loading = true
       this.reflowItems = []
+      this.transferStats = undefined
 
       try {
+        if (this.serverReflow) {
+          await this.runServerReflow(requestId, detectionKey)
+          return
+        }
+
         const image = await this.loadPageImage(this.page.url, requestId)
         if (requestId !== this.requestId) return
         this.imageSize = {w: image.naturalWidth, h: image.naturalHeight}
@@ -866,6 +1043,7 @@ export default Vue.extend({
           regionItems.push(this.renderReflowItems(sourceCanvas, lines, imageRegions))
         }
         if (requestId !== this.requestId) return
+        this.transferStats = this.localTransferStats()
         this.reflowItems = this.joinRegionReflowItems(regionItems)
         this.repaginate()
         this.lastDetectionKey = detectionKey
@@ -877,6 +1055,83 @@ export default Vue.extend({
       } finally {
         if (requestId === this.requestId) this.loading = false
       }
+    },
+    async runServerReflow(requestId: number, detectionKey: string) {
+      if (!this.serverReflowUrl) throw new Error('Server reflow URL is unavailable')
+
+      const requestUrl = this.serverReflowRequestUrl()
+
+      const response = await fetch(requestUrl, {
+        method: 'GET',
+        credentials: 'include',
+        headers: {
+          Accept: 'application/json',
+        },
+      })
+      if (!response.ok) throw new Error(`Unable to reflow page on server: ${response.status}`)
+      const text = await response.text()
+      const payload = JSON.parse(text) as ServerReflowResponse
+      if (requestId !== this.requestId) return
+
+      this.imageSize = {w: payload.sourceWidth || 0, h: payload.sourceHeight || 0}
+      this.pageBackground = payload.pageBackground || '#fff'
+      this.reflowItems = Array.isArray(payload.items) ? payload.items : []
+      const responseBytes = Number(payload.transferBytes) || this.utf8ByteLength(text)
+      this.transferStats = {
+        originalImageBytes: Number(payload.originalImageBytes) || 0,
+        transferBytes: this.utf8ByteLength(requestUrl) + responseBytes,
+        encodedImageBytes: Number(payload.encodedImageBytes) || 0,
+        processingTimeMs: Number(payload.processingTimeMs) || 0,
+      }
+      this.repaginate()
+      this.lastDetectionKey = detectionKey
+      this.emitReflowed()
+    },
+    serverReflowRequestUrl(): string {
+      const params = new URLSearchParams()
+      params.set('targetWidth', String(Math.round(this.targetWidth || 0)))
+      params.set('rotation', String(this.normalizedRotation(this.rotation)))
+      params.set('autoCropBorder', String(this.options.autoCropBorder !== false))
+      params.set('textScale', String(this.textScalePercent))
+      params.set('columnCount', String(this.columnCount))
+      params.set('skewCorrection', String(this.skewCorrection))
+      params.set('threshold', String(this.clampNumber(this.options.threshold, 50, 230, THRESHOLD)))
+      params.set('columnGap', String(this.clampNumber(this.options.columnGap, 5, 80, COLUMN_GAP)))
+      params.set('wordGap', String(this.clampNumber(this.options.wordGap, 1, 30, WORD_GAP)))
+      params.set('strokeStrength', String(this.strokeStrength))
+      params.set('contrastEnhancement', String(this.contrastEnhancement))
+      params.set('matchBackground', String(this.matchBackground))
+      params.set('imageQuality', String(this.imageQuality))
+      params.set('blockSpacing', String(this.blockSpacing))
+      params.set('verticalText', String(this.verticalText))
+      params.set('verticalDirection', this.verticalDirection)
+      params.set('marginTop', String(this.clampPercent(this.options.marginTop)))
+      params.set('marginRight', String(this.clampPercent(this.options.marginRight)))
+      params.set('marginBottom', String(this.clampPercent(this.options.marginBottom)))
+      params.set('marginLeft', String(this.clampPercent(this.options.marginLeft)))
+      params.set('darkDisplay', String(this.darkDisplay))
+      this.reflowCropRois()
+        .filter((roi): roi is Roi => !!roi)
+        .forEach(roi => params.append('cropRegion', `${Math.round(roi.x)},${Math.round(roi.y)},${Math.round(roi.w)},${Math.round(roi.h)}`))
+
+      const separator = this.serverReflowUrl.includes('?') ? '&' : '?'
+      return `${this.serverReflowUrl}${separator}${params.toString()}`
+    },
+    localTransferStats(): ReflowTransferStats {
+      return {
+        originalImageBytes: this.objectUrlBytes || 0,
+        transferBytes: 0,
+      }
+    },
+    utf8ByteLength(value: string): number {
+      if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(value).length
+      return new Blob([value]).size
+    },
+    formatBytes(bytes: number): string {
+      const value = Number(bytes) || 0
+      if (value < 1024) return `${Math.round(value)}B`
+      if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)}KB`
+      return `${(value / 1024 / 1024).toFixed(2)}MB`
     },
     handleResize() {
       this.updateViewportMetrics()
@@ -1174,6 +1429,9 @@ export default Vue.extend({
       return JSON.stringify({
         page: this.page.number,
         url: this.page.url,
+        serverReflow: this.serverReflow,
+        serverReflowUrl: this.serverReflowUrl,
+        rotation: this.normalizedRotation(this.rotation),
         autoCropBorder: this.options.autoCropBorder,
         columnCount: this.options.columnCount,
         skewCorrection: this.skewCorrection,
@@ -1183,18 +1441,19 @@ export default Vue.extend({
         strokeStrength: this.options.strokeStrength,
         contrastEnhancement: this.options.contrastEnhancement,
         matchBackground: this.options.matchBackground,
+        imageQuality: this.imageQuality,
         verticalText: this.options.verticalText,
         verticalDirection: this.options.verticalDirection,
         marginTop: this.options.marginTop,
         marginRight: this.options.marginRight,
         marginBottom: this.options.marginBottom,
         marginLeft: this.options.marginLeft,
-        cropRois: this.effectiveCropRois(this.pageParity),
+        cropRois: this.currentReflowCropRois(this.pageParity),
         darkDisplay: this.darkDisplay,
         deskewDetectionVersion: 9,
         imageExclusionVersion: 3,
         detectionScaleVersion: 3,
-        darkWordRenderVersion: 3,
+        darkWordRenderVersion: 4,
       })
     },
     emitReflowed() {
@@ -1203,6 +1462,7 @@ export default Vue.extend({
         cacheKey: this.cacheKey,
         items: this.reflowItems,
         pageBackground: this.pageBackground,
+        transferStats: this.transferStats,
       } as ReflowCachePayload)
     },
     currentCachePayload(): ReflowCachePayload | undefined {
@@ -1212,6 +1472,7 @@ export default Vue.extend({
         cacheKey: this.cacheKey,
         items: this.reflowItems,
         pageBackground: this.pageBackground,
+        transferStats: this.transferStats,
       }
     },
     rescaleReflowItems() {
@@ -1254,15 +1515,24 @@ export default Vue.extend({
     },
     async loadPageImage(url: string, requestId?: number): Promise<HTMLImageElement> {
       const sourceUrl = this.pageImageUrl(url)
-      if (this.objectUrl && this.objectUrlSource === sourceUrl) return this.decodeImageUrl(this.objectUrl)
+      const rotation = this.normalizedRotation(this.rotation)
+      const sourceKey = `${sourceUrl}#rotation=${rotation}`
+      if (this.objectUrl && this.objectUrlSource === sourceKey) return this.decodeImageUrl(this.objectUrl)
 
       const response = await fetch(sourceUrl, {credentials: 'include'})
       if (!response.ok) throw new Error(`Unable to load page: ${response.status}`)
       const blob = await response.blob()
       if (blob.type && !blob.type.startsWith('image/')) throw new Error(`Page response is not an image: ${blob.type}`)
-      const nextObjectUrl = URL.createObjectURL(blob)
+      const rawObjectUrl = URL.createObjectURL(blob)
+      let nextObjectUrl = rawObjectUrl
       try {
-        const image = await this.decodeImageUrl(nextObjectUrl)
+        let image = await this.decodeImageUrl(rawObjectUrl)
+        if (rotation) {
+          const rotatedUrl = await this.canvasObjectUrl(this.rotatedImageCanvas(image, rotation))
+          URL.revokeObjectURL(rawObjectUrl)
+          nextObjectUrl = rotatedUrl
+          image = await this.decodeImageUrl(nextObjectUrl)
+        }
         if (requestId !== undefined && requestId !== this.requestId) {
           URL.revokeObjectURL(nextObjectUrl)
           return image
@@ -1270,7 +1540,8 @@ export default Vue.extend({
         const previousObjectUrl = this.objectUrl
         this.revokeCropObjectUrl(false)
         this.objectUrl = nextObjectUrl
-        this.objectUrlSource = sourceUrl
+        this.objectUrlSource = sourceKey
+        this.objectUrlBytes = blob.size
         if (previousObjectUrl && previousObjectUrl !== nextObjectUrl) URL.revokeObjectURL(previousObjectUrl)
         return image
       } catch (e) {
@@ -1306,6 +1577,9 @@ export default Vue.extend({
     fillWordSliceBackground(context: CanvasRenderingContext2D, width: number, height: number) {
       context.fillStyle = this.wordOutputBackground()
       context.fillRect(0, 0, width, height)
+    },
+    reflowSliceDataUrl(canvas: HTMLCanvasElement): string {
+      return canvas.toDataURL('image/jpeg', this.imageQuality / 100)
     },
     enhanceSourceCanvas(context: CanvasRenderingContext2D, width: number, height: number) {
       if (!this.contrastEnhancement || this.darkDisplay) return
@@ -1556,11 +1830,15 @@ export default Vue.extend({
       }
     },
     canvasObjectUrl(canvas: HTMLCanvasElement): Promise<string> {
+      return this.canvasBlob(canvas, 'image/jpeg', 0.95)
+        .then(blob => URL.createObjectURL(blob))
+    },
+    canvasBlob(canvas: HTMLCanvasElement, type: string, quality?: number): Promise<Blob> {
       return new Promise((resolve, reject) => {
         canvas.toBlob(blob => {
-          if (blob) resolve(URL.createObjectURL(blob))
-          else reject(new Error('Unable to encode deskewed crop image'))
-        }, 'image/jpeg', 0.95)
+          if (blob) resolve(blob)
+          else reject(new Error('Unable to encode page image'))
+        }, type, quality)
       })
     },
     reflowRegionSource(sourceCanvas: HTMLCanvasElement, cropRoi?: Roi): ReflowRegionSource {
@@ -1621,11 +1899,37 @@ export default Vue.extend({
       context.drawImage(sourceCanvas, -sourceCanvas.width / 2, -sourceCanvas.height / 2)
       return correctedCanvas
     },
+    rotatedImageCanvas(image: HTMLImageElement, degrees: number): HTMLCanvasElement {
+      const rotation = this.normalizedRotation(degrees)
+      const quarterTurn = Math.abs(rotation) === 90
+      const canvas = document.createElement('canvas')
+      canvas.width = quarterTurn ? image.naturalHeight : image.naturalWidth
+      canvas.height = quarterTurn ? image.naturalWidth : image.naturalHeight
+      const context = this.canvasContext(canvas, true)
+      if (!context) return canvas
+      context.fillStyle = this.pageBackground || '#fff'
+      context.fillRect(0, 0, canvas.width, canvas.height)
+      context.translate(canvas.width / 2, canvas.height / 2)
+      context.rotate(rotation * Math.PI / 180)
+      context.drawImage(image, -image.naturalWidth / 2, -image.naturalHeight / 2)
+      return canvas
+    },
+    normalizedRotation(value: number): number {
+      const numberValue = Number(value)
+      if (!Number.isFinite(numberValue)) return 0
+      const rounded = Math.round(numberValue / 90) * 90
+      const normalized = ((rounded % 360) + 360) % 360
+      if (normalized === 90) return 90
+      if (normalized === 180) return 180
+      if (normalized === 270) return -90
+      return 0
+    },
     revokeObjectUrl(cancelCropRequests: boolean = true) {
       this.revokeCropObjectUrl(cancelCropRequests)
       if (this.objectUrl) URL.revokeObjectURL(this.objectUrl)
       this.objectUrl = ''
       this.objectUrlSource = ''
+      this.objectUrlBytes = 0
     },
     revokeCropObjectUrl(cancelCropRequests: boolean = true) {
       if (cancelCropRequests) this.cropImageRequestId += 1
@@ -1671,7 +1975,7 @@ export default Vue.extend({
       })
 
       return {
-        lines: wordLines,
+        lines: this.filterHorizontalNoiseLines(wordLines, isInk),
         imageRegions,
       }
     },
@@ -2002,8 +2306,19 @@ export default Vue.extend({
       return roi
     },
     reflowCropRois(): Array<Roi | undefined> {
-      const rois = this.nonOverlappingCropRois(this.effectiveCropRois(this.pageParity)).filter((roi): roi is Roi => !!roi)
+      const rois = this.currentReflowCropRois(this.pageParity).filter((roi): roi is Roi => !!roi)
       return rois.length > 0 ? rois : [undefined]
+    },
+    currentReflowCropRois(parity: PageParity): Array<Roi | undefined> {
+      const rois = this.effectiveCropRois(parity).slice(0, this.cropRegionCount)
+      if (parity === this.pageParity && this.draftRoi && this.draftRoi.w > MIN_CROP_SIZE && this.draftRoi.h > MIN_CROP_SIZE) {
+        rois[this.activeCropRegion] = this.draftRoi
+      }
+      const activeStoredRoi = this.cropRoisByParity[parity]?.[this.activeCropRegion]
+      if (parity === this.pageParity && activeStoredRoi && this.explicitCropRoisByParity[parity]?.[this.activeCropRegion]) {
+        rois[this.activeCropRegion] = activeStoredRoi
+      }
+      return this.nonOverlappingCropRois(rois)
     },
     joinRegionReflowItems(regionItems: ReflowItem[][]): ReflowItem[] {
       const rendered = [] as ReflowItem[]
@@ -2020,27 +2335,33 @@ export default Vue.extend({
       const even = this.normalizedStoredRegions(rois, 'even')
       const oddExplicit = this.normalizedStoredExplicitRegions(rois, 'odd', odd)
       const evenExplicit = this.normalizedStoredExplicitRegions(rois, 'even', even)
+      this.cropRegionCount = this.normalizedCropRegionCount((rois as any).regionCount)
+      if (this.activeCropRegion >= this.cropRegionCount) this.activeCropRegion = this.cropRegionCount - 1
       this.$set(this.cropRoisByParity, 'odd', odd)
       this.$set(this.cropRoisByParity, 'even', even)
       this.$set(this.explicitCropRoisByParity, 'odd', oddExplicit)
       this.$set(this.explicitCropRoisByParity, 'even', evenExplicit)
+    },
+    normalizedCropRegionCount(value: any): number {
+      const numberValue = Number(value)
+      if (!Number.isFinite(numberValue)) return 2
+      return Math.max(1, Math.min(MAX_CROP_REGIONS, Math.round(numberValue)))
     },
     effectiveCropRoi(parity: PageParity, region: CropRegionIndex): Roi | undefined {
       if (!this.explicitCropRoisByParity[parity]?.[region]) return undefined
       return this.cropRoisByParity[parity]?.[region]
     },
     effectiveCropRois(parity: PageParity): Array<Roi | undefined> {
-      return ([0, 1] as CropRegionIndex[]).map(region => this.effectiveCropRoi(parity, region))
+      return this.cropRegionIndexes.map(region => this.effectiveCropRoi(parity, region))
     },
     normalizedStoredRegions(
       rois: Partial<Record<PageParity, Roi | null | undefined>> & {regions?: Partial<Record<PageParity, Array<Roi | null | undefined>>>},
       parity: PageParity,
     ): Array<Roi | undefined> {
       const regions = rois.regions?.[parity] || []
-      const normalized = [
-        this.normalizedStoredRoi(regions[0]) || this.normalizedStoredRoi(rois[parity]),
-        this.normalizedStoredRoi(regions[1]),
-      ]
+      const normalized = Array.from({length: MAX_CROP_REGIONS}, (_, index) =>
+        this.normalizedStoredRoi(regions[index]) || (index === 0 ? this.normalizedStoredRoi(rois[parity]) : undefined),
+      )
       return this.nonOverlappingCropRois(normalized)
     },
     normalizedStoredExplicitRegions(
@@ -2052,10 +2373,11 @@ export default Vue.extend({
       regions: Array<Roi | undefined>,
     ): boolean[] {
       const explicitRegions = rois.explicitRegions?.[parity] || []
-      return [
-        regions[0] ? (explicitRegions[0] ?? rois.explicit?.[parity]) !== false : false,
-        regions[1] ? explicitRegions[1] !== false : false,
-      ]
+      return Array.from({length: MAX_CROP_REGIONS}, (_, index) => {
+        if (!regions[index]) return false
+        if (index === 0) return (explicitRegions[0] ?? rois.explicit?.[parity]) !== false
+        return explicitRegions[index] !== false
+      })
     },
     normalizedStoredRoi(value: Roi | null | undefined): Roi | undefined {
       if (!value) return undefined
@@ -2070,6 +2392,7 @@ export default Vue.extend({
       const odd = this.payloadRegions('odd')
       const even = this.payloadRegions('even')
       return {
+        regionCount: this.cropRegionCount,
         odd: odd[0],
         even: even[0],
         regions: {
@@ -2081,20 +2404,24 @@ export default Vue.extend({
           even: this.explicitCropRoisByParity.even[0],
         },
         explicitRegions: {
-          odd: this.explicitCropRoisByParity.odd.slice(0, 2),
-          even: this.explicitCropRoisByParity.even.slice(0, 2),
+          odd: this.explicitCropRoisByParity.odd.slice(0, this.cropRegionCount),
+          even: this.explicitCropRoisByParity.even.slice(0, this.cropRegionCount),
         },
       }
     },
     payloadRegions(parity: PageParity): Array<Roi | null> {
-      return ([0, 1] as CropRegionIndex[]).map(region => {
+      return this.cropRegionIndexes.map(region => {
         const roi = this.cropRoisByParity[parity][region]
         return this.explicitCropRoisByParity[parity][region] && roi ? {...roi} : null
       })
     },
     nonOverlappingCropRois(rois: Array<Roi | undefined>): Array<Roi | undefined> {
-      const normalized = rois.slice(0, 2)
-      if (normalized[0] && normalized[1] && this.cropRegionsOverlap(normalized[0], normalized[1])) normalized[1] = undefined
+      const normalized = rois.slice(0, MAX_CROP_REGIONS)
+      normalized.forEach((roi, index) => {
+        if (!roi) return
+        const overlapsPrevious = normalized.slice(0, index).some(previous => !!previous && this.cropRegionsOverlap(previous, roi))
+        if (overlapsPrevious) normalized[index] = undefined
+      })
       return normalized
     },
     cropRegionsOverlap(a: Roi, b: Roi): boolean {
@@ -2147,7 +2474,7 @@ export default Vue.extend({
         return this.verticalDirection === 'rtl' ? centerB - centerA : centerA - centerB
       })
 
-      const lines = orderedColumns
+      const rawLines = orderedColumns
         .map(column => {
           const words = this.mergeVerticalAdornmentBlocks(this.mergeVerticalGlyphFragments(this.detectVerticalBlocks(isInk, column, roi), isInk))
           return {
@@ -2157,6 +2484,7 @@ export default Vue.extend({
           }
         })
         .filter(line => line.words.length > 0)
+      const lines = this.filterVerticalNoiseLines(rawLines, isInk)
 
       const textBounds = this.verticalTextBounds(lines)
       if (!textBounds) return lines
@@ -2277,13 +2605,19 @@ export default Vue.extend({
       medianWidth: number,
       isInk: (x: number, y: number) => boolean,
     ): boolean {
-      const gap = bottom.y - (top.y + top.h)
-      const maxInternalGap = Math.max(3, Math.min(charHeight * 0.42, this.clampNumber(this.options.wordGap, 1, 30, WORD_GAP) * 3.5))
-      if (gap < 0 || gap > maxInternalGap) return false
+      const rawGap = bottom.y - (top.y + top.h)
+      const gap = Math.max(0, rawGap)
+      const wordGap = this.clampNumber(this.options.wordGap, 1, 30, WORD_GAP)
+      const baseInternalGap = Math.max(3, Math.min(charHeight * 0.5, wordGap * 4))
+      const highResolutionInternalGap = charHeight >= 36
+        ? Math.max(baseInternalGap, Math.min(charHeight * 0.4, Math.max(30, wordGap * 8)))
+        : baseInternalGap
+      const maxInternalGap = Math.min(charHeight * 0.5, highResolutionInternalGap)
+      if (rawGap > maxInternalGap) return false
 
       const union = this.unionWordBlocks(top, bottom)
       const hasSmallFragment = top.h < charHeight * 0.58 || bottom.h < charHeight * 0.58 || top.w < medianWidth * 0.72 || bottom.w < medianWidth * 0.72
-      const singleGlyphHeightLimit = charHeight * (hasSmallFragment ? 1.85 : 1.42)
+      const singleGlyphHeightLimit = charHeight * (hasSmallFragment ? 2.05 : 1.42)
       if (union.h > singleGlyphHeightLimit) return false
 
       const overlap = this.horizontalOverlap(top, bottom)
@@ -2291,12 +2625,13 @@ export default Vue.extend({
       const topCenter = top.x + top.w / 2
       const bottomCenter = bottom.x + bottom.w / 2
       const centerGap = Math.abs(topCenter - bottomCenter)
-      const aligned = overlap >= minWidth * 0.2 || centerGap <= medianWidth * 0.6 || hasSmallFragment
+      const aligned = overlap >= minWidth * 0.2 || centerGap <= medianWidth * 0.68 || hasSmallFragment
       if (!aligned) return false
 
-      const strictGapLimit = Math.max(3, Math.min(charHeight * 0.24, this.clampNumber(this.options.wordGap, 1, 30, WORD_GAP) * 2.2))
+      const strictGapLimit = Math.max(3, Math.min(charHeight * 0.28, wordGap * 2.6))
       if (gap <= strictGapLimit) return true
-      return this.verticalFragmentSidesHaveInk(top, bottom, charHeight, isInk)
+      const compactSingleGlyph = hasSmallFragment && union.h <= charHeight * 1.35
+      return compactSingleGlyph && this.verticalFragmentSidesHaveInk(top, bottom, charHeight, isInk)
     },
     verticalFragmentSidesHaveInk(
       top: WordBlock,
@@ -2365,6 +2700,11 @@ export default Vue.extend({
     horizontalBlockGap(a: WordBlock, b: WordBlock): number {
       if (a.x + a.w < b.x) return b.x - (a.x + a.w)
       if (b.x + b.w < a.x) return a.x - (b.x + b.w)
+      return 0
+    },
+    verticalBlockGap(a: WordBlock, b: WordBlock): number {
+      if (a.y + a.h < b.y) return b.y - (a.y + a.h)
+      if (b.y + b.h < a.y) return a.y - (b.y + b.h)
       return 0
     },
     horizontalOverlap(a: WordBlock, b: WordBlock): number {
@@ -2697,9 +3037,15 @@ export default Vue.extend({
       lineBounds: {top: number, bottom: number},
       isInk?: (x: number, y: number) => boolean,
     ): boolean {
-      const gap = right.x - (left.x + left.w)
-      const maxInternalGap = Math.max(3, Math.min(glyphHeight * 0.42, this.clampNumber(this.options.wordGap, 1, 30, WORD_GAP) * 3.5))
-      if (gap < 0 || gap > maxInternalGap) return false
+      const rawGap = right.x - (left.x + left.w)
+      const gap = Math.max(0, rawGap)
+      const wordGap = this.clampNumber(this.options.wordGap, 1, 30, WORD_GAP)
+      const baseInternalGap = Math.max(3, Math.min(glyphHeight * 0.5, wordGap * 4))
+      const highResolutionInternalGap = glyphHeight >= 36
+        ? Math.max(baseInternalGap, Math.min(glyphHeight * 0.4, Math.max(30, wordGap * 8)))
+        : baseInternalGap
+      const maxInternalGap = Math.min(glyphHeight * 0.5, highResolutionInternalGap)
+      if (rawGap > maxInternalGap) return false
 
       const union = this.unionWordBlocks(left, right)
 
@@ -2709,15 +3055,21 @@ export default Vue.extend({
       const rightCenter = right.y + right.h / 2
       const centerGap = Math.abs(leftCenter - rightCenter)
       const hasSmallFragment = left.h < glyphHeight * 0.58 || right.h < glyphHeight * 0.58 || left.w < glyphHeight * 0.42 || right.w < glyphHeight * 0.42
-      const singleGlyphWidthLimit = glyphHeight * (hasSmallFragment ? 1.85 : 1.42)
+      const hasNarrowVerticalStroke = this.isNarrowHorizontalVerticalStroke(left, glyphHeight) || this.isNarrowHorizontalVerticalStroke(right, glyphHeight)
+      const singleGlyphWidthLimit = glyphHeight * (hasSmallFragment || hasNarrowVerticalStroke ? 2.25 : 1.42)
       if (union.w > singleGlyphWidthLimit) return false
 
-      const aligned = overlap >= minHeight * 0.2 || centerGap <= glyphHeight * 0.52 || hasSmallFragment
+      const aligned = overlap >= minHeight * 0.2 || centerGap <= glyphHeight * 0.56 || hasSmallFragment || hasNarrowVerticalStroke
       if (!aligned) return false
 
-      const strictGapLimit = Math.max(3, Math.min(glyphHeight * 0.24, this.clampNumber(this.options.wordGap, 1, 30, WORD_GAP) * 2.2))
-      if (!isInk || gap <= strictGapLimit) return true
-      return this.horizontalFragmentSidesHaveInk(left, right, lineBounds, glyphHeight, isInk)
+      const strictGapLimit = Math.max(3, Math.min(glyphHeight * 0.24, wordGap * 2.2))
+      const narrowStrokeGapLimit = Math.max(strictGapLimit, Math.min(glyphHeight * 0.55, wordGap * 4))
+      if (!isInk || gap <= strictGapLimit || (hasNarrowVerticalStroke && gap <= narrowStrokeGapLimit)) return true
+      const compactSingleGlyph = hasSmallFragment && union.w <= glyphHeight * 1.28
+      return compactSingleGlyph && this.horizontalFragmentSidesHaveInk(left, right, lineBounds, glyphHeight, isInk)
+    },
+    isNarrowHorizontalVerticalStroke(block: WordBlock, glyphHeight: number): boolean {
+      return block.w <= Math.max(4, glyphHeight * 0.18) && block.h >= glyphHeight * 0.42
     },
     horizontalFragmentSidesHaveInk(
       left: WordBlock,
@@ -2767,6 +3119,113 @@ export default Vue.extend({
         }
       }
       return count
+    },
+    filterHorizontalNoiseLines(lines: WordLine[], isInk: (x: number, y: number) => boolean): WordLine[] {
+      const glyphSize = this.horizontalGlyphSourceHeight(lines)
+      return lines
+        .map(line => ({
+          ...line,
+          words: this.filterNoiseBlocks(line.words, glyphSize, isInk, true),
+        }))
+        .filter(line => line.words.length > 0)
+    },
+    filterVerticalNoiseLines(lines: WordLine[], isInk: (x: number, y: number) => boolean): WordLine[] {
+      const blocks = lines.flatMap(line => line.words)
+      const glyphSize = blocks.length > 0
+        ? this.verticalCharacterSourceHeight({column: {start: 0, end: 0}, line: {start: 0, end: 0}, words: blocks})
+        : 8
+      return lines
+        .map(line => ({
+          ...line,
+          words: this.filterNoiseBlocks(line.words, glyphSize, isInk, false),
+        }))
+        .filter(line => line.words.length > 0)
+    },
+    filterNoiseBlocks(blocks: WordBlock[], glyphSize: number, isInk: (x: number, y: number) => boolean, horizontal: boolean): WordBlock[] {
+      const normalizedGlyphSize = Math.max(8, glyphSize)
+      const metricsByIndex = blocks.map(block => this.inkBlockMetrics(block, isInk))
+      return blocks.filter((block, index) =>
+        !this.isIsolatedNoiseBlock(index, blocks, metricsByIndex, normalizedGlyphSize, horizontal),
+      )
+    },
+    isIsolatedNoiseBlock(
+      index: number,
+      blocks: WordBlock[],
+      metricsByIndex: Array<InkBlockMetrics | undefined>,
+      glyphSize: number,
+      horizontal: boolean,
+    ): boolean {
+      const metrics = metricsByIndex[index]
+      if (!metrics) return true
+      if (!this.isTinySparseNoise(metrics, glyphSize)) return false
+      return !this.hasNearbyReflowBlock(metrics, index, blocks, metricsByIndex, glyphSize, horizontal)
+    },
+    inkBlockMetrics(block: WordBlock, isInk: (x: number, y: number) => boolean): InkBlockMetrics | undefined {
+      let minX = block.x + block.w
+      let minY = block.y + block.h
+      let maxX = block.x - 1
+      let maxY = block.y - 1
+      let inkCount = 0
+
+      for (let y = block.y; y < block.y + block.h; y++) {
+        for (let x = block.x; x < block.x + block.w; x++) {
+          if (!isInk(x, y)) continue
+          minX = Math.min(minX, x)
+          minY = Math.min(minY, y)
+          maxX = Math.max(maxX, x)
+          maxY = Math.max(maxY, y)
+          inkCount++
+        }
+      }
+
+      if (inkCount === 0) return undefined
+      return {
+        bounds: {x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1},
+        inkCount,
+      }
+    },
+    isTinySparseNoise(metrics: InkBlockMetrics, glyphSize: number): boolean {
+      const bounds = metrics.bounds
+      const smallSide = Math.max(5, glyphSize * 0.3)
+      const sparseInk = Math.max(8, Math.round(glyphSize * 0.45))
+      const veryTiny = bounds.w <= 3 && bounds.h <= 3 && metrics.inkCount <= 5
+      const tinySparse = bounds.w <= smallSide && bounds.h <= smallSide && metrics.inkCount <= sparseInk
+      const hairlineSpeck = Math.min(bounds.w, bounds.h) <= 2 &&
+        Math.max(bounds.w, bounds.h) <= Math.max(6, glyphSize * 0.45) &&
+        metrics.inkCount <= sparseInk
+      return veryTiny || tinySparse || hairlineSpeck
+    },
+    hasNearbyReflowBlock(
+      metrics: InkBlockMetrics,
+      index: number,
+      blocks: WordBlock[],
+      metricsByIndex: Array<InkBlockMetrics | undefined>,
+      glyphSize: number,
+      horizontal: boolean,
+    ): boolean {
+      const maxGap = Math.max(6, glyphSize * 0.95, this.clampNumber(this.options.wordGap, 1, 30, WORD_GAP) * 2.5)
+      const punctuationClusterGap = Math.max(4, glyphSize * 0.35)
+
+      return blocks.some((_, otherIndex) => {
+        if (otherIndex === index) return false
+        const otherMetrics = metricsByIndex[otherIndex]
+        if (!otherMetrics) return false
+        const otherTiny = this.isTinySparseNoise(otherMetrics, glyphSize)
+
+        if (horizontal) {
+          const gap = this.horizontalBlockGap(metrics.bounds, otherMetrics.bounds)
+          const overlap = this.verticalOverlap(metrics.bounds, otherMetrics.bounds)
+          const centerGap = Math.abs((metrics.bounds.y + metrics.bounds.h / 2) - (otherMetrics.bounds.y + otherMetrics.bounds.h / 2))
+          const aligned = overlap > 0 || centerGap <= glyphSize * 0.72
+          return gap <= maxGap && aligned && (!otherTiny || gap <= punctuationClusterGap)
+        }
+
+        const gap = this.verticalBlockGap(metrics.bounds, otherMetrics.bounds)
+        const overlap = this.horizontalOverlap(metrics.bounds, otherMetrics.bounds)
+        const centerGap = Math.abs((metrics.bounds.x + metrics.bounds.w / 2) - (otherMetrics.bounds.x + otherMetrics.bounds.w / 2))
+        const aligned = overlap > 0 || centerGap <= glyphSize * 0.72
+        return gap <= maxGap && aligned && (!otherTiny || gap <= punctuationClusterGap)
+      })
     },
     tightLineBounds(isInk: (x: number, y: number) => boolean, column: Column, line: Line): {top: number, bottom: number} | undefined {
       let minY = line.end
@@ -2863,7 +3322,7 @@ export default Vue.extend({
           rendered.push({
             ...renderBlock,
             type: 'word',
-            src: sliceCanvas.toDataURL('image/png'),
+            src: this.reflowSliceDataUrl(sliceCanvas),
             height: renderBlock.h * this.textScale(),
           })
         })
@@ -2939,7 +3398,7 @@ export default Vue.extend({
       return {
         ...source,
         type: 'image',
-        src: sliceCanvas.toDataURL('image/png'),
+        src: this.reflowSliceDataUrl(sliceCanvas),
         sourceWidth: source.w,
         sourceHeight: source.h,
         ...this.scaledImageDimensions(source.w, source.h),
@@ -3034,7 +3493,7 @@ export default Vue.extend({
             w: renderBlock.outputWidth,
             h: renderBlock.outputHeight,
             type: 'word',
-            src: sliceCanvas.toDataURL('image/png'),
+            src: this.reflowSliceDataUrl(sliceCanvas),
             height: renderBlock.outputHeight * this.textScale(),
           })
         })
@@ -3267,6 +3726,14 @@ export default Vue.extend({
     adjustTextScale(delta: number) {
       this.$emit('text-scale-change', this.clampNumber(this.textScalePercent + delta, 10, 140, WORD_SCALE * 100))
     },
+    setProcessingMode(event: Event) {
+      const target = event.target as HTMLSelectElement
+      this.$emit('processing-mode-change', target.value === 'server' ? 'server' : 'local')
+    },
+    setRotation(event: Event) {
+      const target = event.target as HTMLSelectElement
+      this.$emit('rotation-change', this.normalizedRotation(Number(target.value)))
+    },
     setColumnCount(event: Event) {
       const target = event.target as HTMLSelectElement
       this.pendingColumnCount = Math.round(this.clampNumber(Number(target.value), 1, 4, 1))
@@ -3305,6 +3772,10 @@ export default Vue.extend({
     adjustStrokeStrength(delta: number) {
       this.pendingStrokeStrength = this.roundStrokeStrength(this.controlStrokeStrength + delta)
     },
+    setImageQuality(event: Event) {
+      const target = event.target as HTMLSelectElement
+      this.pendingImageQuality = this.normalizedImageQuality(Number(target.value))
+    },
     setContrastEnhancement(event: Event) {
       const target = event.target as HTMLInputElement
       this.$emit('contrast-enhancement-change', target.checked)
@@ -3326,6 +3797,7 @@ export default Vue.extend({
       this.$emit('vertical-text-change', this.controlVerticalText)
       this.$emit('vertical-direction-change', this.controlVerticalDirection)
       this.$emit('stroke-strength-change', this.controlStrokeStrength)
+      this.$emit('image-quality-change', this.controlImageQuality)
       this.$emit('block-spacing-change', this.controlBlockSpacing)
       this.$emit('crop-rois-change', this.cropRoisPayload())
       if (this.deferReflow) {
@@ -3349,11 +3821,24 @@ export default Vue.extend({
     roundStrokeStrength(value: number): number {
       return Math.round(this.clampNumber(value, 0.1, 3, 0.1) * 10) / 10
     },
+    normalizedImageQuality(value: number): number {
+      const quality = Math.round(this.clampNumber(Number(value), 40, 90, DEFAULT_REFLOW_IMAGE_QUALITY) / 10) * 10
+      return REFLOW_IMAGE_QUALITY_OPTIONS.includes(quality) ? quality : DEFAULT_REFLOW_IMAGE_QUALITY
+    },
     exitReflow() {
       this.controlsCollapsed = true
       this.$emit('exit-reflow')
     },
+    setCropRegionCount(event: Event) {
+      const target = event.target as HTMLSelectElement
+      const count = this.normalizedCropRegionCount(target.value)
+      this.cropRegionCount = count
+      if (this.activeCropRegion >= count) this.activeCropRegion = count - 1
+      this.cropWarning = ''
+      this.$emit('crop-rois-change', this.cropRoisPayload())
+    },
     setActiveCropRegion(region: CropRegionIndex) {
+      if (region < 0 || region >= this.cropRegionCount) return
       this.activeCropRegion = region
       this.draftRoi = undefined
       this.drawingCrop = false
@@ -3408,8 +3893,9 @@ export default Vue.extend({
       const roi = this.normalizedRoi(this.cropStart, this.cropPoint(event))
       this.draftRoi = undefined
       if (roi.w > MIN_CROP_SIZE && roi.h > MIN_CROP_SIZE) {
-        if (this.overlapsOtherCropRegion(roi)) {
-          this.cropWarning = `区域 ${this.activeCropRegion + 1} 不能与区域 ${this.activeCropRegion === 0 ? 2 : 1} 重叠`
+        const overlappingRegion = this.overlappingCropRegion(roi)
+        if (overlappingRegion !== undefined) {
+          this.cropWarning = `区域 ${this.activeCropRegion + 1} 不能与区域 ${overlappingRegion + 1} 重叠`
           event.preventDefault()
           return
         }
@@ -3452,10 +3938,12 @@ export default Vue.extend({
         height: `${roi.h / this.imageSize.h * 100}%`,
       }
     },
-    overlapsOtherCropRegion(roi: Roi): boolean {
-      const otherRegion = this.activeCropRegion === 0 ? 1 : 0
-      const otherRoi = this.effectiveCropRoi(this.pageParity, otherRegion)
-      return !!otherRoi && this.cropRegionsOverlap(roi, otherRoi)
+    overlappingCropRegion(roi: Roi): CropRegionIndex | undefined {
+      return this.cropRegionIndexes.find(region => {
+        if (region === this.activeCropRegion) return false
+        const otherRoi = this.effectiveCropRoi(this.pageParity, region)
+        return !!otherRoi && this.cropRegionsOverlap(roi, otherRoi)
+      })
     },
     setCurrentCropRoi(roi: Roi | undefined) {
       const rois = this.cropRoisByParity[this.pageParity].slice()
@@ -3609,7 +4097,7 @@ export default Vue.extend({
 .reflow-controls {
   position: sticky;
   top: 0;
-  z-index: 4;
+  z-index: 50;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -3624,6 +4112,43 @@ export default Vue.extend({
   overflow-x: auto;
   overflow-y: visible;
   pointer-events: auto;
+}
+
+.reflow-controls-collapsed {
+  justify-content: flex-start;
+  min-height: 34px;
+  padding: 3px 0 3px 6px;
+  background: transparent;
+  border-bottom: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.reflow-collapsed-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  pointer-events: auto;
+}
+
+.reflow-pull-control {
+  width: 28px;
+  height: 18px;
+  min-height: 18px;
+  flex-basis: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 0 0 5px 5px;
+  background: transparent;
+  opacity: 0.86;
+  pointer-events: auto;
+}
+
+.reflow-compact-control {
+  width: 30px;
+  height: 30px;
+  flex-basis: 30px;
+  padding: 0;
 }
 
 .reflow-top-controls {
@@ -3646,6 +4171,38 @@ export default Vue.extend({
   justify-content: flex-start;
   gap: 6px;
   min-width: 0;
+}
+
+.reflow-processing-control {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #212121;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.reflow-processing-control select {
+  min-width: 88px;
+  height: 30px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #212121;
+  padding: 4px 6px;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.reflow-transfer-stats {
+  flex: 0 0 auto;
+  color: #424242;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .reflow-toc-control {
@@ -3672,6 +4229,28 @@ export default Vue.extend({
   flex-wrap: wrap;
   align-items: center;
   gap: 4px;
+}
+
+.reflow-region-count-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #212121;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.reflow-region-count-control select {
+  min-width: 44px;
+  height: 28px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #212121;
+  padding: 3px 5px;
+  font-size: 12px;
+  line-height: 1.2;
 }
 
 .reflow-region-control {
@@ -3836,6 +4415,11 @@ export default Vue.extend({
   border-bottom-color: rgba(255, 255, 255, 0.14);
 }
 
+.reflowed-page-dark .reflow-controls-collapsed {
+  background: transparent;
+  border-bottom: 0;
+}
+
 .reflowed-page-dark {
   background: #000;
 }
@@ -3845,17 +4429,27 @@ export default Vue.extend({
 .reflowed-page-dark .reflow-spacing-control,
 .reflowed-page-dark .reflow-skew-control,
 .reflowed-page-dark .reflow-column-control,
+.reflowed-page-dark .reflow-region-count-control,
+.reflowed-page-dark .reflow-processing-control,
 .reflowed-page-dark .reflow-parity-label,
-.reflowed-page-dark .reflow-page-indicator {
+.reflowed-page-dark .reflow-page-indicator,
+.reflowed-page-dark .reflow-transfer-stats {
   color: #eeeeee;
 }
 
 .reflowed-page-dark .reflow-step-control,
 .reflowed-page-dark .reflow-column-control select,
+.reflowed-page-dark .reflow-region-count-control select,
+.reflowed-page-dark .reflow-processing-control select,
 .reflowed-page-dark .reflow-control {
   border-color: rgba(255, 255, 255, 0.22);
   background: rgba(48, 48, 48, 0.96);
   color: #eeeeee;
+}
+
+.reflowed-page-dark .reflow-pull-control {
+  border: 0;
+  background: transparent;
 }
 
 .reflowed-page-dark .reflow-column-control input[type="checkbox"] {
@@ -3863,6 +4457,7 @@ export default Vue.extend({
 }
 
 .reflowed-page-dark .reflow-column-control select:disabled,
+.reflowed-page-dark .reflow-region-count-control select:disabled,
 .reflowed-page-dark .reflow-control:disabled {
   color: #9e9e9e;
 }
