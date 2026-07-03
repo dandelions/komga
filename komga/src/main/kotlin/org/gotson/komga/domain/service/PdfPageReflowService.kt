@@ -75,6 +75,7 @@ data class PdfPageReflowDto(
   val originalImageBytes: Long,
   val uploadedImageBytes: Long,
   val transferBytes: Long,
+  val encodedImageBytes: Long,
   val processingTimeMs: Long,
   val items: List<PdfPageReflowItemDto>,
 )
@@ -247,6 +248,7 @@ class PdfPageReflowService(
             originalImageBytes = pageContent.bytes.size.toLong(),
             uploadedImageBytes = 0,
             transferBytes = 0,
+            encodedImageBytes = encodedItemImageBytes(items),
             processingTimeMs = 0,
             items = items,
           )
@@ -291,6 +293,7 @@ class PdfPageReflowService(
         val fallbackImage = decodedImages.first()
         val fallbackRoi = Roi(0, 0, fallbackImage.width, fallbackImage.height)
         val sourceDimensions = rotatedSourceDimensions(sourceWidth, sourceHeight, options.rotation, fallbackImage)
+        val finalItems = items.ifEmpty { listOf(renderFallbackImage(fallbackImage, fallbackRoi, options, clamp(options.textScale.toDouble() / 100.0, 0.1, 1.4))) }
 
         response =
           PdfPageReflowDto(
@@ -301,8 +304,9 @@ class PdfPageReflowService(
             originalImageBytes = sourceImageBytes.takeIf { it > 0 } ?: images.sumOf { it.size.toLong() },
             uploadedImageBytes = images.sumOf { it.size.toLong() },
             transferBytes = 0,
+            encodedImageBytes = encodedItemImageBytes(finalItems),
             processingTimeMs = 0,
-            items = items.ifEmpty { listOf(renderFallbackImage(fallbackImage, fallbackRoi, options, clamp(options.textScale.toDouble() / 100.0, 0.1, 1.4))) },
+            items = finalItems,
           )
       }
 
@@ -1739,6 +1743,23 @@ class PdfPageReflowService(
     val encoded = bestReflowEncoding(image, background, allowResize, normalizedImageQuality(options))
     return "data:${encoded.mimeType};base64,${Base64.getEncoder().encodeToString(encoded.bytes)}"
   }
+
+  private fun encodedItemImageBytes(items: List<PdfPageReflowItemDto>): Long =
+    items.sumOf { item ->
+      item.src
+        ?.substringAfter(",", missingDelimiterValue = "")
+        ?.takeIf { it.isNotBlank() }
+        ?.let {
+          runCatching {
+            Base64
+              .getDecoder()
+              .decode(it)
+              .size
+              .toLong()
+          }.getOrDefault(0L)
+        }
+        ?: 0L
+    }
 
   private fun bestReflowEncoding(
     image: BufferedImage,

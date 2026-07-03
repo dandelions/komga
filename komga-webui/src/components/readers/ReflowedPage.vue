@@ -502,6 +502,7 @@ type ReflowCachePayload = {
 type ReflowTransferStats = {
   originalImageBytes: number,
   transferBytes: number,
+  encodedImageBytes?: number,
   processingTimeMs?: number,
 }
 
@@ -513,6 +514,7 @@ type ServerReflowResponse = {
   originalImageBytes: number,
   uploadedImageBytes?: number,
   transferBytes: number,
+  encodedImageBytes?: number,
   processingTimeMs: number,
   items: ReflowItem[],
 }
@@ -801,7 +803,8 @@ export default Vue.extend({
     transferStatsLabel(): string {
       if (!this.transferStats) return ''
       const processing = this.transferStats.processingTimeMs !== undefined ? ` / ${Math.round(this.transferStats.processingTimeMs)}ms` : ''
-      return `源页 ${this.formatBytes(this.transferStats.originalImageBytes)} / 交互 ${this.formatBytes(this.transferStats.transferBytes)}${processing}`
+      const encodedImages = this.transferStats.encodedImageBytes !== undefined ? ` / 字块 ${this.formatBytes(this.transferStats.encodedImageBytes)}` : ''
+      return `源页 ${this.formatBytes(this.transferStats.originalImageBytes)} / 交互 ${this.formatBytes(this.transferStats.transferBytes)}${encodedImages}${processing}`
     },
     activeRoi(): Roi | undefined {
       return this.draftRoi || this.cropRoi
@@ -1074,6 +1077,7 @@ export default Vue.extend({
       this.transferStats = {
         originalImageBytes: Number(payload.originalImageBytes) || 0,
         transferBytes: this.utf8ByteLength(requestUrl) + responseBytes,
+        encodedImageBytes: Number(payload.encodedImageBytes) || 0,
         processingTimeMs: Number(payload.processingTimeMs) || 0,
       }
       this.repaginate()

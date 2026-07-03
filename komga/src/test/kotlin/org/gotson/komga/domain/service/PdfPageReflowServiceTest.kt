@@ -186,6 +186,30 @@ class PdfPageReflowServiceTest {
   }
 
   @Test
+  fun `given lower image quality when reflowing page then encoded image bytes are smaller`() {
+    val pageBytes = highDetailWordPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+
+    val highQuality =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(imageQuality = 90),
+        cropRegions = listOf(PdfPageReflowRegion(x = 20, y = 20, w = 180, h = 110)),
+      )
+    val lowQuality =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(imageQuality = 50),
+        cropRegions = listOf(PdfPageReflowRegion(x = 20, y = 20, w = 180, h = 110)),
+      )
+
+    assertThat(lowQuality.encodedImageBytes).isLessThan(highQuality.encodedImageBytes)
+  }
+
+  @Test
   fun `given horizontal lines without indent when reflowing page then lines stay in same paragraph`() {
     val pageBytes = horizontalParagraphPage(secondLineIndent = 0)
     val book = makeBook("book")
@@ -320,6 +344,25 @@ class PdfPageReflowServiceTest {
     graphics.fillRect(70, 80, 52, 6)
     graphics.fillRect(78, 92, 36, 10)
     graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun highDetailWordPage(): ByteArray {
+    val image = BufferedImage(220, 150, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.dispose()
+
+    for (y in 42 until 104) {
+      for (x in 48 until 172) {
+        val value = if (((x / 3) + (y / 2)) % 2 == 0) 24 else 146
+        image.setRGB(x, y, Color(value, value, value).rgb)
+      }
+    }
 
     val output = ByteArrayOutputStream()
     ImageIO.write(image, "png", output)
