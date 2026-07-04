@@ -23,6 +23,25 @@ interface SeriesDtoRepository {
   ): Page<SeriesDto>
 
   fun findAll(
+    context: SearchContext,
+    pageable: Pageable,
+    includeTotal: Boolean,
+  ): Page<SeriesDto>
+
+  fun findAll(
+    search: SeriesSearch,
+    context: SearchContext,
+    pageable: Pageable,
+  ): Page<SeriesDto>
+
+  fun findAll(
+    search: SeriesSearch,
+    context: SearchContext,
+    pageable: Pageable,
+    includeTotal: Boolean,
+  ): Page<SeriesDto>
+
+  fun findAllRecentlyUpdated(
     search: SeriesSearch,
     context: SearchContext,
     pageable: Pageable,
@@ -32,6 +51,7 @@ interface SeriesDtoRepository {
     search: SeriesSearch,
     context: SearchContext,
     pageable: Pageable,
+    includeTotal: Boolean,
   ): Page<SeriesDto>
 
   fun countByFirstCharacter(

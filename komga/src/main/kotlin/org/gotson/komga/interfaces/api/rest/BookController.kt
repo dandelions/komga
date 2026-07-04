@@ -184,6 +184,7 @@ class BookController(
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @RequestBody search: BookSearch,
     @RequestParam(name = "unpaged", required = false) unpaged: Boolean = false,
+    @RequestParam(name = "include_total", required = false) includeTotal: Boolean = true,
     @Parameter(hidden = true) page: Pageable,
   ): Page<BookDto> {
     val sort =
@@ -204,7 +205,7 @@ class BookController(
         )
 
     return bookDtoRepository
-      .findAll(search, SearchContext(principal.user), pageRequest)
+      .findAll(search, SearchContext(principal.user), pageRequest, includeTotal)
       .map { it.restrictUrl(!principal.user.isAdmin) }
   }
 
@@ -214,6 +215,7 @@ class BookController(
   fun getBooksLatest(
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @RequestParam(name = "unpaged", required = false) unpaged: Boolean = false,
+    @RequestParam(name = "include_total", required = false) includeTotal: Boolean = true,
     @Parameter(hidden = true) page: Pageable,
   ): Page<BookDto> {
     val sort = Sort.by(Sort.Order.desc("lastModifiedDate"))
@@ -232,6 +234,7 @@ class BookController(
       .findAll(
         SearchContext(principal.user),
         pageRequest,
+        includeTotal,
       ).map { it.restrictUrl(!principal.user.isAdmin) }
   }
 
@@ -241,6 +244,7 @@ class BookController(
   fun getBooksOnDeck(
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @RequestParam(name = "library_id", required = false) libraryIds: List<String>? = null,
+    @RequestParam(name = "include_total", required = false) includeTotal: Boolean = true,
     @Parameter(hidden = true) page: Pageable,
   ): Page<BookDto> =
     bookDtoRepository
@@ -248,6 +252,7 @@ class BookController(
         principal.user.id,
         principal.user.getAuthorizedLibraryIds(libraryIds),
         page,
+        includeTotal,
         principal.user.restrictions,
       ).map { it.restrictUrl(!principal.user.isAdmin) }
 

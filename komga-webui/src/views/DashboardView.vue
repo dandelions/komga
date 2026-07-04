@@ -177,6 +177,9 @@ enum SectionType {
   BOOK,
 }
 
+const DASHBOARD_PAGE_SIZE = 12
+const DASHBOARD_PAGE_REQUEST = {size: DASHBOARD_PAGE_SIZE, include_total: false}
+
 export default Vue.extend({
   name: 'DashboardView',
   components: {
@@ -426,40 +429,40 @@ export default Vue.extend({
         ))
 
       this.loaderKeepReadingBooks = this.hasSection(RecommendedViewSection.KEEP_READING) ? new PageLoader<BookDto>(
-        {sort: ['readProgress.readDate,desc']},
+        {...DASHBOARD_PAGE_REQUEST, sort: ['readProgress.readDate,desc']},
         (pageable: PageRequest) => this.$komgaBooks.getBooksList({
           condition: new SearchConditionAllOfBook([...baseBookConditions, new SearchConditionReadStatus(new SearchOperatorIs(ReadStatus.IN_PROGRESS))]),
         } as BookSearch, pageable),
       ) : undefined
       this.loaderOnDeckBooks = this.hasSection(RecommendedViewSection.ON_DECK) ? new PageLoader<BookDto>(
-        {},
+        DASHBOARD_PAGE_REQUEST,
         (pageable: PageRequest) => this.$komgaBooks.getBooksOnDeck(requestLibraries, pageable),
       ) : undefined
       this.loaderRecentlyAddedBooks = this.hasSection(RecommendedViewSection.RECENTLY_ADDED_BOOKS) ? new PageLoader<BookDto>(
-        {sort: ['createdDate,desc']},
+        {...DASHBOARD_PAGE_REQUEST, sort: ['createdDate,desc']},
         (pageable: PageRequest) => this.$komgaBooks.getBooksList({
           condition: new SearchConditionAllOfBook(baseBookConditions),
         } as BookSearch, pageable),
       ) : undefined
       this.loaderRecentlyReleasedBooks = this.hasSection(RecommendedViewSection.RECENTLY_RELEASED_BOOKS) ? new PageLoader<BookDto>(
-        {sort: ['metadata.releaseDate,desc']},
+        {...DASHBOARD_PAGE_REQUEST, sort: ['metadata.releaseDate,desc']},
         (pageable: PageRequest) => this.$komgaBooks.getBooksList({
           condition: new SearchConditionAllOfBook([...baseBookConditions, new SearchConditionReleaseDate(new SearchOperatorAfter(subMonths(new Date(), 1)))]),
         } as BookSearch, pageable),
       ) : undefined
       this.loaderRecentlyReadBooks = this.hasSection(RecommendedViewSection.RECENTLY_READ_BOOKS) ? new PageLoader<BookDto>(
-        {sort: ['readProgress.readDate,desc']},
+        {...DASHBOARD_PAGE_REQUEST, sort: ['readProgress.readDate,desc']},
         (pageable: PageRequest) => this.$komgaBooks.getBooksList({
           condition: new SearchConditionAllOfBook([...baseBookConditions, new SearchConditionReadStatus(new SearchOperatorIs(ReadStatus.READ))]),
         } as BookSearch, pageable),
       ) : undefined
 
       this.loaderRecentlyAddedSeries = this.hasSection(RecommendedViewSection.RECENTLY_ADDED_SERIES) ? new PageLoader<SeriesDto>(
-        {},
+        DASHBOARD_PAGE_REQUEST,
         (pageable: PageRequest) => this.$komgaSeries.getNewSeries(requestLibraries, false, pageable),
       ) : undefined
       this.loaderRecentlyUpdatedSeries = this.hasSection(RecommendedViewSection.RECENTLY_UPDATED_SERIES) ? new PageLoader<SeriesDto>(
-        {},
+        DASHBOARD_PAGE_REQUEST,
         (pageable: PageRequest) => this.$komgaSeries.getUpdatedSeries(requestLibraries, false, pageable),
       ) : undefined
     },

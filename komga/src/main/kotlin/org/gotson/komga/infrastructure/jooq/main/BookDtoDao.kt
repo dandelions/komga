@@ -103,14 +103,27 @@ class BookDtoDao(
   ): Page<BookDto> = findAll(BookSearch(), context, pageable)
 
   override fun findAll(
+    context: SearchContext,
+    pageable: Pageable,
+    includeTotal: Boolean,
+  ): Page<BookDto> = findAll(BookSearch(), context, pageable, includeTotal)
+
+  override fun findAll(
     search: BookSearch,
     context: SearchContext,
     pageable: Pageable,
+  ): Page<BookDto> = findAll(search, context, pageable, true)
+
+  override fun findAll(
+    search: BookSearch,
+    context: SearchContext,
+    pageable: Pageable,
+    includeTotal: Boolean,
   ): Page<BookDto> {
     requireNotNull(context.userId) { "Missing userId in search context" }
 
     val (conditions, joins) = BookSearchHelper(context).toCondition(search.condition)
-    return findAll(conditions, context.userId, pageable, search.fullTextSearch, joins)
+    return findAll(conditions, context.userId, pageable, search.fullTextSearch, joins, includeTotal)
   }
 
   private fun findAll(
@@ -119,6 +132,7 @@ class BookDtoDao(
     pageable: Pageable,
     searchTerm: String?,
     joins: Set<RequiredJoin>,
+    includeTotal: Boolean,
   ): Page<BookDto> {
     val bookIds = luceneHelper.searchEntitiesIds(searchTerm, LuceneEntity.Book)
 
@@ -152,58 +166,73 @@ class BookDtoDao(
         }
 
       val count =
-        dslRO.fetchCount(
-          dslRO
-            .select(b.ID)
-            .from(b)
-            .leftJoin(m)
-            .on(b.ID.eq(m.BOOK_ID))
-            .leftJoin(d)
-            .on(b.ID.eq(d.BOOK_ID))
-            .leftJoin(r)
-            .on(b.ID.eq(r.BOOK_ID))
-            .and(readProgressCondition(userId))
-            .leftJoin(sd)
-            .on(b.SERIES_ID.eq(sd.SERIES_ID))
-            .apply {
-              joins.forEach { join ->
-                when (join) {
-                  is RequiredJoin.ReadList -> {
-                    val rlbAlias = rlbAlias(join.readListId)
-                    leftJoin(rlbAlias).on(rlbAlias.BOOK_ID.eq(b.ID).and(rlbAlias.READLIST_ID.eq(join.readListId)))
+        if (includeTotal) {
+          dslRO.fetchCount(
+            dslRO
+              .select(b.ID)
+              .from(b)
+              .leftJoin(m)
+              .on(b.ID.eq(m.BOOK_ID))
+              .leftJoin(d)
+              .on(b.ID.eq(d.BOOK_ID))
+              .leftJoin(r)
+              .on(b.ID.eq(r.BOOK_ID))
+              .and(readProgressCondition(userId))
+              .leftJoin(sd)
+              .on(b.SERIES_ID.eq(sd.SERIES_ID))
+              .apply {
+                joins.forEach { join ->
+                  when (join) {
+                    is RequiredJoin.ReadList -> {
+                      val rlbAlias = rlbAlias(join.readListId)
+                      leftJoin(rlbAlias).on(rlbAlias.BOOK_ID.eq(b.ID).and(rlbAlias.READLIST_ID.eq(join.readListId)))
+                    }
+                    // always joined
+                    RequiredJoin.BookMetadata -> Unit
+                    RequiredJoin.Media -> Unit
+                    is RequiredJoin.ReadProgress -> Unit
+                    // Series joins - not needed
+                    RequiredJoin.BookMetadataAggregation -> Unit
+                    RequiredJoin.SeriesMetadata -> Unit
+                    is RequiredJoin.Collection -> Unit
                   }
-                  // always joined
-                  RequiredJoin.BookMetadata -> Unit
-                  RequiredJoin.Media -> Unit
-                  is RequiredJoin.ReadProgress -> Unit
-                  // Series joins - not needed
-                  RequiredJoin.BookMetadataAggregation -> Unit
-                  RequiredJoin.SeriesMetadata -> Unit
-                  is RequiredJoin.Collection -> Unit
                 }
-              }
-            }.where(conditions)
-            .and(searchCondition)
-            .groupBy(b.ID),
-        )
+              }.where(conditions)
+              .and(searchCondition)
+              .groupBy(b.ID),
+          )
+        } else {
+          null
+        }
 
-      val dtos =
+      val query =
         dslRO
           .selectBase(userId, joins)
           .where(conditions)
           .and(searchCondition)
           .orderBy(orderBy)
-          .apply { if (pageable.isPaged) limit(pageable.pageSize).offset(pageable.offset) }
-          .fetchAndMap(dslRO)
+      if (pageable.isPaged) {
+        val pageLimit = if (includeTotal) pageable.pageSize else pageable.pageSize + 1
+        query.limit(pageLimit).offset(pageable.offset)
+      }
+      val fetchedDtos = query.fetchAndMap(dslRO)
 
+      val hasNextPage = !includeTotal && pageable.isPaged && fetchedDtos.size > pageable.pageSize
+      val dtos = if (hasNextPage) fetchedDtos.take(pageable.pageSize) else fetchedDtos
       val pageSort = if (orderBy.isNotEmpty()) pageable.sort else Sort.unsorted()
+      val total =
+        count?.toLong()
+          ?: if (pageable.isPaged)
+            pageable.offset + dtos.size + (if (hasNextPage) 1 else 0)
+          else
+            dtos.size.toLong()
       return PageImpl(
         dtos,
         if (pageable.isPaged)
           PageRequest.of(pageable.pageNumber, pageable.pageSize, pageSort)
         else
-          PageRequest.of(0, maxOf(count, 20), pageSort),
-        count.toLong(),
+          PageRequest.of(0, maxOf(total.toInt(), 20), pageSort),
+        total,
       )
     }
   }
@@ -249,23 +278,40 @@ class BookDtoDao(
     filterOnLibraryIds: Collection<String>?,
     pageable: Pageable,
     restrictions: ContentRestrictions,
+  ): Page<BookDto> = findAllOnDeck(userId, filterOnLibraryIds, pageable, true, restrictions)
+
+  override fun findAllOnDeck(
+    userId: String,
+    filterOnLibraryIds: Collection<String>?,
+    pageable: Pageable,
+    includeTotal: Boolean,
+    restrictions: ContentRestrictions,
   ): Page<BookDto> {
     val (query, sortField, _) = bookCommonDao.getBooksOnDeckQuery(userId, restrictions, filterOnLibraryIds, onDeckFields)
 
-    val count = dslRO.fetchCount(query)
-    val dtos =
-      query
-        .orderBy(sortField.desc())
-        .apply { if (pageable.isPaged) limit(pageable.pageSize).offset(pageable.offset) }
-        .fetchAndMap(dslRO)
+    val count = if (includeTotal) dslRO.fetchCount(query) else null
+    val sortedQuery = query.orderBy(sortField.desc())
+    if (pageable.isPaged) {
+      val pageLimit = if (includeTotal) pageable.pageSize else pageable.pageSize + 1
+      sortedQuery.limit(pageLimit).offset(pageable.offset)
+    }
+    val fetchedDtos = sortedQuery.fetchAndMap(dslRO)
 
+    val hasNextPage = !includeTotal && pageable.isPaged && fetchedDtos.size > pageable.pageSize
+    val dtos = if (hasNextPage) fetchedDtos.take(pageable.pageSize) else fetchedDtos
+    val total =
+      count?.toLong()
+        ?: if (pageable.isPaged)
+          pageable.offset + dtos.size + (if (hasNextPage) 1 else 0)
+        else
+          dtos.size.toLong()
     return PageImpl(
       dtos,
       if (pageable.isPaged)
         PageRequest.of(pageable.pageNumber, pageable.pageSize, Sort.unsorted())
       else
-        PageRequest.of(0, maxOf(count, 20), Sort.unsorted()),
-      count.toLong(),
+        PageRequest.of(0, maxOf(total.toInt(), 20), Sort.unsorted()),
+      total,
     )
   }
 

@@ -230,6 +230,7 @@ class SeriesController(
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @RequestBody search: SeriesSearch,
     @RequestParam(name = "unpaged", required = false) unpaged: Boolean = false,
+    @RequestParam(name = "include_total", required = false) includeTotal: Boolean = true,
     @Parameter(hidden = true) page: Pageable,
   ): Page<SeriesDto> {
     val sort =
@@ -250,7 +251,7 @@ class SeriesController(
         )
 
     return seriesDtoRepository
-      .findAll(search, SearchContext(principal.user), pageRequest)
+      .findAll(search, SearchContext(principal.user), pageRequest, includeTotal)
       .map { it.restrictUrl(!principal.user.isAdmin) }
   }
 
@@ -352,6 +353,7 @@ class SeriesController(
     @RequestParam(name = "deleted", required = false) deleted: Boolean?,
     @RequestParam(name = "oneshot", required = false) oneshot: Boolean? = null,
     @RequestParam(name = "unpaged", required = false) unpaged: Boolean = false,
+    @RequestParam(name = "include_total", required = false) includeTotal: Boolean = true,
     @Parameter(hidden = true) page: Pageable,
   ): Page<SeriesDto> {
     val sort = Sort.by(Sort.Order.desc("lastModified"))
@@ -379,6 +381,7 @@ class SeriesController(
         ),
         SearchContext(principal.user),
         pageRequest,
+        includeTotal,
       ).map { it.restrictUrl(!principal.user.isAdmin) }
   }
 
@@ -391,6 +394,7 @@ class SeriesController(
     @RequestParam(name = "deleted", required = false) deleted: Boolean? = null,
     @RequestParam(name = "oneshot", required = false) oneshot: Boolean? = null,
     @RequestParam(name = "unpaged", required = false) unpaged: Boolean = false,
+    @RequestParam(name = "include_total", required = false) includeTotal: Boolean = true,
     @Parameter(hidden = true) page: Pageable,
   ): Page<SeriesDto> {
     val sort = Sort.by(Sort.Order.desc("created"))
@@ -418,6 +422,7 @@ class SeriesController(
         ),
         SearchContext(principal.user),
         pageRequest,
+        includeTotal,
       ).map { it.restrictUrl(!principal.user.isAdmin) }
   }
 
@@ -430,6 +435,7 @@ class SeriesController(
     @RequestParam(name = "deleted", required = false) deleted: Boolean? = null,
     @RequestParam(name = "oneshot", required = false) oneshot: Boolean? = null,
     @RequestParam(name = "unpaged", required = false) unpaged: Boolean = false,
+    @RequestParam(name = "include_total", required = false) includeTotal: Boolean = true,
     @Parameter(hidden = true) page: Pageable,
   ): Page<SeriesDto> {
     val sort = Sort.by(Sort.Order.desc("lastModified"))
@@ -457,6 +463,7 @@ class SeriesController(
         ),
         SearchContext(principal.user),
         pageRequest,
+        includeTotal,
       ).map { it.restrictUrl(!principal.user.isAdmin) }
   }
 

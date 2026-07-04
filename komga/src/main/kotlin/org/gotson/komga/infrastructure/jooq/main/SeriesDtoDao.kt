@@ -103,29 +103,49 @@ class SeriesDtoDao(
   ): Page<SeriesDto> = findAll(SeriesSearch(), context, pageable)
 
   override fun findAll(
+    context: SearchContext,
+    pageable: Pageable,
+    includeTotal: Boolean,
+  ): Page<SeriesDto> = findAll(SeriesSearch(), context, pageable, includeTotal)
+
+  override fun findAll(
     search: SeriesSearch,
     context: SearchContext,
     pageable: Pageable,
+  ): Page<SeriesDto> = findAll(search, context, pageable, true)
+
+  override fun findAll(
+    search: SeriesSearch,
+    context: SearchContext,
+    pageable: Pageable,
+    includeTotal: Boolean,
   ): Page<SeriesDto> {
     requireNotNull(context.userId) { "Missing userId in search context" }
 
     val (conditions, joins) = SeriesSearchHelper(context).toCondition(search.condition)
     val conditionsRefined = conditions.and(search.regexSearch?.let { it.second.toColumn().likeRegex(it.first) } ?: DSL.noCondition())
 
-    return findAll(conditionsRefined, context.userId, pageable, joins, search.fullTextSearch)
+    return findAll(conditionsRefined, context.userId, pageable, joins, search.fullTextSearch, includeTotal)
   }
 
   override fun findAllRecentlyUpdated(
     search: SeriesSearch,
     context: SearchContext,
     pageable: Pageable,
+  ): Page<SeriesDto> = findAllRecentlyUpdated(search, context, pageable, true)
+
+  override fun findAllRecentlyUpdated(
+    search: SeriesSearch,
+    context: SearchContext,
+    pageable: Pageable,
+    includeTotal: Boolean,
   ): Page<SeriesDto> {
     requireNotNull(context.userId) { "Missing userId in search context" }
 
     val (conditions, joins) = SeriesSearchHelper(context).toCondition(search.condition)
     val conditionsRefined = conditions.and(s.CREATED_DATE.notEqual(s.LAST_MODIFIED_DATE))
 
-    return findAll(conditionsRefined, context.userId, pageable, joins, search.fullTextSearch)
+    return findAll(conditionsRefined, context.userId, pageable, joins, search.fullTextSearch, includeTotal)
   }
 
   override fun countByFirstCharacter(
@@ -226,41 +246,46 @@ class SeriesDtoDao(
     pageable: Pageable,
     joins: Set<RequiredJoin> = emptySet(),
     searchTerm: String? = null,
+    includeTotal: Boolean,
   ): Page<SeriesDto> {
     val seriesIds = luceneHelper.searchEntitiesIds(searchTerm, LuceneEntity.Series)
     val searchCondition = s.ID.inOrNoCondition(seriesIds)
 
     val count =
-      dslRO
-        .select(countDistinct(s.ID))
-        .from(s)
-        .leftJoin(d)
-        .on(s.ID.eq(d.SERIES_ID))
-        .leftJoin(bma)
-        .on(s.ID.eq(bma.SERIES_ID))
-        .leftJoin(rs)
-        .on(s.ID.eq(rs.SERIES_ID))
-        .and(readProgressConditionSeries(userId))
-        .apply {
-          joins.forEach { join ->
-            when (join) {
-              is RequiredJoin.Collection -> {
-                val csAlias = csAlias(join.collectionId)
-                leftJoin(csAlias).on(s.ID.eq(csAlias.SERIES_ID).and(csAlias.COLLECTION_ID.eq(join.collectionId)))
+      if (includeTotal) {
+        dslRO
+          .select(countDistinct(s.ID))
+          .from(s)
+          .leftJoin(d)
+          .on(s.ID.eq(d.SERIES_ID))
+          .leftJoin(bma)
+          .on(s.ID.eq(bma.SERIES_ID))
+          .leftJoin(rs)
+          .on(s.ID.eq(rs.SERIES_ID))
+          .and(readProgressConditionSeries(userId))
+          .apply {
+            joins.forEach { join ->
+              when (join) {
+                is RequiredJoin.Collection -> {
+                  val csAlias = csAlias(join.collectionId)
+                  leftJoin(csAlias).on(s.ID.eq(csAlias.SERIES_ID).and(csAlias.COLLECTION_ID.eq(join.collectionId)))
+                }
+                // always joined
+                is RequiredJoin.ReadProgress -> Unit
+                RequiredJoin.SeriesMetadata -> Unit
+                // Book joins - not needed
+                RequiredJoin.BookMetadata -> Unit
+                RequiredJoin.BookMetadataAggregation -> Unit
+                RequiredJoin.Media -> Unit
+                is RequiredJoin.ReadList -> Unit
               }
-              // always joined
-              is RequiredJoin.ReadProgress -> Unit
-              RequiredJoin.SeriesMetadata -> Unit
-              // Book joins - not needed
-              RequiredJoin.BookMetadata -> Unit
-              RequiredJoin.BookMetadataAggregation -> Unit
-              RequiredJoin.Media -> Unit
-              is RequiredJoin.ReadList -> Unit
             }
-          }
-        }.where(conditions)
-        .and(searchCondition)
-        .fetchOne(countDistinct(s.ID)) ?: 0
+          }.where(conditions)
+          .and(searchCondition)
+          .fetchOne(countDistinct(s.ID)) ?: 0
+      } else {
+        null
+      }
 
     val orderBy =
       pageable.sort.mapNotNull {
@@ -277,23 +302,34 @@ class SeriesDtoDao(
         }
       }
 
-    val dtos =
+    val query =
       dslRO
         .selectBase(userId, joins)
         .where(conditions)
         .and(searchCondition)
         .orderBy(orderBy)
-        .apply { if (pageable.isPaged) limit(pageable.pageSize).offset(pageable.offset) }
-        .fetchAndMap(dslRO)
+    if (pageable.isPaged) {
+      val pageLimit = if (includeTotal) pageable.pageSize else pageable.pageSize + 1
+      query.limit(pageLimit).offset(pageable.offset)
+    }
+    val fetchedDtos = query.fetchAndMap(dslRO)
 
+    val hasNextPage = !includeTotal && pageable.isPaged && fetchedDtos.size > pageable.pageSize
+    val dtos = if (hasNextPage) fetchedDtos.take(pageable.pageSize) else fetchedDtos
     val pageSort = if (orderBy.isNotEmpty()) pageable.sort else Sort.unsorted()
+    val total =
+      count?.toLong()
+        ?: if (pageable.isPaged)
+          pageable.offset + dtos.size + (if (hasNextPage) 1 else 0)
+        else
+          dtos.size.toLong()
     return PageImpl(
       dtos,
       if (pageable.isPaged)
         PageRequest.of(pageable.pageNumber, pageable.pageSize, pageSort)
       else
-        PageRequest.of(0, maxOf(count, 20), pageSort),
-      count.toLong(),
+        PageRequest.of(0, maxOf(total.toInt(), 20), pageSort),
+      total,
     )
   }
 
