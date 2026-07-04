@@ -46,6 +46,8 @@
       @select-all="selectedBooks = books"
       @mark-read="markSelectedRead"
       @mark-unread="markSelectedUnread"
+      show-analyze
+      @analyze="analyzeSelectedBooks"
       @add-to-readlist="addToReadList"
       @bulk-edit="bulkEditMultipleBooks"
       @edit="editMultipleBooks"
@@ -510,7 +512,7 @@ import SeriesActionsMenu from '@/components/menus/SeriesActionsMenu.vue'
 import PageSizeSelect from '@/components/PageSizeSelect.vue'
 import {parseQuerySort} from '@/functions/query-params'
 import {seriesFileUrl, seriesThumbnailUrl} from '@/functions/urls'
-import {MediaProfile, ReadStatus} from '@/types/enum-books'
+import {MediaProfile, MediaStatus, ReadStatus} from '@/types/enum-books'
 import {
   BOOK_ADDED,
   BOOK_CHANGED,
@@ -558,6 +560,7 @@ import {
   SearchConditionDeleted,
   SearchConditionGenre,
   SearchConditionLanguage,
+  SearchConditionMediaStatus,
   SearchConditionMediaProfile,
   SearchConditionPublisher,
   SearchConditionReadStatus,
@@ -679,6 +682,22 @@ export default Vue.extend({
               name: this.$t('filter.read').toString(),
               value: new SearchConditionReadStatus(new SearchOperatorIs(ReadStatus.READ)),
               nValue: new SearchConditionReadStatus(new SearchOperatorIsNot(ReadStatus.READ)),
+            },
+            {
+              name: this.$t('book_card.unknown').toString(),
+              value: new SearchConditionMediaStatus(new SearchOperatorIs(MediaStatus.UNKNOWN)),
+              nValue: new SearchConditionMediaStatus(new SearchOperatorIsNot(MediaStatus.UNKNOWN)),
+            },
+            {
+              name: `${this.$t('book_card.error')} / ${this.$t('book_card.unsupported')}`,
+              value: new SearchConditionAnyOfBook([
+                new SearchConditionMediaStatus(new SearchOperatorIs(MediaStatus.ERROR)),
+                new SearchConditionMediaStatus(new SearchOperatorIs(MediaStatus.UNSUPPORTED)),
+              ]),
+              nValue: new SearchConditionAllOfBook([
+                new SearchConditionMediaStatus(new SearchOperatorIsNot(MediaStatus.ERROR)),
+                new SearchConditionMediaStatus(new SearchOperatorIsNot(MediaStatus.UNSUPPORTED)),
+              ]),
             },
           ],
         },
@@ -1103,6 +1122,12 @@ export default Vue.extend({
     },
     addToReadList() {
       this.$store.dispatch('dialogAddBooksToReadList', this.selectedBooks.map(b => b.id))
+    },
+    async analyzeSelectedBooks() {
+      await Promise.all(this.selectedBooks.map(b =>
+        this.$komgaBooks.analyzeBook(b),
+      ))
+      this.selectedBooks = []
     },
     async markSelectedRead() {
       await Promise.all(this.selectedBooks.map(b =>
