@@ -7,6 +7,7 @@ import jakarta.validation.Valid
 import org.gotson.komga.application.tasks.HIGHEST_PRIORITY
 import org.gotson.komga.application.tasks.HIGH_PRIORITY
 import org.gotson.komga.application.tasks.TaskEmitter
+import org.gotson.komga.domain.model.BookSearch
 import org.gotson.komga.domain.model.DirectoryNotFoundException
 import org.gotson.komga.domain.model.DuplicateNameException
 import org.gotson.komga.domain.model.Library
@@ -250,9 +251,22 @@ class LibraryController(
   @Operation(summary = "Analyze a library")
   fun libraryAnalyze(
     @PathVariable libraryId: String,
+    @RequestBody(required = false) search: BookSearch? = null,
   ) {
     findLeafLibrariesOrNull(libraryId)?.forEach { library ->
-      taskEmitter.analyzeUnknownBooks(library, HIGH_PRIORITY)
+      val libraryCondition = SearchCondition.LibraryId(SearchOperator.Is(library.id))
+      val condition =
+        search?.condition?.let {
+          SearchCondition.AllOfBook(libraryCondition, it)
+        } ?: libraryCondition
+      val books =
+        bookRepository
+          .findAll(
+            condition,
+            SearchContext.empty(),
+            Pageable.unpaged(),
+          ).content
+      taskEmitter.analyzeBook(books, HIGH_PRIORITY)
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
   }
 

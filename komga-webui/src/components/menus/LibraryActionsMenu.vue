@@ -63,6 +63,7 @@
 import Vue from 'vue'
 import ConfirmationDialog from '@/components/dialogs/ConfirmationDialog.vue'
 import {LibraryDto} from '@/types/komga-libraries'
+import {BookSearch} from '@/types/komga-search'
 
 export default Vue.extend({
   name: 'LibraryActionsMenu',
@@ -71,6 +72,10 @@ export default Vue.extend({
     library: {
       type: Object as () => LibraryDto,
       required: true,
+    },
+    analyzeSearch: {
+      type: Object as () => BookSearch | undefined,
+      required: false,
     },
   },
   data: () => {
@@ -90,7 +95,7 @@ export default Vue.extend({
       this.$komgaLibraries.scanLibrary(this.library, scanDeep)
     },
     analyze() {
-      this.$komgaLibraries.analyzeLibrary(this.library)
+      this.$komgaLibraries.analyzeLibrary(this.library, this.analyzeSearch)
     },
     refreshMetadata() {
       this.$komgaLibraries.refreshMetadata(this.library)

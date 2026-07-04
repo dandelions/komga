@@ -3,7 +3,8 @@
     <toolbar-sticky v-if="selectedBooks.length === 0">
       <!--   Action menu   -->
       <library-actions-menu v-if="isAdmin && library"
-                            :library="library"/>
+                            :library="library"
+                            :analyze-search="filteredAnalyzeSearch"/>
 
       <v-toolbar-title>
         <span>{{ toolbarTitle }}</span>
@@ -165,8 +166,8 @@ import {
   SearchConditionMediaProfile,
   SearchConditionMediaStatus,
   SearchConditionOneShot,
+  SearchConditionBook,
   SearchConditionReadStatus,
-  SearchConditionSeries,
   SearchConditionTag,
   SearchOperatorIs,
   SearchOperatorIsFalse,
@@ -446,6 +447,15 @@ export default Vue.extend({
     sortOrFilterActive(): boolean {
       return sortOrFilterActive(this.sortActive, this.sortDefault, this.filters)
     },
+    filtersActive(): boolean {
+      return Object.keys(this.filters).some(x => this.filters[x].length !== 0)
+    },
+    filteredAnalyzeSearch(): BookSearch | undefined {
+      if (!this.filtersActive) return undefined
+      return {
+        condition: new SearchConditionAllOfBook(this.getSearchConditions(this.libraryId)),
+      } as BookSearch
+    },
   },
   methods: {
     resetSortAndFilters() {
@@ -613,7 +623,16 @@ export default Vue.extend({
         pageRequest.sort = [`${sort.key},${sort.order}`]
       }
 
-      const conditions = [] as SearchConditionSeries[]
+      const booksPage = await this.$komgaBooks.getBooksList({
+        condition: new SearchConditionAllOfBook(this.getSearchConditions(libraryId)),
+      } as BookSearch, pageRequest)
+
+      this.totalPages = booksPage.totalPages
+      this.totalElements = booksPage.totalElements
+      this.books = booksPage.content
+    },
+    getSearchConditions(libraryId: string): SearchConditionBook[] {
+      const conditions = [] as SearchConditionBook[]
       const requestLibraryIds = this.getRequestLibraryIds(libraryId)
       conditions.push(new SearchConditionAnyOfBook(
         requestLibraryIds.map((it: string) => new SearchConditionLibraryId(new SearchOperatorIs(it))),
@@ -623,7 +642,6 @@ export default Vue.extend({
       if (this.filters.oneshot && this.filters.oneshot.length > 0) conditions.push(...this.filters.oneshot)
       if (this.filters.mediaProfile && this.filters.mediaProfile.length > 0) this.filtersMode?.mediaProfile?.allOf ? conditions.push(new SearchConditionAllOfBook(this.filters.mediaProfile)) : conditions.push(new SearchConditionAnyOfBook(this.filters.mediaProfile))
       if (this.filters.deleted && this.filters.deleted.length > 0) conditions.push(...this.filters.deleted)
-      if (this.filters.mediaProfile && this.filters.mediaProfile.length > 0) conditions.push(new SearchConditionAnyOfBook(this.filters.mediaProfile))
       if (this.filters.mediaStatus && this.filters.mediaStatus.length > 0) conditions.push(new SearchConditionAnyOfBook(this.filters.mediaStatus))
       authorRoles.forEach((role: string) => {
         if (role in this.filters) {
@@ -645,14 +663,7 @@ export default Vue.extend({
           conditions.push(this.filtersMode[role]?.allOf ? new SearchConditionAllOfBook(authorConditions) : new SearchConditionAnyOfBook(authorConditions))
         }
       })
-
-      const booksPage = await this.$komgaBooks.getBooksList({
-        condition: new SearchConditionAllOfBook(conditions),
-      } as BookSearch, pageRequest)
-
-      this.totalPages = booksPage.totalPages
-      this.totalElements = booksPage.totalElements
-      this.books = booksPage.content
+      return conditions
     },
     getLibraryLazy(libraryId: string): LibraryDto | undefined {
       if (libraryId !== LIBRARIES_ALL) {
