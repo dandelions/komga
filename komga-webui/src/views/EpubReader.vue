@@ -763,9 +763,11 @@ export default Vue.extend({
       return ''
     },
     epubReaderBackgroundStyle(): Record<string, string> {
+      const backgroundColor = this.getEpubThemeBackgroundColor()
       const style = {
         height: '100vh',
-        backgroundColor: this.getEpubThemeBackgroundColor(),
+        backgroundColor: backgroundColor,
+        '--epub-reader-background-color': backgroundColor,
       } as Record<string, string>
       const image = this.getCurrentEpubBackgroundImage()
       if (image) {
@@ -778,11 +780,14 @@ export default Vue.extend({
       return style
     },
     epubReaderStatusStyle(): Record<string, string> {
+      const backgroundColor = this.getEpubThemeBackgroundColor()
       const style = {
         position: 'fixed',
         bottom: '0',
         fontSize: '.85rem',
-        backgroundColor: this.getEpubThemeBackgroundColor(),
+        backgroundColor: backgroundColor,
+        '--epub-reader-status-background-color': backgroundColor,
+        '--epub-reader-status-text-color': this.getEpubThemeTextColor(),
       } as Record<string, string>
       const image = this.getCurrentEpubBackgroundImage()
       if (image) {
@@ -1421,6 +1426,16 @@ export default Vue.extend({
           return '#c7edcc'
         default:
           return '#ffffff'
+      }
+    },
+    getEpubThemeTextColor(): string {
+      switch (this.getEpubAppearanceName()) {
+        case 'night':
+          return '#DADADA'
+        case 'green':
+          return '#33533a'
+        default:
+          return '#5B5852'
       }
     },
     getCurrentEpubBackgroundImage(): string {
@@ -2431,6 +2446,12 @@ export default Vue.extend({
 .epub-status-bar {
   box-sizing: border-box;
   z-index: 13;
+  background-color: var(--epub-reader-status-background-color) !important;
+  color: var(--epub-reader-status-text-color) !important;
+}
+
+.epub-status-bar .col {
+  color: inherit;
 }
 
 .night-bg {
