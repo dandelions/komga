@@ -252,7 +252,7 @@ class LibraryController(
     @PathVariable libraryId: String,
   ) {
     findLeafLibrariesOrNull(libraryId)?.forEach { library ->
-      taskEmitter.analyzeUnknownAndOutdatedBooks(library, HIGH_PRIORITY)
+      taskEmitter.analyzeUnknownBooks(library, HIGH_PRIORITY)
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
   }
 
