@@ -113,6 +113,12 @@ class TasksDao(
 
   override fun count(): Int = dslRO.fetchCount(t)
 
+  override fun exists(taskId: String): Boolean =
+    dslRO.fetchExists(
+      t,
+      t.ID.eq(taskId),
+    )
+
   override fun countBySimpleType(): Map<String, Int> = countTasksBySimpleType()
 
   override fun countReadyOrRunningBySimpleType(): Map<String, Int> = countTasksBySimpleType(readyOrRunningCondition())

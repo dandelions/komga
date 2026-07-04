@@ -30,6 +30,7 @@ private val logger = KotlinLogging.logger {}
 @Service
 class TaskHandler(
   private val taskEmitter: TaskEmitter,
+  private val tasksRepository: TasksRepository,
   private val libraryRepository: LibraryRepository,
   private val bookRepository: BookRepository,
   private val seriesRepository: SeriesRepository,
@@ -55,6 +56,7 @@ class TaskHandler(
             libraryRepository.findByIdOrNull(task.libraryId)?.let { library ->
               findLeafLibraries(library).forEach {
                 val scanSummary = libraryContentLifecycle.scanRootFolder(it, task.scanDeep)
+                if (taskCancelled(task)) return@measureTime
                 if (scanSummary.limited) {
                   logger.info { "Daily scan file limit reached for library '${it.name}', scheduling continuation tomorrow" }
                   taskEmitter.scanLibraryTomorrow(task.libraryId, task.scanDeep, task.priority)
@@ -104,6 +106,7 @@ class TaskHandler(
           is Task.AnalyzeBook ->
             bookRepository.findByIdOrNull(task.bookId)?.let { book ->
               val actions = bookLifecycle.analyzeAndPersist(book)
+              if (taskCancelled(task)) return@measureTime
               if (actions.contains(BookAction.GENERATE_THUMBNAIL)) taskEmitter.generateBookThumbnail(book.id, priority = task.priority + 1)
               if (actions.contains(BookAction.REFRESH_METADATA)) taskEmitter.refreshBookMetadata(book, priority = task.priority + 1)
             } ?: logger.warn { "Cannot execute task $task: Book does not exist" }
@@ -209,6 +212,12 @@ class TaskHandler(
       logger.error(e) { "Task $task execution failed" }
       meterRegistry.counter(METER_TASKS_FAILURE, "type", task.javaClass.simpleName).increment()
     }
+  }
+
+  private fun taskCancelled(task: Task): Boolean {
+    val cancelled = !tasksRepository.exists(task.uniqueId)
+    if (cancelled) logger.info { "Task $task was cancelled, skipping follow-up tasks" }
+    return cancelled
   }
 
   private fun findLeafLibraries(library: Library): Collection<Library> {

@@ -13,6 +13,8 @@ interface TasksRepository {
 
   fun count(): Int
 
+  fun exists(taskId: String): Boolean
+
   fun countBySimpleType(): Map<String, Int>
 
   fun countReadyOrRunningBySimpleType(): Map<String, Int>
