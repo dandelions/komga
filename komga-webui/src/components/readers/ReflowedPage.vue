@@ -1998,7 +1998,7 @@ export default Vue.extend({
           const metrics = this.imageTileMetrics(pixels, width, xStart, yStart, xEnd, yEnd, threshold)
           const index = tileY * tileColumns + tileX
           const colored = metrics.coloredRatio >= 0.055
-          const dense = metrics.inkRatio >= 0.24 && metrics.coveredRatio >= 0.20
+          const dense = metrics.inkRatio >= 0.24 && metrics.coveredRatio >= 0.20 && metrics.lumaStdDev >= 12
           const textured = metrics.inkRatio >= 0.08 && metrics.coveredRatio >= 0.18 && metrics.lumaStdDev >= 38
 
           if (colored || dense || textured) candidates[index] = 1
@@ -2151,10 +2151,7 @@ export default Vue.extend({
       const minHeight = Math.max(36, roi.h * 0.04)
       const spansTextColumn = region.w >= minWidth && region.h >= minHeight
       const colorImage = coloredRatio >= 0.22 && areaRatio >= 0.008 && fillRatio >= 0.16
-      const denseGraphic = denseRatio >= 0.34 && areaRatio >= 0.016 && fillRatio >= 0.20
-      const texturedGraphic = texturedRatio >= 0.42 && areaRatio >= 0.018 && fillRatio >= 0.22
-
-      return spansTextColumn && (colorImage || denseGraphic || texturedGraphic)
+      return spansTextColumn && colorImage
     },
     mergeImageRegions(regions: ImageRegion[]): ImageRegion[] {
       if (regions.length <= 1) return regions

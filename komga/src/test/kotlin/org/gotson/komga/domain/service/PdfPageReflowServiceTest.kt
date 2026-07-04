@@ -169,6 +169,27 @@ class PdfPageReflowServiceTest {
   }
 
   @Test
+  fun `given image with side text when reflowing page then side text remains small word blocks`() {
+    val pageBytes = imageWithSideTextPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+        cropRegions = listOf(PdfPageReflowRegion(x = 20, y = 20, w = 220, h = 120)),
+      )
+
+    val wordBlocks = response.items.filter { it.type == "word" }
+
+    assertThat(response.items.filter { it.type == "image" }).hasSize(1)
+    assertThat(wordBlocks).hasSizeGreaterThanOrEqualTo(2)
+    assertThat(wordBlocks.mapNotNull { it.h }.max()).isLessThan(40)
+  }
+
+  @Test
   fun `given image quality when reflowing page then word block uses jpeg encoding`() {
     val pageBytes = horizontalShortGlyphPage()
     val book = makeBook("book")
@@ -306,6 +327,35 @@ class PdfPageReflowServiceTest {
     graphics.fillRect(95, 60, 10, 26)
     graphics.fillRect(120, 73, 25, 3)
     graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun imageWithSideTextPage(): ByteArray {
+    val image = BufferedImage(260, 160, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color.BLACK
+    graphics.fillRect(35, 68, 12, 22)
+    graphics.fillRect(58, 68, 12, 22)
+    graphics.fillRect(188, 68, 12, 22)
+    graphics.fillRect(211, 68, 12, 22)
+    graphics.dispose()
+
+    for (y in 35 until 125) {
+      for (x in 85 until 175) {
+        val color =
+          when {
+            (x + y) % 7 == 0 -> Color(190, 42, 54)
+            (x / 4 + y / 3) % 2 == 0 -> Color(58, 116, 190)
+            else -> Color(230, 185, 58)
+          }
+        image.setRGB(x, y, color.rgb)
+      }
+    }
 
     val output = ByteArrayOutputStream()
     ImageIO.write(image, "png", output)

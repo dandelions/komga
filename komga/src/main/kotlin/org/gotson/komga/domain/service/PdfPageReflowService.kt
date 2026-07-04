@@ -430,12 +430,14 @@ class PdfPageReflowService(
     val pageBackground = detectPageBackground(image)
     val ink = buildInkMap(image, options)
     val roi = if (useWholeImage) Roi(0, 0, image.width, image.height) else detectRoi(ink, image.width, image.height, options)
+    val imageRegions = detectImageRegions(image, roi, options)
+    val textInk = maskInkRegions(ink, image.width, image.height, imageRegions)
     val textScale = clamp(options.textScale.toDouble() / 100.0, 0.1, 1.4)
     val items =
       if (options.verticalText) {
-        renderVerticalItems(image, ink, roi, options, textScale)
+        renderVerticalItems(image, textInk, roi, options, textScale, imageRegions)
       } else {
-        renderHorizontalItems(image, ink, roi, options, textScale)
+        renderHorizontalItems(image, textInk, roi, options, textScale, imageRegions)
       }.ifEmpty {
         listOf(renderFallbackImage(image, roi, options, textScale))
       }
@@ -524,6 +526,288 @@ class PdfPageReflowService(
     )
   }
 
+  private fun detectImageRegions(
+    image: BufferedImage,
+    roi: Roi,
+    options: PdfPageReflowOptions,
+  ): List<Roi> {
+    if (roi.w < 44 || roi.h < 36) return emptyList()
+
+    val threshold = clamp(options.threshold, 50, 230)
+    val tileSize = max(12, min(28, (min(roi.w, roi.h) / 64.0).roundToInt()))
+    val tileColumns = ceil(roi.w / tileSize.toDouble()).toInt()
+    val tileRows = ceil(roi.h / tileSize.toDouble()).toInt()
+    val tileCount = tileColumns * tileRows
+    val candidates = ByteArray(tileCount)
+    val coloredTiles = ByteArray(tileCount)
+    val denseTiles = ByteArray(tileCount)
+    val texturedTiles = ByteArray(tileCount)
+
+    for (tileY in 0 until tileRows) {
+      for (tileX in 0 until tileColumns) {
+        val xStart = roi.x + tileX * tileSize
+        val yStart = roi.y + tileY * tileSize
+        val xEnd = min(roi.x + roi.w, xStart + tileSize)
+        val yEnd = min(roi.y + roi.h, yStart + tileSize)
+        val metrics = imageTileMetrics(image, xStart, yStart, xEnd, yEnd, threshold)
+        val index = tileY * tileColumns + tileX
+        val colored = metrics.coloredRatio >= 0.055
+        val dense = metrics.inkRatio >= 0.24 && metrics.coveredRatio >= 0.20 && metrics.lumaStdDev >= 12.0
+        val textured = metrics.inkRatio >= 0.08 && metrics.coveredRatio >= 0.18 && metrics.lumaStdDev >= 38.0
+
+        if (colored || dense || textured) candidates[index] = 1
+        if (colored) coloredTiles[index] = 1
+        if (dense) denseTiles[index] = 1
+        if (textured) texturedTiles[index] = 1
+      }
+    }
+
+    val regions =
+      collectImageRegions(
+        candidates = candidates,
+        coloredTiles = coloredTiles,
+        denseTiles = denseTiles,
+        texturedTiles = texturedTiles,
+        tileColumns = tileColumns,
+        tileRows = tileRows,
+        tileSize = tileSize,
+        roi = roi,
+      )
+    return expandImageRegions(regions, max(2, (tileSize * 0.6).roundToInt()), roi, image.width, image.height)
+  }
+
+  private data class ImageTileMetrics(
+    val inkRatio: Double,
+    val coloredRatio: Double,
+    val coveredRatio: Double,
+    val lumaStdDev: Double,
+  )
+
+  private fun imageTileMetrics(
+    image: BufferedImage,
+    xStart: Int,
+    yStart: Int,
+    xEnd: Int,
+    yEnd: Int,
+    threshold: Int,
+  ): ImageTileMetrics {
+    var pixelsCount = 0
+    var inkPixels = 0
+    var coloredPixels = 0
+    var coveredPixels = 0
+    var lumaSum = 0.0
+    var lumaSquareSum = 0.0
+    val coverageThreshold = min(248, threshold + 42)
+    val sampleStep = max(1, kotlin.math.sqrt(max(1, (xEnd - xStart) * (yEnd - yStart)) / 220.0).roundToInt())
+
+    for (y in yStart until yEnd step sampleStep) {
+      for (x in xStart until xEnd step sampleStep) {
+        val rgb = image.getRGB(x, y)
+        val alpha = rgb ushr 24 and 0xff
+        if (alpha == 0) continue
+        val red = rgb ushr 16 and 0xff
+        val green = rgb ushr 8 and 0xff
+        val blue = rgb and 0xff
+        val maxChannel = max(red, max(green, blue))
+        val minChannel = min(red, min(green, blue))
+        val luma = 0.299 * red + 0.587 * green + 0.114 * blue
+
+        pixelsCount++
+        lumaSum += luma
+        lumaSquareSum += luma * luma
+        if (luma < threshold) inkPixels++
+        if (luma < coverageThreshold) coveredPixels++
+        if (maxChannel - minChannel >= 28 && maxChannel > 36) coloredPixels++
+      }
+    }
+
+    if (pixelsCount == 0) return ImageTileMetrics(0.0, 0.0, 0.0, 0.0)
+    val mean = lumaSum / pixelsCount
+    val variance = max(0.0, lumaSquareSum / pixelsCount - mean * mean)
+    return ImageTileMetrics(
+      inkRatio = inkPixels.toDouble() / pixelsCount,
+      coloredRatio = coloredPixels.toDouble() / pixelsCount,
+      coveredRatio = coveredPixels.toDouble() / pixelsCount,
+      lumaStdDev = kotlin.math.sqrt(variance),
+    )
+  }
+
+  private fun collectImageRegions(
+    candidates: ByteArray,
+    coloredTiles: ByteArray,
+    denseTiles: ByteArray,
+    texturedTiles: ByteArray,
+    tileColumns: Int,
+    tileRows: Int,
+    tileSize: Int,
+    roi: Roi,
+  ): List<Roi> {
+    val visited = ByteArray(candidates.size)
+    val regions = mutableListOf<Roi>()
+
+    for (start in candidates.indices) {
+      if (candidates[start].toInt() == 0 || visited[start].toInt() != 0) continue
+      val queue = mutableListOf(start)
+      visited[start] = 1
+      var minTileX = tileColumns
+      var minTileY = tileRows
+      var maxTileX = 0
+      var maxTileY = 0
+      var componentTiles = 0
+      var componentColoredTiles = 0
+      var componentDenseTiles = 0
+      var componentTexturedTiles = 0
+
+      var cursor = 0
+      while (cursor < queue.size) {
+        val index = queue[cursor++]
+        val tileX = index % tileColumns
+        val tileY = index / tileColumns
+        minTileX = min(minTileX, tileX)
+        minTileY = min(minTileY, tileY)
+        maxTileX = max(maxTileX, tileX)
+        maxTileY = max(maxTileY, tileY)
+        componentTiles++
+        if (coloredTiles[index].toInt() != 0) componentColoredTiles++
+        if (denseTiles[index].toInt() != 0) componentDenseTiles++
+        if (texturedTiles[index].toInt() != 0) componentTexturedTiles++
+
+        neighborImageTiles(tileX, tileY, tileColumns, tileRows).forEach { next ->
+          if (candidates[next].toInt() == 0 || visited[next].toInt() != 0) return@forEach
+          visited[next] = 1
+          queue += next
+        }
+      }
+
+      val region = imageRegionFromTiles(minTileX, minTileY, maxTileX, maxTileY, tileSize, roi)
+      if (isLikelyImageRegion(region, roi, componentTiles, componentColoredTiles, componentDenseTiles, componentTexturedTiles, minTileX, minTileY, maxTileX, maxTileY)) {
+        regions += region
+      }
+    }
+
+    return mergeImageRegions(regions)
+  }
+
+  private fun neighborImageTiles(
+    tileX: Int,
+    tileY: Int,
+    tileColumns: Int,
+    tileRows: Int,
+  ): List<Int> {
+    val neighbors = mutableListOf<Int>()
+    if (tileX > 0) neighbors += tileY * tileColumns + tileX - 1
+    if (tileX < tileColumns - 1) neighbors += tileY * tileColumns + tileX + 1
+    if (tileY > 0) neighbors += (tileY - 1) * tileColumns + tileX
+    if (tileY < tileRows - 1) neighbors += (tileY + 1) * tileColumns + tileX
+    return neighbors
+  }
+
+  private fun imageRegionFromTiles(
+    minTileX: Int,
+    minTileY: Int,
+    maxTileX: Int,
+    maxTileY: Int,
+    tileSize: Int,
+    roi: Roi,
+  ): Roi {
+    val x = roi.x + minTileX * tileSize
+    val y = roi.y + minTileY * tileSize
+    val right = min(roi.x + roi.w, roi.x + (maxTileX + 1) * tileSize)
+    val bottom = min(roi.y + roi.h, roi.y + (maxTileY + 1) * tileSize)
+    return Roi(x, y, right - x, bottom - y)
+  }
+
+  private fun isLikelyImageRegion(
+    region: Roi,
+    roi: Roi,
+    componentTiles: Int,
+    componentColoredTiles: Int,
+    componentDenseTiles: Int,
+    componentTexturedTiles: Int,
+    minTileX: Int,
+    minTileY: Int,
+    maxTileX: Int,
+    maxTileY: Int,
+  ): Boolean {
+    val rectTiles = max(1, (maxTileX - minTileX + 1) * (maxTileY - minTileY + 1))
+    val fillRatio = componentTiles.toDouble() / rectTiles
+    val coloredRatio = componentColoredTiles.toDouble() / max(1, componentTiles)
+    val denseRatio = componentDenseTiles.toDouble() / max(1, componentTiles)
+    val texturedRatio = componentTexturedTiles.toDouble() / max(1, componentTiles)
+    val roiArea = max(1, roi.w * roi.h)
+    val areaRatio = region.w * region.h.toDouble() / roiArea
+    val minWidth = max(44.0, roi.w * 0.08)
+    val minHeight = max(36.0, roi.h * 0.04)
+    val spansTextColumn = region.w >= minWidth && region.h >= minHeight
+    val colorImage = coloredRatio >= 0.22 && areaRatio >= 0.008 && fillRatio >= 0.16
+    return spansTextColumn && colorImage
+  }
+
+  private fun mergeImageRegions(regions: List<Roi>): List<Roi> {
+    if (regions.size <= 1) return regions
+    val merged = mutableListOf<Roi>()
+    regions.sortedWith(compareBy<Roi> { it.y }.thenBy { it.x }).forEach { region ->
+      val targetIndex = merged.indexOfFirst { imageRegionsTouch(it, region) }
+      if (targetIndex >= 0) {
+        merged[targetIndex] = unionRoi(merged[targetIndex], region)
+      } else {
+        merged += region
+      }
+    }
+    return merged
+  }
+
+  private fun imageRegionsTouch(
+    a: Roi,
+    b: Roi,
+  ): Boolean {
+    val gap = 4
+    return a.x <= b.x + b.w + gap &&
+      a.x + a.w + gap >= b.x &&
+      a.y <= b.y + b.h + gap &&
+      a.y + a.h + gap >= b.y
+  }
+
+  private fun expandImageRegions(
+    regions: List<Roi>,
+    padding: Int,
+    roi: Roi,
+    width: Int,
+    height: Int,
+  ): List<Roi> {
+    if (regions.isEmpty()) return regions
+    val rightLimit = min(width, roi.x + roi.w)
+    val bottomLimit = min(height, roi.y + roi.h)
+    val expanded =
+      regions.map { region ->
+        val x = max(roi.x, region.x - padding)
+        val y = max(roi.y, region.y - padding)
+        val right = min(rightLimit, region.x + region.w + padding)
+        val bottom = min(bottomLimit, region.y + region.h + padding)
+        Roi(x, y, max(1, right - x), max(1, bottom - y))
+      }
+    return mergeImageRegions(expanded)
+  }
+
+  private fun maskInkRegions(
+    ink: ByteArray,
+    width: Int,
+    height: Int,
+    regions: List<Roi>,
+  ): ByteArray {
+    if (regions.isEmpty()) return ink
+    val masked = ink.copyOf()
+    regions.forEach { region ->
+      val roi = clampRoi(region, width, height)
+      for (y in roi.y until roi.y + roi.h) {
+        for (x in roi.x until roi.x + roi.w) {
+          masked[y * width + x] = 0
+        }
+      }
+    }
+    return masked
+  }
+
   private fun manualRoi(
     width: Int,
     height: Int,
@@ -542,6 +826,7 @@ class PdfPageReflowService(
     roi: Roi,
     options: PdfPageReflowOptions,
     textScale: Double,
+    imageRegions: List<Roi>,
   ): List<PdfPageReflowItemDto> {
     val items = mutableListOf<PdfPageReflowItemDto>()
     val columns = detectHorizontalColumns(image, ink, roi, options)
@@ -583,7 +868,9 @@ class PdfPageReflowService(
         if (blocks.isEmpty()) null else line.copy(blocks = blocks)
       }
 
+    val imageSlots = horizontalImageSlots(imageRegions, lines)
     lines.forEachIndexed { index, line ->
+      appendImageItems(items, image, imageSlots[index], options, textScale)
       val startParagraph = isHorizontalParagraphStart(line, lines.getOrNull(index - 1))
       val indent = if (startParagraph) horizontalLineIndentSourceWidth(line) else 0
 
@@ -595,6 +882,7 @@ class PdfPageReflowService(
         .map { renderWordItem(image, it, options, textScale) }
         .forEach { items += it }
     }
+    appendImageItems(items, image, imageSlots[lines.size], options, textScale)
 
     return trimTrailingBreak(items)
   }
@@ -637,6 +925,48 @@ class PdfPageReflowService(
     val rawIndent = rawHorizontalLineIndent(line)
     val indentThreshold = max(8.0, first.h * 0.3)
     return if (rawIndent < indentThreshold) 0 else rawIndent
+  }
+
+  private fun horizontalImageSlots(
+    imageRegions: List<Roi>,
+    lines: List<HorizontalTextLine>,
+  ): List<List<Roi>> {
+    val slots = MutableList(lines.size + 1) { mutableListOf<Roi>() }
+    imageRegions.forEach { region ->
+      slots[horizontalImageSlot(region, lines)] += region
+    }
+    return slots.map { regions -> regions.sortedWith(compareBy<Roi> { it.y }.thenBy { it.x }) }
+  }
+
+  private fun horizontalImageSlot(
+    region: Roi,
+    lines: List<HorizontalTextLine>,
+  ): Int {
+    if (lines.isEmpty()) return 0
+    val centerY = region.y + region.h / 2.0
+    var fallback = lines.size
+
+    lines.forEachIndexed { index, line ->
+      if (!imageOverlapsLineColumn(region, line)) return@forEachIndexed
+      val lineCenterY = (line.line.start + line.line.end) / 2.0
+      if (centerY <= lineCenterY) return index
+      fallback = index + 1
+    }
+
+    lines.forEachIndexed { index, line ->
+      val lineCenterY = (line.line.start + line.line.end) / 2.0
+      if (centerY <= lineCenterY) return index
+    }
+
+    return fallback
+  }
+
+  private fun imageOverlapsLineColumn(
+    region: Roi,
+    line: HorizontalTextLine,
+  ): Boolean {
+    val overlap = max(0, min(region.x + region.w, line.column.end) - max(region.x, line.column.start))
+    return overlap >= min(region.w, line.column.end - line.column.start) * 0.25
   }
 
   private fun detectHorizontalColumns(
@@ -912,6 +1242,7 @@ class PdfPageReflowService(
     roi: Roi,
     options: PdfPageReflowOptions,
     textScale: Double,
+    imageRegions: List<Roi>,
   ): List<PdfPageReflowItemDto> {
     val columns =
       detectBands(roi.x, roi.x + roi.w) { x ->
@@ -945,7 +1276,9 @@ class PdfPageReflowService(
     val lines = if (textBounds == null) filteredLines else filteredLines.map { it.copy(line = textBounds) }
 
     val items = mutableListOf<PdfPageReflowItemDto>()
+    val imageSlots = verticalImageSlots(imageRegions, lines, options)
     lines.forEachIndexed { index, line ->
+      appendImageItems(items, image, imageSlots[index], options, textScale)
       val startParagraph = isVerticalParagraphStart(line, lines.getOrNull(index - 1))
       if (startParagraph && items.isNotEmpty()) appendBreakIfNeeded(items)
 
@@ -961,6 +1294,7 @@ class PdfPageReflowService(
         .map { renderVerticalWordItem(image, it, options, textScale) }
         .forEach { items += it }
     }
+    appendImageItems(items, image, imageSlots[lines.size], options, textScale)
 
     return trimTrailingBreak(items)
   }
@@ -974,6 +1308,34 @@ class PdfPageReflowService(
       sourceWidth = sourceHeight,
       width = sourceHeight * textScale,
     )
+
+  private fun verticalImageSlots(
+    imageRegions: List<Roi>,
+    lines: List<VerticalTextLine>,
+    options: PdfPageReflowOptions,
+  ): List<List<Roi>> {
+    val slots = MutableList(lines.size + 1) { mutableListOf<Roi>() }
+    imageRegions.forEach { region ->
+      slots[verticalImageSlot(region, lines, options)] += region
+    }
+    return slots.map { regions -> regions.sortedWith(compareBy<Roi> { it.y }.thenBy { it.x }) }
+  }
+
+  private fun verticalImageSlot(
+    region: Roi,
+    lines: List<VerticalTextLine>,
+    options: PdfPageReflowOptions,
+  ): Int {
+    if (lines.isEmpty()) return 0
+    val centerX = region.x + region.w / 2.0
+
+    lines.forEachIndexed { index, line ->
+      val lineCenterX = (line.column.start + line.column.end) / 2.0
+      if (if (options.verticalDirection == "ltr") centerX <= lineCenterX else centerX >= lineCenterX) return index
+    }
+
+    return lines.size
+  }
 
   private fun verticalTextBounds(lines: List<VerticalTextLine>): LineBand? {
     var top = Int.MAX_VALUE
@@ -1507,6 +1869,58 @@ class PdfPageReflowService(
       width = roi.w * scale,
       height = roi.h * scale,
     )
+  }
+
+  private fun appendImageItems(
+    items: MutableList<PdfPageReflowItemDto>,
+    image: BufferedImage,
+    imageRegions: List<Roi>,
+    options: PdfPageReflowOptions,
+    textScale: Double,
+  ) {
+    imageRegions.forEach { region ->
+      val imageItem = renderImageItem(image, region, options, textScale) ?: return@forEach
+      appendBreakIfNeeded(items)
+      items += imageItem
+      items += PdfPageReflowItemDto(type = "break")
+    }
+  }
+
+  private fun renderImageItem(
+    image: BufferedImage,
+    roi: Roi,
+    options: PdfPageReflowOptions,
+    textScale: Double,
+  ): PdfPageReflowItemDto? {
+    val block = clampRoi(roi, image.width, image.height)
+    if (block.w < 2 || block.h < 2) return null
+    val slice = copyOriginalSlice(image, block)
+    val maxWidth = max(1, options.targetWidth - 32).toDouble()
+    val scale = min(textScale, maxWidth / block.w)
+    return PdfPageReflowItemDto(
+      type = "image",
+      src = encodeReflowDataUrl(slice, options, allowResize = true),
+      x = block.x,
+      y = block.y,
+      w = block.w,
+      h = block.h,
+      sourceWidth = block.w,
+      sourceHeight = block.h,
+      width = block.w * scale,
+      height = block.h * scale,
+    )
+  }
+
+  private fun copyOriginalSlice(
+    image: BufferedImage,
+    roi: Roi,
+  ): BufferedImage {
+    val block = clampRoi(roi, image.width, image.height)
+    val output = BufferedImage(block.w, block.h, BufferedImage.TYPE_INT_ARGB)
+    val graphics = output.createGraphics()
+    graphics.drawImage(image, 0, 0, block.w, block.h, block.x, block.y, block.x + block.w, block.y + block.h, null)
+    graphics.dispose()
+    return output
   }
 
   private fun copySlice(
