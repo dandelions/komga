@@ -927,7 +927,7 @@ function defaultCropRegionsByParity(enabled: boolean = false): any {
 
 function defaultReflowSettings(): any {
   return {
-    processingMode: 'local',
+    processingMode: 'server',
     autoCropBorder: true,
     textScale: 40,
     columnCount: 1,
