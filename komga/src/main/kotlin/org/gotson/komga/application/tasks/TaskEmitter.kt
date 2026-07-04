@@ -57,17 +57,24 @@ class TaskEmitter(
     submitTask(Task.EmptyTrash(libraryId, priority))
   }
 
-  fun analyzeUnknownAndOutdatedBooks(library: Library) {
-    analyzeBooks(library, setOf(Media.Status.UNKNOWN, Media.Status.OUTDATED))
+  fun analyzeUnknownAndOutdatedBooks(
+    library: Library,
+    priority: Int = DEFAULT_PRIORITY,
+  ) {
+    analyzeBooks(library, setOf(Media.Status.UNKNOWN, Media.Status.OUTDATED), priority)
   }
 
-  fun analyzeUnknownBooks(library: Library) {
-    analyzeBooks(library, setOf(Media.Status.UNKNOWN))
+  fun analyzeUnknownBooks(
+    library: Library,
+    priority: Int = DEFAULT_PRIORITY,
+  ) {
+    analyzeBooks(library, setOf(Media.Status.UNKNOWN), priority)
   }
 
   private fun analyzeBooks(
     library: Library,
     statuses: Set<Media.Status>,
+    priority: Int,
   ) {
     val statusConditions = statuses.map { SearchCondition.MediaStatus(SearchOperator.Is(it)) }
     val mediaStatusCondition: SearchCondition.Book =
@@ -86,21 +93,28 @@ class TaskEmitter(
         SearchContext.empty(),
         UnpagedSorted(Sort.by(Sort.Order.asc("seriesId"), Sort.Order.asc("number"))),
       ).content
-      .map { Task.AnalyzeBook(it.id, groupId = it.seriesId) }
+      .map { Task.AnalyzeBook(it.id, priority, it.seriesId) }
       .let { submitTasks(it) }
   }
 
-  fun analyzeUnknownAndOutdatedBooks(bookIds: Collection<String>) {
-    analyzeBooks(bookIds, setOf(Media.Status.UNKNOWN, Media.Status.OUTDATED))
+  fun analyzeUnknownAndOutdatedBooks(
+    bookIds: Collection<String>,
+    priority: Int = DEFAULT_PRIORITY,
+  ) {
+    analyzeBooks(bookIds, setOf(Media.Status.UNKNOWN, Media.Status.OUTDATED), priority)
   }
 
-  fun analyzeUnknownBooks(bookIds: Collection<String>) {
-    analyzeBooks(bookIds, setOf(Media.Status.UNKNOWN))
+  fun analyzeUnknownBooks(
+    bookIds: Collection<String>,
+    priority: Int = DEFAULT_PRIORITY,
+  ) {
+    analyzeBooks(bookIds, setOf(Media.Status.UNKNOWN), priority)
   }
 
   private fun analyzeBooks(
     bookIds: Collection<String>,
     statuses: Set<Media.Status>,
+    priority: Int,
   ) {
     bookIds
       .mapNotNull { bookRepository.findByIdOrNull(it) }
@@ -116,7 +130,7 @@ class TaskEmitter(
           }
         }.thenBy { it.first.seriesId }
           .thenBy { it.first.number },
-      ).map { (book, _) -> Task.AnalyzeBook(book.id, groupId = book.seriesId) }
+      ).map { (book, _) -> Task.AnalyzeBook(book.id, priority, book.seriesId) }
       .let { submitTasks(it) }
   }
 

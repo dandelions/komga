@@ -252,14 +252,7 @@ class LibraryController(
     @PathVariable libraryId: String,
   ) {
     findLeafLibrariesOrNull(libraryId)?.forEach { library ->
-      val books =
-        bookRepository
-          .findAll(
-            SearchCondition.LibraryId(SearchOperator.Is(library.id)),
-            SearchContext.empty(),
-            Pageable.unpaged(),
-          ).content
-      taskEmitter.analyzeBook(books, HIGH_PRIORITY)
+      taskEmitter.analyzeUnknownAndOutdatedBooks(library, HIGH_PRIORITY)
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
   }
 
