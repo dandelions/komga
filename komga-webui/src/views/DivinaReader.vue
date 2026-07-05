@@ -2434,15 +2434,9 @@ export default Vue.extend({
     },
     normalizedReflowCropRegionRois(cropRoisByParity: any, parity: 'odd' | 'even'): Array<object | null> {
       const regions = cropRoisByParity?.regions?.[parity] || []
-      const normalized = Array.from({length: MAX_REFLOW_CROP_REGIONS}, (_, index) =>
+      return Array.from({length: MAX_REFLOW_CROP_REGIONS}, (_, index) =>
         this.normalizedReflowCropRoi(regions[index]) || (index === 0 ? this.normalizedReflowCropRoi(cropRoisByParity?.[parity]) : null),
       )
-      normalized.forEach((roi, index) => {
-        if (!roi) return
-        const overlapsPrevious = normalized.slice(0, index).some(previous => !!previous && this.reflowCropRoisOverlap(previous, roi))
-        if (overlapsPrevious) normalized[index] = null
-      })
-      return normalized
     },
     normalizedReflowCropRegionExplicit(cropRoisByParity: any, parity: 'odd' | 'even', regions: Array<object | null>): boolean[] {
       const explicit = cropRoisByParity?.explicit || {}
@@ -2470,12 +2464,6 @@ export default Vue.extend({
     normalizedReflowImageQuality(value: any): number {
       const quality = Math.round(this.clampReflowNumber(value, 40, 90, 80) / 10) * 10
       return [90, 80, 70, 60, 50, 40].includes(quality) ? quality : 80
-    },
-    reflowCropRoisOverlap(a: any, b: any): boolean {
-      return a.x < b.x + b.w &&
-        a.x + a.w > b.x &&
-        a.y < b.y + b.h &&
-        a.y + a.h > b.y
     },
     clampReflowNumber(value: any, min: number, max: number, fallback: number): number {
       const numberValue = Number(value)

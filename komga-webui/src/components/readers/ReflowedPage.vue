@@ -2315,7 +2315,7 @@ export default Vue.extend({
       if (parity === this.pageParity && activeStoredRoi && this.explicitCropRoisByParity[parity]?.[this.activeCropRegion]) {
         rois[this.activeCropRegion] = activeStoredRoi
       }
-      return this.nonOverlappingCropRois(rois)
+      return this.adjustOverlappingCropRois(rois)
     },
     joinRegionReflowItems(regionItems: ReflowItem[][]): ReflowItem[] {
       const rendered = [] as ReflowItem[]
@@ -2359,7 +2359,7 @@ export default Vue.extend({
       const normalized = Array.from({length: MAX_CROP_REGIONS}, (_, index) =>
         this.normalizedStoredRoi(regions[index]) || (index === 0 ? this.normalizedStoredRoi(rois[parity]) : undefined),
       )
-      return this.nonOverlappingCropRois(normalized)
+      return normalized
     },
     normalizedStoredExplicitRegions(
       rois: Partial<Record<PageParity, Roi | null | undefined>> & {
@@ -2412,14 +2412,38 @@ export default Vue.extend({
         return this.explicitCropRoisByParity[parity][region] && roi ? {...roi} : null
       })
     },
-    nonOverlappingCropRois(rois: Array<Roi | undefined>): Array<Roi | undefined> {
-      const normalized = rois.slice(0, MAX_CROP_REGIONS)
-      normalized.forEach((roi, index) => {
+    adjustOverlappingCropRois(rois: Array<Roi | undefined>): Array<Roi | undefined> {
+      const adjusted = rois.slice(0, MAX_CROP_REGIONS).map(roi => roi ? {...roi} : undefined)
+      adjusted.forEach((roi, index) => {
         if (!roi) return
-        const overlapsPrevious = normalized.slice(0, index).some(previous => !!previous && this.cropRegionsOverlap(previous, roi))
-        if (overlapsPrevious) normalized[index] = undefined
+
+        let current = {...roi}
+        for (let previousIndex = 0; previousIndex < index; previousIndex++) {
+          const previous = adjusted[previousIndex]
+          if (!previous || !this.cropRegionsOverlap(previous, current)) continue
+
+          const currentRight = current.x + current.w
+          const previousRight = previous.x + previous.w
+          const currentCenter = current.x + current.w / 2
+          const previousCenter = previous.x + previous.w / 2
+
+          if (previousCenter <= currentCenter) {
+            const newX = Math.max(current.x, previousRight)
+            current = {...current, x: newX, w: currentRight - newX}
+          } else {
+            const newRight = Math.min(currentRight, previous.x)
+            current = {...current, w: newRight - current.x}
+          }
+
+          if (current.w <= MIN_CROP_SIZE || current.h <= MIN_CROP_SIZE) {
+            adjusted[index] = undefined
+            return
+          }
+        }
+
+        adjusted[index] = current
       })
-      return normalized
+      return adjusted
     },
     cropRegionsOverlap(a: Roi, b: Roi): boolean {
       return a.x < b.x + b.w &&
@@ -3890,12 +3914,6 @@ export default Vue.extend({
       const roi = this.normalizedRoi(this.cropStart, this.cropPoint(event))
       this.draftRoi = undefined
       if (roi.w > MIN_CROP_SIZE && roi.h > MIN_CROP_SIZE) {
-        const overlappingRegion = this.overlappingCropRegion(roi)
-        if (overlappingRegion !== undefined) {
-          this.cropWarning = `区域 ${this.activeCropRegion + 1} 不能与区域 ${overlappingRegion + 1} 重叠`
-          event.preventDefault()
-          return
-        }
         this.cropWarning = ''
         this.setCurrentCropRoi(roi)
         this.cropMode = false
@@ -3934,13 +3952,6 @@ export default Vue.extend({
         width: `${roi.w / this.imageSize.w * 100}%`,
         height: `${roi.h / this.imageSize.h * 100}%`,
       }
-    },
-    overlappingCropRegion(roi: Roi): CropRegionIndex | undefined {
-      return this.cropRegionIndexes.find(region => {
-        if (region === this.activeCropRegion) return false
-        const otherRoi = this.effectiveCropRoi(this.pageParity, region)
-        return !!otherRoi && this.cropRegionsOverlap(roi, otherRoi)
-      })
     },
     setCurrentCropRoi(roi: Roi | undefined) {
       const rois = this.cropRoisByParity[this.pageParity].slice()
