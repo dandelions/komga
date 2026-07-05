@@ -179,6 +179,8 @@ enum SectionType {
 
 const DASHBOARD_PAGE_SIZE = 12
 const DASHBOARD_PAGE_REQUEST = {size: DASHBOARD_PAGE_SIZE, include_total: false}
+const DASHBOARD_LOAD_CONCURRENCY = 2
+const DASHBOARD_RELOAD_THROTTLE_MS = 30000
 
 export default Vue.extend({
   name: 'DashboardView',
@@ -418,8 +420,9 @@ export default Vue.extend({
       else if (this.loaderRecentlyAddedSeries?.items.some(s => s.id === event.seriesId)) this.reload()
     },
     reload: throttle(function (this: any) {
+      if (this.loading) return
       this.loadAll(true)
-    }, 5000),
+    }, DASHBOARD_RELOAD_THROTTLE_MS),
     setupLoaders(libraryId: string) {
       const requestLibraries = this.getRequestLibraryId(libraryId)
       const baseBookConditions = [] as SearchConditionBook[]
@@ -466,37 +469,43 @@ export default Vue.extend({
         (pageable: PageRequest) => this.$komgaSeries.getUpdatedSeries(requestLibraries, false, pageable),
       ) : undefined
     },
-    loadAll(reload: boolean = false) {
+    async loadAll(reload: boolean = false) {
       this.loading = true
       if (this.library != undefined) document.title = `Komga - ${this.library.name}`
       this.selectedSeries = []
       this.selectedBooks = []
 
-      if (reload) {
-        Promise.all([
-          this.loaderKeepReadingBooks?.reload(),
-          this.loaderOnDeckBooks?.reload(),
-          this.loaderRecentlyReleasedBooks?.reload(),
-          this.loaderRecentlyAddedBooks?.reload(),
-          this.loaderRecentlyAddedSeries?.reload(),
-          this.loaderRecentlyUpdatedSeries?.reload(),
-          this.loaderRecentlyReadBooks?.reload(),
-        ]).then(() => {
-          this.loading = false
-        })
-      } else {
-        Promise.all([
-          this.loaderKeepReadingBooks?.loadNext(),
-          this.loaderOnDeckBooks?.loadNext(),
-          this.loaderRecentlyReleasedBooks?.loadNext(),
-          this.loaderRecentlyAddedBooks?.loadNext(),
-          this.loaderRecentlyAddedSeries?.loadNext(),
-          this.loaderRecentlyUpdatedSeries?.loadNext(),
-          this.loaderRecentlyReadBooks?.loadNext(),
-        ]).then(() => {
-          this.loading = false
-        })
+      try {
+        const loaders = this.getDashboardLoaders()
+        await this.loadDashboardQueue(loaders, reload)
+      } finally {
+        this.loading = false
       }
+    },
+    getDashboardLoaders(): PageLoader<any>[] {
+      return this.sections
+        .map(section => section.loader)
+        .filter((loader): loader is PageLoader<any> => loader !== undefined)
+    },
+    async loadDashboardQueue(loaders: PageLoader<any>[], reload: boolean) {
+      const queue = [...loaders]
+      const workers = Array.from(
+        {length: Math.min(DASHBOARD_LOAD_CONCURRENCY, queue.length)},
+        async () => {
+          while (queue.length > 0) {
+            const loader = queue.shift()
+            if (!loader) return
+
+            try {
+              if (reload) await loader.reload()
+              else await loader.loadNext()
+            } catch (_) {
+            }
+          }
+        },
+      )
+
+      await Promise.all(workers)
     },
     async singleEditSeries(series: SeriesDto) {
       if (series.oneshot) {
