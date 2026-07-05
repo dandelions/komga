@@ -568,6 +568,8 @@ const EPUB_CHINESE_TEXT_PATTERN = /[\u3400-\u9fff\uf900-\ufaff]/
 const EPUB_HORIZONTAL_SWIPE_MIN_DISTANCE = 48
 const EPUB_HORIZONTAL_SWIPE_DOMINANCE_RATIO = 1.25
 const EPUB_BACKGROUND_IMAGE_MAX_BYTES = 2 * 1024 * 1024
+const EPUB_BACKGROUND_IMAGE_MAX_DIMENSION = 1920
+const EPUB_BACKGROUND_IMAGE_JPEG_QUALITY = .86
 const EPUB_AUTHOR_INLINE_STYLE_PROPERTIES = [
   'font-size',
   'font-family',
@@ -1444,7 +1446,13 @@ export default Vue.extend({
         return
       }
 
-      const dataUrl = await this.readFileAsDataUrl(file)
+      const dataUrl = await this.readOptimizedEpubBackgroundImage(file)
+      if (this.getDataUrlSize(dataUrl) > EPUB_BACKGROUND_IMAGE_MAX_BYTES) {
+        this.sendNotification(this.$t('epubreader.settings.background_image_too_large').toString())
+        this.resetEpubBackgroundImageInput(mode)
+        return
+      }
+
       const image = this.createEpubBackgroundImage(file.name, dataUrl)
       this.setEpubBackgroundImageList(mode, [...this.getEpubBackgroundImageList(mode), image])
       this.setSelectedEpubBackgroundImageId(mode, image.id)
@@ -1499,6 +1507,50 @@ export default Vue.extend({
         reader.readAsDataURL(file)
       })
     },
+    async readOptimizedEpubBackgroundImage(file: File): Promise<string> {
+      const dataUrl = await this.readFileAsDataUrl(file)
+      const image = await this.loadImage(dataUrl).catch(() => undefined)
+      if (!image) return dataUrl
+
+      if (
+        image.width <= EPUB_BACKGROUND_IMAGE_MAX_DIMENSION &&
+        image.height <= EPUB_BACKGROUND_IMAGE_MAX_DIMENSION
+      ) {
+        return dataUrl
+      }
+
+      const scale = Math.min(
+        EPUB_BACKGROUND_IMAGE_MAX_DIMENSION / image.width,
+        EPUB_BACKGROUND_IMAGE_MAX_DIMENSION / image.height,
+      )
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.max(1, Math.round(image.width * scale))
+      canvas.height = Math.max(1, Math.round(image.height * scale))
+
+      const context = canvas.getContext('2d')
+      if (!context) return dataUrl
+
+      context.drawImage(image, 0, 0, canvas.width, canvas.height)
+
+      for (const quality of [EPUB_BACKGROUND_IMAGE_JPEG_QUALITY, .74, .62, .5]) {
+        const optimized = canvas.toDataURL('image/jpeg', quality)
+        if (this.getDataUrlSize(optimized) <= EPUB_BACKGROUND_IMAGE_MAX_BYTES) return optimized
+      }
+
+      return canvas.toDataURL('image/jpeg', .42)
+    },
+    loadImage(dataUrl: string): Promise<HTMLImageElement> {
+      return new Promise((resolve, reject) => {
+        const image = new Image()
+        image.onload = () => resolve(image)
+        image.onerror = () => reject(new Error('Unable to load background image'))
+        image.src = dataUrl
+      })
+    },
+    getDataUrlSize(dataUrl: string): number {
+      const base64 = dataUrl.split(',', 2)[1] || ''
+      return Math.ceil(base64.length * 3 / 4)
+    },
     async saveEpubBackgroundImages() {
       const update = {} as Record<string, ClientSettingUserUpdateDto>
       update[CLIENT_SETTING.WEBUI_EPUB_BACKGROUND_IMAGES] = {
@@ -1550,29 +1602,23 @@ export default Vue.extend({
       const backgroundColor = this.getEpubThemeBackgroundColor()
       const backgroundImage = this.getCurrentEpubBackgroundImage()
 
-      html.style.setProperty('--USER__backgroundColor', backgroundColor)
-      html.style.setProperty('background-color', backgroundColor, 'important')
-
       if (backgroundImage) {
-        this.applyEpubBackgroundImageToElement(html, backgroundImage)
+        html.style.setProperty('--USER__backgroundColor', 'transparent')
+        html.style.setProperty('background-color', 'transparent', 'important')
+        this.clearEpubBackgroundImageFromElement(html)
         if (body) {
-          this.applyEpubBackgroundImageToElement(body, backgroundImage)
+          this.clearEpubBackgroundImageFromElement(body)
           body.style.setProperty('background-color', 'transparent', 'important')
         }
       } else {
+        html.style.setProperty('--USER__backgroundColor', backgroundColor)
+        html.style.setProperty('background-color', backgroundColor, 'important')
         this.clearEpubBackgroundImageFromElement(html)
         if (body) {
           this.clearEpubBackgroundImageFromElement(body)
           body.style.setProperty('background-color', backgroundColor, 'important')
         }
       }
-    },
-    applyEpubBackgroundImageToElement(element: HTMLElement, image: string) {
-      element.style.setProperty('background-image', this.toCssUrl(image), 'important')
-      element.style.setProperty('background-size', '100vw 100vh', 'important')
-      element.style.setProperty('background-position', 'center', 'important')
-      element.style.setProperty('background-repeat', 'no-repeat', 'important')
-      element.style.setProperty('background-attachment', 'fixed', 'important')
     },
     clearEpubBackgroundImageFromElement(element: HTMLElement) {
       element.style.removeProperty('background-image')
@@ -1683,6 +1729,7 @@ export default Vue.extend({
     },
     applyEpubEnhancementsToIframe(iframe: HTMLIFrameElement) {
       try {
+        this.applyEpubThemeToIframeElement(iframe)
         const doc = iframe.contentDocument
         const view = iframe.contentWindow || doc?.defaultView
         if (!doc?.documentElement || !view) return
@@ -1698,6 +1745,15 @@ export default Vue.extend({
           this.applyPendingVerticalEpubResourceEdge(doc)
         }
       } catch (e) {
+      }
+    },
+    applyEpubThemeToIframeElement(iframe: HTMLIFrameElement) {
+      if (this.getCurrentEpubBackgroundImage()) {
+        iframe.setAttribute('allowtransparency', 'true')
+        iframe.style.setProperty('background-color', 'transparent', 'important')
+      } else {
+        iframe.removeAttribute('allowtransparency')
+        iframe.style.removeProperty('background-color')
       }
     },
     applyEpubVerticalWritingMode(doc: Document, view: Window) {
