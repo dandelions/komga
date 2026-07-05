@@ -305,61 +305,26 @@
             </v-list-item>
 
             <v-list-item v-if="epubBackgroundImagesEnabled">
-              <settings-select
-                :items="epubBackgroundImageLightItems"
-                v-model="epubBackgroundImageLightId"
-                :label="$t('epubreader.settings.background_image_light')"
-              />
-            </v-list-item>
-
-            <v-list-item v-if="epubBackgroundImagesEnabled">
-              <v-file-input
-                v-model="epubBackgroundImageLightFile"
-                accept="image/*"
-                prepend-icon="mdi-image-outline"
-                show-size
-                hide-details
-                :label="$t('epubreader.settings.background_image_light_upload')"
-                @change="setEpubBackgroundImage('light', $event)"
-              />
               <v-btn
-                icon
-                :aria-label="$t('epubreader.settings.background_image_delete')"
-                :disabled="!epubBackgroundImageLightId"
-                @click="deleteEpubBackgroundImage('light')"
+                block
+                outlined
+                color="primary"
+                @click="showBackgroundImageSelector = true"
               >
-                <v-icon>mdi-delete</v-icon>
+                <v-icon left>mdi-image-multiple</v-icon>
+                {{ $t('epubreader.settings.background_image_manage') }}
               </v-btn>
             </v-list-item>
-
-            <v-list-item v-if="epubBackgroundImagesEnabled">
-              <settings-select
-                :items="epubBackgroundImageDarkItems"
-                v-model="epubBackgroundImageDarkId"
-                :label="$t('epubreader.settings.background_image_dark')"
-              />
-            </v-list-item>
-
-            <v-list-item v-if="epubBackgroundImagesEnabled">
-              <v-file-input
-                v-model="epubBackgroundImageDarkFile"
-                accept="image/*"
-                prepend-icon="mdi-image-outline"
-                show-size
-                hide-details
-                :label="$t('epubreader.settings.background_image_dark_upload')"
-                @change="setEpubBackgroundImage('dark', $event)"
-              />
+            <v-list-item v-else>
               <v-btn
-                icon
-                :aria-label="$t('epubreader.settings.background_image_delete')"
-                :disabled="!epubBackgroundImageDarkId"
-                @click="deleteEpubBackgroundImage('dark')"
+                block
+                outlined
+                @click="showBackgroundImageSelector = true"
               >
-                <v-icon>mdi-delete</v-icon>
+                <v-icon left>mdi-image-multiple</v-icon>
+                {{ $t('epubreader.settings.background_image_manage') }}
               </v-btn>
             </v-list-item>
-
             <v-divider/>
             <v-subheader class="font-weight-black text-h6">{{ $t('epubreader.settings.custom_style') }}</v-subheader>
 
@@ -411,6 +376,126 @@
         </v-card-text>
       </v-card>
     </v-bottom-sheet>
+
+    <v-dialog
+      v-model="showBackgroundImageSelector"
+      fullscreen
+      scrollable
+      transition="dialog-bottom-transition"
+    >
+      <v-card>
+        <v-toolbar dark color="primary">
+          <v-btn icon dark @click="showBackgroundImageSelector = false">
+            <v-icon>mdi-close</v-icon>
+          </v-btn>
+          <v-toolbar-title>{{ $t('epubreader.settings.background_image_manage') }}</v-toolbar-title>
+        </v-toolbar>
+        <v-card-text class="pa-4 epub-background-manager">
+          <settings-switch
+            v-model="epubBackgroundImagesEnabled"
+            :label="$t('epubreader.settings.background_images_enabled')"
+          />
+
+          <v-row>
+            <v-col cols="12" md="6">
+              <h2 class="subtitle-1 font-weight-bold mb-3">{{ $t('epubreader.settings.background_image_light') }}</h2>
+              <v-file-input
+                v-model="epubBackgroundImageLightFile"
+                accept="image/*"
+                prepend-icon="mdi-image-outline"
+                show-size
+                outlined
+                dense
+                :label="$t('epubreader.settings.background_image_light_upload')"
+                @change="setEpubBackgroundImage('light', $event)"
+              />
+              <div class="epub-background-grid">
+                <v-card
+                  outlined
+                  class="epub-background-card"
+                  :class="{'epub-background-card-selected': !epubBackgroundImageLightId}"
+                  @click="selectEpubBackgroundImage('light', '')"
+                >
+                  <div class="epub-background-empty">
+                    <v-icon large>mdi-image-off-outline</v-icon>
+                    <span>{{ $t('epubreader.settings.background_image_none') }}</span>
+                  </div>
+                </v-card>
+                <v-card
+                  v-for="image in epubBackgroundImages.light"
+                  :key="image.id"
+                  outlined
+                  class="epub-background-card"
+                  :class="{'epub-background-card-selected': epubBackgroundImageLightId === image.id}"
+                  @click="selectEpubBackgroundImage('light', image.id)"
+                >
+                  <v-img :src="image.dataUrl" class="epub-background-thumbnail"/>
+                  <div class="epub-background-card-footer">
+                    <span class="text-truncate">{{ image.name }}</span>
+                    <v-btn
+                      icon
+                      small
+                      :aria-label="$t('epubreader.settings.background_image_delete')"
+                      @click.stop="deleteEpubBackgroundImageById('light', image.id)"
+                    >
+                      <v-icon small>mdi-delete</v-icon>
+                    </v-btn>
+                  </div>
+                </v-card>
+              </div>
+            </v-col>
+
+            <v-col cols="12" md="6">
+              <h2 class="subtitle-1 font-weight-bold mb-3">{{ $t('epubreader.settings.background_image_dark') }}</h2>
+              <v-file-input
+                v-model="epubBackgroundImageDarkFile"
+                accept="image/*"
+                prepend-icon="mdi-image-outline"
+                show-size
+                outlined
+                dense
+                :label="$t('epubreader.settings.background_image_dark_upload')"
+                @change="setEpubBackgroundImage('dark', $event)"
+              />
+              <div class="epub-background-grid">
+                <v-card
+                  outlined
+                  class="epub-background-card"
+                  :class="{'epub-background-card-selected': !epubBackgroundImageDarkId}"
+                  @click="selectEpubBackgroundImage('dark', '')"
+                >
+                  <div class="epub-background-empty">
+                    <v-icon large>mdi-image-off-outline</v-icon>
+                    <span>{{ $t('epubreader.settings.background_image_none') }}</span>
+                  </div>
+                </v-card>
+                <v-card
+                  v-for="image in epubBackgroundImages.dark"
+                  :key="image.id"
+                  outlined
+                  class="epub-background-card"
+                  :class="{'epub-background-card-selected': epubBackgroundImageDarkId === image.id}"
+                  @click="selectEpubBackgroundImage('dark', image.id)"
+                >
+                  <v-img :src="image.dataUrl" class="epub-background-thumbnail"/>
+                  <div class="epub-background-card-footer">
+                    <span class="text-truncate">{{ image.name }}</span>
+                    <v-btn
+                      icon
+                      small
+                      :aria-label="$t('epubreader.settings.background_image_delete')"
+                      @click.stop="deleteEpubBackgroundImageById('dark', image.id)"
+                    >
+                      <v-icon small>mdi-delete</v-icon>
+                    </v-btn>
+                  </div>
+                </v-card>
+              </div>
+            </v-col>
+          </v-row>
+        </v-card-text>
+      </v-card>
+    </v-dialog>
 
     <v-snackbar
       v-model="notification.enabled"
@@ -583,6 +668,7 @@ export default Vue.extend({
       context: {} as Context,
       contextName: '',
       showSettings: false,
+      showBackgroundImageSelector: false,
       showToolbars: false,
       showToc: false,
       showHelp: false,
@@ -772,7 +858,7 @@ export default Vue.extend({
       const image = this.getCurrentEpubBackgroundImage()
       if (image) {
         style.backgroundImage = this.toCssUrl(image)
-        style.backgroundSize = 'cover'
+        style.backgroundSize = '100vw 100vh'
         style.backgroundPosition = 'center'
         style.backgroundRepeat = 'no-repeat'
         style.backgroundAttachment = 'fixed'
@@ -792,7 +878,7 @@ export default Vue.extend({
       const image = this.getCurrentEpubBackgroundImage()
       if (image) {
         style.backgroundImage = this.toCssUrl(image)
-        style.backgroundSize = 'cover'
+        style.backgroundSize = '100vw 100vh'
         style.backgroundPosition = 'center'
         style.backgroundRepeat = 'no-repeat'
         style.backgroundAttachment = 'fixed'
@@ -1326,6 +1412,12 @@ export default Vue.extend({
     setSelectedEpubBackgroundImageId(mode: EpubBackgroundImageMode, id: string) {
       this.setCurrentEpubBackgroundImageSelection(mode === 'light' ? {selectedLightId: id} : {selectedDarkId: id})
     },
+    async selectEpubBackgroundImage(mode: EpubBackgroundImageMode, id: string) {
+      this.setSelectedEpubBackgroundImageId(mode, id)
+      this.setCurrentEpubBackgroundImageSelection({enabled: true})
+      await this.saveEpubBackgroundImages()
+      this.scheduleEpubIframeEnhancements(false)
+    },
     getSelectedEpubBackgroundImage(mode: EpubBackgroundImageMode): ClientSettingsEpubBackgroundImage | undefined {
       const id = this.getSelectedEpubBackgroundImageId(mode)
       return this.getEpubBackgroundImageList(mode).find(image => image.id === id)
@@ -1366,9 +1458,14 @@ export default Vue.extend({
       const selectedId = this.getSelectedEpubBackgroundImageId(mode)
       if (!selectedId) return
 
-      const images = this.getEpubBackgroundImageList(mode).filter(image => image.id !== selectedId)
+      await this.deleteEpubBackgroundImageById(mode, selectedId)
+    },
+    async deleteEpubBackgroundImageById(mode: EpubBackgroundImageMode, id: string) {
+      if (!id) return
+
+      const images = this.getEpubBackgroundImageList(mode).filter(image => image.id !== id)
       this.setEpubBackgroundImageList(mode, images)
-      this.clearEpubBackgroundImageSelection(mode, selectedId)
+      this.clearEpubBackgroundImageSelection(mode, id)
 
       await this.saveEpubBackgroundImages()
       this.scheduleEpubIframeEnhancements(false)
@@ -1472,7 +1569,7 @@ export default Vue.extend({
     },
     applyEpubBackgroundImageToElement(element: HTMLElement, image: string) {
       element.style.setProperty('background-image', this.toCssUrl(image), 'important')
-      element.style.setProperty('background-size', 'cover', 'important')
+      element.style.setProperty('background-size', '100vw 100vh', 'important')
       element.style.setProperty('background-position', 'center', 'important')
       element.style.setProperty('background-repeat', 'no-repeat', 'important')
       element.style.setProperty('background-attachment', 'fixed', 'important')
@@ -2441,6 +2538,55 @@ export default Vue.extend({
 
 .green {
   color: #33533a;
+}
+
+.epub-background-manager {
+  background-color: var(--v-background-base, #fff);
+}
+
+.epub-background-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.epub-background-card {
+  cursor: pointer;
+  overflow: hidden;
+  border-radius: 6px;
+}
+
+.epub-background-card-selected {
+  border-color: var(--v-primary-base) !important;
+  box-shadow: 0 0 0 2px var(--v-primary-base);
+}
+
+.epub-background-thumbnail {
+  height: 120px;
+  background-color: rgba(0, 0, 0, .06);
+}
+
+.epub-background-card-footer {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 40px;
+  padding: 4px 4px 4px 8px;
+}
+
+.epub-background-card-footer span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.epub-background-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 160px;
+  color: rgba(0, 0, 0, .58);
 }
 
 .epub-status-bar {

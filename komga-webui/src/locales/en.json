@@ -801,6 +801,7 @@
       "background_image_dark_upload": "Upload dark background image",
       "background_image_light": "Light background image",
       "background_image_light_upload": "Upload light background image",
+      "background_image_manage": "Manage background images",
       "background_image_none": "None",
       "background_image_too_large": "Background image must be 2MB or smaller",
       "background_images_enabled": "Use background images",
