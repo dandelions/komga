@@ -60,7 +60,7 @@ Thanks to [Chromatic](https://www.chromatic.com/) for providing the visual testi
 
 <a href="https://linux.do/" target="_blank">
   <img src="./.github/readme-images/linuxdo.png" alt="Linux.Do logo" height="40">
-</a>
+</a><br>
 Thanks to [Linux.Do](https://linux.do/) for providing the platform and the related community-contributed sites.
 
 ## Credits
