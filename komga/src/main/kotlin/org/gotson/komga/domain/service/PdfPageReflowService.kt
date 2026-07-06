@@ -678,6 +678,7 @@ class PdfPageReflowService(
   ): List<Roi> {
     val visited = ByteArray(candidates.size)
     val regions = mutableListOf<Roi>()
+    val lineArtFragments = mutableListOf<Roi>()
 
     for (start in candidates.indices) {
       if (candidates[start].toInt() == 0 || visited[start].toInt() != 0) continue
@@ -718,10 +719,12 @@ class PdfPageReflowService(
       val region = imageRegionFromTiles(minTileX, minTileY, maxTileX, maxTileY, tileSize, roi)
       if (isLikelyImageRegion(image, threshold, region, roi, componentTiles, componentColoredTiles, componentDenseTiles, componentTexturedTiles, componentLineArtTiles, minTileX, minTileY, maxTileX, maxTileY)) {
         regions += region
+      } else if (componentLineArtTiles > 0) {
+        lineArtFragments += region
       }
     }
 
-    return mergeImageRegions(regions)
+    return mergeImageRegions(includeNearbyLineArtFragments(regions, lineArtFragments))
   }
 
   private fun neighborImageTiles(
@@ -928,15 +931,35 @@ class PdfPageReflowService(
     return merged
   }
 
+  private fun includeNearbyLineArtFragments(
+    regions: List<Roi>,
+    fragments: List<Roi>,
+  ): List<Roi> {
+    if (regions.isEmpty() || fragments.isEmpty()) return regions
+    val merged = regions.toMutableList()
+
+    fragments.sortedWith(compareBy<Roi> { it.y }.thenBy { it.x }).forEach { fragment ->
+      val targetIndex = merged.indexOfFirst { imageRegionsTouch(it, fragment) }
+      if (targetIndex >= 0) merged[targetIndex] = unionRoi(merged[targetIndex], fragment)
+    }
+
+    return merged
+  }
+
   private fun imageRegionsTouch(
     a: Roi,
     b: Roi,
   ): Boolean {
-    val gap = 4
-    return a.x <= b.x + b.w + gap &&
-      a.x + a.w + gap >= b.x &&
-      a.y <= b.y + b.h + gap &&
-      a.y + a.h + gap >= b.y
+    val gap = max(8, min(120, (max(max(a.w, b.w), max(a.h, b.h)) * 0.20).roundToInt()))
+    val horizontalGap = horizontalBlockGap(a, b)
+    val verticalGap = verticalBlockGap(a, b)
+    val horizontalAligned = horizontalOverlap(a, b) >= min(a.w, b.w) * 0.18
+    val verticalAligned = verticalOverlap(a, b) >= min(a.h, b.h) * 0.18
+    val nearCorner = horizontalGap <= gap / 2 && verticalGap <= gap / 2
+
+    return (verticalGap <= gap && horizontalAligned) ||
+      (horizontalGap <= gap && verticalAligned) ||
+      nearCorner
   }
 
   private fun expandImageRegions(

@@ -2101,6 +2101,7 @@ export default Vue.extend({
     ): ImageRegion[] {
       const visited = new Uint8Array(candidates.length)
       const regions = [] as ImageRegion[]
+      const lineArtFragments = [] as ImageRegion[]
 
       for (let start = 0; start < candidates.length; start++) {
         if (!candidates[start] || visited[start]) continue
@@ -2140,10 +2141,12 @@ export default Vue.extend({
         const region = this.imageRegionFromTiles(minTileX, minTileY, maxTileX, maxTileY, tileSize, roi)
         if (this.isLikelyImageRegion(pixels, width, region, roi, componentTiles, componentColoredTiles, componentDenseTiles, componentTexturedTiles, componentLineArtTiles, minTileX, minTileY, maxTileX, maxTileY, threshold)) {
           regions.push(region)
+        } else if (componentLineArtTiles > 0) {
+          lineArtFragments.push(region)
         }
       }
 
-      return this.mergeImageRegions(regions)
+      return this.mergeImageRegions(this.includeNearbyLineArtFragments(regions, lineArtFragments))
     },
     neighborImageTiles(tileX: number, tileY: number, tileColumns: number, tileRows: number): number[] {
       const neighbors = [] as number[]
@@ -2348,12 +2351,36 @@ export default Vue.extend({
 
       return merged
     },
+    includeNearbyLineArtFragments(regions: ImageRegion[], fragments: ImageRegion[]): ImageRegion[] {
+      if (regions.length === 0 || fragments.length === 0) return regions
+      const merged = regions.map(region => ({...region}))
+
+      fragments
+        .slice()
+        .sort((a, b) => a.y - b.y || a.x - b.x)
+        .forEach(fragment => {
+          const target = merged.find(region => this.imageRegionsTouch(region, fragment))
+          if (!target) return
+          const union = this.unionWordBlocks(target, fragment)
+          target.x = union.x
+          target.y = union.y
+          target.w = union.w
+          target.h = union.h
+        })
+
+      return merged
+    },
     imageRegionsTouch(a: ImageRegion, b: ImageRegion): boolean {
-      const gap = 4
-      return a.x <= b.x + b.w + gap &&
-        a.x + a.w + gap >= b.x &&
-        a.y <= b.y + b.h + gap &&
-        a.y + a.h + gap >= b.y
+      const gap = Math.max(8, Math.min(120, Math.round(Math.max(a.w, b.w, a.h, b.h) * 0.20)))
+      const horizontalGap = this.horizontalBlockGap(a, b)
+      const verticalGap = this.verticalBlockGap(a, b)
+      const horizontalAligned = this.horizontalOverlap(a, b) >= Math.min(a.w, b.w) * 0.18
+      const verticalAligned = this.verticalOverlap(a, b) >= Math.min(a.h, b.h) * 0.18
+      const nearCorner = horizontalGap <= gap / 2 && verticalGap <= gap / 2
+
+      return (verticalGap <= gap && horizontalAligned) ||
+        (horizontalGap <= gap && verticalAligned) ||
+        nearCorner
     },
     expandImageRegions(regions: ImageRegion[], padding: number, roi: Roi, width: number, height: number): ImageRegion[] {
       if (regions.length === 0) return regions
