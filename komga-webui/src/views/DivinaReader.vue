@@ -289,6 +289,7 @@
           @rotation-change="setReaderRotation"
           @crop-mode-change="setReflowCropMode"
           @crop-rois-change="setReflowCropRois"
+          @manual-image-rois-change="setReflowManualImageRois"
           @start-reflow="startReflowMode"
           @force-reflow="forceCurrentReflow"
           @exit-reflow="exitReflowMode"
@@ -925,6 +926,13 @@ function defaultCropRegionsByParity(enabled: boolean = false): any {
   }
 }
 
+function defaultManualImageRegionsByPage(): any {
+  return {
+    regionCount: 1,
+    pages: {},
+  }
+}
+
 function defaultReflowSettings(): any {
   return {
     processingMode: 'server',
@@ -947,6 +955,7 @@ function defaultReflowSettings(): any {
     marginBottom: 0,
     marginLeft: 0,
     cropRoisByParity: defaultCropRegionsByParity(false),
+    manualImageRoisByPage: defaultManualImageRegionsByPage(),
     k2Settings: {
       textScale: 80,
       maxColumns: 2,
@@ -1375,11 +1384,12 @@ export default Vue.extend({
         marginBottom: this.reflowSettings.marginBottom,
         marginLeft: this.reflowSettings.marginLeft,
         cropRoisByParity: this.reflowSettings.cropRoisByParity,
+        manualImageRoisByPage: this.reflowSettings.manualImageRoisByPage,
         darkDisplay: this.nightDisplay,
         deskewDetectionVersion: 9,
-        imageExclusionVersion: 2,
+        imageExclusionVersion: 3,
         detectionScaleVersion: 1,
-        darkWordRenderVersion: 1,
+        darkWordRenderVersion: 2,
       })
     },
 
@@ -2387,6 +2397,7 @@ export default Vue.extend({
         marginBottom: this.clampReflowNumber(settings.marginBottom, 0, 45, this.reflowSettings.marginBottom),
         marginLeft: this.clampReflowNumber(settings.marginLeft, 0, 45, this.reflowSettings.marginLeft),
         cropRoisByParity: this.normalizedReflowCropRois(settings.cropRoisByParity),
+        manualImageRoisByPage: this.normalizedReflowManualImageRois(settings.manualImageRoisByPage),
         k2Settings: this.normalizedK2ReflowSettings(settings.k2Settings),
       }
     },
@@ -2455,6 +2466,20 @@ export default Vue.extend({
       const h = Number(roi.h)
       if (![x, y, w, h].every(Number.isFinite) || w <= 15 || h <= 15) return null
       return {x, y, w, h}
+    },
+    normalizedReflowManualImageRois(manualImageRoisByPage: any): Record<string, any> {
+      const regionCount = this.normalizedReflowCropRegionCount(manualImageRoisByPage?.regionCount)
+      const pages = {} as Record<string, Array<object | null>>
+      const sourcePages = manualImageRoisByPage?.pages || {}
+      Object.keys(sourcePages).forEach(page => {
+        const regions = Array.isArray(sourcePages[page]) ? sourcePages[page] : []
+        const normalized = Array.from({length: regionCount}, (_, index) => this.normalizedReflowCropRoi(regions[index]))
+        if (normalized.some(Boolean)) pages[String(page)] = normalized
+      })
+      return {
+        regionCount,
+        pages,
+      }
     },
     normalizedReflowSkewCorrection(value: any): number {
       const numberValue = Number(value)
@@ -2670,6 +2695,11 @@ export default Vue.extend({
       this.$set(this.reflowSettings.cropRoisByParity, 'regions', normalized.regions)
       this.$set(this.reflowSettings.cropRoisByParity, 'explicit', normalized.explicit)
       this.$set(this.reflowSettings.cropRoisByParity, 'explicitRegions', normalized.explicitRegions)
+      this.clearReflowPrefetch()
+    },
+    setReflowManualImageRois(manualImageRoisByPage: Record<string, any>) {
+      const normalized = this.normalizedReflowManualImageRois(manualImageRoisByPage)
+      this.$set(this.reflowSettings, 'manualImageRoisByPage', normalized)
       this.clearReflowPrefetch()
     },
     setK2ReflowSettings(settings: Record<string, any>) {

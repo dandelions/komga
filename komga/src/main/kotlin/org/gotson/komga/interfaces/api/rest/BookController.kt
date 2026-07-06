@@ -561,6 +561,8 @@ class BookController(
     darkDisplay: Boolean,
     @RequestParam(value = "cropRegion", required = false)
     cropRegions: List<String>?,
+    @RequestParam(value = "manualImageRegion", required = false)
+    manualImageRegions: List<String>?,
   ): ResponseEntity<ByteArray> =
     bookRepository.findByIdOrNull(bookId)?.let { book ->
       val media = mediaRepository.findById(book.id)
@@ -594,12 +596,14 @@ class BookController(
             rotation = normalizePdfReflowRotation(rotation),
           )
         val parsedCropRegions = parsePdfReflowRegions(cropRegions)
+        val parsedManualImageRegions = parsePdfReflowRegions(manualImageRegions)
         val response =
           pdfPageReflowService.reflowPageCached(
             book,
             page,
             options,
             cropRegions = parsedCropRegions,
+            manualImageRegions = parsedManualImageRegions,
           )
         val body = serverReflowResponseBytes(response)
 
@@ -688,6 +692,8 @@ class BookController(
     marginLeft: Double,
     @RequestParam(value = "darkDisplay", defaultValue = "false")
     darkDisplay: Boolean,
+    @RequestParam(value = "manualImageRegion", required = false)
+    manualImageRegions: List<String>?,
   ): ResponseEntity<ByteArray> =
     bookRepository.findByIdOrNull(bookId)?.let { book ->
       val media = mediaRepository.findById(book.id)
@@ -729,6 +735,7 @@ class BookController(
             sourceHeight = sourceHeight,
             pageBackground = pageBackground,
             useWholeImage = preparedRegions,
+            manualImageRegions = parsePdfReflowRegions(manualImageRegions),
           )
         val body = serverReflowResponseBytes(response)
 

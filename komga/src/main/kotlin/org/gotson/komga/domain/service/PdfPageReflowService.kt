@@ -140,6 +140,7 @@ private data class PdfPageReflowCacheKey(
   val pageNumber: Int,
   val options: PdfPageReflowOptions,
   val cropRegions: List<PdfPageReflowRegion>,
+  val manualImageRegions: List<PdfPageReflowRegion>,
 )
 
 @Service
@@ -160,6 +161,7 @@ class PdfPageReflowService(
     pageNumber: Int,
     options: PdfPageReflowOptions,
     cropRegions: List<PdfPageReflowRegion> = emptyList(),
+    manualImageRegions: List<PdfPageReflowRegion> = emptyList(),
   ): PdfPageReflowDto {
     val key =
       PdfPageReflowCacheKey(
@@ -169,6 +171,7 @@ class PdfPageReflowService(
         pageNumber = pageNumber,
         options = options,
         cropRegions = cropRegions,
+        manualImageRegions = manualImageRegions,
       )
     reflowPageCache.getIfPresent(key)?.let { return it }
 
@@ -177,7 +180,7 @@ class PdfPageReflowService(
     if (existingFuture != null) return existingFuture.awaitReflow()
 
     return try {
-      val response = reflowPage(book, pageNumber, options, cropRegions)
+      val response = reflowPage(book, pageNumber, options, cropRegions, manualImageRegions)
       reflowPageCache.put(key, response)
       currentFuture.complete(response)
       response
@@ -207,6 +210,7 @@ class PdfPageReflowService(
     pageNumber: Int,
     options: PdfPageReflowOptions,
     cropRegions: List<PdfPageReflowRegion> = emptyList(),
+    manualImageRegions: List<PdfPageReflowRegion> = emptyList(),
   ): PdfPageReflowDto {
     var processingTimeMs = 0L
     lateinit var response: PdfPageReflowDto
@@ -220,15 +224,18 @@ class PdfPageReflowService(
         val rotatedImage = rotatedImage(image, options.rotation)
         val pageBackground = detectPageBackground(rotatedImage)
         val preparedPage = skewCorrectedImage(rotatedImage, options.skewCorrection, Color.WHITE)
+        val pageManualImageRegions = manualImageRegions.mapNotNull { it.toRoi(preparedPage.width, preparedPage.height) }
         val regionImages =
           cropRegions
             .mapNotNull { it.toRoi(preparedPage.width, preparedPage.height) }
             .ifEmpty { listOf(null) }
             .map { region ->
               val source = if (region == null) preparedPage else copyImageRegion(preparedPage, region, Color.WHITE)
-              downscaleServerImage(source) to false
+              val sourceManualRegions = manualImageRegionsForSource(pageManualImageRegions, region, source.width, source.height)
+              val downscaled = downscaleServerImage(source)
+              Triple(downscaled, false, scaleRegions(sourceManualRegions, source.width, source.height, downscaled.width, downscaled.height))
             }
-        val results = regionImages.map { (source, useWholeImage) -> reflowImage(source, options, useWholeImage) }
+        val results = regionImages.map { (source, useWholeImage, sourceManualRegions) -> reflowImage(source, options, useWholeImage, sourceManualRegions) }
         val items =
           results
             .map { it.items }
@@ -266,6 +273,7 @@ class PdfPageReflowService(
     sourceHeight: Int,
     pageBackground: String?,
     useWholeImage: Boolean,
+    manualImageRegions: List<PdfPageReflowRegion> = emptyList(),
   ): PdfPageReflowDto {
     require(images.isNotEmpty()) { "No page images were provided" }
 
@@ -280,7 +288,15 @@ class PdfPageReflowService(
               ImageIO.read(ByteArrayInputStream(bytes))
                 ?: error("Unable to decode uploaded page image")
             }.map { rotatedImage(it, options.rotation) }
-        val results = decodedImages.map { image -> reflowImage(image, options, useWholeImage) }
+        val results =
+          decodedImages.map { image ->
+            reflowImage(
+              image = image,
+              options = options,
+              useWholeImage = useWholeImage,
+              manualImageRegions = manualImageRegions.mapNotNull { it.toRoi(image.width, image.height) },
+            )
+          }
         val items =
           results
             .map { it.items }
@@ -426,11 +442,12 @@ class PdfPageReflowService(
     image: BufferedImage,
     options: PdfPageReflowOptions,
     useWholeImage: Boolean,
+    manualImageRegions: List<Roi> = emptyList(),
   ): ImageReflowResult {
     val pageBackground = detectPageBackground(image)
     val ink = buildInkMap(image, options)
     val roi = if (useWholeImage) Roi(0, 0, image.width, image.height) else detectRoi(ink, image.width, image.height, options)
-    val imageRegions = detectImageRegions(image, roi, options)
+    val imageRegions = applyManualImageRegions(detectImageRegions(image, roi, options), manualImageRegions, image.width, image.height)
     val textInk = maskInkRegions(ink, image.width, image.height, imageRegions)
     val textScale = clamp(options.textScale.toDouble() / 100.0, 0.1, 1.4)
     val items =
@@ -444,6 +461,68 @@ class PdfPageReflowService(
 
     return ImageReflowResult(pageBackground, items)
   }
+
+  private fun manualImageRegionsForSource(
+    regions: List<Roi>,
+    sourceRegion: Roi?,
+    sourceWidth: Int,
+    sourceHeight: Int,
+  ): List<Roi> {
+    if (regions.isEmpty()) return emptyList()
+    val offsetX = sourceRegion?.x ?: 0
+    val offsetY = sourceRegion?.y ?: 0
+    val sourceBounds = sourceRegion ?: Roi(0, 0, sourceWidth, sourceHeight)
+    return regions.mapNotNull { region ->
+      val left = max(region.x, sourceBounds.x)
+      val top = max(region.y, sourceBounds.y)
+      val right = min(region.x + region.w, sourceBounds.x + sourceBounds.w)
+      val bottom = min(region.y + region.h, sourceBounds.y + sourceBounds.h)
+      if (right - left <= 1 || bottom - top <= 1) {
+        null
+      } else {
+        clampRoi(Roi(left - offsetX, top - offsetY, right - left, bottom - top), sourceWidth, sourceHeight)
+      }
+    }
+  }
+
+  private fun applyManualImageRegions(
+    detectedRegions: List<Roi>,
+    manualImageRegions: List<Roi>,
+    width: Int,
+    height: Int,
+  ): List<Roi> {
+    val manual = manualImageRegions.map { clampRoi(it, width, height) }.filter { it.w > 1 && it.h > 1 }
+    if (manual.isEmpty()) return detectedRegions
+    return detectedRegions.filterNot { detected -> manual.any { regionsOverlap(detected, it) } } + manual
+  }
+
+  private fun scaleRegions(
+    regions: List<Roi>,
+    sourceWidth: Int,
+    sourceHeight: Int,
+    targetWidth: Int,
+    targetHeight: Int,
+  ): List<Roi> {
+    if (regions.isEmpty() || (sourceWidth == targetWidth && sourceHeight == targetHeight)) return regions
+    val scaleX = targetWidth.toDouble() / max(1, sourceWidth)
+    val scaleY = targetHeight.toDouble() / max(1, sourceHeight)
+    return regions.map { region ->
+      val x = floor(region.x * scaleX).toInt()
+      val y = floor(region.y * scaleY).toInt()
+      val right = ceil((region.x + region.w) * scaleX).toInt()
+      val bottom = ceil((region.y + region.h) * scaleY).toInt()
+      clampRoi(Roi(x, y, right - x, bottom - y), targetWidth, targetHeight)
+    }
+  }
+
+  private fun regionsOverlap(
+    a: Roi,
+    b: Roi,
+  ): Boolean =
+    a.x < b.x + b.w &&
+      a.x + a.w > b.x &&
+      a.y < b.y + b.h &&
+      a.y + a.h > b.y
 
   private fun buildInkMap(
     image: BufferedImage,
@@ -807,7 +886,8 @@ class PdfPageReflowService(
           }
           clusters
         },
-    ).map { it.bounds }
+    ).filterNot { hasAlignedTextRows(image, it.bounds, threshold) }
+      .map { it.bounds }
   }
 
   private fun mergeStructuralLineClusters(clusters: List<StructuralLineCluster>): List<StructuralLineCluster> {
@@ -2205,7 +2285,12 @@ class PdfPageReflowService(
   ): PdfPageReflowItemDto? {
     val block = clampRoi(roi, image.width, image.height)
     if (block.w < 2 || block.h < 2) return null
-    val slice = copyOriginalSlice(image, block)
+    val slice =
+      if (shouldNormalizeImageRegionForDisplay(image, block, options)) {
+        copySlice(image, block, options)
+      } else {
+        copyOriginalSlice(image, block)
+      }
     val maxWidth = max(1, options.targetWidth - 32).toDouble()
     val scale = min(textScale, maxWidth / block.w)
     return PdfPageReflowItemDto(
@@ -2232,6 +2317,35 @@ class PdfPageReflowService(
     graphics.drawImage(image, 0, 0, block.w, block.h, block.x, block.y, block.x + block.w, block.y + block.h, null)
     graphics.dispose()
     return output
+  }
+
+  private fun shouldNormalizeImageRegionForDisplay(
+    image: BufferedImage,
+    roi: Roi,
+    options: PdfPageReflowOptions,
+  ): Boolean {
+    if (!options.darkDisplay) return false
+    val block = clampRoi(roi, image.width, image.height)
+    val pixels = max(1, block.w * block.h)
+    val step = max(1, kotlin.math.sqrt(pixels / 12000.0).roundToInt())
+    var sampled = 0
+    var colored = 0
+
+    for (y in block.y until block.y + block.h step step) {
+      for (x in block.x until block.x + block.w step step) {
+        val rgb = image.getRGB(x, y)
+        val alpha = rgb ushr 24 and 0xff
+        if (alpha == 0) continue
+        val red = rgb ushr 16 and 0xff
+        val green = rgb ushr 8 and 0xff
+        val blue = rgb and 0xff
+        sampled++
+        if (max(red, max(green, blue)) - min(red, min(green, blue)) >= 28 && max(red, max(green, blue)) > 36) colored++
+      }
+    }
+
+    if (sampled == 0) return false
+    return colored.toDouble() / sampled <= 0.03
   }
 
   private fun copySlice(

@@ -235,6 +235,35 @@
           >
             重置{{ pageParityShortLabel }}区域{{ activeCropRegion + 1 }}
           </button>
+          <div class="reflow-region-controls">
+            <label class="reflow-region-count-control">
+              <span>图片区</span>
+              <select :value="manualImageRegionCount" @change="setManualImageRegionCount">
+                <option v-for="count in manualImageRegionCountOptions" :key="count" :value="count">{{ count }}</option>
+              </select>
+            </label>
+            <button
+              v-for="region in manualImageRegionIndexes"
+              :key="`image-${region}`"
+              type="button"
+              class="reflow-control reflow-region-control"
+              :class="{'reflow-region-active': cropTarget === 'image' && activeManualImageRegion === region}"
+              @click="setActiveManualImageRegion(region)"
+            >
+              图 {{ region + 1 }}
+            </button>
+          </div>
+          <button type="button" class="reflow-control" @click="toggleManualImageRegionMode">
+            {{ manualImageAreaLabel }}
+          </button>
+          <button
+            type="button"
+            class="reflow-control"
+            :disabled="!manualImageRoi && !(cropMode && cropTarget === 'image')"
+            @click="resetManualImageRegion"
+          >
+            重置图片区{{ activeManualImageRegion + 1 }}
+          </button>
         </div>
       </template>
     </div>
@@ -245,8 +274,8 @@
       @click.stop
     >
       <div class="crop-toolbar">
-        <button type="button" class="reflow-control" @click="toggleCropMode">完成</button>
-        <span class="crop-toolbar-label">拖拽选择{{ pageParityShortLabel }}区域{{ activeCropRegion + 1 }}</span>
+        <button type="button" class="reflow-control" @click="finishCropMode">完成</button>
+        <span class="crop-toolbar-label">{{ cropToolbarLabel }}</span>
         <label class="reflow-skew-control crop-skew-control">
           <span>手动纠斜</span>
           <button type="button" class="reflow-step-control" @click="adjustCropSkewCorrection(-0.5)">-</button>
@@ -405,6 +434,10 @@ type ReflowOptions = {
     explicit?: Partial<Record<PageParity, boolean>>,
     explicitRegions?: Partial<Record<PageParity, boolean[]>>,
   },
+  manualImageRoisByPage?: {
+    regionCount?: number,
+    pages?: Record<string, Array<Roi | null | undefined>>,
+  },
 }
 
 type Roi = {
@@ -417,6 +450,7 @@ type Roi = {
 type PageParity = 'odd' | 'even'
 type VerticalDirection = 'ltr' | 'rtl'
 type CropRegionIndex = number
+type CropTarget = 'text' | 'image'
 
 type Column = {
   start: number,
@@ -517,6 +551,7 @@ type ServerReflowResponse = {
 type ReflowRegionSource = {
   canvas: HTMLCanvasElement,
   detectionRoi?: Roi,
+  sourceOffset?: Roi,
 }
 
 type DetectionCanvasSource = {
@@ -534,6 +569,7 @@ type ReflowOptionsSnapshot = {
   imageQuality: number,
   blockSpacing: number,
   cropRoisKey: string,
+  manualImageRoisKey: string,
 }
 
 const THRESHOLD = 185
@@ -643,9 +679,12 @@ export default Vue.extend({
       imageSize: {w: 0, h: 0},
       transferStats: undefined as ReflowTransferStats | undefined,
       cropMode: false,
+      cropTarget: 'text' as CropTarget,
       cropWarning: '',
       activeCropRegion: 0 as CropRegionIndex,
       cropRegionCount: 2,
+      activeManualImageRegion: 0 as CropRegionIndex,
+      manualImageRegionCount: 1,
       drawingCrop: false,
       cropStart: {x: 0, y: 0},
       cropRoisByParity: {
@@ -656,6 +695,7 @@ export default Vue.extend({
         odd: Array(MAX_CROP_REGIONS).fill(false),
         even: Array(MAX_CROP_REGIONS).fill(false),
       } as Record<PageParity, boolean[]>,
+      manualImageRoisByPage: {} as Record<string, Array<Roi | undefined>>,
       draftRoi: undefined as Roi | undefined,
       pendingColumnCount: 1,
       pendingSkewCorrection: 0,
@@ -794,11 +834,31 @@ export default Vue.extend({
     cropRegionIndexes(): CropRegionIndex[] {
       return Array.from({length: this.cropRegionCount}, (_, index) => index)
     },
+    manualImageRegionCountOptions(): number[] {
+      return Array.from({length: MAX_CROP_REGIONS}, (_, index) => index + 1)
+    },
+    manualImageRegionIndexes(): CropRegionIndex[] {
+      return Array.from({length: this.manualImageRegionCount}, (_, index) => index)
+    },
     selectAreaLabel(): string {
-      return this.cropMode ? '完成' : `截取${this.pageParityShortLabel}区域${this.activeCropRegion + 1}`
+      return this.cropMode && this.cropTarget === 'text' ? '完成' : `截取${this.pageParityShortLabel}区域${this.activeCropRegion + 1}`
+    },
+    manualImageAreaLabel(): string {
+      return this.cropMode && this.cropTarget === 'image' ? '完成' : `截取图片区域${this.activeManualImageRegion + 1}`
+    },
+    cropToolbarLabel(): string {
+      return this.cropTarget === 'image'
+        ? `拖拽选择图片区域${this.activeManualImageRegion + 1}`
+        : `拖拽选择${this.pageParityShortLabel}区域${this.activeCropRegion + 1}`
     },
     cropRoi(): Roi | undefined {
       return this.effectiveCropRoi(this.pageParity, this.activeCropRegion)
+    },
+    manualImagePageKey(): string {
+      return String(this.page.number)
+    },
+    manualImageRoi(): Roi | undefined {
+      return this.effectiveManualImageRoi(this.activeManualImageRegion)
     },
     cropImageUrl(): string {
       return this.cropObjectUrl || this.objectUrl
@@ -810,10 +870,24 @@ export default Vue.extend({
       return `源页 ${this.formatBytes(this.transferStats.originalImageBytes)} / 交互 ${this.formatBytes(this.transferStats.transferBytes)}${encodedImages}${processing}`
     },
     activeRoi(): Roi | undefined {
-      return this.draftRoi || this.cropRoi
+      return this.draftRoi || (this.cropTarget === 'image' ? this.manualImageRoi : this.cropRoi)
     },
     cropRects(): CropRect[] {
       if (!this.imageSize.w || !this.imageSize.h) return []
+      if (this.cropTarget === 'image') {
+        const rois = this.effectiveManualImageRois()
+        return this.manualImageRegionIndexes
+          .map(region => {
+            const roi = region === this.activeManualImageRegion ? this.activeRoi : rois[region]
+            if (!roi) return undefined
+            return {
+              key: `image-${this.manualImagePageKey}-${region}`,
+              active: region === this.activeManualImageRegion,
+              style: this.cropRectStyle(roi),
+            } as CropRect
+          })
+          .filter((rect): rect is CropRect => !!rect)
+      }
       const rois = this.effectiveCropRois(this.pageParity)
       return this.cropRegionIndexes
         .map(region => {
@@ -833,6 +907,7 @@ export default Vue.extend({
       handler() {
         this.syncPendingOptionsFromProps(true)
         this.syncCropRoisFromOptions()
+        this.syncManualImageRoisFromOptions()
         this.draftRoi = undefined
         this.drawingCrop = false
         this.cropMode = false
@@ -942,6 +1017,7 @@ export default Vue.extend({
       if (force || !previous || snapshot.imageQuality !== previous.imageQuality) this.pendingImageQuality = snapshot.imageQuality
       if (force || !previous || snapshot.blockSpacing !== previous.blockSpacing) this.pendingBlockSpacing = snapshot.blockSpacing
       if (force || !previous || snapshot.cropRoisKey !== previous.cropRoisKey) this.syncCropRoisFromOptions()
+      if (force || !previous || snapshot.manualImageRoisKey !== previous.manualImageRoisKey) this.syncManualImageRoisFromOptions()
       this.optionsSnapshot = snapshot
     },
     optionsSnapshotFromProps(): ReflowOptionsSnapshot {
@@ -955,6 +1031,7 @@ export default Vue.extend({
         imageQuality: this.normalizedImageQuality(this.options.imageQuality),
         blockSpacing: this.clampNumber(this.options.blockSpacing, 0, 24, 6),
         cropRoisKey: JSON.stringify(this.options.cropRoisByParity || {}),
+        manualImageRoisKey: JSON.stringify(this.options.manualImageRoisByPage || {}),
       }
     },
     async reflow() {
@@ -1039,7 +1116,8 @@ export default Vue.extend({
             : undefined
           const detectedContent = this.detectWordLines(imageData, detectionSource.canvas.width, detectionSource.canvas.height, detectionRoi)
           const lines = this.scaleWordLines(detectedContent.lines, detectionSource.scale, sourceCanvas.width, sourceCanvas.height)
-          const imageRegions = this.scaleImageRegions(detectedContent.imageRegions, detectionSource.scale, sourceCanvas.width, sourceCanvas.height)
+          const detectedImageRegions = this.scaleImageRegions(detectedContent.imageRegions, detectionSource.scale, sourceCanvas.width, sourceCanvas.height)
+          const imageRegions = this.applyManualImageRegions(detectedImageRegions, this.manualImageRoisForSource(sourceCanvas, regionSource.sourceOffset))
           regionItems.push(this.renderReflowItems(sourceCanvas, lines, imageRegions))
         }
         if (requestId !== this.requestId) return
@@ -1113,6 +1191,8 @@ export default Vue.extend({
       this.reflowCropRois()
         .filter((roi): roi is Roi => !!roi)
         .forEach(roi => params.append('cropRegion', `${Math.round(roi.x)},${Math.round(roi.y)},${Math.round(roi.w)},${Math.round(roi.h)}`))
+      this.currentManualImageRois()
+        .forEach(roi => params.append('manualImageRegion', `${Math.round(roi.x)},${Math.round(roi.y)},${Math.round(roi.w)},${Math.round(roi.h)}`))
 
       const separator = this.serverReflowUrl.includes('?') ? '&' : '?'
       return `${this.serverReflowUrl}${separator}${params.toString()}`
@@ -1842,7 +1922,7 @@ export default Vue.extend({
       })
     },
     reflowRegionSource(sourceCanvas: HTMLCanvasElement, cropRoi?: Roi): ReflowRegionSource {
-      if (!cropRoi) return {canvas: sourceCanvas}
+      if (!cropRoi) return {canvas: sourceCanvas, sourceOffset: {x: 0, y: 0, w: sourceCanvas.width, h: sourceCanvas.height}}
 
       const roi = this.clampRoi(cropRoi, sourceCanvas.width, sourceCanvas.height)
       const canvas = document.createElement('canvas')
@@ -1856,6 +1936,7 @@ export default Vue.extend({
       return {
         canvas,
         detectionRoi: {x: 0, y: 0, w: canvas.width, h: canvas.height},
+        sourceOffset: roi,
       }
     },
     detectPageBackground(context: CanvasRenderingContext2D, width: number, height: number): string {
@@ -2204,7 +2285,8 @@ export default Vue.extend({
             }
             return clusters
           }, [] as Array<{bounds: ImageRegion, horizontalCount: number, verticalCount: number}>),
-      ).map(cluster => cluster.bounds)
+      ).filter(cluster => !this.hasAlignedTextRows(pixels, width, cluster.bounds, threshold))
+        .map(cluster => cluster.bounds)
     },
     mergeStructuralLineClusters(clusters: Array<{bounds: ImageRegion, horizontalCount: number, verticalCount: number}>): Array<{bounds: ImageRegion, horizontalCount: number, verticalCount: number}> {
       if (clusters.length <= 1) return clusters.filter(cluster => this.isStructuralLineArtCluster(cluster))
@@ -2638,6 +2720,18 @@ export default Vue.extend({
       this.$set(this.explicitCropRoisByParity, 'odd', oddExplicit)
       this.$set(this.explicitCropRoisByParity, 'even', evenExplicit)
     },
+    syncManualImageRoisFromOptions() {
+      const value = this.options.manualImageRoisByPage || {}
+      this.manualImageRegionCount = this.normalizedCropRegionCount(value.regionCount)
+      if (this.activeManualImageRegion >= this.manualImageRegionCount) this.activeManualImageRegion = this.manualImageRegionCount - 1
+      const pages = value.pages || {}
+      const normalized = {} as Record<string, Array<Roi | undefined>>
+      Object.keys(pages).forEach(page => {
+        const regions = pages[page] || []
+        normalized[page] = Array.from({length: MAX_CROP_REGIONS}, (_, index) => this.normalizedStoredRoi(regions[index]))
+      })
+      this.manualImageRoisByPage = normalized
+    },
     normalizedCropRegionCount(value: any): number {
       const numberValue = Number(value)
       if (!Number.isFinite(numberValue)) return 2
@@ -2710,6 +2804,52 @@ export default Vue.extend({
         const roi = this.cropRoisByParity[parity][region]
         return this.explicitCropRoisByParity[parity][region] && roi ? {...roi} : null
       })
+    },
+    manualImageRoisPayload(): Record<string, any> {
+      const pages = {} as Record<string, Array<Roi | null>>
+      Object.keys(this.manualImageRoisByPage).forEach(page => {
+        const regions = this.manualImageRoisByPage[page] || []
+        const payload = Array.from({length: this.manualImageRegionCount}, (_, index) => {
+          const roi = regions[index]
+          return roi ? {...roi} : null
+        })
+        if (payload.some(Boolean)) pages[page] = payload
+      })
+      return {
+        regionCount: this.manualImageRegionCount,
+        pages,
+      }
+    },
+    effectiveManualImageRoi(region: CropRegionIndex): Roi | undefined {
+      return this.manualImageRoisByPage[this.manualImagePageKey]?.[region]
+    },
+    effectiveManualImageRois(): Array<Roi | undefined> {
+      return Array.from({length: this.manualImageRegionCount}, (_, index) => this.effectiveManualImageRoi(index))
+    },
+    currentManualImageRois(): Roi[] {
+      return this.effectiveManualImageRois().filter((roi): roi is Roi => !!roi)
+    },
+    manualImageRoisForSource(sourceCanvas: HTMLCanvasElement, sourceOffset?: Roi): ImageRegion[] {
+      const pageRegions = this.currentManualImageRois()
+      if (pageRegions.length === 0) return []
+      const sourceBounds = sourceOffset || {x: 0, y: 0, w: sourceCanvas.width, h: sourceCanvas.height}
+      return pageRegions
+        .map(region => {
+          const left = Math.max(region.x, sourceBounds.x)
+          const top = Math.max(region.y, sourceBounds.y)
+          const right = Math.min(region.x + region.w, sourceBounds.x + sourceBounds.w)
+          const bottom = Math.min(region.y + region.h, sourceBounds.y + sourceBounds.h)
+          if (right - left <= 1 || bottom - top <= 1) return undefined
+          return this.clampRoi({x: left - sourceBounds.x, y: top - sourceBounds.y, w: right - left, h: bottom - top}, sourceCanvas.width, sourceCanvas.height)
+        })
+        .filter((region): region is ImageRegion => !!region)
+    },
+    applyManualImageRegions(detectedRegions: ImageRegion[], manualRegions: ImageRegion[]): ImageRegion[] {
+      if (manualRegions.length === 0) return detectedRegions
+      return [
+        ...detectedRegions.filter(region => !manualRegions.some(manual => this.cropRegionsOverlap(region, manual))),
+        ...manualRegions,
+      ]
     },
     adjustOverlappingCropRois(rois: Array<Roi | undefined>): Array<Roi | undefined> {
       const adjusted = rois.slice(0, MAX_CROP_REGIONS).map(roi => roi ? {...roi} : undefined)
@@ -3715,6 +3855,7 @@ export default Vue.extend({
       sliceContext.imageSmoothingQuality = 'high'
       this.fillWordSliceBackground(sliceContext, source.w, source.h)
       sliceContext.drawImage(sourceCanvas, source.x, source.y, source.w, source.h, 0, 0, source.w, source.h)
+      if (this.shouldNormalizeImageSliceForDisplay(sliceContext, source.w, source.h)) this.finishWordSlice(sliceContext, source.w, source.h)
       return {
         ...source,
         type: 'image',
@@ -3723,6 +3864,28 @@ export default Vue.extend({
         sourceHeight: source.h,
         ...this.scaledImageDimensions(source.w, source.h),
       }
+    },
+    shouldNormalizeImageSliceForDisplay(context: CanvasRenderingContext2D, width: number, height: number): boolean {
+      if (!this.darkDisplay) return false
+      const imageData = context.getImageData(0, 0, width, height)
+      const data = imageData.data
+      const pixels = Math.max(1, width * height)
+      const step = Math.max(1, Math.round(Math.sqrt(pixels / 12000)))
+      let sampled = 0
+      let colored = 0
+
+      for (let y = 0; y < height; y += step) {
+        for (let x = 0; x < width; x += step) {
+          const offset = (y * width + x) * 4
+          if (data[offset + 3] === 0) continue
+          const max = Math.max(data[offset], data[offset + 1], data[offset + 2])
+          const min = Math.min(data[offset], data[offset + 1], data[offset + 2])
+          sampled++
+          if (max - min >= 28 && max > 36) colored++
+        }
+      }
+
+      return sampled > 0 && colored / sampled <= 0.03
     },
     scaledImageDimensions(sourceWidth: number, sourceHeight: number): {width: number, height: number} {
       const width = Math.max(1, sourceWidth)
@@ -4120,6 +4283,7 @@ export default Vue.extend({
       this.$emit('image-quality-change', this.controlImageQuality)
       this.$emit('block-spacing-change', this.controlBlockSpacing)
       this.$emit('crop-rois-change', this.cropRoisPayload())
+      this.$emit('manual-image-rois-change', this.manualImageRoisPayload())
       if (this.deferReflow) {
         this.$emit('start-reflow')
         return
@@ -4159,23 +4323,47 @@ export default Vue.extend({
     },
     setActiveCropRegion(region: CropRegionIndex) {
       if (region < 0 || region >= this.cropRegionCount) return
+      this.cropTarget = 'text'
       this.activeCropRegion = region
       this.draftRoi = undefined
       this.drawingCrop = false
       this.cropWarning = ''
     },
+    setManualImageRegionCount(event: Event) {
+      const target = event.target as HTMLSelectElement
+      const count = this.normalizedCropRegionCount(target.value)
+      this.manualImageRegionCount = count
+      if (this.activeManualImageRegion >= count) this.activeManualImageRegion = count - 1
+      this.cropWarning = ''
+      this.$emit('manual-image-rois-change', this.manualImageRoisPayload())
+    },
+    setActiveManualImageRegion(region: CropRegionIndex) {
+      if (region < 0 || region >= this.manualImageRegionCount) return
+      this.cropTarget = 'image'
+      this.activeManualImageRegion = region
+      this.draftRoi = undefined
+      this.drawingCrop = false
+      this.cropWarning = ''
+    },
     async toggleCropMode() {
+      await this.toggleCropModeForTarget('text')
+    },
+    async toggleManualImageRegionMode() {
+      await this.toggleCropModeForTarget('image')
+    },
+    async toggleCropModeForTarget(target: CropTarget) {
       this.controlsCollapsed = true
       this.draftRoi = undefined
       this.drawingCrop = false
       this.cropWarning = ''
-      if (this.cropMode) {
+      if (this.cropMode && this.cropTarget === target) {
         this.cropMode = false
         this.$emit('crop-mode-change', false)
         return
       }
 
       try {
+        this.cropTarget = target
         await this.ensureCropImage()
         this.cropMode = true
         this.$emit('crop-mode-change', true)
@@ -4184,14 +4372,32 @@ export default Vue.extend({
         this.errorMessage = e instanceof Error ? e.message : String(e)
       }
     },
+    finishCropMode() {
+      this.cropMode = false
+      this.draftRoi = undefined
+      this.drawingCrop = false
+      this.$emit('crop-mode-change', false)
+    },
     resetCrop() {
       this.controlsCollapsed = true
+      this.cropTarget = 'text'
       this.setCurrentCropRoi(undefined)
       this.draftRoi = undefined
       this.drawingCrop = false
       this.cropWarning = ''
       this.cropMode = false
       this.$emit('crop-mode-change', false)
+    },
+    resetManualImageRegion() {
+      this.controlsCollapsed = true
+      this.cropTarget = 'image'
+      this.setCurrentManualImageRoi(undefined)
+      this.draftRoi = undefined
+      this.drawingCrop = false
+      this.cropWarning = ''
+      this.cropMode = false
+      this.$emit('crop-mode-change', false)
+      this.$emit('manual-image-rois-change', this.manualImageRoisPayload())
     },
     startCrop(event: PointerEvent) {
       if (!this.cropMode || !this.imageSize.w || !this.imageSize.h) return
@@ -4214,7 +4420,12 @@ export default Vue.extend({
       this.draftRoi = undefined
       if (roi.w > MIN_CROP_SIZE && roi.h > MIN_CROP_SIZE) {
         this.cropWarning = ''
-        this.setCurrentCropRoi(roi)
+        if (this.cropTarget === 'image') {
+          this.setCurrentManualImageRoi(roi)
+          this.$emit('manual-image-rois-change', this.manualImageRoisPayload())
+        } else {
+          this.setCurrentCropRoi(roi)
+        }
         this.cropMode = false
         this.$emit('crop-mode-change', false)
       }
@@ -4259,6 +4470,11 @@ export default Vue.extend({
       explicit[this.activeCropRegion] = !!roi
       this.$set(this.cropRoisByParity, this.pageParity, rois)
       this.$set(this.explicitCropRoisByParity, this.pageParity, explicit)
+    },
+    setCurrentManualImageRoi(roi: Roi | undefined) {
+      const pageRegions = (this.manualImageRoisByPage[this.manualImagePageKey] || Array(MAX_CROP_REGIONS).fill(undefined)).slice()
+      pageRegions[this.activeManualImageRegion] = roi
+      this.$set(this.manualImageRoisByPage, this.manualImagePageKey, pageRegions)
     },
   },
 })
