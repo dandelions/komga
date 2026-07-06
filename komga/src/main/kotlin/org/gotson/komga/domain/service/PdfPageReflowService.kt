@@ -785,7 +785,8 @@ class PdfPageReflowService(
         lineArtRatio >= 0.18 &&
         fillRatio >= 0.08 &&
         areaRatio >= 0.006 &&
-        hasStructuralLineArt(image, region, threshold)
+        hasStructuralLineArt(image, region, threshold) &&
+        !hasAlignedTextRows(image, region, threshold)
     return spansTextColumn && (colorImage || lineArtImage)
   }
 
@@ -834,6 +835,83 @@ class PdfPageReflowService(
     }
 
     return hasLongHorizontal && hasLongVertical
+  }
+
+  private data class AlignedTextRow(
+    val left: Int,
+    val right: Int,
+    val height: Int,
+  )
+
+  private fun hasAlignedTextRows(
+    image: BufferedImage,
+    region: Roi,
+    threshold: Int,
+  ): Boolean {
+    val block = clampRoi(region, image.width, image.height)
+    if (block.w < 120 || block.h < 80) return false
+    val inkThreshold = adaptiveInkThreshold(threshold, estimateBackgroundLuma(image, block))
+    val horizontalLimit = max(96, (block.w * 0.22).roundToInt())
+    val minimumRowInk = max(2, (block.w * 0.015).roundToInt())
+    val maximumTextLineHeight = max(8, (block.h * 0.12).roundToInt())
+
+    val rowBands =
+      detectBands(block.y, block.y + block.h) { y ->
+        var inkCount = 0
+        var run = 0
+        var longestRun = 0
+        for (x in block.x until block.x + block.w) {
+          if (isInk(image.getRGB(x, y), inkThreshold)) {
+            inkCount++
+            run++
+            longestRun = max(longestRun, run)
+          } else {
+            run = 0
+          }
+        }
+        inkCount >= minimumRowInk && longestRun < horizontalLimit * 0.65
+      }
+
+    val rows =
+      rowBands
+        .filter { it.end - it.start in 2..maximumTextLineHeight }
+        .mapNotNull { band -> alignedTextRowBounds(image, block, band, inkThreshold) }
+        .filter { it.right - it.left >= block.w * 0.35 }
+
+    if (rows.size < 4) return false
+
+    val medianLeft = medianNumber(rows.map { it.left.toDouble() })
+    val medianRight = medianNumber(rows.map { it.right.toDouble() })
+    val leftTolerance = max(8.0, block.w * 0.06)
+    val rightTolerance = max(12.0, block.w * 0.10)
+    val alignedRows =
+      rows.count { row ->
+        abs(row.left - medianLeft) <= leftTolerance &&
+          abs(row.right - medianRight) <= rightTolerance
+      }
+
+    return alignedRows >= max(4, ceil(rows.size * 0.65).toInt())
+  }
+
+  private fun alignedTextRowBounds(
+    image: BufferedImage,
+    block: Roi,
+    band: LineBand,
+    inkThreshold: Int,
+  ): AlignedTextRow? {
+    var minX = block.x + block.w
+    var maxX = block.x - 1
+
+    for (y in band.start until band.end) {
+      for (x in block.x until block.x + block.w) {
+        if (!isInk(image.getRGB(x, y), inkThreshold)) continue
+        minX = min(minX, x)
+        maxX = max(maxX, x)
+      }
+    }
+
+    if (maxX < minX) return null
+    return AlignedTextRow(minX, maxX + 1, band.end - band.start)
   }
 
   private fun mergeImageRegions(regions: List<Roi>): List<Roi> {

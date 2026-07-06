@@ -2193,7 +2193,8 @@ export default Vue.extend({
         lineArtRatio >= 0.18 &&
         fillRatio >= 0.08 &&
         areaRatio >= 0.006 &&
-        this.hasStructuralLineArt(pixels, width, region, threshold)
+        this.hasStructuralLineArt(pixels, width, region, threshold) &&
+        !this.hasAlignedTextRows(pixels, width, region, threshold)
       return spansTextColumn && (colorImage || lineArtImage)
     },
     hasStructuralLineArt(pixels: Uint8ClampedArray, width: number, region: ImageRegion, threshold: number): boolean {
@@ -2243,6 +2244,87 @@ export default Vue.extend({
       }
 
       return hasLongHorizontal && hasLongVertical
+    },
+    hasAlignedTextRows(pixels: Uint8ClampedArray, width: number, region: ImageRegion, threshold: number): boolean {
+      if (region.w < 120 || region.h < 80) return false
+      const horizontalLimit = Math.max(96, Math.round(region.w * 0.22))
+      const minimumRowInk = Math.max(2, Math.round(region.w * 0.015))
+      const maximumTextLineHeight = Math.max(8, Math.round(region.h * 0.12))
+      const rowBands = [] as Array<{start: number, end: number}>
+      let bandStart = -1
+      let lastInk = -1
+      const bottom = region.y + region.h
+      const right = region.x + region.w
+
+      for (let y = region.y; y < bottom; y++) {
+        let inkCount = 0
+        let run = 0
+        let longestRun = 0
+        for (let x = region.x; x < right; x++) {
+          const offset = (y * width + x) * 4
+          const alpha = pixels[offset + 3]
+          const luma = 0.299 * pixels[offset] + 0.587 * pixels[offset + 1] + 0.114 * pixels[offset + 2]
+          if (alpha !== 0 && luma < threshold) {
+            inkCount++
+            run++
+            longestRun = Math.max(longestRun, run)
+          } else {
+            run = 0
+          }
+        }
+
+        if (inkCount >= minimumRowInk && longestRun < horizontalLimit * 0.65) {
+          if (bandStart < 0) bandStart = y
+          lastInk = y
+        } else if (bandStart >= 0 && y - lastInk > 1) {
+          rowBands.push({start: bandStart, end: lastInk + 1})
+          bandStart = -1
+        }
+      }
+
+      if (bandStart >= 0) rowBands.push({start: bandStart, end: lastInk + 1})
+
+      const rows = rowBands
+        .filter(band => band.end - band.start >= 2 && band.end - band.start <= maximumTextLineHeight)
+        .map(band => this.alignedTextRowBounds(pixels, width, region, band, threshold))
+        .filter((row): row is {left: number, right: number} => !!row && row.right - row.left >= region.w * 0.35)
+
+      if (rows.length < 4) return false
+
+      const medianLeft = this.medianNumber(rows.map(row => row.left))
+      const medianRight = this.medianNumber(rows.map(row => row.right))
+      const leftTolerance = Math.max(8, region.w * 0.06)
+      const rightTolerance = Math.max(12, region.w * 0.10)
+      const alignedRows = rows.filter(row =>
+        Math.abs(row.left - medianLeft) <= leftTolerance &&
+        Math.abs(row.right - medianRight) <= rightTolerance,
+      )
+
+      return alignedRows.length >= Math.max(4, Math.ceil(rows.length * 0.65))
+    },
+    alignedTextRowBounds(
+      pixels: Uint8ClampedArray,
+      width: number,
+      region: ImageRegion,
+      band: {start: number, end: number},
+      threshold: number,
+    ): {left: number, right: number} | undefined {
+      let left = region.x + region.w
+      let right = region.x - 1
+
+      for (let y = band.start; y < band.end; y++) {
+        for (let x = region.x; x < region.x + region.w; x++) {
+          const offset = (y * width + x) * 4
+          const alpha = pixels[offset + 3]
+          const luma = 0.299 * pixels[offset] + 0.587 * pixels[offset + 1] + 0.114 * pixels[offset + 2]
+          if (alpha === 0 || luma >= threshold) continue
+          left = Math.min(left, x)
+          right = Math.max(right, x)
+        }
+      }
+
+      if (right < left) return undefined
+      return {left, right: right + 1}
     },
     mergeImageRegions(regions: ImageRegion[]): ImageRegion[] {
       if (regions.length <= 1) return regions
