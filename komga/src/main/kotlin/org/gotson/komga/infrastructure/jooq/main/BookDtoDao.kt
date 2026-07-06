@@ -556,6 +556,7 @@ class BookDtoDao(
       mediaType = mediaType ?: "",
       pagesCount = pageCount.toInt(),
       comment = comment ?: "",
+      lastModified = lastModifiedDate,
       epubDivinaCompatible = epubDivinaCompatible,
       epubIsKepub = epubIsKepub,
     )

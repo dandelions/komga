@@ -40,6 +40,7 @@ import javax.imageio.ImageIO
 import kotlin.io.path.extension
 
 private val logger = KotlinLogging.logger {}
+private const val ANALYSIS_ERROR_COMMENT_MAX_LENGTH = 1000
 
 @Service
 class BookAnalyzer(
@@ -107,13 +108,13 @@ class BookAnalyzer(
       }.copy(mediaType = mediaType.type)
     } catch (ade: AccessDeniedException) {
       logger.error(ade) { "Error while analyzing book: $book" }
-      Media(status = Media.Status.ERROR, comment = "ERR_1000")
+      Media(status = Media.Status.ERROR, comment = analysisErrorComment("ERR_1000", ade))
     } catch (ex: NoSuchFileException) {
       logger.error(ex) { "Error while analyzing book: $book" }
-      Media(status = Media.Status.ERROR, comment = "ERR_1018")
+      Media(status = Media.Status.ERROR, comment = analysisErrorComment("ERR_1018", ex))
     } catch (ex: Exception) {
       logger.error(ex) { "Error while analyzing book: $book" }
-      Media(status = Media.Status.ERROR, comment = "ERR_1005")
+      Media(status = Media.Status.ERROR, comment = analysisErrorComment("ERR_1005", ex))
     }.copy(bookId = book.id)
   }
 
@@ -130,7 +131,7 @@ class BookAnalyzer(
         return Media(status = Media.Status.UNSUPPORTED, comment = ex.code)
       } catch (ex: Exception) {
         logger.error(ex) { "Error while analyzing book: $book" }
-        return Media(status = Media.Status.ERROR, comment = "ERR_1008")
+        return Media(status = Media.Status.ERROR, comment = analysisErrorComment("ERR_1008", ex))
       }
 
     val (pages, others) =
@@ -260,8 +261,26 @@ class BookAnalyzer(
       analyzeEpub(book, ebookConverter.getOrConvertToEpub(book.path), analyzeDimensions)
     } catch (e: EbookConversionException) {
       logger.error(e) { "Error while converting ebook to EPUB: $book" }
-      Media(status = Media.Status.ERROR, comment = "ERR_1040")
+      Media(status = Media.Status.ERROR, comment = analysisErrorComment("ERR_1040", e))
     }
+
+  private fun analysisErrorComment(
+    code: String,
+    throwable: Throwable,
+  ): String {
+    val reason =
+      sequenceOf(throwable::class.simpleName, throwable.message)
+        .filterNotNull()
+        .joinToString(": ")
+        .replace(Regex("\\s+"), " ")
+        .trim()
+
+    return if (reason.isBlank()) {
+      code
+    } else {
+      "$code [$reason]".take(ANALYSIS_ERROR_COMMENT_MAX_LENGTH)
+    }
+  }
 
   private fun analyzePdf(
     book: Book,

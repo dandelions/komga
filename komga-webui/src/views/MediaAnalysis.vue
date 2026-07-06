@@ -119,6 +119,7 @@ export default Vue.extend({
         {text: this.$i18n.t('media_analysis.name').toString(), value: 'name'},
         {text: this.$i18n.t('media_analysis.status').toString(), value: 'media.status'},
         {text: this.$i18n.t('media_analysis.comment').toString(), value: 'media.comment'},
+        {text: this.$i18n.t('media_analysis.analysis_date').toString(), value: 'media.lastModified'},
         {text: this.$i18n.t('media_analysis.media_type').toString(), value: 'media.mediaType'},
         {text: this.$i18n.t('media_analysis.url').toString(), value: 'url'},
         {text: this.$i18n.t('media_analysis.size').toString(), value: 'size'},
@@ -131,6 +132,7 @@ export default Vue.extend({
         media: {
           ...b.media,
           comment: convertErrorCodes(b.media.comment),
+          lastModified: this.formatDateTime(b.media.lastModified),
           status: this.$t(`enums.media_status.${b.media.status}`).toString(),
         },
       }))
@@ -139,6 +141,16 @@ export default Vue.extend({
   methods: {
     getLibraryName(libraryId: string): string {
       return this.$store.getters.getLibraryById(libraryId).name
+    },
+    formatDateTime(value: string): string {
+      if (!value) return ''
+      return new Intl.DateTimeFormat(
+        this.$i18n.locale,
+        {
+          dateStyle: 'medium',
+          timeStyle: 'short',
+        } as Intl.DateTimeFormatOptions,
+      ).format(new Date(value))
     },
     async loadBooks() {
       this.loading = true

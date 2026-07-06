@@ -173,6 +173,7 @@
     "tooltip_incognito": "将不保存阅读进度"
   },
   "browse_book": {
+    "analysis_date": "分析时间",
     "comment": "注释",
     "date_created": "创建于",
     "date_modified": "最后修改时间",
@@ -919,6 +920,7 @@
     "unclaimed_html": "该 Komga 服务器尚未激活，您需要创建一个用户帐户才能访问它。<br><br>选择一个 <strong>邮箱</strong> 和 <strong>密码</strong> 然后点击 <strong>创建账户</strong>。"
   },
   "media_analysis": {
+    "analysis_date": "分析时间",
     "comment": "注释",
     "media_analysis": "媒体分析",
     "media_type": "媒体类型",

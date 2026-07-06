@@ -57,6 +57,7 @@ import kotlin.io.path.toPath
 import kotlin.math.roundToInt
 
 private val logger = KotlinLogging.logger {}
+private const val ANALYSIS_ERROR_COMMENT_MAX_LENGTH = 1000
 
 @Service
 class BookLifecycle(
@@ -124,16 +125,35 @@ class BookLifecycle(
     } catch (ex: TimeoutException) {
       future.cancel(true)
       logger.error { "Book analysis timed out after ${analysisTimeoutSeconds}s, marking media as error and skipping: $book" }
-      Media(status = Media.Status.ERROR, comment = "ERR_1041", bookId = book.id)
+      Media(status = Media.Status.ERROR, comment = "ERR_1041 [Timed out after ${analysisTimeoutSeconds}s]", bookId = book.id)
     } catch (ex: ExecutionException) {
-      logger.error(ex.cause ?: ex) { "Error while analyzing book: $book" }
-      Media(status = Media.Status.ERROR, comment = "ERR_1005", bookId = book.id)
+      val cause = ex.cause ?: ex
+      logger.error(cause) { "Error while analyzing book: $book" }
+      Media(status = Media.Status.ERROR, comment = analysisErrorComment("ERR_1005", cause), bookId = book.id)
     } catch (ex: InterruptedException) {
       Thread.currentThread().interrupt()
       logger.error(ex) { "Book analysis interrupted: $book" }
-      Media(status = Media.Status.ERROR, comment = "ERR_1005", bookId = book.id)
+      Media(status = Media.Status.ERROR, comment = analysisErrorComment("ERR_1005", ex), bookId = book.id)
     } finally {
       executor.shutdownNow()
+    }
+  }
+
+  private fun analysisErrorComment(
+    code: String,
+    throwable: Throwable,
+  ): String {
+    val reason =
+      sequenceOf(throwable::class.simpleName, throwable.message)
+        .filterNotNull()
+        .joinToString(": ")
+        .replace(Regex("\\s+"), " ")
+        .trim()
+
+    return if (reason.isBlank()) {
+      code
+    } else {
+      "$code [$reason]".take(ANALYSIS_ERROR_COMMENT_MAX_LENGTH)
     }
   }
 

@@ -482,6 +482,11 @@
         <v-col class="py-1 error--text font-weight-bold" cols="8" sm="9" md="10" xl="11">{{ mediaComment }}</v-col>
       </v-row>
 
+      <v-row v-if="mediaAnalysisDate" class="align-center text-caption">
+        <v-col class="py-1 text-uppercase" cols="4" sm="3" md="2" xl="1">{{ $t('browse_book.analysis_date') }}</v-col>
+        <v-col class="py-1" cols="8" sm="9" md="10" xl="11">{{ mediaAnalysisDate }}</v-col>
+      </v-row>
+
       <v-row class="align-center text-caption">
         <v-col class="py-1 text-uppercase" cols="4" sm="3" md="2" xl="1">{{ $t('browse_book.format') }}</v-col>
         <v-col class="py-1" cols="8" sm="9" md="10" xl="11">{{ format.type }}</v-col>
@@ -719,6 +724,16 @@ export default Vue.extend({
     },
     mediaComment(): string {
       return convertErrorCodes(this.book.media.comment)
+    },
+    mediaAnalysisDate(): string | undefined {
+      if (this.book.media.status !== 'ERROR' || !this.book.media.lastModified) return undefined
+      return new Intl.DateTimeFormat(
+        this.$i18n.locale,
+        {
+          dateStyle: 'medium',
+          timeStyle: 'short',
+        } as Intl.DateTimeFormatOptions,
+      ).format(new Date(this.book.media.lastModified))
     },
     parentLocation(): RawLocation {
       if (this.context.origin === ContextOrigin.READLIST)
