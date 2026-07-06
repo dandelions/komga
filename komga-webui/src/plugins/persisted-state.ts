@@ -57,6 +57,7 @@ export const persistedModule: Module<any, any> = {
       filterDsl: {},
       filterMode: {},
       sort: {},
+      displayMode: {},
       filterDslBooks: {},
       filterModeBooks: {},
       sortBooks: {},
@@ -106,6 +107,10 @@ export const persistedModule: Module<any, any> = {
     },
     getLibrarySort: (state) => (id: string) => {
       return state.library.sort[id]
+    },
+    getLibraryDisplayMode: (state) => (id: string) => {
+      if (!state.library.displayMode) state.library.displayMode = {}
+      return state.library.displayMode[id]
     },
     getLibrarySortBooks: (state) => (id: string) => {
       return state.library.sortBooks[id]
@@ -196,6 +201,10 @@ export const persistedModule: Module<any, any> = {
     },
     setLibrarySort(state, {id, sort}) {
       state.library.sort[id] = sort
+    },
+    setLibraryDisplayMode(state, {id, displayMode}) {
+      if (!state.library.displayMode) state.library.displayMode = {}
+      state.library.displayMode[id] = displayMode
     },
     setLibrarySortBooks(state, {id, sort}) {
       state.library.sortBooks[id] = sort
