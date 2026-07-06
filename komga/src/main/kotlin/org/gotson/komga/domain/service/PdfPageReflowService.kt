@@ -579,7 +579,8 @@ class PdfPageReflowService(
         tileSize = tileSize,
         roi = roi,
       )
-    return expandImageRegions(regions, max(2, (tileSize * 0.6).roundToInt()), roi, image.width, image.height)
+    val structuralRegions = detectStructuralLineArtRegions(image, roi, threshold)
+    return expandImageRegions(mergeImageRegions(regions + structuralRegions), max(2, (tileSize * 0.6).roundToInt()), roi, image.width, image.height)
   }
 
   private data class ImageTileMetrics(
@@ -589,6 +590,17 @@ class PdfPageReflowService(
     val lumaStdDev: Double,
     val horizontalRunRatio: Double,
     val verticalRunRatio: Double,
+  )
+
+  private data class StructuralLineSegment(
+    val roi: Roi,
+    val horizontal: Boolean,
+  )
+
+  private data class StructuralLineCluster(
+    val bounds: Roi,
+    val horizontalCount: Int,
+    val verticalCount: Int,
   )
 
   private fun imageTileMetrics(
@@ -725,6 +737,111 @@ class PdfPageReflowService(
     }
 
     return mergeImageRegions(includeNearbyLineArtFragments(regions, lineArtFragments))
+  }
+
+  private fun detectStructuralLineArtRegions(
+    image: BufferedImage,
+    roi: Roi,
+    threshold: Int,
+  ): List<Roi> {
+    val block = clampRoi(roi, image.width, image.height)
+    if (block.w < 120 || block.h < 80) return emptyList()
+    val inkThreshold = adaptiveInkThreshold(threshold, estimateBackgroundLuma(image, block))
+    val horizontalLimit = max(96, (block.w * 0.12).roundToInt())
+    val verticalLimit = max(48, (block.h * 0.08).roundToInt())
+    val segments = mutableListOf<StructuralLineSegment>()
+
+    for (y in block.y until block.y + block.h) {
+      var runStart = -1
+      for (x in block.x until block.x + block.w) {
+        if (isInk(image.getRGB(x, y), inkThreshold)) {
+          if (runStart < 0) runStart = x
+        } else if (runStart >= 0) {
+          if (x - runStart >= horizontalLimit) segments += StructuralLineSegment(Roi(runStart, y, x - runStart, 1), horizontal = true)
+          runStart = -1
+        }
+      }
+      if (runStart >= 0 && block.x + block.w - runStart >= horizontalLimit) {
+        segments += StructuralLineSegment(Roi(runStart, y, block.x + block.w - runStart, 1), horizontal = true)
+      }
+    }
+
+    for (x in block.x until block.x + block.w) {
+      var runStart = -1
+      for (y in block.y until block.y + block.h) {
+        if (isInk(image.getRGB(x, y), inkThreshold)) {
+          if (runStart < 0) runStart = y
+        } else if (runStart >= 0) {
+          if (y - runStart >= verticalLimit) segments += StructuralLineSegment(Roi(x, runStart, 1, y - runStart), horizontal = false)
+          runStart = -1
+        }
+      }
+      if (runStart >= 0 && block.y + block.h - runStart >= verticalLimit) {
+        segments += StructuralLineSegment(Roi(x, runStart, 1, block.y + block.h - runStart), horizontal = false)
+      }
+    }
+
+    if (segments.count { it.horizontal } < 3 || segments.count { !it.horizontal } < 2) return emptyList()
+
+    return mergeStructuralLineClusters(
+      segments
+        .sortedWith(compareBy<StructuralLineSegment> { it.roi.y }.thenBy { it.roi.x })
+        .fold(mutableListOf<StructuralLineCluster>()) { clusters, segment ->
+          val targetIndex = clusters.indexOfFirst { imageRegionsTouch(it.bounds, segment.roi) }
+          val next =
+            StructuralLineCluster(
+              bounds = segment.roi,
+              horizontalCount = if (segment.horizontal) 1 else 0,
+              verticalCount = if (segment.horizontal) 0 else 1,
+            )
+          if (targetIndex >= 0) {
+            val target = clusters[targetIndex]
+            clusters[targetIndex] =
+              StructuralLineCluster(
+                bounds = unionRoi(target.bounds, segment.roi),
+                horizontalCount = target.horizontalCount + next.horizontalCount,
+                verticalCount = target.verticalCount + next.verticalCount,
+              )
+          } else {
+            clusters += next
+          }
+          clusters
+        },
+    ).map { it.bounds }
+  }
+
+  private fun mergeStructuralLineClusters(clusters: List<StructuralLineCluster>): List<StructuralLineCluster> {
+    if (clusters.size <= 1) return clusters.filter(::isStructuralLineArtCluster)
+    val merged = clusters.toMutableList()
+    var changed = true
+
+    while (changed) {
+      changed = false
+      loop@ for (i in 0 until merged.size) {
+        for (j in i + 1 until merged.size) {
+          if (!imageRegionsTouch(merged[i].bounds, merged[j].bounds)) continue
+          merged[i] =
+            StructuralLineCluster(
+              bounds = unionRoi(merged[i].bounds, merged[j].bounds),
+              horizontalCount = merged[i].horizontalCount + merged[j].horizontalCount,
+              verticalCount = merged[i].verticalCount + merged[j].verticalCount,
+            )
+          merged.removeAt(j)
+          changed = true
+          break@loop
+        }
+      }
+    }
+
+    return merged.filter(::isStructuralLineArtCluster)
+  }
+
+  private fun isStructuralLineArtCluster(cluster: StructuralLineCluster): Boolean {
+    val bounds = cluster.bounds
+    return cluster.horizontalCount >= 3 &&
+      cluster.verticalCount >= 2 &&
+      bounds.w >= 120 &&
+      bounds.h >= 80
   }
 
   private fun neighborImageTiles(

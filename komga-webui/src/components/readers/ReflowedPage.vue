@@ -2012,7 +2012,8 @@ export default Vue.extend({
       }
 
       const regions = this.collectImageRegions(pixels, width, candidates, coloredTiles, denseTiles, texturedTiles, lineArtTiles, tileColumns, tileRows, tileSize, roi, threshold)
-      return this.expandImageRegions(regions, Math.max(2, Math.round(tileSize * 0.6)), roi, width, height)
+      const structuralRegions = this.detectStructuralLineArtRegions(pixels, width, roi, threshold)
+      return this.expandImageRegions(this.mergeImageRegions([...regions, ...structuralRegions]), Math.max(2, Math.round(tileSize * 0.6)), roi, width, height)
     },
     imageTileMetrics(
       pixels: Uint8ClampedArray,
@@ -2147,6 +2148,104 @@ export default Vue.extend({
       }
 
       return this.mergeImageRegions(this.includeNearbyLineArtFragments(regions, lineArtFragments))
+    },
+    detectStructuralLineArtRegions(pixels: Uint8ClampedArray, width: number, roi: Roi, threshold: number): ImageRegion[] {
+      if (roi.w < 120 || roi.h < 80) return []
+      const horizontalLimit = Math.max(96, Math.round(roi.w * 0.12))
+      const verticalLimit = Math.max(48, Math.round(roi.h * 0.08))
+      const right = roi.x + roi.w
+      const bottom = roi.y + roi.h
+      const segments = [] as Array<ImageRegion & {horizontal: boolean}>
+
+      for (let y = roi.y; y < bottom; y++) {
+        let runStart = -1
+        for (let x = roi.x; x < right; x++) {
+          if (this.pixelIsInk(pixels, width, x, y, threshold)) {
+            if (runStart < 0) runStart = x
+          } else if (runStart >= 0) {
+            if (x - runStart >= horizontalLimit) segments.push({x: runStart, y, w: x - runStart, h: 1, horizontal: true})
+            runStart = -1
+          }
+        }
+        if (runStart >= 0 && right - runStart >= horizontalLimit) segments.push({x: runStart, y, w: right - runStart, h: 1, horizontal: true})
+      }
+
+      for (let x = roi.x; x < right; x++) {
+        let runStart = -1
+        for (let y = roi.y; y < bottom; y++) {
+          if (this.pixelIsInk(pixels, width, x, y, threshold)) {
+            if (runStart < 0) runStart = y
+          } else if (runStart >= 0) {
+            if (y - runStart >= verticalLimit) segments.push({x, y: runStart, w: 1, h: y - runStart, horizontal: false})
+            runStart = -1
+          }
+        }
+        if (runStart >= 0 && bottom - runStart >= verticalLimit) segments.push({x, y: runStart, w: 1, h: bottom - runStart, horizontal: false})
+      }
+
+      if (segments.filter(segment => segment.horizontal).length < 3 || segments.filter(segment => !segment.horizontal).length < 2) return []
+
+      return this.mergeStructuralLineClusters(
+        segments
+          .slice()
+          .sort((a, b) => a.y - b.y || a.x - b.x)
+          .reduce((clusters, segment) => {
+            const target = clusters.find(cluster => this.imageRegionsTouch(cluster.bounds, segment))
+            if (target) {
+              target.bounds = this.unionWordBlocks(target.bounds, segment)
+              target.horizontalCount += segment.horizontal ? 1 : 0
+              target.verticalCount += segment.horizontal ? 0 : 1
+            } else {
+              clusters.push({
+                bounds: {x: segment.x, y: segment.y, w: segment.w, h: segment.h},
+                horizontalCount: segment.horizontal ? 1 : 0,
+                verticalCount: segment.horizontal ? 0 : 1,
+              })
+            }
+            return clusters
+          }, [] as Array<{bounds: ImageRegion, horizontalCount: number, verticalCount: number}>),
+      ).map(cluster => cluster.bounds)
+    },
+    mergeStructuralLineClusters(clusters: Array<{bounds: ImageRegion, horizontalCount: number, verticalCount: number}>): Array<{bounds: ImageRegion, horizontalCount: number, verticalCount: number}> {
+      if (clusters.length <= 1) return clusters.filter(cluster => this.isStructuralLineArtCluster(cluster))
+      const merged = clusters.map(cluster => ({
+        bounds: {...cluster.bounds},
+        horizontalCount: cluster.horizontalCount,
+        verticalCount: cluster.verticalCount,
+      }))
+      let changed = true
+
+      while (changed) {
+        changed = false
+        for (let i = 0; i < merged.length; i++) {
+          let mergedPair = false
+          for (let j = i + 1; j < merged.length; j++) {
+            if (!this.imageRegionsTouch(merged[i].bounds, merged[j].bounds)) continue
+            merged[i].bounds = this.unionWordBlocks(merged[i].bounds, merged[j].bounds)
+            merged[i].horizontalCount += merged[j].horizontalCount
+            merged[i].verticalCount += merged[j].verticalCount
+            merged.splice(j, 1)
+            changed = true
+            mergedPair = true
+            break
+          }
+          if (mergedPair) break
+        }
+      }
+
+      return merged.filter(cluster => this.isStructuralLineArtCluster(cluster))
+    },
+    isStructuralLineArtCluster(cluster: {bounds: ImageRegion, horizontalCount: number, verticalCount: number}): boolean {
+      return cluster.horizontalCount >= 3 &&
+        cluster.verticalCount >= 2 &&
+        cluster.bounds.w >= 120 &&
+        cluster.bounds.h >= 80
+    },
+    pixelIsInk(pixels: Uint8ClampedArray, width: number, x: number, y: number, threshold: number): boolean {
+      const offset = (y * width + x) * 4
+      const alpha = pixels[offset + 3]
+      const luma = 0.299 * pixels[offset] + 0.587 * pixels[offset + 1] + 0.114 * pixels[offset + 2]
+      return alpha !== 0 && luma < threshold
     },
     neighborImageTiles(tileX: number, tileY: number, tileColumns: number, tileRows: number): number[] {
       const neighbors = [] as number[]
