@@ -104,6 +104,13 @@ class TaskEmitter(
     analyzeBooks(bookIds, setOf(Media.Status.UNKNOWN, Media.Status.OUTDATED), priority)
   }
 
+  fun analyzeUnknownOutdatedAndErrorBooks(
+    bookIds: Collection<String>,
+    priority: Int = DEFAULT_PRIORITY,
+  ) {
+    analyzeBooks(bookIds, setOf(Media.Status.UNKNOWN, Media.Status.OUTDATED, Media.Status.ERROR), priority)
+  }
+
   fun analyzeUnknownBooks(
     bookIds: Collection<String>,
     priority: Int = DEFAULT_PRIORITY,

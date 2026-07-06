@@ -17,6 +17,7 @@
       <!--   Action menu   -->
       <book-actions-menu v-if="book"
                          :book="book"
+                         @analyzed="refreshAfterAnalyze"
       />
 
       <v-btn icon @click="editBook" v-if="isAdmin">
@@ -762,8 +763,12 @@ export default Vue.extend({
           .catch(e => this.siblingPrevious = {} as BookDto)
       }
     },
-    analyze() {
-      this.$komgaBooks.analyzeBook(this.book)
+    async analyze() {
+      await this.$komgaBooks.analyzeBook(this.book)
+      this.refreshAfterAnalyze()
+    },
+    refreshAfterAnalyze() {
+      setTimeout(() => this.loadBook(this.bookId), 1500)
     },
     refreshMetadata() {
       this.$komgaBooks.refreshMetadata(this.book)

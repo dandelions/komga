@@ -929,6 +929,9 @@
     "status": "状态",
     "url": "地址"
   },
+  "notification": {
+    "analysis_task_submitted": "分析任务已提交"
+  },
   "menu": {
     "add_to_collection": "添加到收藏",
     "add_to_readlist": "添加到阅读列表",

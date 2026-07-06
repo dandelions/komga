@@ -929,6 +929,9 @@
     "status": "Status",
     "url": "URL"
   },
+  "notification": {
+    "analysis_task_submitted": "Analysis task submitted"
+  },
   "menu": {
     "add_to_collection": "Add to collection",
     "add_to_readlist": "Add to read list",

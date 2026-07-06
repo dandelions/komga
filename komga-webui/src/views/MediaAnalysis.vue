@@ -56,6 +56,17 @@
         </v-chip>
       </template>
 
+      <template v-slot:item.actions="{ item }">
+        <v-btn
+          v-if="isAdmin"
+          icon
+          :title="$t('menu.analyze')"
+          @click="analyzeBook(item)"
+        >
+          <v-icon>mdi-play-circle-outline</v-icon>
+        </v-btn>
+      </template>
+
       <template v-slot:footer.prepend>
         <v-btn icon @click="loadBooks">
           <v-icon>mdi-refresh</v-icon>
@@ -70,6 +81,7 @@ import Vue from 'vue'
 import {MediaStatus} from '@/types/enum-books'
 import {BookDto} from '@/types/komga-books'
 import {convertErrorCodes} from '@/functions/error-codes'
+import {ERROR, ErrorEvent, NOTIFICATION, NotificationEvent} from '@/types/events'
 import {
   BookSearch,
   SearchConditionAllOfBook,
@@ -124,7 +136,11 @@ export default Vue.extend({
         {text: this.$i18n.t('media_analysis.url').toString(), value: 'url'},
         {text: this.$i18n.t('media_analysis.size').toString(), value: 'size'},
         {text: '', value: 'deleted', groupable: false, sortable: false},
+        {text: '', value: 'actions', groupable: false, sortable: false},
       ]
+    },
+    isAdmin(): boolean {
+      return this.$store.getters.meAdmin
     },
     booksData(): BookDto[] {
       return this.books.map((b: BookDto) => ({
@@ -151,6 +167,15 @@ export default Vue.extend({
           timeStyle: 'short',
         } as Intl.DateTimeFormatOptions,
       ).format(new Date(value))
+    },
+    async analyzeBook(book: BookDto) {
+      try {
+        await this.$komgaBooks.analyzeBook(book)
+        this.$eventHub.$emit(NOTIFICATION, {message: this.$t('notification.analysis_task_submitted').toString()} as NotificationEvent)
+        setTimeout(() => this.loadBooks(), 1500)
+      } catch (e) {
+        this.$eventHub.$emit(ERROR, {message: e.message} as ErrorEvent)
+      }
     },
     async loadBooks() {
       this.loading = true
