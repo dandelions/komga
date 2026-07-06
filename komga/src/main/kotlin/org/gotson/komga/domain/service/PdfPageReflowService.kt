@@ -567,6 +567,8 @@ class PdfPageReflowService(
 
     val regions =
       collectImageRegions(
+        image = image,
+        threshold = threshold,
         candidates = candidates,
         coloredTiles = coloredTiles,
         denseTiles = denseTiles,
@@ -662,6 +664,8 @@ class PdfPageReflowService(
   }
 
   private fun collectImageRegions(
+    image: BufferedImage,
+    threshold: Int,
     candidates: ByteArray,
     coloredTiles: ByteArray,
     denseTiles: ByteArray,
@@ -712,7 +716,7 @@ class PdfPageReflowService(
       }
 
       val region = imageRegionFromTiles(minTileX, minTileY, maxTileX, maxTileY, tileSize, roi)
-      if (isLikelyImageRegion(region, roi, componentTiles, componentColoredTiles, componentDenseTiles, componentTexturedTiles, componentLineArtTiles, minTileX, minTileY, maxTileX, maxTileY)) {
+      if (isLikelyImageRegion(image, threshold, region, roi, componentTiles, componentColoredTiles, componentDenseTiles, componentTexturedTiles, componentLineArtTiles, minTileX, minTileY, maxTileX, maxTileY)) {
         regions += region
       }
     }
@@ -750,6 +754,8 @@ class PdfPageReflowService(
   }
 
   private fun isLikelyImageRegion(
+    image: BufferedImage,
+    threshold: Int,
     region: Roi,
     roi: Roi,
     componentTiles: Int,
@@ -778,8 +784,56 @@ class PdfPageReflowService(
       componentLineArtTiles >= 3 &&
         lineArtRatio >= 0.18 &&
         fillRatio >= 0.08 &&
-        areaRatio >= 0.006
+        areaRatio >= 0.006 &&
+        hasStructuralLineArt(image, region, threshold)
     return spansTextColumn && (colorImage || lineArtImage)
+  }
+
+  private fun hasStructuralLineArt(
+    image: BufferedImage,
+    region: Roi,
+    threshold: Int,
+  ): Boolean {
+    val block = clampRoi(region, image.width, image.height)
+    val inkThreshold = adaptiveInkThreshold(threshold, estimateBackgroundLuma(image, block))
+    val horizontalLimit = max(96, (block.w * 0.22).roundToInt())
+    val verticalLimit = max(64, (block.h * 0.22).roundToInt())
+    var hasLongHorizontal = false
+    var hasLongVertical = false
+
+    for (y in block.y until block.y + block.h) {
+      var run = 0
+      for (x in block.x until block.x + block.w) {
+        if (isInk(image.getRGB(x, y), inkThreshold)) {
+          run++
+          if (run >= horizontalLimit) {
+            hasLongHorizontal = true
+            break
+          }
+        } else {
+          run = 0
+        }
+      }
+      if (hasLongHorizontal) break
+    }
+
+    for (x in block.x until block.x + block.w) {
+      var run = 0
+      for (y in block.y until block.y + block.h) {
+        if (isInk(image.getRGB(x, y), inkThreshold)) {
+          run++
+          if (run >= verticalLimit) {
+            hasLongVertical = true
+            break
+          }
+        } else {
+          run = 0
+        }
+      }
+      if (hasLongVertical) break
+    }
+
+    return hasLongHorizontal && hasLongVertical
   }
 
   private fun mergeImageRegions(regions: List<Roi>): List<Roi> {

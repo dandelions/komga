@@ -2011,7 +2011,7 @@ export default Vue.extend({
         }
       }
 
-      const regions = this.collectImageRegions(candidates, coloredTiles, denseTiles, texturedTiles, lineArtTiles, tileColumns, tileRows, tileSize, roi)
+      const regions = this.collectImageRegions(pixels, width, candidates, coloredTiles, denseTiles, texturedTiles, lineArtTiles, tileColumns, tileRows, tileSize, roi, threshold)
       return this.expandImageRegions(regions, Math.max(2, Math.round(tileSize * 0.6)), roi, width, height)
     },
     imageTileMetrics(
@@ -2086,6 +2086,8 @@ export default Vue.extend({
       }
     },
     collectImageRegions(
+      pixels: Uint8ClampedArray,
+      width: number,
       candidates: Uint8Array,
       coloredTiles: Uint8Array,
       denseTiles: Uint8Array,
@@ -2095,6 +2097,7 @@ export default Vue.extend({
       tileRows: number,
       tileSize: number,
       roi: Roi,
+      threshold: number,
     ): ImageRegion[] {
       const visited = new Uint8Array(candidates.length)
       const regions = [] as ImageRegion[]
@@ -2135,7 +2138,7 @@ export default Vue.extend({
         }
 
         const region = this.imageRegionFromTiles(minTileX, minTileY, maxTileX, maxTileY, tileSize, roi)
-        if (this.isLikelyImageRegion(region, roi, componentTiles, componentColoredTiles, componentDenseTiles, componentTexturedTiles, componentLineArtTiles, minTileX, minTileY, maxTileX, maxTileY)) {
+        if (this.isLikelyImageRegion(pixels, width, region, roi, componentTiles, componentColoredTiles, componentDenseTiles, componentTexturedTiles, componentLineArtTiles, minTileX, minTileY, maxTileX, maxTileY, threshold)) {
           regions.push(region)
         }
       }
@@ -2158,6 +2161,8 @@ export default Vue.extend({
       return {x, y, w: right - x, h: bottom - y}
     },
     isLikelyImageRegion(
+      pixels: Uint8ClampedArray,
+      width: number,
       region: ImageRegion,
       roi: Roi,
       componentTiles: number,
@@ -2169,6 +2174,7 @@ export default Vue.extend({
       minTileY: number,
       maxTileX: number,
       maxTileY: number,
+      threshold: number,
     ): boolean {
       const rectTiles = Math.max(1, (maxTileX - minTileX + 1) * (maxTileY - minTileY + 1))
       const fillRatio = componentTiles / rectTiles
@@ -2182,8 +2188,61 @@ export default Vue.extend({
       const minHeight = Math.max(36, roi.h * 0.04)
       const spansTextColumn = region.w >= minWidth && region.h >= minHeight
       const colorImage = coloredRatio >= 0.22 && areaRatio >= 0.008 && fillRatio >= 0.16
-      const lineArtImage = componentLineArtTiles >= 3 && lineArtRatio >= 0.18 && fillRatio >= 0.08 && areaRatio >= 0.006
+      const lineArtImage =
+        componentLineArtTiles >= 3 &&
+        lineArtRatio >= 0.18 &&
+        fillRatio >= 0.08 &&
+        areaRatio >= 0.006 &&
+        this.hasStructuralLineArt(pixels, width, region, threshold)
       return spansTextColumn && (colorImage || lineArtImage)
+    },
+    hasStructuralLineArt(pixels: Uint8ClampedArray, width: number, region: ImageRegion, threshold: number): boolean {
+      const horizontalLimit = Math.max(96, Math.round(region.w * 0.22))
+      const verticalLimit = Math.max(64, Math.round(region.h * 0.22))
+      const right = region.x + region.w
+      const bottom = region.y + region.h
+      let hasLongHorizontal = false
+      let hasLongVertical = false
+
+      for (let y = region.y; y < bottom; y++) {
+        let run = 0
+        for (let x = region.x; x < right; x++) {
+          const offset = (y * width + x) * 4
+          const alpha = pixels[offset + 3]
+          const luma = 0.299 * pixels[offset] + 0.587 * pixels[offset + 1] + 0.114 * pixels[offset + 2]
+          if (alpha !== 0 && luma < threshold) {
+            run++
+            if (run >= horizontalLimit) {
+              hasLongHorizontal = true
+              break
+            }
+          } else {
+            run = 0
+          }
+        }
+        if (hasLongHorizontal) break
+      }
+
+      for (let x = region.x; x < right; x++) {
+        let run = 0
+        for (let y = region.y; y < bottom; y++) {
+          const offset = (y * width + x) * 4
+          const alpha = pixels[offset + 3]
+          const luma = 0.299 * pixels[offset] + 0.587 * pixels[offset + 1] + 0.114 * pixels[offset + 2]
+          if (alpha !== 0 && luma < threshold) {
+            run++
+            if (run >= verticalLimit) {
+              hasLongVertical = true
+              break
+            }
+          } else {
+            run = 0
+          }
+        }
+        if (hasLongVertical) break
+      }
+
+      return hasLongHorizontal && hasLongVertical
     },
     mergeImageRegions(regions: ImageRegion[]): ImageRegion[] {
       if (regions.length <= 1) return regions
