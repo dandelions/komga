@@ -2094,7 +2094,8 @@ export default Vue.extend({
 
       const regions = this.collectImageRegions(pixels, width, candidates, coloredTiles, denseTiles, texturedTiles, lineArtTiles, tileColumns, tileRows, tileSize, roi, threshold)
       const structuralRegions = this.detectStructuralLineArtRegions(pixels, width, roi, threshold)
-      return this.expandImageRegions(this.mergeImageRegions([...regions, ...structuralRegions]), Math.max(2, Math.round(tileSize * 0.6)), roi, width, height)
+      const tightenedRegions = [...regions, ...structuralRegions].map(region => this.tightenLineArtRegion(pixels, width, region, threshold))
+      return this.expandImageRegions(this.mergeImageRegions(tightenedRegions), Math.max(2, Math.round(tileSize * 0.6)), roi, width, height)
     },
     imageTileMetrics(
       pixels: Uint8ClampedArray,
@@ -2428,6 +2429,81 @@ export default Vue.extend({
       }
 
       return hasLongHorizontal && hasLongVertical
+    },
+    tightenLineArtRegion(pixels: Uint8ClampedArray, width: number, region: ImageRegion, threshold: number): ImageRegion {
+      if (region.w < 120 || region.h < 80) return region
+      const horizontalLimit = Math.max(72, Math.round(region.w * 0.16))
+      const verticalLimit = Math.max(48, Math.round(region.h * 0.16))
+      const right = region.x + region.w
+      const bottom = region.y + region.h
+      let left = right
+      let top = bottom
+      let lineRight = region.x - 1
+      let lineBottom = region.y - 1
+      let horizontalSegments = 0
+      let verticalSegments = 0
+
+      for (let y = region.y; y < bottom; y++) {
+        let runStart = -1
+        for (let x = region.x; x < right; x++) {
+          if (this.pixelIsInk(pixels, width, x, y, threshold)) {
+            if (runStart < 0) runStart = x
+          } else if (runStart >= 0) {
+            if (x - runStart >= horizontalLimit) {
+              left = Math.min(left, runStart)
+              top = Math.min(top, y)
+              lineRight = Math.max(lineRight, x)
+              lineBottom = Math.max(lineBottom, y + 1)
+              horizontalSegments++
+            }
+            runStart = -1
+          }
+        }
+        if (runStart >= 0 && right - runStart >= horizontalLimit) {
+          left = Math.min(left, runStart)
+          top = Math.min(top, y)
+          lineRight = Math.max(lineRight, right)
+          lineBottom = Math.max(lineBottom, y + 1)
+          horizontalSegments++
+        }
+      }
+
+      for (let x = region.x; x < right; x++) {
+        let runStart = -1
+        for (let y = region.y; y < bottom; y++) {
+          if (this.pixelIsInk(pixels, width, x, y, threshold)) {
+            if (runStart < 0) runStart = y
+          } else if (runStart >= 0) {
+            if (y - runStart >= verticalLimit) {
+              left = Math.min(left, x)
+              top = Math.min(top, runStart)
+              lineRight = Math.max(lineRight, x + 1)
+              lineBottom = Math.max(lineBottom, y)
+              verticalSegments++
+            }
+            runStart = -1
+          }
+        }
+        if (runStart >= 0 && bottom - runStart >= verticalLimit) {
+          left = Math.min(left, x)
+          top = Math.min(top, runStart)
+          lineRight = Math.max(lineRight, x + 1)
+          lineBottom = Math.max(lineBottom, bottom)
+          verticalSegments++
+        }
+      }
+
+      if (horizontalSegments < 2 || verticalSegments < 2 || lineRight < left || lineBottom < top) return region
+
+      const paddingX = Math.max(18, Math.round(region.w * 0.08))
+      const paddingY = Math.max(14, Math.round(region.h * 0.06))
+      const x = Math.max(region.x, left - paddingX)
+      const y = Math.max(region.y, top - paddingY)
+      const tightenedRight = Math.min(right, lineRight + paddingX)
+      const tightenedBottom = Math.min(bottom, lineBottom + paddingY)
+      const tightened = {x, y, w: Math.max(1, tightenedRight - x), h: Math.max(1, tightenedBottom - y)}
+
+      return tightened.w * tightened.h < region.w * region.h * 0.92 ? tightened : region
     },
     hasAlignedTextRows(pixels: Uint8ClampedArray, width: number, region: ImageRegion, threshold: number): boolean {
       if (region.w < 120 || region.h < 80) return false

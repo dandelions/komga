@@ -659,7 +659,8 @@ class PdfPageReflowService(
         roi = roi,
       )
     val structuralRegions = detectStructuralLineArtRegions(image, roi, threshold)
-    return expandImageRegions(mergeImageRegions(regions + structuralRegions), max(2, (tileSize * 0.6).roundToInt()), roi, image.width, image.height)
+    val tightenedRegions = (regions + structuralRegions).map { tightenLineArtRegion(image, it, threshold) }
+    return expandImageRegions(mergeImageRegions(tightenedRegions), max(2, (tileSize * 0.6).roundToInt()), roi, image.width, image.height)
   }
 
   private data class ImageTileMetrics(
@@ -1035,6 +1036,87 @@ class PdfPageReflowService(
     }
 
     return hasLongHorizontal && hasLongVertical
+  }
+
+  private fun tightenLineArtRegion(
+    image: BufferedImage,
+    region: Roi,
+    threshold: Int,
+  ): Roi {
+    val block = clampRoi(region, image.width, image.height)
+    if (block.w < 120 || block.h < 80) return region
+
+    val inkThreshold = adaptiveInkThreshold(threshold, estimateBackgroundLuma(image, block))
+    val horizontalLimit = max(72, (block.w * 0.16).roundToInt())
+    val verticalLimit = max(48, (block.h * 0.16).roundToInt())
+    var minX = block.x + block.w
+    var minY = block.y + block.h
+    var maxX = block.x - 1
+    var maxY = block.y - 1
+    var horizontalSegments = 0
+    var verticalSegments = 0
+
+    for (y in block.y until block.y + block.h) {
+      var runStart = -1
+      for (x in block.x until block.x + block.w) {
+        if (isInk(image.getRGB(x, y), inkThreshold)) {
+          if (runStart < 0) runStart = x
+        } else if (runStart >= 0) {
+          if (x - runStart >= horizontalLimit) {
+            minX = min(minX, runStart)
+            minY = min(minY, y)
+            maxX = max(maxX, x)
+            maxY = max(maxY, y + 1)
+            horizontalSegments++
+          }
+          runStart = -1
+        }
+      }
+      if (runStart >= 0 && block.x + block.w - runStart >= horizontalLimit) {
+        minX = min(minX, runStart)
+        minY = min(minY, y)
+        maxX = max(maxX, block.x + block.w)
+        maxY = max(maxY, y + 1)
+        horizontalSegments++
+      }
+    }
+
+    for (x in block.x until block.x + block.w) {
+      var runStart = -1
+      for (y in block.y until block.y + block.h) {
+        if (isInk(image.getRGB(x, y), inkThreshold)) {
+          if (runStart < 0) runStart = y
+        } else if (runStart >= 0) {
+          if (y - runStart >= verticalLimit) {
+            minX = min(minX, x)
+            minY = min(minY, runStart)
+            maxX = max(maxX, x + 1)
+            maxY = max(maxY, y)
+            verticalSegments++
+          }
+          runStart = -1
+        }
+      }
+      if (runStart >= 0 && block.y + block.h - runStart >= verticalLimit) {
+        minX = min(minX, x)
+        minY = min(minY, runStart)
+        maxX = max(maxX, x + 1)
+        maxY = max(maxY, block.y + block.h)
+        verticalSegments++
+      }
+    }
+
+    if (horizontalSegments < 2 || verticalSegments < 2 || maxX < minX || maxY < minY) return region
+
+    val paddingX = max(18, (block.w * 0.08).roundToInt())
+    val paddingY = max(14, (block.h * 0.06).roundToInt())
+    val x = max(block.x, minX - paddingX)
+    val y = max(block.y, minY - paddingY)
+    val right = min(block.x + block.w, maxX + paddingX)
+    val bottom = min(block.y + block.h, maxY + paddingY)
+    val tightened = Roi(x, y, max(1, right - x), max(1, bottom - y))
+
+    return if (tightened.w * tightened.h < block.w * block.h * 0.92) tightened else region
   }
 
   private data class AlignedTextRow(

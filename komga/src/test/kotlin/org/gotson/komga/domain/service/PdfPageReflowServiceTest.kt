@@ -190,6 +190,28 @@ class PdfPageReflowServiceTest {
   }
 
   @Test
+  fun `given line art image between text when reflowing page then surrounding text is not preserved as image`() {
+    val pageBytes = lineArtImageBetweenTextPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+        cropRegions = listOf(PdfPageReflowRegion(x = 20, y = 20, w = 460, h = 500)),
+      )
+
+    val images = response.items.filter { it.type == "image" }
+    val wordBlocks = response.items.filter { it.type == "word" }
+
+    assertThat(images).hasSize(1)
+    assertThat(images.first().h).isLessThan(260)
+    assertThat(wordBlocks).hasSizeGreaterThanOrEqualTo(8)
+  }
+
+  @Test
   fun `given image quality when reflowing page then word block uses jpeg encoding`() {
     val pageBytes = horizontalShortGlyphPage()
     val book = makeBook("book")
@@ -356,6 +378,36 @@ class PdfPageReflowServiceTest {
         image.setRGB(x, y, color.rgb)
       }
     }
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun lineArtImageBetweenTextPage(): ByteArray {
+    val image = BufferedImage(520, 560, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color.BLACK
+
+    listOf(45, 82, 390, 427, 464).forEach { y ->
+      listOf(55, 105, 155, 205, 255, 305, 355, 405).forEach { x ->
+        graphics.fillRect(x, y, 18, 22)
+      }
+    }
+
+    graphics.drawRect(105, 170, 280, 145)
+    graphics.drawRect(125, 195, 70, 48)
+    graphics.drawRect(235, 195, 70, 48)
+    graphics.drawLine(195, 219, 235, 219)
+    graphics.drawLine(305, 219, 370, 219)
+    graphics.drawLine(160, 243, 160, 295)
+    graphics.drawLine(270, 243, 270, 295)
+    graphics.drawLine(100, 295, 390, 295)
+    graphics.fillRect(143, 205, 12, 20)
+    graphics.fillRect(253, 205, 12, 20)
+    graphics.dispose()
 
     val output = ByteArrayOutputStream()
     ImageIO.write(image, "png", output)
