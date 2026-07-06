@@ -60,6 +60,7 @@ export const persistedModule: Module<any, any> = {
       filterDslBooks: {},
       filterModeBooks: {},
       sortBooks: {},
+      displayModeBooks: {},
       route: {},
     },
     importPath: '',
@@ -108,6 +109,10 @@ export const persistedModule: Module<any, any> = {
     },
     getLibrarySortBooks: (state) => (id: string) => {
       return state.library.sortBooks[id]
+    },
+    getLibraryDisplayModeBooks: (state) => (id: string) => {
+      if (!state.library.displayModeBooks) state.library.displayModeBooks = {}
+      return state.library.displayModeBooks[id]
     },
     getLibraryRoute: (state) => (id: string) => {
       return state.library.route[id]
@@ -194,6 +199,10 @@ export const persistedModule: Module<any, any> = {
     },
     setLibrarySortBooks(state, {id, sort}) {
       state.library.sortBooks[id] = sort
+    },
+    setLibraryDisplayModeBooks(state, {id, displayMode}) {
+      if (!state.library.displayModeBooks) state.library.displayModeBooks = {}
+      state.library.displayModeBooks[id] = displayMode
     },
     setLibraryRoute(state, {id, route}) {
       state.library.route[id] = route

@@ -21,6 +21,20 @@
 
       <page-size-select v-model="pageSize"/>
 
+      <v-btn-toggle
+        v-model="displayMode"
+        mandatory
+        dense
+        class="mx-2"
+      >
+        <v-btn small value="card" title="卡片显示">
+          <v-icon small>mdi-view-grid</v-icon>
+        </v-btn>
+        <v-btn small value="list" title="列表显示">
+          <v-icon small>mdi-format-list-bulleted</v-icon>
+        </v-btn>
+      </v-btn-toggle>
+
       <v-btn icon @click="drawer = !drawer">
         <v-icon :color="sortOrFilterActive ? 'secondary' : ''">mdi-filter-variant</v-icon>
       </v-btn>
@@ -100,11 +114,68 @@
         />
 
         <item-browser
+          v-if="displayMode === 'card'"
           :items="books"
           :item-context="itemContext"
           :selected.sync="selectedBooks"
           :edit-function="isAdmin ? editSingleBook : undefined"
         />
+        <v-list v-else two-line class="book-list-view">
+          <v-list-item
+            v-for="book in books"
+            :key="book.id"
+            class="book-list-row"
+            :class="{'book-list-row-selected': selectedBooks.includes(book)}"
+            @click="openBook(book)"
+          >
+            <v-list-item-action class="book-list-checkbox">
+              <v-checkbox
+                :input-value="selectedBooks.includes(book)"
+                @click.stop="toggleBookSelection(book)"
+              />
+            </v-list-item-action>
+
+            <v-list-item-avatar tile class="book-list-thumbnail">
+              <v-img
+                :src="bookThumbnailUrl(book.id)"
+                :lazy-src="coverBase64"
+                contain
+              />
+            </v-list-item-avatar>
+
+            <v-list-item-content>
+              <v-list-item-title class="book-list-title">
+                {{ book.name }}
+              </v-list-item-title>
+              <v-list-item-subtitle class="book-list-subtitle">
+                <span>{{ book.seriesTitle }}</span>
+                <span v-if="book.metadata.number">#{{ book.metadata.number }}</span>
+                <span v-if="book.media.pagesCount">{{ book.media.pagesCount }}p</span>
+                <span v-if="book.size">{{ book.size }}</span>
+              </v-list-item-subtitle>
+            </v-list-item-content>
+
+            <v-list-item-action class="book-list-actions">
+              <v-btn
+                icon
+                :to="{name: bookReadRouteName(book.media), params: {bookId: book.id}}"
+                @click.stop
+              >
+                <v-icon>mdi-book-open-page-variant</v-icon>
+              </v-btn>
+              <one-shot-actions-menu
+                v-if="book.oneshot"
+                :book="book"
+                @click.native.stop
+              />
+              <book-actions-menu
+                v-else
+                :book="book"
+                @click.native.stop
+              />
+            </v-list-item-action>
+          </v-list-item>
+        </v-list>
 
         <v-pagination
           v-if="totalPages > 1"
@@ -125,8 +196,12 @@ import EmptyState from '@/components/EmptyState.vue'
 import ItemBrowser from '@/components/ItemBrowser.vue'
 import LibraryNavigation from '@/components/LibraryNavigation.vue'
 import LibraryActionsMenu from '@/components/menus/LibraryActionsMenu.vue'
+import BookActionsMenu from '@/components/menus/BookActionsMenu.vue'
+import OneShotActionsMenu from '@/components/menus/OneshotActionsMenu.vue'
 import PageSizeSelect from '@/components/PageSizeSelect.vue'
 import {parseQuerySort} from '@/functions/query-params'
+import {getBookReadRouteFromMedia as getReadRouteFromMedia} from '@/functions/book-format'
+import {bookThumbnailUrl} from '@/functions/urls'
 import {MediaProfile, MediaStatus, ReadStatus} from '@/types/enum-books'
 import {
   BOOK_ADDED,
@@ -189,11 +264,16 @@ import {
   NameValue,
 } from '@/types/filter'
 import {BookDto} from '@/types/komga-books'
+import {coverBase64} from '@/types/image'
+
+type BooksDisplayMode = 'card' | 'list'
 
 export default Vue.extend({
   name: 'BrowseBooks',
   components: {
+    BookActionsMenu,
     LibraryActionsMenu,
+    OneShotActionsMenu,
     EmptyState,
     ToolbarSticky,
     ItemBrowser,
@@ -216,6 +296,7 @@ export default Vue.extend({
       totalElements: null as number | null,
       sortActive: {} as SortActive,
       sortDefault: {key: 'createdDate', order: 'desc'} as SortActive,
+      displayMode: 'card' as BooksDisplayMode,
       filters: {} as FiltersActive,
       filtersMode: {} as FiltersActiveMode,
       sortUnwatch: null as any,
@@ -223,6 +304,7 @@ export default Vue.extend({
       filterModeUnwatch: null as any,
       pageUnwatch: null as any,
       pageSizeUnwatch: null as any,
+      displayModeUnwatch: null as any,
       drawer: false,
       filterOptions: {
         tag: [] as NameValue[],
@@ -264,6 +346,7 @@ export default Vue.extend({
   async mounted() {
     this.$store.commit('setLibraryRoute', {id: this.libraryId, route: LIBRARY_ROUTE.BOOKS})
     this.pageSize = this.$store.state.persistedState.browsingPageSize || this.pageSize
+    this.displayMode = this.normalizedDisplayMode(this.$store.getters.getLibraryDisplayModeBooks(this.libraryId))
 
     // restore from query param
     await this.resetParams(this.$route, this.libraryId)
@@ -279,12 +362,13 @@ export default Vue.extend({
       this.unsetWatches()
 
       // reset
-      await this.resetParams(to, to.params.libraryId)
+      await this.resetParams(to, to.params.libraryId, true)
       this.page = 1
       this.totalPages = 1
       this.totalElements = null
       this.books = []
       this.seriesGroups = []
+      this.displayMode = this.normalizedDisplayMode(this.$store.getters.getLibraryDisplayModeBooks(to.params.libraryId))
 
       this.loadLibrary(to.params.libraryId)
 
@@ -294,6 +378,12 @@ export default Vue.extend({
     next()
   },
   computed: {
+    bookThumbnailUrl() {
+      return bookThumbnailUrl
+    },
+    coverBase64(): string {
+      return coverBase64
+    },
     library(): LibraryDto | undefined {
       return this.getLibraryLazy(this.libraryId)
     },
@@ -458,6 +548,12 @@ export default Vue.extend({
     },
   },
   methods: {
+    normalizedDisplayMode(value: any): BooksDisplayMode {
+      return value === 'list' ? 'list' : 'card'
+    },
+    bookReadRouteName(media: any): string {
+      return getReadRouteFromMedia(media)
+    },
     resetSortAndFilters() {
       this.drawer = false
       for (const prop in this.filters) {
@@ -468,9 +564,11 @@ export default Vue.extend({
       this.$store.commit('setLibrarySortBooks', {id: this.libraryId, sort: this.sortActive})
       this.updateRouteAndReload()
     },
-    async resetParams(route: any, libraryId: string) {
-      this.sortActive = parseQuerySort(route.query.sort, this.sortOptions) ||
-        this.$store.getters.getLibrarySortBooks(route.params.libraryId) ||
+    async resetParams(route: any, libraryId: string, preferStoredSort: boolean = false) {
+      const storedSort = this.$store.getters.getLibrarySortBooks(libraryId)
+      this.sortActive = storedSort && preferStoredSort ? storedSort :
+        parseQuerySort(route.query.sort, this.sortOptions) ||
+        storedSort ||
         this.$_.clone(this.sortDefault)
 
       const requestLibraryIds = this.getRequestLibraryIds(libraryId)
@@ -496,7 +594,7 @@ export default Vue.extend({
           activeFilters[role] = route.query[role] || []
         })
       } else {
-        activeFilters = this.$store.getters.getLibraryFilterBooks(route.params.libraryId) || {} as FiltersActive
+        activeFilters = this.$store.getters.getLibraryFilterBooks(libraryId) || {} as FiltersActive
       }
       this.filters = this.validateFilters(activeFilters)
 
@@ -505,7 +603,7 @@ export default Vue.extend({
       if (route.query.filterMode) {
         activeFiltersMode = route.query.filterMode
       } else {
-        activeFiltersMode = this.$store.getters.getLibraryFilterModeBooks(route.params.libraryId) || {} as FiltersActiveMode
+        activeFiltersMode = this.$store.getters.getLibraryFilterModeBooks(libraryId) || {} as FiltersActiveMode
       }
       this.filtersMode = this.validateFiltersMode(activeFiltersMode)
     },
@@ -554,6 +652,9 @@ export default Vue.extend({
         this.$store.commit('setBrowsingPageSize', val)
         this.updateRouteAndReload()
       })
+      this.displayModeUnwatch = this.$watch('displayMode', (val) => {
+        this.$store.commit('setLibraryDisplayModeBooks', {id: this.libraryId, displayMode: this.normalizedDisplayMode(val)})
+      })
 
       this.pageUnwatch = this.$watch('page', (val) => {
         this.updateRoute()
@@ -566,6 +667,7 @@ export default Vue.extend({
       this.filterModeUnwatch()
       this.pageUnwatch()
       this.pageSizeUnwatch()
+      this.displayModeUnwatch()
     },
     updateRouteAndReload() {
       this.unsetWatches()
@@ -691,6 +793,18 @@ export default Vue.extend({
       ))
       this.selectedBooks = []
     },
+    toggleBookSelection(book: BookDto) {
+      const index = this.selectedBooks.indexOf(book)
+      if (index >= 0) this.selectedBooks.splice(index, 1)
+      else this.selectedBooks.push(book)
+    },
+    openBook(book: BookDto) {
+      if (this.selectedBooks.length > 0) {
+        this.toggleBookSelection(book)
+        return
+      }
+      this.$router.push({name: 'browse-book', params: {bookId: book.id}})
+    },
     addToReadList() {
       this.$store.dispatch('dialogAddBooksToReadList', this.selectedBooks.map(b => b.id))
     },
@@ -716,4 +830,49 @@ export default Vue.extend({
 })
 </script>
 <style scoped>
+.book-list-view {
+  background: transparent;
+}
+
+.book-list-row {
+  min-height: 76px;
+  border-bottom: 1px solid rgba(128, 128, 128, .18);
+}
+
+.book-list-row-selected {
+  background-color: rgba(255, 152, 0, .10);
+}
+
+.book-list-checkbox {
+  margin-right: 8px;
+}
+
+.book-list-thumbnail {
+  width: 44px !important;
+  min-width: 44px !important;
+  height: 62px !important;
+  margin-right: 14px;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.book-list-actions {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 2px;
+}
+
+.book-list-title {
+  font-size: .95rem;
+  line-height: 1.35;
+}
+
+.book-list-subtitle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 3px;
+  font-size: .78rem;
+}
 </style>
