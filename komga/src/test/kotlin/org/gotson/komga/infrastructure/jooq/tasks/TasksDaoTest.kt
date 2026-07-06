@@ -307,6 +307,28 @@ class TasksDaoTest(
   }
 
   @Test
+  fun `given running task replaced when deleting by previous owner then replacement remains queued`() {
+    // given
+    val task1 = Task.AnalyzeBook("book1", 0, "group1")
+    val task2 = Task.AnalyzeBook("book1", 5, "group1")
+    tasksDao.save(task1)
+    tasksDao.takeFirst("thread1")
+
+    // when
+    tasksDao.deleteAll()
+    tasksDao.save(task2)
+    val deleted = tasksDao.delete(task1.uniqueId, "thread1")
+
+    // then
+    assertThat(deleted).isEqualTo(0)
+    assertThat(tasksDao.findAll()).hasSize(1)
+    assertThat(tasksDao.findAllGroupedByOwner().keys).containsExactly(null)
+    assertThat(tasksDao.takeFirst("thread2"))
+      .isInstanceOf(Task.AnalyzeBook::class.java)
+      .hasFieldOrPropertyWithValue("priority", task2.priority)
+  }
+
+  @Test
   fun `given a single task with owner when counting tasks then the count is 1`() {
     // given
     tasksDao.save(Task.HashBookPages("book1", 5))

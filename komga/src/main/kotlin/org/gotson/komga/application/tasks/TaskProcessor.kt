@@ -88,7 +88,8 @@ class TaskProcessor(
         logger.error(e) { "Task $task processing failed unexpectedly" }
       } finally {
         logger.debug { "Task processed, remove it from the queue: $task" }
-        tasksRepository.delete(task.uniqueId)
+        val deleted = tasksRepository.delete(task.uniqueId, Thread.currentThread().name)
+        if (deleted == 0) logger.debug { "Task $task was already removed or replaced" }
       }
     }
   }

@@ -15,6 +15,11 @@ interface TasksRepository {
 
   fun exists(taskId: String): Boolean
 
+  fun exists(
+    taskId: String,
+    owner: String,
+  ): Boolean
+
   fun countBySimpleType(): Map<String, Int>
 
   fun countReadyOrRunningBySimpleType(): Map<String, Int>
@@ -31,6 +36,11 @@ interface TasksRepository {
   fun save(tasks: Collection<Task>)
 
   fun delete(taskId: String)
+
+  fun delete(
+    taskId: String,
+    owner: String,
+  ): Int
 
   fun deleteAll(): Int
 

@@ -14,6 +14,8 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
@@ -73,6 +75,35 @@ class TaskProcessorTest(
     }
 
     verify(exactly = 1) { mockBookLifecycle.analyzeAndPersist(any()) }
+  }
+
+  @Test
+  fun `when running task is cancelled and resubmitted then new task remains queued`() {
+    val started = CountDownLatch(1)
+    val release = CountDownLatch(1)
+    every { mockBookRepository.findByIdOrNull(any()) } returns makeBook("id")
+    every { mockBookLifecycle.analyzeAndPersist(any()) } answers {
+      started.countDown()
+      release.await(5, TimeUnit.SECONDS)
+      emptySet()
+    }
+
+    taskProcessor.processTasks = true
+    taskEmitter.analyzeBook(makeBook("book"))
+    taskProcessor.processAvailableTask()
+
+    assertThat(started.await(5, TimeUnit.SECONDS)).isTrue
+
+    tasksRepository.deleteAll()
+    taskEmitter.analyzeBook(makeBook("book"))
+
+    taskProcessor.processTasks = false
+    release.countDown()
+    Thread.sleep(500)
+
+    val tasks = tasksRepository.findAll()
+    assertThat(tasks).hasSize(1)
+    assertThat(tasks.first()).isInstanceOf(Task.AnalyzeBook::class.java)
   }
 
   @Test

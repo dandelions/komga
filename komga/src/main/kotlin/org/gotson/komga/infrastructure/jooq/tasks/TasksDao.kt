@@ -119,6 +119,15 @@ class TasksDao(
       t.ID.eq(taskId),
     )
 
+  override fun exists(
+    taskId: String,
+    owner: String,
+  ): Boolean =
+    dslRO.fetchExists(
+      t,
+      t.ID.eq(taskId).and(t.OWNER.eq(owner)),
+    )
+
   override fun countBySimpleType(): Map<String, Int> = countTasksBySimpleType()
 
   override fun countReadyOrRunningBySimpleType(): Map<String, Int> = countTasksBySimpleType(readyOrRunningCondition())
@@ -160,6 +169,16 @@ class TasksDao(
   override fun delete(taskId: String) {
     dslRW.deleteFrom(t).where(t.ID.eq(taskId)).execute()
   }
+
+  override fun delete(
+    taskId: String,
+    owner: String,
+  ): Int =
+    dslRW
+      .deleteFrom(t)
+      .where(t.ID.eq(taskId))
+      .and(t.OWNER.eq(owner))
+      .execute()
 
   override fun deleteAll(): Int = dslRW.deleteFrom(t).execute()
 

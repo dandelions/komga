@@ -27,6 +27,7 @@ import org.junit.jupiter.api.Test
 
 class TaskHandlerTest {
   private val taskEmitter = mockk<TaskEmitter>(relaxed = true)
+  private val tasksRepository = mockk<TasksRepository>(relaxed = true)
   private val libraryRepository = mockk<LibraryRepository>()
   private val bookRepository = mockk<BookRepository>(relaxed = true)
   private val seriesRepository = mockk<SeriesRepository>(relaxed = true)
@@ -46,6 +47,7 @@ class TaskHandlerTest {
   private val taskHandler =
     TaskHandler(
       taskEmitter,
+      tasksRepository,
       libraryRepository,
       bookRepository,
       seriesRepository,
@@ -66,6 +68,7 @@ class TaskHandlerTest {
   @BeforeEach
   fun clearMockCalls() {
     clearMocks(taskEmitter, answers = false)
+    every { tasksRepository.exists(any(), any()) } returns true
   }
 
   @Test
