@@ -57,7 +57,7 @@ Thanks to [JetBrains](https://www.jetbrains.com/?from=Komga) for providing the d
 
 Thanks to [Chromatic](https://www.chromatic.com/) for providing the visual testing platform that helps us review UI changes and catch visual regressions.
 
-[![Linuxdo logo](https://cdn3.ldstatic.com/original/4X/d/1/4/d146c68151340881c884d95e0da4acdf369258c6.png)](https://linux.do/)
+[![Linuxdo logo](https://cdn3.ldstatic.com/original/1X/d/1/4/d146c68151340881c884d95e0da4acdf369258c6.png)](https://linux.do/)
 Thanks to [Linux.Do](https://linux.do/) for providing the platform and the related community-contributed sites.
 
 ## Credits
