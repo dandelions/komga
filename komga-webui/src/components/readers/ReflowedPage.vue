@@ -1988,6 +1988,7 @@ export default Vue.extend({
       const coloredTiles = new Uint8Array(tileCount)
       const denseTiles = new Uint8Array(tileCount)
       const texturedTiles = new Uint8Array(tileCount)
+      const lineArtTiles = new Uint8Array(tileCount)
 
       for (let tileY = 0; tileY < tileRows; tileY++) {
         for (let tileX = 0; tileX < tileColumns; tileX++) {
@@ -2000,15 +2001,17 @@ export default Vue.extend({
           const colored = metrics.coloredRatio >= 0.055
           const dense = metrics.inkRatio >= 0.24 && metrics.coveredRatio >= 0.20 && metrics.lumaStdDev >= 12
           const textured = metrics.inkRatio >= 0.08 && metrics.coveredRatio >= 0.18 && metrics.lumaStdDev >= 38
+          const lineArt = metrics.horizontalRunRatio >= 0.62 || metrics.verticalRunRatio >= 0.62
 
-          if (colored || dense || textured) candidates[index] = 1
+          if (colored || dense || textured || lineArt) candidates[index] = 1
           if (colored) coloredTiles[index] = 1
           if (dense) denseTiles[index] = 1
           if (textured) texturedTiles[index] = 1
+          if (lineArt) lineArtTiles[index] = 1
         }
       }
 
-      const regions = this.collectImageRegions(candidates, coloredTiles, denseTiles, texturedTiles, tileColumns, tileRows, tileSize, roi)
+      const regions = this.collectImageRegions(candidates, coloredTiles, denseTiles, texturedTiles, lineArtTiles, tileColumns, tileRows, tileSize, roi)
       return this.expandImageRegions(regions, Math.max(2, Math.round(tileSize * 0.6)), roi, width, height)
     },
     imageTileMetrics(
@@ -2019,7 +2022,7 @@ export default Vue.extend({
       xEnd: number,
       yEnd: number,
       threshold: number,
-    ): {inkRatio: number, coloredRatio: number, coveredRatio: number, lumaStdDev: number} {
+    ): {inkRatio: number, coloredRatio: number, coveredRatio: number, lumaStdDev: number, horizontalRunRatio: number, verticalRunRatio: number} {
       let pixelsCount = 0
       let inkPixels = 0
       let coloredPixels = 0
@@ -2028,12 +2031,22 @@ export default Vue.extend({
       let lumaSquareSum = 0
       const coverageThreshold = Math.min(248, threshold + 42)
       const sampleStep = Math.max(1, Math.floor(Math.sqrt(Math.max(1, (xEnd - xStart) * (yEnd - yStart)) / 220)))
+      let longestHorizontalRun = 0
+      const verticalColumns = Math.ceil(Math.max(1, xEnd - xStart) / sampleStep)
+      const verticalRuns = new Array(verticalColumns).fill(0)
+      const longestVerticalRuns = new Array(verticalColumns).fill(0)
 
       for (let y = yStart; y < yEnd; y += sampleStep) {
+        let horizontalRun = 0
         for (let x = xStart; x < xEnd; x += sampleStep) {
           const offset = (y * width + x) * 4
           const alpha = pixels[offset + 3]
-          if (alpha === 0) continue
+          const verticalIndex = Math.floor((x - xStart) / sampleStep)
+          if (alpha === 0) {
+            horizontalRun = 0
+            verticalRuns[verticalIndex] = 0
+            continue
+          }
           const r = pixels[offset]
           const g = pixels[offset + 1]
           const b = pixels[offset + 2]
@@ -2046,17 +2059,30 @@ export default Vue.extend({
           if (luma < threshold) inkPixels++
           if (luma < coverageThreshold) coveredPixels++
           if (max - min >= 28 && max > 36) coloredPixels++
+          if (luma < threshold) {
+            horizontalRun += sampleStep
+            longestHorizontalRun = Math.max(longestHorizontalRun, horizontalRun)
+            verticalRuns[verticalIndex] += sampleStep
+            longestVerticalRuns[verticalIndex] = Math.max(longestVerticalRuns[verticalIndex], verticalRuns[verticalIndex])
+          } else {
+            horizontalRun = 0
+            verticalRuns[verticalIndex] = 0
+          }
         }
       }
 
-      if (pixelsCount === 0) return {inkRatio: 0, coloredRatio: 0, coveredRatio: 0, lumaStdDev: 0}
+      if (pixelsCount === 0) return {inkRatio: 0, coloredRatio: 0, coveredRatio: 0, lumaStdDev: 0, horizontalRunRatio: 0, verticalRunRatio: 0}
       const mean = lumaSum / pixelsCount
       const variance = Math.max(0, lumaSquareSum / pixelsCount - mean * mean)
+      const tileWidth = Math.max(1, xEnd - xStart)
+      const tileHeight = Math.max(1, yEnd - yStart)
       return {
         inkRatio: inkPixels / pixelsCount,
         coloredRatio: coloredPixels / pixelsCount,
         coveredRatio: coveredPixels / pixelsCount,
         lumaStdDev: Math.sqrt(variance),
+        horizontalRunRatio: longestHorizontalRun / tileWidth,
+        verticalRunRatio: Math.max(...longestVerticalRuns) / tileHeight,
       }
     },
     collectImageRegions(
@@ -2064,6 +2090,7 @@ export default Vue.extend({
       coloredTiles: Uint8Array,
       denseTiles: Uint8Array,
       texturedTiles: Uint8Array,
+      lineArtTiles: Uint8Array,
       tileColumns: number,
       tileRows: number,
       tileSize: number,
@@ -2084,6 +2111,7 @@ export default Vue.extend({
         let componentColoredTiles = 0
         let componentDenseTiles = 0
         let componentTexturedTiles = 0
+        let componentLineArtTiles = 0
 
         for (let cursor = 0; cursor < queue.length; cursor++) {
           const index = queue[cursor]
@@ -2097,6 +2125,7 @@ export default Vue.extend({
           if (coloredTiles[index]) componentColoredTiles++
           if (denseTiles[index]) componentDenseTiles++
           if (texturedTiles[index]) componentTexturedTiles++
+          if (lineArtTiles[index]) componentLineArtTiles++
 
           this.neighborImageTiles(tileX, tileY, tileColumns, tileRows).forEach(next => {
             if (!candidates[next] || visited[next]) return
@@ -2106,7 +2135,7 @@ export default Vue.extend({
         }
 
         const region = this.imageRegionFromTiles(minTileX, minTileY, maxTileX, maxTileY, tileSize, roi)
-        if (this.isLikelyImageRegion(region, roi, componentTiles, componentColoredTiles, componentDenseTiles, componentTexturedTiles, minTileX, minTileY, maxTileX, maxTileY)) {
+        if (this.isLikelyImageRegion(region, roi, componentTiles, componentColoredTiles, componentDenseTiles, componentTexturedTiles, componentLineArtTiles, minTileX, minTileY, maxTileX, maxTileY)) {
           regions.push(region)
         }
       }
@@ -2135,6 +2164,7 @@ export default Vue.extend({
       componentColoredTiles: number,
       componentDenseTiles: number,
       componentTexturedTiles: number,
+      componentLineArtTiles: number,
       minTileX: number,
       minTileY: number,
       maxTileX: number,
@@ -2145,13 +2175,15 @@ export default Vue.extend({
       const coloredRatio = componentColoredTiles / Math.max(1, componentTiles)
       const denseRatio = componentDenseTiles / Math.max(1, componentTiles)
       const texturedRatio = componentTexturedTiles / Math.max(1, componentTiles)
+      const lineArtRatio = componentLineArtTiles / Math.max(1, componentTiles)
       const roiArea = Math.max(1, roi.w * roi.h)
       const areaRatio = region.w * region.h / roiArea
       const minWidth = Math.max(44, roi.w * 0.08)
       const minHeight = Math.max(36, roi.h * 0.04)
       const spansTextColumn = region.w >= minWidth && region.h >= minHeight
       const colorImage = coloredRatio >= 0.22 && areaRatio >= 0.008 && fillRatio >= 0.16
-      return spansTextColumn && colorImage
+      const lineArtImage = componentLineArtTiles >= 3 && lineArtRatio >= 0.18 && fillRatio >= 0.08 && areaRatio >= 0.006
+      return spansTextColumn && (colorImage || lineArtImage)
     },
     mergeImageRegions(regions: ImageRegion[]): ImageRegion[] {
       if (regions.length <= 1) return regions

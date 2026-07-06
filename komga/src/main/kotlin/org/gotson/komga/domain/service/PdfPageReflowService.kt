@@ -542,6 +542,7 @@ class PdfPageReflowService(
     val coloredTiles = ByteArray(tileCount)
     val denseTiles = ByteArray(tileCount)
     val texturedTiles = ByteArray(tileCount)
+    val lineArtTiles = ByteArray(tileCount)
 
     for (tileY in 0 until tileRows) {
       for (tileX in 0 until tileColumns) {
@@ -554,11 +555,13 @@ class PdfPageReflowService(
         val colored = metrics.coloredRatio >= 0.055
         val dense = metrics.inkRatio >= 0.24 && metrics.coveredRatio >= 0.20 && metrics.lumaStdDev >= 12.0
         val textured = metrics.inkRatio >= 0.08 && metrics.coveredRatio >= 0.18 && metrics.lumaStdDev >= 38.0
+        val lineArt = metrics.horizontalRunRatio >= 0.62 || metrics.verticalRunRatio >= 0.62
 
-        if (colored || dense || textured) candidates[index] = 1
+        if (colored || dense || textured || lineArt) candidates[index] = 1
         if (colored) coloredTiles[index] = 1
         if (dense) denseTiles[index] = 1
         if (textured) texturedTiles[index] = 1
+        if (lineArt) lineArtTiles[index] = 1
       }
     }
 
@@ -568,6 +571,7 @@ class PdfPageReflowService(
         coloredTiles = coloredTiles,
         denseTiles = denseTiles,
         texturedTiles = texturedTiles,
+        lineArtTiles = lineArtTiles,
         tileColumns = tileColumns,
         tileRows = tileRows,
         tileSize = tileSize,
@@ -581,6 +585,8 @@ class PdfPageReflowService(
     val coloredRatio: Double,
     val coveredRatio: Double,
     val lumaStdDev: Double,
+    val horizontalRunRatio: Double,
+    val verticalRunRatio: Double,
   )
 
   private fun imageTileMetrics(
@@ -597,14 +603,22 @@ class PdfPageReflowService(
     var coveredPixels = 0
     var lumaSum = 0.0
     var lumaSquareSum = 0.0
+    var longestHorizontalRun = 0
+    val verticalRuns = IntArray(max(0, xEnd - xStart))
+    val longestVerticalRuns = IntArray(max(0, xEnd - xStart))
     val coverageThreshold = min(248, threshold + 42)
     val sampleStep = max(1, kotlin.math.sqrt(max(1, (xEnd - xStart) * (yEnd - yStart)) / 220.0).roundToInt())
 
     for (y in yStart until yEnd step sampleStep) {
+      var horizontalRun = 0
       for (x in xStart until xEnd step sampleStep) {
         val rgb = image.getRGB(x, y)
         val alpha = rgb ushr 24 and 0xff
-        if (alpha == 0) continue
+        if (alpha == 0) {
+          horizontalRun = 0
+          verticalRuns[(x - xStart) / sampleStep] = 0
+          continue
+        }
         val red = rgb ushr 16 and 0xff
         val green = rgb ushr 8 and 0xff
         val blue = rgb and 0xff
@@ -618,17 +632,32 @@ class PdfPageReflowService(
         if (luma < threshold) inkPixels++
         if (luma < coverageThreshold) coveredPixels++
         if (maxChannel - minChannel >= 28 && maxChannel > 36) coloredPixels++
+
+        if (luma < threshold) {
+          horizontalRun += sampleStep
+          longestHorizontalRun = max(longestHorizontalRun, horizontalRun)
+          val verticalIndex = (x - xStart) / sampleStep
+          verticalRuns[verticalIndex] += sampleStep
+          longestVerticalRuns[verticalIndex] = max(longestVerticalRuns[verticalIndex], verticalRuns[verticalIndex])
+        } else {
+          horizontalRun = 0
+          verticalRuns[(x - xStart) / sampleStep] = 0
+        }
       }
     }
 
-    if (pixelsCount == 0) return ImageTileMetrics(0.0, 0.0, 0.0, 0.0)
+    if (pixelsCount == 0) return ImageTileMetrics(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
     val mean = lumaSum / pixelsCount
     val variance = max(0.0, lumaSquareSum / pixelsCount - mean * mean)
+    val tileWidth = max(1, xEnd - xStart)
+    val tileHeight = max(1, yEnd - yStart)
     return ImageTileMetrics(
       inkRatio = inkPixels.toDouble() / pixelsCount,
       coloredRatio = coloredPixels.toDouble() / pixelsCount,
       coveredRatio = coveredPixels.toDouble() / pixelsCount,
       lumaStdDev = kotlin.math.sqrt(variance),
+      horizontalRunRatio = longestHorizontalRun.toDouble() / tileWidth,
+      verticalRunRatio = (longestVerticalRuns.maxOrNull() ?: 0).toDouble() / tileHeight,
     )
   }
 
@@ -637,6 +666,7 @@ class PdfPageReflowService(
     coloredTiles: ByteArray,
     denseTiles: ByteArray,
     texturedTiles: ByteArray,
+    lineArtTiles: ByteArray,
     tileColumns: Int,
     tileRows: Int,
     tileSize: Int,
@@ -657,6 +687,7 @@ class PdfPageReflowService(
       var componentColoredTiles = 0
       var componentDenseTiles = 0
       var componentTexturedTiles = 0
+      var componentLineArtTiles = 0
 
       var cursor = 0
       while (cursor < queue.size) {
@@ -671,6 +702,7 @@ class PdfPageReflowService(
         if (coloredTiles[index].toInt() != 0) componentColoredTiles++
         if (denseTiles[index].toInt() != 0) componentDenseTiles++
         if (texturedTiles[index].toInt() != 0) componentTexturedTiles++
+        if (lineArtTiles[index].toInt() != 0) componentLineArtTiles++
 
         neighborImageTiles(tileX, tileY, tileColumns, tileRows).forEach { next ->
           if (candidates[next].toInt() == 0 || visited[next].toInt() != 0) return@forEach
@@ -680,7 +712,7 @@ class PdfPageReflowService(
       }
 
       val region = imageRegionFromTiles(minTileX, minTileY, maxTileX, maxTileY, tileSize, roi)
-      if (isLikelyImageRegion(region, roi, componentTiles, componentColoredTiles, componentDenseTiles, componentTexturedTiles, minTileX, minTileY, maxTileX, maxTileY)) {
+      if (isLikelyImageRegion(region, roi, componentTiles, componentColoredTiles, componentDenseTiles, componentTexturedTiles, componentLineArtTiles, minTileX, minTileY, maxTileX, maxTileY)) {
         regions += region
       }
     }
@@ -724,6 +756,7 @@ class PdfPageReflowService(
     componentColoredTiles: Int,
     componentDenseTiles: Int,
     componentTexturedTiles: Int,
+    componentLineArtTiles: Int,
     minTileX: Int,
     minTileY: Int,
     maxTileX: Int,
@@ -734,13 +767,19 @@ class PdfPageReflowService(
     val coloredRatio = componentColoredTiles.toDouble() / max(1, componentTiles)
     val denseRatio = componentDenseTiles.toDouble() / max(1, componentTiles)
     val texturedRatio = componentTexturedTiles.toDouble() / max(1, componentTiles)
+    val lineArtRatio = componentLineArtTiles.toDouble() / max(1, componentTiles)
     val roiArea = max(1, roi.w * roi.h)
     val areaRatio = region.w * region.h.toDouble() / roiArea
     val minWidth = max(44.0, roi.w * 0.08)
     val minHeight = max(36.0, roi.h * 0.04)
     val spansTextColumn = region.w >= minWidth && region.h >= minHeight
     val colorImage = coloredRatio >= 0.22 && areaRatio >= 0.008 && fillRatio >= 0.16
-    return spansTextColumn && colorImage
+    val lineArtImage =
+      componentLineArtTiles >= 3 &&
+        lineArtRatio >= 0.18 &&
+        fillRatio >= 0.08 &&
+        areaRatio >= 0.006
+    return spansTextColumn && (colorImage || lineArtImage)
   }
 
   private fun mergeImageRegions(regions: List<Roi>): List<Roi> {
