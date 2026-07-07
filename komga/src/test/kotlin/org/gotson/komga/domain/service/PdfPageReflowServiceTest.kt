@@ -211,6 +211,46 @@ class PdfPageReflowServiceTest {
   }
 
   @Test
+  fun `given two color images separated by text when reflowing page then middle text is not preserved as image`() {
+    val pageBytes = twoColorImagesWithMiddleTextPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+        cropRegions = listOf(PdfPageReflowRegion(x = 0, y = 0, w = 320, h = 420)),
+      )
+
+    val images = response.items.filter { it.type == "image" }
+    val wordBlocks = response.items.filter { it.type == "word" }
+
+    assertThat(images).hasSize(2)
+    assertThat(images.maxOf { it.h ?: 0 }).isLessThan(135)
+    assertThat(wordBlocks).hasSizeGreaterThanOrEqualTo(12)
+  }
+
+  @Test
+  fun `given colored decorated text page when reflowing page then page is not preserved as image`() {
+    val pageBytes = coloredDecoratedTextPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+        cropRegions = listOf(PdfPageReflowRegion(x = 0, y = 0, w = 320, h = 420)),
+      )
+
+    assertThat(response.items.filter { it.type == "image" }).isEmpty()
+    assertThat(response.items.filter { it.type == "word" }).hasSizeGreaterThanOrEqualTo(18)
+  }
+
+  @Test
   fun `given line art image between text when reflowing page then surrounding text is not preserved as image`() {
     val pageBytes = lineArtImageBetweenTextPage()
     val book = makeBook("book")
@@ -463,6 +503,69 @@ class PdfPageReflowServiceTest {
     val output = ByteArrayOutputStream()
     ImageIO.write(image, "png", output)
     return output.toByteArray()
+  }
+
+  private fun twoColorImagesWithMiddleTextPage(): ByteArray {
+    val image = BufferedImage(320, 420, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    drawTerminalScreenshot(graphics, 55, 35, 210, 95)
+    graphics.color = Color.BLACK
+    listOf(152, 178, 204, 230).forEach { y ->
+      listOf(35, 62, 89, 116, 143, 170, 197, 224, 251).forEach { x ->
+        graphics.fillRect(x, y, 14, 18)
+      }
+    }
+    drawTerminalScreenshot(graphics, 55, 285, 210, 95)
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun coloredDecoratedTextPage(): ByteArray {
+    val image = BufferedImage(320, 420, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color(224, 154, 28)
+    graphics.fillRect(78, 70, 32, 54)
+    graphics.fillRect(20, 95, 12, 120)
+    graphics.color = Color.BLACK
+    listOf(72, 98, 124, 150, 176, 202, 228, 254, 280, 306, 332).forEach { y ->
+      listOf(122, 149, 176, 203, 230, 257).forEach { x ->
+        graphics.fillRect(x, y, 13, 18)
+      }
+    }
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun drawTerminalScreenshot(
+    graphics: java.awt.Graphics2D,
+    x: Int,
+    y: Int,
+    width: Int,
+    height: Int,
+  ) {
+    graphics.color = Color(90, 90, 90)
+    graphics.fillRect(x, y, width, 14)
+    graphics.color = Color(92, 24, 62)
+    graphics.fillRect(x, y + 14, width, height - 14)
+    graphics.color = Color(230, 230, 230)
+    listOf(12, 30, 48, 66, 84, 102, 120, 138, 156).forEach { offset ->
+      graphics.fillRect(x + offset, y + 28, 10, 5)
+      graphics.fillRect(x + offset, y + 56, 10, 5)
+    }
+    graphics.color = Color(96, 178, 220)
+    graphics.fillRect(x + 12, y + 42, 86, 6)
+    graphics.color = Color(224, 182, 78)
+    graphics.fillRect(x + 12, y + 72, 114, 6)
   }
 
   private fun lineArtImageBetweenTextPage(): ByteArray {

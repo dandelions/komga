@@ -660,8 +660,10 @@ class PdfPageReflowService(
       )
     val structuralRegions = detectStructuralLineArtRegions(image, roi, threshold)
     val tightenedRegions =
-      (regions + structuralRegions).map {
-        tightenLineArtRegion(image, tightenColorImageRegion(image, it), threshold)
+      (regions + structuralRegions).flatMap { region ->
+        splitColorImageRegion(image, region).map { colorRegion ->
+          tightenLineArtRegion(image, colorRegion, threshold)
+        }
       }
     return expandImageRegions(mergeImageRegions(tightenedRegions), max(2, (tileSize * 0.6).roundToInt()), roi, image.width, image.height)
   }
@@ -1122,25 +1124,78 @@ class PdfPageReflowService(
     return if (tightened.w * tightened.h < block.w * block.h * 0.92) tightened else region
   }
 
-  private fun tightenColorImageRegion(
+  private fun splitColorImageRegion(
     image: BufferedImage,
     region: Roi,
-  ): Roi {
+  ): List<Roi> {
     val block = clampRoi(region, image.width, image.height)
-    if (block.w < 80 || block.h < 60) return region
+    if (block.w < 80 || block.h < 60) return listOf(region)
 
-    var left = block.x + block.w
-    var top = block.y + block.h
-    var right = block.x - 1
-    var bottom = block.y - 1
-    var coloredPixels = 0
-    val pixels = max(1, block.w * block.h)
-    val step = max(1, kotlin.math.sqrt(pixels / 220000.0).roundToInt())
+    val rowColorCounts = IntArray(block.h)
+    val stepX = max(1, (block.w / 700.0).roundToInt())
+    var sampledColoredPixels = 0
 
-    for (y in block.y until block.y + block.h step step) {
-      for (x in block.x until block.x + block.w step step) {
+    for (y in block.y until block.y + block.h) {
+      var count = 0
+      for (x in block.x until block.x + block.w step stepX) {
         if (!isColoredPixel(image.getRGB(x, y))) continue
-        coloredPixels++
+        count++
+      }
+      rowColorCounts[y - block.y] = count
+      sampledColoredPixels += count
+    }
+
+    if (sampledColoredPixels < 16) return listOf(region)
+
+    val minimumRowColor = max(3, (block.w / stepX * 0.018).roundToInt())
+    val maxGap = max(6, (block.h * 0.025).roundToInt())
+    val bands = mutableListOf<LineBand>()
+    var start = -1
+    var lastColor = -1
+    rowColorCounts.forEachIndexed { index, count ->
+      if (count >= minimumRowColor) {
+        if (start < 0) start = index
+        lastColor = index
+      } else if (start >= 0 && index - lastColor > maxGap) {
+        bands += LineBand(block.y + start, block.y + lastColor + 1)
+        start = -1
+      }
+    }
+    if (start >= 0) bands += LineBand(block.y + start, block.y + lastColor + 1)
+
+    val paddingX = max(8, (block.w * 0.025).roundToInt())
+    val paddingY = max(8, (block.h * 0.025).roundToInt())
+    val colorRegions =
+      bands
+        .mapNotNull { band ->
+          colorBoundsInBand(image, block, band, stepX, paddingX, paddingY)
+        }.filter { colorRegion ->
+          colorRegion.w >= max(72, (block.w * 0.20).roundToInt()) &&
+            colorRegion.h >= max(36, (block.h * 0.08).roundToInt()) &&
+            colorRegion.w * colorRegion.h >= block.w * block.h * 0.025 &&
+            colorCoverage(image, colorRegion, stepX) >= 0.22
+        }
+
+    if (colorRegions.isEmpty()) return emptyList()
+    return colorRegions
+  }
+
+  private fun colorBoundsInBand(
+    image: BufferedImage,
+    block: Roi,
+    band: LineBand,
+    stepX: Int,
+    paddingX: Int,
+    paddingY: Int,
+  ): Roi? {
+    var left = block.x + block.w
+    var top = band.end
+    var right = block.x - 1
+    var bottom = band.start - 1
+
+    for (y in band.start until band.end) {
+      for (x in block.x until block.x + block.w step stepX) {
+        if (!isColoredPixel(image.getRGB(x, y))) continue
         left = min(left, x)
         top = min(top, y)
         right = max(right, x)
@@ -1148,19 +1203,31 @@ class PdfPageReflowService(
       }
     }
 
-    if (coloredPixels < 16 || right < left || bottom < top) return region
-    val colorArea = max(1, right - left + 1) * max(1, bottom - top + 1)
-    if (colorArea < block.w * block.h * 0.08) return region
-
-    val paddingX = max(8, (block.w * 0.025).roundToInt())
-    val paddingY = max(8, (block.h * 0.025).roundToInt())
+    if (right < left || bottom < top) return null
     val x = max(block.x, left - paddingX)
     val y = max(block.y, top - paddingY)
-    val tightenedRight = min(block.x + block.w, right + paddingX + 1)
+    val tightenedRight = min(block.x + block.w, right + paddingX + stepX)
     val tightenedBottom = min(block.y + block.h, bottom + paddingY + 1)
-    val tightened = Roi(x, y, max(1, tightenedRight - x), max(1, tightenedBottom - y))
+    return Roi(x, y, max(1, tightenedRight - x), max(1, tightenedBottom - y))
+  }
 
-    return if (tightened.w * tightened.h < block.w * block.h * 0.88) tightened else region
+  private fun colorCoverage(
+    image: BufferedImage,
+    region: Roi,
+    stepX: Int,
+  ): Double {
+    var sampled = 0
+    var colored = 0
+    val stepY = max(1, (region.h / 700.0).roundToInt())
+
+    for (y in region.y until region.y + region.h step stepY) {
+      for (x in region.x until region.x + region.w step stepX) {
+        sampled++
+        if (isColoredPixel(image.getRGB(x, y))) colored++
+      }
+    }
+
+    return if (sampled == 0) 0.0 else colored.toDouble() / sampled
   }
 
   private data class AlignedTextRow(

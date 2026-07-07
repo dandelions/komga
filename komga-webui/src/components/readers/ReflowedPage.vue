@@ -2094,7 +2094,11 @@ export default Vue.extend({
 
       const regions = this.collectImageRegions(pixels, width, candidates, coloredTiles, denseTiles, texturedTiles, lineArtTiles, tileColumns, tileRows, tileSize, roi, threshold)
       const structuralRegions = this.detectStructuralLineArtRegions(pixels, width, roi, threshold)
-      const tightenedRegions = [...regions, ...structuralRegions].map(region => this.tightenLineArtRegion(pixels, width, this.tightenColorImageRegion(pixels, width, region), threshold))
+      const tightenedRegions = [...regions, ...structuralRegions].flatMap(region =>
+        this.splitColorImageRegion(pixels, width, region).map(colorRegion =>
+          this.tightenLineArtRegion(pixels, width, colorRegion, threshold),
+        ),
+      )
       return this.expandImageRegions(this.mergeImageRegions(tightenedRegions), Math.max(2, Math.round(tileSize * 0.6)), roi, width, height)
     },
     imageTileMetrics(
@@ -2511,22 +2515,76 @@ export default Vue.extend({
 
       return tightened.w * tightened.h < region.w * region.h * 0.92 ? tightened : region
     },
-    tightenColorImageRegion(pixels: Uint8ClampedArray, width: number, region: ImageRegion): ImageRegion {
-      if (region.w < 80 || region.h < 60) return region
+    splitColorImageRegion(pixels: Uint8ClampedArray, width: number, region: ImageRegion): ImageRegion[] {
+      if (region.w < 80 || region.h < 60) return [region]
       const right = region.x + region.w
       const bottom = region.y + region.h
-      let left = right
-      let top = bottom
-      let colorRight = region.x - 1
-      let colorBottom = region.y - 1
-      let coloredPixels = 0
-      const step = Math.max(1, Math.round(Math.sqrt(Math.max(1, region.w * region.h) / 220000)))
+      const stepX = Math.max(1, Math.round(region.w / 700))
+      const rowColorCounts = new Array(region.h).fill(0)
+      let sampledColoredPixels = 0
 
-      for (let y = region.y; y < bottom; y += step) {
-        for (let x = region.x; x < right; x += step) {
+      for (let y = region.y; y < bottom; y++) {
+        let count = 0
+        for (let x = region.x; x < right; x += stepX) {
           const offset = (y * width + x) * 4
           if (!this.isColoredPixel(pixels, offset)) continue
-          coloredPixels++
+          count++
+        }
+        rowColorCounts[y - region.y] = count
+        sampledColoredPixels += count
+      }
+
+      if (sampledColoredPixels < 16) return [region]
+
+      const minimumRowColor = Math.max(3, Math.round((region.w / stepX) * 0.018))
+      const maxGap = Math.max(6, Math.round(region.h * 0.025))
+      const bands = [] as Array<{start: number, end: number}>
+      let start = -1
+      let lastColor = -1
+      rowColorCounts.forEach((count, index) => {
+        if (count >= minimumRowColor) {
+          if (start < 0) start = index
+          lastColor = index
+        } else if (start >= 0 && index - lastColor > maxGap) {
+          bands.push({start: region.y + start, end: region.y + lastColor + 1})
+          start = -1
+        }
+      })
+      if (start >= 0) bands.push({start: region.y + start, end: region.y + lastColor + 1})
+
+      const paddingX = Math.max(8, Math.round(region.w * 0.025))
+      const paddingY = Math.max(8, Math.round(region.h * 0.025))
+      const colorRegions = bands
+        .map(band => this.colorBoundsInBand(pixels, width, region, band, stepX, paddingX, paddingY))
+        .filter((colorRegion): colorRegion is ImageRegion =>
+          !!colorRegion &&
+          colorRegion.w >= Math.max(72, region.w * 0.20) &&
+          colorRegion.h >= Math.max(36, region.h * 0.08) &&
+          colorRegion.w * colorRegion.h >= region.w * region.h * 0.025 &&
+          this.colorCoverage(pixels, width, colorRegion, stepX) >= 0.22,
+        )
+
+      return colorRegions
+    },
+    colorBoundsInBand(
+      pixels: Uint8ClampedArray,
+      width: number,
+      region: ImageRegion,
+      band: {start: number, end: number},
+      stepX: number,
+      paddingX: number,
+      paddingY: number,
+    ): ImageRegion | undefined {
+      const right = region.x + region.w
+      let left = right
+      let top = band.end
+      let colorRight = region.x - 1
+      let colorBottom = band.start - 1
+
+      for (let y = band.start; y < band.end; y++) {
+        for (let x = region.x; x < right; x += stepX) {
+          const offset = (y * width + x) * 4
+          if (!this.isColoredPixel(pixels, offset)) continue
           left = Math.min(left, x)
           top = Math.min(top, y)
           colorRight = Math.max(colorRight, x)
@@ -2534,19 +2592,26 @@ export default Vue.extend({
         }
       }
 
-      if (coloredPixels < 16 || colorRight < left || colorBottom < top) return region
-      const colorArea = Math.max(1, colorRight - left + 1) * Math.max(1, colorBottom - top + 1)
-      if (colorArea < region.w * region.h * 0.08) return region
-
-      const paddingX = Math.max(8, Math.round(region.w * 0.025))
-      const paddingY = Math.max(8, Math.round(region.h * 0.025))
+      if (colorRight < left || colorBottom < top) return undefined
       const x = Math.max(region.x, left - paddingX)
       const y = Math.max(region.y, top - paddingY)
-      const tightenedRight = Math.min(right, colorRight + paddingX + 1)
-      const tightenedBottom = Math.min(bottom, colorBottom + paddingY + 1)
-      const tightened = {x, y, w: Math.max(1, tightenedRight - x), h: Math.max(1, tightenedBottom - y)}
+      const tightenedRight = Math.min(region.x + region.w, colorRight + paddingX + stepX)
+      const tightenedBottom = Math.min(region.y + region.h, colorBottom + paddingY + 1)
+      return {x, y, w: Math.max(1, tightenedRight - x), h: Math.max(1, tightenedBottom - y)}
+    },
+    colorCoverage(pixels: Uint8ClampedArray, width: number, region: ImageRegion, stepX: number): number {
+      let sampled = 0
+      let colored = 0
+      const stepY = Math.max(1, Math.round(region.h / 700))
 
-      return tightened.w * tightened.h < region.w * region.h * 0.88 ? tightened : region
+      for (let y = region.y; y < region.y + region.h; y += stepY) {
+        for (let x = region.x; x < region.x + region.w; x += stepX) {
+          sampled++
+          if (this.isColoredPixel(pixels, (y * width + x) * 4)) colored++
+        }
+      }
+
+      return sampled === 0 ? 0 : colored / sampled
     },
     hasAlignedTextRows(pixels: Uint8ClampedArray, width: number, region: ImageRegion, threshold: number): boolean {
       if (region.w < 120 || region.h < 80) return false
