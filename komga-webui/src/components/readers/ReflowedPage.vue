@@ -2094,7 +2094,7 @@ export default Vue.extend({
 
       const regions = this.collectImageRegions(pixels, width, candidates, coloredTiles, denseTiles, texturedTiles, lineArtTiles, tileColumns, tileRows, tileSize, roi, threshold)
       const structuralRegions = this.detectStructuralLineArtRegions(pixels, width, roi, threshold)
-      const tightenedRegions = [...regions, ...structuralRegions].map(region => this.tightenLineArtRegion(pixels, width, region, threshold))
+      const tightenedRegions = [...regions, ...structuralRegions].map(region => this.tightenLineArtRegion(pixels, width, this.tightenColorImageRegion(pixels, width, region), threshold))
       return this.expandImageRegions(this.mergeImageRegions(tightenedRegions), Math.max(2, Math.round(tileSize * 0.6)), roi, width, height)
     },
     imageTileMetrics(
@@ -2330,6 +2330,12 @@ export default Vue.extend({
       const luma = 0.299 * pixels[offset] + 0.587 * pixels[offset + 1] + 0.114 * pixels[offset + 2]
       return alpha !== 0 && luma < threshold
     },
+    isColoredPixel(pixels: Uint8ClampedArray, offset: number): boolean {
+      if (pixels[offset + 3] === 0) return false
+      const max = Math.max(pixels[offset], pixels[offset + 1], pixels[offset + 2])
+      const min = Math.min(pixels[offset], pixels[offset + 1], pixels[offset + 2])
+      return max - min >= 28 && max > 36
+    },
     neighborImageTiles(tileX: number, tileY: number, tileColumns: number, tileRows: number): number[] {
       const neighbors = [] as number[]
       if (tileX > 0) neighbors.push(tileY * tileColumns + tileX - 1)
@@ -2504,6 +2510,43 @@ export default Vue.extend({
       const tightened = {x, y, w: Math.max(1, tightenedRight - x), h: Math.max(1, tightenedBottom - y)}
 
       return tightened.w * tightened.h < region.w * region.h * 0.92 ? tightened : region
+    },
+    tightenColorImageRegion(pixels: Uint8ClampedArray, width: number, region: ImageRegion): ImageRegion {
+      if (region.w < 80 || region.h < 60) return region
+      const right = region.x + region.w
+      const bottom = region.y + region.h
+      let left = right
+      let top = bottom
+      let colorRight = region.x - 1
+      let colorBottom = region.y - 1
+      let coloredPixels = 0
+      const step = Math.max(1, Math.round(Math.sqrt(Math.max(1, region.w * region.h) / 220000)))
+
+      for (let y = region.y; y < bottom; y += step) {
+        for (let x = region.x; x < right; x += step) {
+          const offset = (y * width + x) * 4
+          if (!this.isColoredPixel(pixels, offset)) continue
+          coloredPixels++
+          left = Math.min(left, x)
+          top = Math.min(top, y)
+          colorRight = Math.max(colorRight, x)
+          colorBottom = Math.max(colorBottom, y)
+        }
+      }
+
+      if (coloredPixels < 16 || colorRight < left || colorBottom < top) return region
+      const colorArea = Math.max(1, colorRight - left + 1) * Math.max(1, colorBottom - top + 1)
+      if (colorArea < region.w * region.h * 0.08) return region
+
+      const paddingX = Math.max(8, Math.round(region.w * 0.025))
+      const paddingY = Math.max(8, Math.round(region.h * 0.025))
+      const x = Math.max(region.x, left - paddingX)
+      const y = Math.max(region.y, top - paddingY)
+      const tightenedRight = Math.min(right, colorRight + paddingX + 1)
+      const tightenedBottom = Math.min(bottom, colorBottom + paddingY + 1)
+      const tightened = {x, y, w: Math.max(1, tightenedRight - x), h: Math.max(1, tightenedBottom - y)}
+
+      return tightened.w * tightened.h < region.w * region.h * 0.88 ? tightened : region
     },
     hasAlignedTextRows(pixels: Uint8ClampedArray, width: number, region: ImageRegion, threshold: number): boolean {
       if (region.w < 120 || region.h < 80) return false
@@ -3960,7 +4003,11 @@ export default Vue.extend({
       sliceContext.imageSmoothingQuality = 'high'
       this.fillWordSliceBackground(sliceContext, source.w, source.h)
       sliceContext.drawImage(sourceCanvas, source.x, source.y, source.w, source.h, 0, 0, source.w, source.h)
-      if (this.shouldNormalizeImageSliceForDisplay(sliceContext, source.w, source.h)) this.finishWordSlice(sliceContext, source.w, source.h)
+      if (this.darkDisplay) {
+        this.normalizeImageSliceForDarkDisplay(sliceContext, source.w, source.h)
+      } else if (this.shouldNormalizeImageSliceForDisplay(sliceContext, source.w, source.h)) {
+        this.finishWordSlice(sliceContext, source.w, source.h)
+      }
       return {
         ...source,
         type: 'image',
@@ -3991,6 +4038,91 @@ export default Vue.extend({
       }
 
       return sampled > 0 && colored / sampled <= 0.03
+    },
+    normalizeImageSliceForDarkDisplay(context: CanvasRenderingContext2D, width: number, height: number) {
+      const imageData = context.getImageData(0, 0, width, height)
+      const data = imageData.data
+      const background = this.edgeLightBackgroundMask(data, width, height)
+      const foreground = new Uint8Array(width * height)
+      const threshold = Math.min(120, Math.floor(this.clampNumber(this.options.threshold, 50, 230, THRESHOLD) / 2))
+
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const index = y * width + x
+          if (background[index]) continue
+          const offset = index * 4
+          if (this.isDarkNeutralImagePixel(data, offset, threshold) && this.hasMaskedNeighbor(background, width, height, x, y, 2)) foreground[index] = 1
+        }
+      }
+
+      for (let i = 0; i < width * height; i++) {
+        const offset = i * 4
+        if (background[i]) {
+          data[offset] = 0
+          data[offset + 1] = 0
+          data[offset + 2] = 0
+          data[offset + 3] = 255
+        } else if (foreground[i]) {
+          data[offset] = 255
+          data[offset + 1] = 255
+          data[offset + 2] = 255
+          data[offset + 3] = 255
+        }
+      }
+
+      context.putImageData(imageData, 0, 0)
+    },
+    edgeLightBackgroundMask(data: Uint8ClampedArray, width: number, height: number): Uint8Array {
+      const mask = new Uint8Array(width * height)
+      const queue = [] as number[]
+      const enqueue = (x: number, y: number) => {
+        if (x < 0 || x >= width || y < 0 || y >= height) return
+        const index = y * width + x
+        if (mask[index] || !this.isLightNeutralImagePixel(data, index * 4)) return
+        mask[index] = 1
+        queue.push(index)
+      }
+
+      for (let x = 0; x < width; x++) {
+        enqueue(x, 0)
+        enqueue(x, height - 1)
+      }
+      for (let y = 1; y < height - 1; y++) {
+        enqueue(0, y)
+        enqueue(width - 1, y)
+      }
+
+      for (let cursor = 0; cursor < queue.length; cursor++) {
+        const index = queue[cursor]
+        const x = index % width
+        const y = Math.floor(index / width)
+        enqueue(x - 1, y)
+        enqueue(x + 1, y)
+        enqueue(x, y - 1)
+        enqueue(x, y + 1)
+      }
+
+      return mask
+    },
+    hasMaskedNeighbor(mask: Uint8Array, width: number, height: number, x: number, y: number, radius: number): boolean {
+      for (let yy = Math.max(0, y - radius); yy <= Math.min(height - 1, y + radius); yy++) {
+        for (let xx = Math.max(0, x - radius); xx <= Math.min(width - 1, x + radius); xx++) {
+          if (mask[yy * width + xx]) return true
+        }
+      }
+      return false
+    },
+    isLightNeutralImagePixel(data: Uint8ClampedArray, offset: number): boolean {
+      if (data[offset + 3] === 0) return false
+      const max = Math.max(data[offset], data[offset + 1], data[offset + 2])
+      const min = Math.min(data[offset], data[offset + 1], data[offset + 2])
+      return max - min <= 24 && this.pixelLuma(data, offset) >= 214
+    },
+    isDarkNeutralImagePixel(data: Uint8ClampedArray, offset: number, threshold: number): boolean {
+      if (data[offset + 3] === 0) return false
+      const max = Math.max(data[offset], data[offset + 1], data[offset + 2])
+      const min = Math.min(data[offset], data[offset + 1], data[offset + 2])
+      return max - min <= 32 && this.pixelLuma(data, offset) <= threshold
     },
     scaledImageDimensions(sourceWidth: number, sourceHeight: number): {width: number, height: number} {
       const width = Math.max(1, sourceWidth)

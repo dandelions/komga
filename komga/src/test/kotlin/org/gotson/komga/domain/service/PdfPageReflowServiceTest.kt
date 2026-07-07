@@ -190,6 +190,27 @@ class PdfPageReflowServiceTest {
   }
 
   @Test
+  fun `given dark display color image when reflowing page then edge white background becomes dark`() {
+    val pageBytes = colorImageWithCaptionPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(darkDisplay = true),
+        cropRegions = listOf(PdfPageReflowRegion(x = 0, y = 0, w = 260, h = 210)),
+      )
+
+    val image = firstImageBlock(response)
+
+    assertThat(response.items.filter { it.type == "word" }).isNotEmpty
+    assertThat(darkPixelCount(image)).isGreaterThan(image.width * image.height / 3)
+    assertThat(image.getRGB(1, 1) and 0x00ffffff).isEqualTo(0)
+  }
+
+  @Test
   fun `given line art image between text when reflowing page then surrounding text is not preserved as image`() {
     val pageBytes = lineArtImageBetweenTextPage()
     val book = makeBook("book")
@@ -420,6 +441,30 @@ class PdfPageReflowServiceTest {
     return output.toByteArray()
   }
 
+  private fun colorImageWithCaptionPage(): ByteArray {
+    val image = BufferedImage(260, 210, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color(86, 28, 62)
+    graphics.fillRect(45, 35, 170, 90)
+    graphics.color = Color(92, 92, 92)
+    graphics.fillRect(45, 28, 170, 14)
+    graphics.color = Color(230, 230, 230)
+    listOf(56, 74, 92, 110, 128, 146).forEach { x -> graphics.fillRect(x, 55, 10, 5) }
+    graphics.color = Color(104, 170, 220)
+    graphics.fillRect(56, 72, 62, 7)
+    graphics.color = Color(224, 184, 72)
+    graphics.fillRect(56, 91, 82, 7)
+    graphics.color = Color.BLACK
+    listOf(78, 104, 130, 156).forEach { x -> graphics.fillRect(x, 150, 12, 18) }
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
   private fun lineArtImageBetweenTextPage(): ByteArray {
     val image = BufferedImage(520, 560, BufferedImage.TYPE_INT_RGB)
     val graphics = image.createGraphics()
@@ -573,6 +618,12 @@ class PdfPageReflowServiceTest {
 
   private fun firstWordImage(response: PdfPageReflowDto): BufferedImage {
     val dataUrl = response.items.first { it.type == "word" }.src!!
+    val bytes = Base64.getDecoder().decode(dataUrl.substringAfter(","))
+    return ImageIO.read(ByteArrayInputStream(bytes))
+  }
+
+  private fun firstImageBlock(response: PdfPageReflowDto): BufferedImage {
+    val dataUrl = response.items.first { it.type == "image" }.src!!
     val bytes = Base64.getDecoder().decode(dataUrl.substringAfter(","))
     return ImageIO.read(ByteArrayInputStream(bytes))
   }

@@ -659,7 +659,10 @@ class PdfPageReflowService(
         roi = roi,
       )
     val structuralRegions = detectStructuralLineArtRegions(image, roi, threshold)
-    val tightenedRegions = (regions + structuralRegions).map { tightenLineArtRegion(image, it, threshold) }
+    val tightenedRegions =
+      (regions + structuralRegions).map {
+        tightenLineArtRegion(image, tightenColorImageRegion(image, it), threshold)
+      }
     return expandImageRegions(mergeImageRegions(tightenedRegions), max(2, (tileSize * 0.6).roundToInt()), roi, image.width, image.height)
   }
 
@@ -1117,6 +1120,47 @@ class PdfPageReflowService(
     val tightened = Roi(x, y, max(1, right - x), max(1, bottom - y))
 
     return if (tightened.w * tightened.h < block.w * block.h * 0.92) tightened else region
+  }
+
+  private fun tightenColorImageRegion(
+    image: BufferedImage,
+    region: Roi,
+  ): Roi {
+    val block = clampRoi(region, image.width, image.height)
+    if (block.w < 80 || block.h < 60) return region
+
+    var left = block.x + block.w
+    var top = block.y + block.h
+    var right = block.x - 1
+    var bottom = block.y - 1
+    var coloredPixels = 0
+    val pixels = max(1, block.w * block.h)
+    val step = max(1, kotlin.math.sqrt(pixels / 220000.0).roundToInt())
+
+    for (y in block.y until block.y + block.h step step) {
+      for (x in block.x until block.x + block.w step step) {
+        if (!isColoredPixel(image.getRGB(x, y))) continue
+        coloredPixels++
+        left = min(left, x)
+        top = min(top, y)
+        right = max(right, x)
+        bottom = max(bottom, y)
+      }
+    }
+
+    if (coloredPixels < 16 || right < left || bottom < top) return region
+    val colorArea = max(1, right - left + 1) * max(1, bottom - top + 1)
+    if (colorArea < block.w * block.h * 0.08) return region
+
+    val paddingX = max(8, (block.w * 0.025).roundToInt())
+    val paddingY = max(8, (block.h * 0.025).roundToInt())
+    val x = max(block.x, left - paddingX)
+    val y = max(block.y, top - paddingY)
+    val tightenedRight = min(block.x + block.w, right + paddingX + 1)
+    val tightenedBottom = min(block.y + block.h, bottom + paddingY + 1)
+    val tightened = Roi(x, y, max(1, tightenedRight - x), max(1, tightenedBottom - y))
+
+    return if (tightened.w * tightened.h < block.w * block.h * 0.88) tightened else region
   }
 
   private data class AlignedTextRow(
@@ -2444,10 +2488,10 @@ class PdfPageReflowService(
     val block = clampRoi(roi, image.width, image.height)
     if (block.w < 2 || block.h < 2) return null
     val slice =
-      if (shouldNormalizeImageRegionForDisplay(image, block, options)) {
-        copySlice(image, block, options)
-      } else {
-        copyOriginalSlice(image, block)
+      when {
+        options.darkDisplay -> copyDarkDisplayImageSlice(image, block, options)
+        shouldNormalizeImageRegionForDisplay(image, block, options) -> copySlice(image, block, options)
+        else -> copyOriginalSlice(image, block)
       }
     val maxWidth = max(1, options.targetWidth - 32).toDouble()
     val scale = min(textScale, maxWidth / block.w)
@@ -2504,6 +2548,103 @@ class PdfPageReflowService(
 
     if (sampled == 0) return false
     return colored.toDouble() / sampled <= 0.03
+  }
+
+  private fun copyDarkDisplayImageSlice(
+    image: BufferedImage,
+    roi: Roi,
+    options: PdfPageReflowOptions,
+  ): BufferedImage {
+    val output = copyOriginalSlice(image, roi)
+    normalizeImageSliceForDarkDisplay(output, options)
+    return output
+  }
+
+  private fun normalizeImageSliceForDarkDisplay(
+    image: BufferedImage,
+    options: PdfPageReflowOptions,
+  ) {
+    val width = image.width
+    val height = image.height
+    if (width <= 0 || height <= 0) return
+
+    val background = detectEdgeLightBackgroundMask(image)
+    val foreground = BooleanArray(width * height)
+    val threshold = min(120, clamp(options.threshold, 50, 230) / 2)
+
+    for (y in 0 until height) {
+      for (x in 0 until width) {
+        val index = y * width + x
+        if (background[index]) continue
+        val rgb = image.getRGB(x, y)
+        if (isDarkNeutralPixel(rgb, threshold) && hasNeighbor(background, width, height, x, y, 2)) foreground[index] = true
+      }
+    }
+
+    for (y in 0 until height) {
+      for (x in 0 until width) {
+        val index = y * width + x
+        when {
+          background[index] -> image.setRGB(x, y, Color.BLACK.rgb)
+          foreground[index] -> image.setRGB(x, y, Color.WHITE.rgb)
+        }
+      }
+    }
+  }
+
+  private fun detectEdgeLightBackgroundMask(image: BufferedImage): BooleanArray {
+    val width = image.width
+    val height = image.height
+    val mask = BooleanArray(width * height)
+    val queue = ArrayDeque<Int>()
+
+    fun enqueue(
+      x: Int,
+      y: Int,
+    ) {
+      if (x !in 0 until width || y !in 0 until height) return
+      val index = y * width + x
+      if (mask[index] || !isLightNeutralPixel(image.getRGB(x, y))) return
+      mask[index] = true
+      queue += index
+    }
+
+    for (x in 0 until width) {
+      enqueue(x, 0)
+      enqueue(x, height - 1)
+    }
+    for (y in 1 until height - 1) {
+      enqueue(0, y)
+      enqueue(width - 1, y)
+    }
+
+    while (queue.isNotEmpty()) {
+      val index = queue.removeFirst()
+      val x = index % width
+      val y = index / width
+      enqueue(x - 1, y)
+      enqueue(x + 1, y)
+      enqueue(x, y - 1)
+      enqueue(x, y + 1)
+    }
+
+    return mask
+  }
+
+  private fun hasNeighbor(
+    mask: BooleanArray,
+    width: Int,
+    height: Int,
+    x: Int,
+    y: Int,
+    radius: Int,
+  ): Boolean {
+    for (yy in max(0, y - radius)..min(height - 1, y + radius)) {
+      for (xx in max(0, x - radius)..min(width - 1, x + radius)) {
+        if (mask[yy * width + xx]) return true
+      }
+    }
+    return false
   }
 
   private fun copySlice(
@@ -2956,6 +3097,42 @@ class PdfPageReflowService(
     val alpha = rgb ushr 24 and 0xff
     if (alpha == 0) return false
     return pixelLuma(rgb) < threshold
+  }
+
+  private fun isColoredPixel(rgb: Int): Boolean {
+    val alpha = rgb ushr 24 and 0xff
+    if (alpha == 0) return false
+    val red = rgb ushr 16 and 0xff
+    val green = rgb ushr 8 and 0xff
+    val blue = rgb and 0xff
+    val maxChannel = max(red, max(green, blue))
+    val minChannel = min(red, min(green, blue))
+    return maxChannel - minChannel >= 28 && maxChannel > 36
+  }
+
+  private fun isLightNeutralPixel(rgb: Int): Boolean {
+    val alpha = rgb ushr 24 and 0xff
+    if (alpha == 0) return false
+    val red = rgb ushr 16 and 0xff
+    val green = rgb ushr 8 and 0xff
+    val blue = rgb and 0xff
+    val maxChannel = max(red, max(green, blue))
+    val minChannel = min(red, min(green, blue))
+    return maxChannel - minChannel <= 24 && pixelLuma(rgb) >= 214.0
+  }
+
+  private fun isDarkNeutralPixel(
+    rgb: Int,
+    threshold: Int,
+  ): Boolean {
+    val alpha = rgb ushr 24 and 0xff
+    if (alpha == 0) return false
+    val red = rgb ushr 16 and 0xff
+    val green = rgb ushr 8 and 0xff
+    val blue = rgb and 0xff
+    val maxChannel = max(red, max(green, blue))
+    val minChannel = min(red, min(green, blue))
+    return maxChannel - minChannel <= 32 && pixelLuma(rgb) <= threshold
   }
 
   private fun pixelLuma(rgb: Int): Double {
