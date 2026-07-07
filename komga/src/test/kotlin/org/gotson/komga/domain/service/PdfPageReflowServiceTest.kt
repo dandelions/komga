@@ -286,6 +286,24 @@ class PdfPageReflowServiceTest {
   }
 
   @Test
+  fun `given short heading line when reflowing page then next line keeps default paragraph indent`() {
+    val pageBytes = horizontalShortHeadingParagraphPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+      )
+
+    val indent = response.items.first { it.type == "indent" }
+    assertThat(response.items.map { it.type }).containsSubsequence("break", "indent", "word")
+    assertThat(indent.sourceWidth).isGreaterThanOrEqualTo(16)
+  }
+
+  @Test
   fun `given vertical line with long tail blank when reflowing page then next line starts a paragraph`() {
     val pageBytes = verticalParagraphPage()
     val book = makeBook("book")
@@ -481,6 +499,21 @@ class PdfPageReflowServiceTest {
       graphics.fillRect(x, 30, 12, 18)
       graphics.fillRect(x + secondLineIndent, 86, 12, 18)
     }
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun horizontalShortHeadingParagraphPage(): ByteArray {
+    val image = BufferedImage(180, 150, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color.BLACK
+    listOf(30, 56).forEach { x -> graphics.fillRect(x, 30, 12, 18) }
+    listOf(30, 56, 82, 108).forEach { x -> graphics.fillRect(x, 86, 12, 18) }
     graphics.dispose()
 
     val output = ByteArrayOutputStream()

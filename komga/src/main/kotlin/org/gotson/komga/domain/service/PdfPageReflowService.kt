@@ -1344,8 +1344,20 @@ class PdfPageReflowService(
     val imageSlots = horizontalImageSlots(imageRegions, lines)
     lines.forEachIndexed { index, line ->
       appendImageItems(items, image, imageSlots[index], options, textScale)
-      val startParagraph = isHorizontalParagraphStart(line, lines.getOrNull(index - 1))
-      val indent = if (startParagraph) horizontalLineIndentSourceWidth(line) else 0
+      val previousLine = lines.getOrNull(index - 1)
+      val previousBlankCue = previousLine?.let { hasHorizontalParagraphBlankCue(it, glyphHeight) } ?: false
+      val startParagraph = isHorizontalParagraphStart(line, previousLine) || previousBlankCue
+      val indent =
+        if (startParagraph) {
+          val lineIndent = horizontalLineIndentSourceWidth(line)
+          when {
+            lineIndent > 0 -> lineIndent
+            previousBlankCue -> horizontalParagraphIndentSourceWidth(line, glyphHeight)
+            else -> 0
+          }
+        } else {
+          0
+        }
 
       if (startParagraph && items.isNotEmpty()) appendBreakIfNeeded(items)
       if (indent > 0) items += horizontalIndentItem(indent, options, textScale)
@@ -1398,6 +1410,41 @@ class PdfPageReflowService(
     val rawIndent = rawHorizontalLineIndent(line)
     val indentThreshold = max(8.0, first.h * 0.3)
     return if (rawIndent < indentThreshold) 0 else rawIndent
+  }
+
+  private fun horizontalParagraphIndentSourceWidth(
+    line: HorizontalTextLine,
+    glyphHeight: Double,
+  ): Int =
+    max(
+      8.0,
+      horizontalCharacterSourceWidth(line.blocks).takeIf { it > 0 } ?: glyphHeight,
+    ).times(2.0).roundToInt()
+
+  private fun horizontalCharacterSourceWidth(blocks: List<Roi>): Double {
+    val widths =
+      blocks
+        .filter { it.w >= 2 && it.h >= 2 && !isRuleLikeBlock(it) }
+        .map { min(it.w.toDouble(), max(it.h * 1.8, it.h + 4.0)) }
+    return max(8.0, medianNumber(widths))
+  }
+
+  private fun hasHorizontalParagraphBlankCue(
+    line: HorizontalTextLine,
+    glyphHeight: Double,
+  ): Boolean {
+    val blocks = line.blocks.filter { it.w >= 2 && it.h >= 2 && !isRuleLikeBlock(it) }.sortedBy { it.x }
+    if (blocks.isEmpty()) return false
+
+    val glyphWidth = max(8.0, horizontalCharacterSourceWidth(blocks).takeIf { it > 0 } ?: glyphHeight)
+    val blankThreshold = max(12.0, glyphWidth * 2.0)
+    val last = blocks.last()
+    val trailingBlank = line.column.end - (last.x + last.w)
+    if (trailingBlank >= blankThreshold) return true
+
+    return blocks.zipWithNext().any { (left, right) ->
+      right.x - (left.x + left.w) >= blankThreshold
+    }
   }
 
   private fun horizontalImageSlots(

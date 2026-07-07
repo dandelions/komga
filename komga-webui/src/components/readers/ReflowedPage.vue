@@ -3837,8 +3837,14 @@ export default Vue.extend({
       const imageSlots = this.horizontalImageSlots(imageRegions, lines)
       lines.forEach((line, index) => {
         this.appendImageItems(rendered, sourceCanvas, sliceCanvas, sliceContext, imageSlots[index])
-        const startParagraph = this.isParagraphStart(line, lines[index - 1])
-        const indent = startParagraph ? this.lineIndentSourceWidth(line) : 0
+        const previousLine = lines[index - 1]
+        const previousBlankCue = previousLine ? this.hasHorizontalParagraphBlankCue(previousLine, glyphHeight) : false
+        const startParagraph = this.isParagraphStart(line, previousLine) || previousBlankCue
+        let indent = 0
+        if (startParagraph) {
+          const lineIndent = this.lineIndentSourceWidth(line)
+          indent = lineIndent > 0 ? lineIndent : (previousBlankCue ? this.horizontalParagraphIndentSourceWidth(line, glyphHeight) : 0)
+        }
         if (startParagraph && rendered.length > 0) this.appendBreakIfNeeded(rendered)
         if (indent > 0) rendered.push({type: 'indent', sourceWidth: indent, width: this.scaledIndentWidth(indent)})
 
@@ -4270,6 +4276,35 @@ export default Vue.extend({
       const indentThreshold = Math.max(MIN_INDENT, firstWord.h * 0.3)
       if (rawIndent < indentThreshold) return 0
       return rawIndent
+    },
+    horizontalParagraphIndentSourceWidth(line: WordLine, glyphHeight: number): number {
+      const glyphWidth = Math.max(8, this.horizontalCharacterSourceWidth(line.words) || glyphHeight)
+      return Math.round(glyphWidth * 2)
+    },
+    horizontalCharacterSourceWidth(words: WordBlock[]): number {
+      const widths = words
+        .filter(word => word.w >= 2 && word.h >= 2 && !this.isRuleLikeBlock(word))
+        .map(word => Math.min(word.w, Math.max(word.h * 1.8, word.h + 4)))
+      if (widths.length === 0) return 0
+      return Math.max(8, this.medianNumber(widths))
+    },
+    hasHorizontalParagraphBlankCue(line: WordLine, glyphHeight: number): boolean {
+      const words = line.words
+        .filter(word => word.w >= 2 && word.h >= 2 && !this.isRuleLikeBlock(word))
+        .slice()
+        .sort((a, b) => a.x - b.x)
+      if (words.length === 0) return false
+
+      const glyphWidth = Math.max(8, this.horizontalCharacterSourceWidth(words) || glyphHeight)
+      const blankThreshold = Math.max(12, glyphWidth * 2)
+      const lastWord = words[words.length - 1]
+      const trailingBlank = line.column.end - (lastWord.x + lastWord.w)
+      if (trailingBlank >= blankThreshold) return true
+
+      return words.some((word, index) => {
+        const nextWord = words[index + 1]
+        return nextWord ? nextWord.x - (word.x + word.w) >= blankThreshold : false
+      })
     },
     scaledIndentWidth(sourceWidth: number): number {
       const maxIndent = Math.max(0, (this.targetWidth - 32) * 0.45)
