@@ -2056,7 +2056,7 @@ export default Vue.extend({
       })
 
       return {
-        lines: this.filterHorizontalNoiseLines(wordLines, isInk),
+        lines: this.normalizeHorizontalTextColumns(this.filterHorizontalNoiseLines(wordLines, isInk)),
         imageRegions,
       }
     },
@@ -3664,6 +3664,29 @@ export default Vue.extend({
           words: this.filterNoiseBlocks(line.words, glyphSize, isInk, true),
         }))
         .filter(line => line.words.length > 0)
+    },
+    normalizeHorizontalTextColumns(lines: WordLine[]): WordLine[] {
+      if (lines.length === 0) return lines
+      const boundsByColumn = new Map<string, Column>()
+
+      lines.forEach(line => {
+        const key = `${line.column.start}:${line.column.end}`
+        line.words
+          .filter(word => word.w >= 2 && word.h >= 2 && !this.isRuleLikeBlock(word))
+          .forEach(word => {
+            const left = word.x
+            const right = word.x + word.w
+            const bounds = boundsByColumn.get(key)
+            boundsByColumn.set(key, bounds
+              ? {start: Math.min(bounds.start, left), end: Math.max(bounds.end, right)}
+              : {start: left, end: right})
+          })
+      })
+
+      return lines.map(line => {
+        const bounds = boundsByColumn.get(`${line.column.start}:${line.column.end}`)
+        return bounds ? {...line, column: bounds} : line
+      })
     },
     filterVerticalNoiseLines(lines: WordLine[], isInk: (x: number, y: number) => boolean): WordLine[] {
       const blocks = lines.flatMap(line => line.words)

@@ -304,6 +304,24 @@ class PdfPageReflowServiceTest {
   }
 
   @Test
+  fun `given wide crop around short lines when reflowing page then crop edge does not create paragraph`() {
+    val pageBytes = horizontalShortLinesPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+        cropRegions = listOf(PdfPageReflowRegion(x = 0, y = 0, w = 180, h = 150)),
+      )
+
+    assertThat(response.items.count { it.type == "break" }).isEqualTo(0)
+    assertThat(response.items.filter { it.type == "indent" }).isEmpty()
+  }
+
+  @Test
   fun `given vertical line with long tail blank when reflowing page then next line starts a paragraph`() {
     val pageBytes = verticalParagraphPage()
     val book = makeBook("book")
@@ -514,6 +532,23 @@ class PdfPageReflowServiceTest {
     graphics.color = Color.BLACK
     listOf(30, 56).forEach { x -> graphics.fillRect(x, 30, 12, 18) }
     listOf(30, 56, 82, 108).forEach { x -> graphics.fillRect(x, 86, 12, 18) }
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun horizontalShortLinesPage(): ByteArray {
+    val image = BufferedImage(180, 150, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color.BLACK
+    listOf(30, 56).forEach { x ->
+      graphics.fillRect(x, 30, 12, 18)
+      graphics.fillRect(x, 86, 12, 18)
+    }
     graphics.dispose()
 
     val output = ByteArrayOutputStream()

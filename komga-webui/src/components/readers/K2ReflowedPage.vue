@@ -499,7 +499,7 @@ export default Vue.extend({
         const roi = this.detectRoi(ink, detectionSource.canvas.width, detectionSource.canvas.height, detectionSource.scale)
         const columns = this.detectColumns(ink, detectionSource.canvas.width, detectionSource.canvas.height, roi)
         const detectedLines = this.detectWordLines(ink, detectionSource.canvas.width, detectionSource.canvas.height, columns)
-        const lines = this.scaleWordLines(detectedLines, detectionSource.scale, canvas.width, canvas.height)
+        const lines = this.scaleWordLines(this.normalizeHorizontalTextColumns(detectedLines), detectionSource.scale, canvas.width, canvas.height)
         const scaledImageRegions = this.scaleImageRegions(imageRegions, detectionSource.scale, canvas.width, canvas.height)
         if (requestId !== this.requestId) return
 
@@ -1275,6 +1275,29 @@ export default Vue.extend({
       })
 
       return wordLines
+    },
+    normalizeHorizontalTextColumns(lines: WordLine[]): WordLine[] {
+      if (lines.length === 0) return lines
+      const boundsByColumn = new Map<string, Column>()
+
+      lines.forEach(line => {
+        const key = `${line.column.start}:${line.column.end}`
+        line.words
+          .filter(word => word.w >= 2 && word.h >= 2)
+          .forEach(word => {
+            const left = word.x
+            const right = word.x + word.w
+            const bounds = boundsByColumn.get(key)
+            boundsByColumn.set(key, bounds
+              ? {start: Math.min(bounds.start, left), end: Math.max(bounds.end, right)}
+              : {start: left, end: right})
+          })
+      })
+
+      return lines.map(line => {
+        const bounds = boundsByColumn.get(`${line.column.start}:${line.column.end}`)
+        return bounds ? {...line, column: {...line.column, start: bounds.start, end: bounds.end}} : line
+      })
     },
     detectRows(ink: Uint8Array, width: number, height: number, column: Column): TextRow[] {
       const roi = column.roi

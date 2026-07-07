@@ -1335,11 +1335,12 @@ class PdfPageReflowService(
         }
       }
     val glyphHeight = horizontalCharacterSourceHeight(detectedLines.flatMap { it.blocks })
-    val lines =
+    val filteredLines =
       detectedLines.mapNotNull { line ->
         val blocks = filterNoiseBlocks(line.blocks, glyphHeight, image, ink, options, horizontal = true)
         if (blocks.isEmpty()) null else line.copy(blocks = blocks)
       }
+    val lines = normalizeHorizontalTextColumns(filteredLines)
 
     val imageSlots = horizontalImageSlots(imageRegions, lines)
     lines.forEachIndexed { index, line ->
@@ -1410,6 +1411,34 @@ class PdfPageReflowService(
     val rawIndent = rawHorizontalLineIndent(line)
     val indentThreshold = max(8.0, first.h * 0.3)
     return if (rawIndent < indentThreshold) 0 else rawIndent
+  }
+
+  private fun normalizeHorizontalTextColumns(lines: List<HorizontalTextLine>): List<HorizontalTextLine> {
+    if (lines.isEmpty()) return lines
+    val boundsByColumn =
+      lines
+        .groupBy { it.column }
+        .mapValues { (_, columnLines) -> horizontalTextBounds(columnLines) }
+
+    return lines.map { line ->
+      boundsByColumn[line.column]?.let { bounds -> line.copy(column = bounds) } ?: line
+    }
+  }
+
+  private fun horizontalTextBounds(lines: List<HorizontalTextLine>): LineBand? {
+    var left = Int.MAX_VALUE
+    var right = 0
+
+    lines.forEach { line ->
+      line.blocks.forEach { block ->
+        if (isRuleLikeBlock(block)) return@forEach
+        left = min(left, block.x)
+        right = max(right, block.x + block.w)
+      }
+    }
+
+    if (left == Int.MAX_VALUE || right <= left) return null
+    return LineBand(left, right)
   }
 
   private fun horizontalParagraphIndentSourceWidth(
