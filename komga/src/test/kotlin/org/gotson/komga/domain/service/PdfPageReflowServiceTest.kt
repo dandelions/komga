@@ -210,6 +210,28 @@ class PdfPageReflowServiceTest {
   }
 
   @Test
+  fun `given dense gray image above text when reflowing page then image does not swallow lower text`() {
+    val pageBytes = denseGrayImageAboveTextPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+        cropRegions = listOf(PdfPageReflowRegion(x = 10, y = 10, w = 320, h = 220)),
+      )
+
+    val imageBlocks = response.items.filter { it.type == "image" }
+    val wordBlocks = response.items.filter { it.type == "word" }
+
+    assertThat(imageBlocks).hasSize(1)
+    assertThat(imageBlocks.first().h).isLessThan(150)
+    assertThat(wordBlocks).hasSizeGreaterThanOrEqualTo(4)
+  }
+
+  @Test
   fun `given dark display color image when reflowing page then edge white background becomes dark`() {
     val pageBytes = colorImageWithCaptionPage()
     val book = makeBook("book")
@@ -540,6 +562,34 @@ class PdfPageReflowServiceTest {
     graphics.fillRect(56, 91, 82, 7)
     graphics.color = Color.BLACK
     listOf(78, 104, 130, 156).forEach { x -> graphics.fillRect(x, 150, 12, 18) }
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun denseGrayImageAboveTextPage(): ByteArray {
+    val image = BufferedImage(350, 260, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color(218, 218, 218)
+    graphics.fillRect(35, 35, 170, 120)
+    graphics.color = Color.BLACK
+    listOf(64 to 58, 136 to 58, 64 to 96).forEach { (x, y) ->
+      graphics.drawRect(x, y, 34, 34)
+      graphics.drawRect(x + 6, y + 6, 22, 22)
+      graphics.fillRect(x + 13, y + 13, 8, 8)
+    }
+    for (y in 50 until 132 step 6) {
+      for (x in 52 until 188 step 6) {
+        if ((x * 13 + y * 7) % 5 != 0) graphics.fillRect(x, y, 4, 4)
+      }
+    }
+    graphics.fillRect(92, 136, 56, 8)
+    listOf(36, 62, 88, 114, 140, 166, 192, 218, 244).forEach { x -> graphics.fillRect(x, 180, 14, 18) }
+    listOf(36, 62, 88, 114, 140, 166, 192, 218, 244).forEach { x -> graphics.fillRect(x, 214, 14, 18) }
     graphics.dispose()
 
     val output = ByteArrayOutputStream()

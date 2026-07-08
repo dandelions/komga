@@ -668,7 +668,11 @@ class PdfPageReflowService(
     val tightenedRegions =
       (regions + structuralRegions).flatMap { region ->
         splitImageRegion(image, region, threshold).map { splitRegion ->
-          tightenLineArtRegion(image, splitRegion, threshold)
+          trimLowerTextAfterImageGap(
+            image,
+            tightenDenseInkCoreRegion(image, tightenDenseBackgroundRegion(image, tightenLineArtRegion(image, splitRegion, threshold), threshold), threshold),
+            threshold,
+          )
         }
       }
     return expandImageRegions(mergeImageRegions(tightenedRegions), max(2, (tileSize * 0.6).roundToInt()), roi, image.width, image.height)
@@ -992,6 +996,20 @@ class PdfPageReflowService(
     val minHeight = max(36.0, roi.h * 0.04)
     val spansTextColumn = region.w >= minWidth && region.h >= minHeight
     val colorImage = coloredRatio >= 0.22 && areaRatio >= 0.008 && fillRatio >= 0.16
+    val denseImage =
+      componentDenseTiles >= 4 &&
+        denseRatio >= 0.18 &&
+        fillRatio >= 0.12 &&
+        areaRatio >= 0.006 &&
+        hasNeutralImageBackground(image, region, threshold) &&
+        !hasAlignedTextRows(image, region, threshold)
+    val texturedImage =
+      componentTexturedTiles >= 4 &&
+        texturedRatio >= 0.22 &&
+        fillRatio >= 0.12 &&
+        areaRatio >= 0.006 &&
+        hasNeutralImageBackground(image, region, threshold) &&
+        !hasAlignedTextRows(image, region, threshold)
     val lineArtImage =
       componentLineArtTiles >= 3 &&
         lineArtRatio >= 0.18 &&
@@ -999,7 +1017,43 @@ class PdfPageReflowService(
         areaRatio >= 0.006 &&
         hasStructuralLineArt(image, region, threshold) &&
         !hasAlignedTextRows(image, region, threshold)
-    return spansTextColumn && (colorImage || lineArtImage)
+    return spansTextColumn && (colorImage || denseImage || texturedImage || lineArtImage)
+  }
+
+  private fun hasNeutralImageBackground(
+    image: BufferedImage,
+    region: Roi,
+    threshold: Int,
+  ): Boolean {
+    val block = clampRoi(region, image.width, image.height)
+    if (block.w < 80 || block.h < 60) return false
+    val pageBackgroundLuma = estimateBackgroundLuma(image, Roi(0, 0, image.width, image.height))
+    if (pageBackgroundLuma < 210.0) return false
+    val effectiveBackgroundLuma = max(pageBackgroundLuma, 245.0)
+    val inkThreshold = adaptiveInkThreshold(threshold, effectiveBackgroundLuma)
+    val minimumRowCoverage = max(8, (block.w * 0.25).roundToInt())
+    val minimumColumnCoverage = max(8, (block.h * 0.25).roundToInt())
+    val rowBand =
+      detectBands(block.y, block.y + block.h) { y ->
+        var covered = 0
+        for (x in block.x until block.x + block.w) {
+          if (isNeutralImageBackgroundPixel(image.getRGB(x, y), inkThreshold, effectiveBackgroundLuma)) covered++
+        }
+        covered >= minimumRowCoverage
+      }.maxByOrNull { it.end - it.start }
+    val columnBand =
+      detectBands(block.x, block.x + block.w) { x ->
+        var covered = 0
+        for (y in block.y until block.y + block.h) {
+          if (isNeutralImageBackgroundPixel(image.getRGB(x, y), inkThreshold, effectiveBackgroundLuma)) covered++
+        }
+        covered >= minimumColumnCoverage
+      }.maxByOrNull { it.end - it.start }
+
+    return rowBand != null &&
+      columnBand != null &&
+      rowBand.end - rowBand.start >= block.h * 0.25 &&
+      columnBand.end - columnBand.start >= block.w * 0.25
   }
 
   private fun hasStructuralLineArt(
@@ -1236,6 +1290,7 @@ class PdfPageReflowService(
     val denseRegions =
       bands
         .mapNotNull { band -> denseBoundsInColumnBand(image, block, band, inkThreshold, paddingX, paddingY) }
+        .map { denseRegion -> tightenDenseBackgroundRegion(image, denseRegion, threshold) }
         .filter { denseRegion ->
           denseRegion.w >= max(44, (block.w * 0.08).roundToInt()) &&
             denseRegion.h >= max(36, (block.h * 0.08).roundToInt()) &&
@@ -1275,6 +1330,160 @@ class PdfPageReflowService(
     val tightenedRight = min(block.x + block.w, right + paddingX + 1)
     val tightenedBottom = min(block.y + block.h, bottom + paddingY + 1)
     return Roi(x, y, max(1, tightenedRight - x), max(1, tightenedBottom - y))
+  }
+
+  private fun tightenDenseBackgroundRegion(
+    image: BufferedImage,
+    region: Roi,
+    threshold: Int,
+  ): Roi {
+    val block = clampRoi(region, image.width, image.height)
+    if (block.w < 80 || block.h < 60) return region
+
+    val pageBackgroundLuma = estimateBackgroundLuma(image, Roi(0, 0, image.width, image.height))
+    if (pageBackgroundLuma < 210.0) return region
+    val effectiveBackgroundLuma = max(pageBackgroundLuma, 245.0)
+    val inkThreshold = adaptiveInkThreshold(threshold, effectiveBackgroundLuma)
+    val minimumRowCoverage = max(8, (block.w * 0.34).roundToInt())
+    val minimumColumnCoverage = max(8, (block.h * 0.34).roundToInt())
+
+    val rowBands =
+      detectBands(block.y, block.y + block.h) { y ->
+        var covered = 0
+        for (x in block.x until block.x + block.w) {
+          if (isNeutralImageBackgroundPixel(image.getRGB(x, y), inkThreshold, effectiveBackgroundLuma)) covered++
+        }
+        covered >= minimumRowCoverage
+      }
+    val columnBands =
+      detectBands(block.x, block.x + block.w) { x ->
+        var covered = 0
+        for (y in block.y until block.y + block.h) {
+          if (isNeutralImageBackgroundPixel(image.getRGB(x, y), inkThreshold, effectiveBackgroundLuma)) covered++
+        }
+        covered >= minimumColumnCoverage
+      }
+    val rowBand = rowBands.maxByOrNull { it.end - it.start } ?: return region
+    val columnBand = columnBands.maxByOrNull { it.end - it.start } ?: return region
+    if (rowBand.end - rowBand.start < block.h * 0.35 || columnBand.end - columnBand.start < block.w * 0.35) return region
+
+    val padding = max(3, min(10, (min(block.w, block.h) * 0.025).roundToInt()))
+    val x = max(block.x, columnBand.start - padding)
+    val y = max(block.y, rowBand.start - padding)
+    val right = min(block.x + block.w, columnBand.end + padding)
+    val bottom = min(block.y + block.h, rowBand.end + padding)
+    val tightened = Roi(x, y, max(1, right - x), max(1, bottom - y))
+
+    return if (tightened.w * tightened.h < block.w * block.h * 0.96) tightened else region
+  }
+
+  private fun isNeutralImageBackgroundPixel(
+    rgb: Int,
+    inkThreshold: Int,
+    pageBackgroundLuma: Double,
+  ): Boolean {
+    val alpha = rgb ushr 24 and 0xff
+    if (alpha == 0) return false
+    val red = rgb ushr 16 and 0xff
+    val green = rgb ushr 8 and 0xff
+    val blue = rgb and 0xff
+    val maxChannel = max(red, max(green, blue))
+    val minChannel = min(red, min(green, blue))
+    val luma = pixelLuma(rgb)
+    return maxChannel - minChannel <= 18 &&
+      luma > inkThreshold + 8 &&
+      luma <= pageBackgroundLuma - 8
+  }
+
+  private fun tightenDenseInkCoreRegion(
+    image: BufferedImage,
+    region: Roi,
+    threshold: Int,
+  ): Roi {
+    val block = clampRoi(region, image.width, image.height)
+    if (block.w < 80 || block.h < 60) return region
+
+    val inkThreshold = adaptiveInkThreshold(threshold, estimateBackgroundLuma(image, block))
+    val minimumRowInk = max(12, (block.w * 0.22).roundToInt())
+    val minimumColumnInk = max(12, (block.h * 0.18).roundToInt())
+    val rowBand =
+      detectBands(block.y, block.y + block.h) { y ->
+        var count = 0
+        for (x in block.x until block.x + block.w) {
+          if (isInk(image.getRGB(x, y), inkThreshold)) count++
+        }
+        count >= minimumRowInk
+      }.maxByOrNull { it.end - it.start } ?: return region
+    val columnBand =
+      detectBands(block.x, block.x + block.w) { x ->
+        var count = 0
+        for (y in block.y until block.y + block.h) {
+          if (isInk(image.getRGB(x, y), inkThreshold)) count++
+        }
+        count >= minimumColumnInk
+      }.maxByOrNull { it.end - it.start } ?: return region
+
+    if (rowBand.end - rowBand.start < block.h * 0.28 || columnBand.end - columnBand.start < block.w * 0.28) return region
+
+    val paddingX = max(8, (block.w * 0.06).roundToInt())
+    val paddingY = max(8, (block.h * 0.06).roundToInt())
+    val x = max(block.x, columnBand.start - paddingX)
+    val y = max(block.y, rowBand.start - paddingY)
+    val right = min(block.x + block.w, columnBand.end + paddingX)
+    val bottom = min(block.y + block.h, rowBand.end + paddingY)
+    val tightened = Roi(x, y, max(1, right - x), max(1, bottom - y))
+
+    return if (tightened.w * tightened.h < block.w * block.h * 0.90) tightened else region
+  }
+
+  private fun trimLowerTextAfterImageGap(
+    image: BufferedImage,
+    region: Roi,
+    threshold: Int,
+  ): Roi {
+    val block = clampRoi(region, image.width, image.height)
+    if (block.w < 80 || block.h < 90) return region
+
+    val inkThreshold = adaptiveInkThreshold(threshold, estimateBackgroundLuma(image, block))
+    val rowInk = IntArray(block.h)
+    for (y in block.y until block.y + block.h) {
+      var count = 0
+      for (x in block.x until block.x + block.w) {
+        if (isInk(image.getRGB(x, y), inkThreshold)) count++
+      }
+      rowInk[y - block.y] = count
+    }
+
+    val denseThreshold = max(12, (block.w * 0.16).roundToInt())
+    val blankThreshold = max(2, (block.w * 0.025).roundToInt())
+    val minimumDenseRun = max(4, (block.h * 0.05).roundToInt())
+    val denseBand =
+      detectBands(0, block.h) { y -> rowInk[y] >= denseThreshold }
+        .firstOrNull { it.end - it.start >= minimumDenseRun }
+        ?: return region
+    if (denseBand.end < block.h * 0.30 || denseBand.end > block.h * 0.82) return region
+
+    val minBlankRun = max(6, (block.h * 0.035).roundToInt())
+    var blankStart = -1
+    var blankRun = 0
+    for (index in denseBand.end until block.h) {
+      if (rowInk[index] <= blankThreshold) {
+        if (blankStart < 0) blankStart = index
+        blankRun++
+        if (blankRun >= minBlankRun) {
+          val trimAt = block.y + blankStart
+          val hasLowerInk = (index + 1 until block.h).any { rowInk[it] > blankThreshold }
+          if (hasLowerInk && trimAt - block.y >= block.h * 0.35) {
+            return Roi(block.x, block.y, block.w, max(1, trimAt - block.y))
+          }
+        }
+      } else {
+        blankStart = -1
+        blankRun = 0
+      }
+    }
+
+    return region
   }
 
   private fun denseInkCoverage(

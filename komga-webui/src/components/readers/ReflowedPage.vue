@@ -2226,7 +2226,17 @@ export default Vue.extend({
       const structuralRegions = this.detectStructuralLineArtRegions(pixels, width, roi, threshold)
       const tightenedRegions = [...regions, ...structuralRegions].flatMap(region =>
         this.splitImageRegion(pixels, width, region, threshold).map(splitRegion =>
-          this.tightenLineArtRegion(pixels, width, splitRegion, threshold),
+          this.trimLowerTextAfterImageGap(
+            pixels,
+            width,
+            this.tightenDenseInkCoreRegion(
+              pixels,
+              width,
+              this.tightenDenseBackgroundRegion(pixels, width, this.tightenLineArtRegion(pixels, width, splitRegion, threshold), threshold),
+              threshold,
+            ),
+            threshold,
+          ),
         ),
       )
       return this.expandImageRegions(this.mergeImageRegions(tightenedRegions), Math.max(2, Math.round(tileSize * 0.6)), roi, width, height)
@@ -2513,6 +2523,20 @@ export default Vue.extend({
       const minHeight = Math.max(36, roi.h * 0.04)
       const spansTextColumn = region.w >= minWidth && region.h >= minHeight
       const colorImage = coloredRatio >= 0.22 && areaRatio >= 0.008 && fillRatio >= 0.16
+      const denseImage =
+        componentDenseTiles >= 4 &&
+        denseRatio >= 0.18 &&
+        fillRatio >= 0.12 &&
+        areaRatio >= 0.006 &&
+        this.hasNeutralImageBackground(pixels, width, region, threshold) &&
+        !this.hasAlignedTextRows(pixels, width, region, threshold)
+      const texturedImage =
+        componentTexturedTiles >= 4 &&
+        texturedRatio >= 0.22 &&
+        fillRatio >= 0.12 &&
+        areaRatio >= 0.006 &&
+        this.hasNeutralImageBackground(pixels, width, region, threshold) &&
+        !this.hasAlignedTextRows(pixels, width, region, threshold)
       const lineArtImage =
         componentLineArtTiles >= 3 &&
         lineArtRatio >= 0.18 &&
@@ -2520,7 +2544,35 @@ export default Vue.extend({
         areaRatio >= 0.006 &&
         this.hasStructuralLineArt(pixels, width, region, threshold) &&
         !this.hasAlignedTextRows(pixels, width, region, threshold)
-      return spansTextColumn && (colorImage || lineArtImage)
+      return spansTextColumn && (colorImage || denseImage || texturedImage || lineArtImage)
+    },
+    hasNeutralImageBackground(pixels: Uint8ClampedArray, width: number, region: ImageRegion, threshold: number): boolean {
+      if (region.w < 80 || region.h < 60) return false
+      const pageBackgroundLuma = this.estimateRegionBackgroundLuma(pixels, width, {x: 0, y: 0, w: width, h: Math.floor(pixels.length / 4 / width)})
+      if (pageBackgroundLuma < 210) return false
+      const effectiveBackgroundLuma = Math.max(pageBackgroundLuma, 245)
+      const inkThreshold = this.adaptiveInkThreshold(threshold, effectiveBackgroundLuma)
+      const minimumRowCoverage = Math.max(8, Math.round(region.w * 0.25))
+      const minimumColumnCoverage = Math.max(8, Math.round(region.h * 0.25))
+      const rowBand = this.detectIndexBands(region.y, region.y + region.h, y => {
+        let covered = 0
+        for (let x = region.x; x < region.x + region.w; x++) {
+          if (this.isNeutralImageBackgroundPixel(pixels, width, x, y, inkThreshold, effectiveBackgroundLuma)) covered++
+        }
+        return covered >= minimumRowCoverage
+      }).sort((a, b) => (b.end - b.start) - (a.end - a.start))[0]
+      const columnBand = this.detectIndexBands(region.x, region.x + region.w, x => {
+        let covered = 0
+        for (let y = region.y; y < region.y + region.h; y++) {
+          if (this.isNeutralImageBackgroundPixel(pixels, width, x, y, inkThreshold, effectiveBackgroundLuma)) covered++
+        }
+        return covered >= minimumColumnCoverage
+      }).sort((a, b) => (b.end - b.start) - (a.end - a.start))[0]
+
+      return !!rowBand &&
+        !!columnBand &&
+        rowBand.end - rowBand.start >= region.h * 0.25 &&
+        columnBand.end - columnBand.start >= region.w * 0.25
     },
     hasStructuralLineArt(pixels: Uint8ClampedArray, width: number, region: ImageRegion, threshold: number): boolean {
       const horizontalLimit = Math.max(96, Math.round(region.w * 0.22))
@@ -2736,6 +2788,7 @@ export default Vue.extend({
       const paddingY = Math.max(8, Math.round(region.h * 0.025))
       const denseRegions = bands
         .map(band => this.denseBoundsInColumnBand(pixels, width, region, band, threshold, paddingX, paddingY))
+        .map(denseRegion => denseRegion ? this.tightenDenseBackgroundRegion(pixels, width, denseRegion, threshold) : denseRegion)
         .filter((denseRegion): denseRegion is ImageRegion =>
           !!denseRegion &&
           denseRegion.w >= Math.max(44, region.w * 0.08) &&
@@ -2776,6 +2829,177 @@ export default Vue.extend({
       const tightenedRight = Math.min(region.x + region.w, denseRight + paddingX + 1)
       const tightenedBottom = Math.min(region.y + region.h, denseBottom + paddingY + 1)
       return {x, y, w: Math.max(1, tightenedRight - x), h: Math.max(1, tightenedBottom - y)}
+    },
+    tightenDenseBackgroundRegion(pixels: Uint8ClampedArray, width: number, region: ImageRegion, threshold: number): ImageRegion {
+      if (region.w < 80 || region.h < 60) return region
+
+      const pageBackgroundLuma = this.estimateRegionBackgroundLuma(pixels, width, {x: 0, y: 0, w: width, h: Math.floor(pixels.length / 4 / width)})
+      if (pageBackgroundLuma < 210) return region
+      const effectiveBackgroundLuma = Math.max(pageBackgroundLuma, 245)
+      const inkThreshold = this.adaptiveInkThreshold(threshold, effectiveBackgroundLuma)
+      const minimumRowCoverage = Math.max(8, Math.round(region.w * 0.34))
+      const minimumColumnCoverage = Math.max(8, Math.round(region.h * 0.34))
+      const rowBands = this.detectIndexBands(region.y, region.y + region.h, y => {
+        let covered = 0
+        for (let x = region.x; x < region.x + region.w; x++) {
+          if (this.isNeutralImageBackgroundPixel(pixels, width, x, y, inkThreshold, effectiveBackgroundLuma)) covered++
+        }
+        return covered >= minimumRowCoverage
+      })
+      const columnBands = this.detectIndexBands(region.x, region.x + region.w, x => {
+        let covered = 0
+        for (let y = region.y; y < region.y + region.h; y++) {
+          if (this.isNeutralImageBackgroundPixel(pixels, width, x, y, inkThreshold, effectiveBackgroundLuma)) covered++
+        }
+        return covered >= minimumColumnCoverage
+      })
+      const rowBand = rowBands.slice().sort((a, b) => (b.end - b.start) - (a.end - a.start))[0]
+      const columnBand = columnBands.slice().sort((a, b) => (b.end - b.start) - (a.end - a.start))[0]
+      if (!rowBand || !columnBand) return region
+      if (rowBand.end - rowBand.start < region.h * 0.35 || columnBand.end - columnBand.start < region.w * 0.35) return region
+
+      const padding = Math.max(3, Math.min(10, Math.round(Math.min(region.w, region.h) * 0.025)))
+      const x = Math.max(region.x, columnBand.start - padding)
+      const y = Math.max(region.y, rowBand.start - padding)
+      const right = Math.min(region.x + region.w, columnBand.end + padding)
+      const bottom = Math.min(region.y + region.h, rowBand.end + padding)
+      const tightened = {x, y, w: Math.max(1, right - x), h: Math.max(1, bottom - y)}
+
+      return tightened.w * tightened.h < region.w * region.h * 0.96 ? tightened : region
+    },
+    adaptiveInkThreshold(threshold: number, backgroundLuma: number): number {
+      if (backgroundLuma <= 80) return threshold
+      const gap = Math.max(12, Math.min(28, backgroundLuma * 0.10))
+      return this.clampNumber(Math.round(Math.min(threshold, backgroundLuma - gap)), 1, 254, threshold)
+    },
+    isNeutralImageBackgroundPixel(
+      pixels: Uint8ClampedArray,
+      width: number,
+      x: number,
+      y: number,
+      inkThreshold: number,
+      pageBackgroundLuma: number,
+    ): boolean {
+      const offset = (y * width + x) * 4
+      if (pixels[offset + 3] === 0) return false
+      const max = Math.max(pixels[offset], pixels[offset + 1], pixels[offset + 2])
+      const min = Math.min(pixels[offset], pixels[offset + 1], pixels[offset + 2])
+      const luma = this.pixelLuma(pixels, offset)
+      return max - min <= 18 &&
+        luma > inkThreshold + 8 &&
+        luma <= pageBackgroundLuma - 8
+    },
+    tightenDenseInkCoreRegion(pixels: Uint8ClampedArray, width: number, region: ImageRegion, threshold: number): ImageRegion {
+      if (region.w < 80 || region.h < 60) return region
+
+      const inkThreshold = this.adaptiveInkThreshold(threshold, this.estimateRegionBackgroundLuma(pixels, width, region))
+      const minimumRowInk = Math.max(12, Math.round(region.w * 0.22))
+      const minimumColumnInk = Math.max(12, Math.round(region.h * 0.18))
+      const rowBand = this.detectIndexBands(region.y, region.y + region.h, y => {
+        let count = 0
+        for (let x = region.x; x < region.x + region.w; x++) {
+          if (this.pixelIsInk(pixels, width, x, y, inkThreshold)) count++
+        }
+        return count >= minimumRowInk
+      }).sort((a, b) => (b.end - b.start) - (a.end - a.start))[0]
+      const columnBand = this.detectIndexBands(region.x, region.x + region.w, x => {
+        let count = 0
+        for (let y = region.y; y < region.y + region.h; y++) {
+          if (this.pixelIsInk(pixels, width, x, y, inkThreshold)) count++
+        }
+        return count >= minimumColumnInk
+      }).sort((a, b) => (b.end - b.start) - (a.end - a.start))[0]
+      if (!rowBand || !columnBand) return region
+      if (rowBand.end - rowBand.start < region.h * 0.28 || columnBand.end - columnBand.start < region.w * 0.28) return region
+
+      const paddingX = Math.max(8, Math.round(region.w * 0.06))
+      const paddingY = Math.max(8, Math.round(region.h * 0.06))
+      const x = Math.max(region.x, columnBand.start - paddingX)
+      const y = Math.max(region.y, rowBand.start - paddingY)
+      const right = Math.min(region.x + region.w, columnBand.end + paddingX)
+      const bottom = Math.min(region.y + region.h, rowBand.end + paddingY)
+      const tightened = {x, y, w: Math.max(1, right - x), h: Math.max(1, bottom - y)}
+
+      return tightened.w * tightened.h < region.w * region.h * 0.90 ? tightened : region
+    },
+    trimLowerTextAfterImageGap(pixels: Uint8ClampedArray, width: number, region: ImageRegion, threshold: number): ImageRegion {
+      if (region.w < 80 || region.h < 90) return region
+
+      const inkThreshold = this.adaptiveInkThreshold(threshold, this.estimateRegionBackgroundLuma(pixels, width, region))
+      const rowInk = new Array(region.h).fill(0)
+      for (let y = region.y; y < region.y + region.h; y++) {
+        let count = 0
+        for (let x = region.x; x < region.x + region.w; x++) {
+          if (this.pixelIsInk(pixels, width, x, y, inkThreshold)) count++
+        }
+        rowInk[y - region.y] = count
+      }
+
+      const denseThreshold = Math.max(12, Math.round(region.w * 0.16))
+      const blankThreshold = Math.max(2, Math.round(region.w * 0.025))
+      const minimumDenseRun = Math.max(4, Math.round(region.h * 0.05))
+      const denseBand = this.detectIndexBands(0, region.h, y => rowInk[y] >= denseThreshold)
+        .find(band => band.end - band.start >= minimumDenseRun)
+      if (!denseBand || denseBand.end < region.h * 0.30 || denseBand.end > region.h * 0.82) return region
+
+      const minBlankRun = Math.max(6, Math.round(region.h * 0.035))
+      let blankStart = -1
+      let blankRun = 0
+      for (let index = denseBand.end; index < region.h; index++) {
+        if (rowInk[index] <= blankThreshold) {
+          if (blankStart < 0) blankStart = index
+          blankRun++
+          if (blankRun >= minBlankRun) {
+            const trimAt = region.y + blankStart
+            const hasLowerInk = rowInk.slice(index + 1).some(count => count > blankThreshold)
+            if (hasLowerInk && trimAt - region.y >= region.h * 0.35) {
+              return {...region, h: Math.max(1, trimAt - region.y)}
+            }
+          }
+        } else {
+          blankStart = -1
+          blankRun = 0
+        }
+      }
+
+      return region
+    },
+    detectIndexBands(start: number, end: number, hasContent: (index: number) => boolean): Array<{start: number, end: number}> {
+      const bands = [] as Array<{start: number, end: number}>
+      let bandStart = -1
+      let lastContent = -1
+      for (let index = start; index < end; index++) {
+        if (hasContent(index)) {
+          if (bandStart < 0) bandStart = index
+          lastContent = index
+        } else if (bandStart >= 0 && index - lastContent > 1) {
+          bands.push({start: bandStart, end: lastContent + 1})
+          bandStart = -1
+        }
+      }
+      if (bandStart >= 0) bands.push({start: bandStart, end: lastContent + 1})
+      return bands
+    },
+    estimateRegionBackgroundLuma(pixels: Uint8ClampedArray, width: number, region: ImageRegion): number {
+      const bins = new Array(32).fill(0)
+      const sums = new Array(32).fill(0)
+      const pixelsCount = Math.max(1, region.w * region.h)
+      const step = Math.max(1, Math.round(Math.sqrt(pixelsCount / 12000)))
+      for (let y = region.y; y < region.y + region.h; y += step) {
+        for (let x = region.x; x < region.x + region.w; x += step) {
+          const offset = (y * width + x) * 4
+          if (pixels[offset + 3] === 0) continue
+          const luma = this.pixelLuma(pixels, offset)
+          const bin = this.clampNumber(Math.floor(luma / 8), 0, bins.length - 1, 0)
+          bins[bin]++
+          sums[bin] += luma
+        }
+      }
+      let bestBin = 0
+      bins.forEach((count, index) => {
+        if (count > bins[bestBin]) bestBin = index
+      })
+      return bins[bestBin] > 0 ? sums[bestBin] / bins[bestBin] : 255
     },
     denseInkCoverage(pixels: Uint8ClampedArray, width: number, region: ImageRegion, threshold: number): number {
       const step = Math.max(1, Math.round(Math.sqrt(Math.max(1, region.w * region.h) / 40000)))
