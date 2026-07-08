@@ -106,12 +106,14 @@
       />
 
       <template v-if="totalPages > 0">
-        <v-pagination
-          v-if="totalPages > 1"
-          v-model="page"
-          :total-visible="paginationVisible"
-          :length="totalPages"
-        />
+        <div v-if="totalPages > 1" class="pagination-row">
+          <v-pagination
+            v-model="page"
+            :total-visible="paginationVisible"
+            :length="totalPages"
+          />
+          <page-jump v-model="page" :length="totalPages"/>
+        </div>
 
         <item-browser
           v-if="displayMode === 'card'"
@@ -177,12 +179,14 @@
           </v-list-item>
         </v-list>
 
-        <v-pagination
-          v-if="totalPages > 1"
-          v-model="page"
-          :total-visible="paginationVisible"
-          :length="totalPages"
-        />
+        <div v-if="totalPages > 1" class="pagination-row">
+          <v-pagination
+            v-model="page"
+            :total-visible="paginationVisible"
+            :length="totalPages"
+          />
+          <page-jump v-model="page" :length="totalPages"/>
+        </div>
       </template>
     </v-container>
 
@@ -198,6 +202,7 @@ import LibraryNavigation from '@/components/LibraryNavigation.vue'
 import LibraryActionsMenu from '@/components/menus/LibraryActionsMenu.vue'
 import BookActionsMenu from '@/components/menus/BookActionsMenu.vue'
 import OneShotActionsMenu from '@/components/menus/OneshotActionsMenu.vue'
+import PageJump from '@/components/PageJump.vue'
 import PageSizeSelect from '@/components/PageSizeSelect.vue'
 import {parseQuerySort} from '@/functions/query-params'
 import {getBookReadRouteFromMedia as getReadRouteFromMedia} from '@/functions/book-format'
@@ -277,6 +282,7 @@ export default Vue.extend({
     EmptyState,
     ToolbarSticky,
     ItemBrowser,
+    PageJump,
     PageSizeSelect,
     LibraryNavigation,
     MultiSelectBar,
@@ -830,6 +836,14 @@ export default Vue.extend({
 })
 </script>
 <style scoped>
+.pagination-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
 .book-list-view {
   background: transparent;
 }
