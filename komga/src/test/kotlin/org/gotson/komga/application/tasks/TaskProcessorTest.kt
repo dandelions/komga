@@ -14,6 +14,7 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
+import java.time.LocalDateTime
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.time.Duration
@@ -75,6 +76,13 @@ class TaskProcessorTest(
     }
 
     verify(exactly = 1) { mockBookLifecycle.analyzeAndPersist(any()) }
+  }
+
+  @Test
+  fun `when deleted book is submitted for analysis then no task is queued`() {
+    taskEmitter.analyzeBook(makeBook("deleted", id = "deleted").copy(deletedDate = LocalDateTime.now()))
+
+    assertThat(tasksRepository.count()).isEqualTo(0)
   }
 
   @Test

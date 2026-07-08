@@ -106,15 +106,23 @@ class TaskHandler(
 
           is Task.AnalyzeBook ->
             bookRepository.findByIdOrNull(task.bookId)?.let { book ->
-              val actions = bookLifecycle.analyzeAndPersist(book)
-              if (taskCancelled(task, owner)) return@measureTime
-              if (actions.contains(BookAction.GENERATE_THUMBNAIL)) taskEmitter.generateBookThumbnail(book.id, priority = task.priority + 1)
-              if (actions.contains(BookAction.REFRESH_METADATA)) taskEmitter.refreshBookMetadata(book, priority = task.priority + 1)
+              if (book.deletedDate != null) {
+                logger.info { "Skipping task $task: Book is deleted" }
+              } else {
+                val actions = bookLifecycle.analyzeAndPersist(book)
+                if (taskCancelled(task, owner)) return@measureTime
+                if (actions.contains(BookAction.GENERATE_THUMBNAIL)) taskEmitter.generateBookThumbnail(book.id, priority = task.priority + 1)
+                if (actions.contains(BookAction.REFRESH_METADATA)) taskEmitter.refreshBookMetadata(book, priority = task.priority + 1)
+              }
             } ?: logger.warn { "Cannot execute task $task: Book does not exist" }
 
           is Task.GenerateBookThumbnail ->
             bookRepository.findByIdOrNull(task.bookId)?.let { book ->
-              bookLifecycle.generateThumbnailAndPersist(book)
+              if (book.deletedDate != null) {
+                logger.info { "Skipping task $task: Book is deleted" }
+              } else {
+                bookLifecycle.generateThumbnailAndPersist(book)
+              }
             } ?: logger.warn { "Cannot execute task $task: Book does not exist" }
 
           is Task.RefreshBookMetadata ->

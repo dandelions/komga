@@ -88,6 +88,7 @@ class TaskEmitter(
       .findAll(
         SearchCondition.AllOfBook(
           SearchCondition.LibraryId(SearchOperator.Is(library.id)),
+          SearchCondition.Deleted(SearchOperator.IsFalse),
           mediaStatusCondition,
         ),
         SearchContext.empty(),
@@ -125,6 +126,7 @@ class TaskEmitter(
   ) {
     bookIds
       .mapNotNull { bookRepository.findByIdOrNull(it) }
+      .filterNot { it.deletedDate != null }
       .mapNotNull { book ->
         mediaRepository.findByIdOrNull(book.id)?.let { media -> book to media }
       }.filter { (_, media) -> statuses.contains(media.status) }
@@ -228,6 +230,10 @@ class TaskEmitter(
     book: Book,
     priority: Int = DEFAULT_PRIORITY,
   ) {
+    if (book.deletedDate != null) {
+      logger.info { "Skipping analysis task for deleted book: $book" }
+      return
+    }
     submitTask(Task.AnalyzeBook(book.id, priority, book.seriesId))
   }
 
@@ -236,6 +242,7 @@ class TaskEmitter(
     priority: Int = DEFAULT_PRIORITY,
   ) {
     books
+      .filterNot { it.deletedDate != null }
       .map { Task.AnalyzeBook(it.id, priority, it.seriesId) }
       .let { submitTasks(it) }
   }

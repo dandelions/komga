@@ -6,6 +6,7 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import org.gotson.komga.domain.model.Library
+import org.gotson.komga.domain.model.makeBook
 import org.gotson.komga.domain.model.makeLibrary
 import org.gotson.komga.domain.persistence.BookRepository
 import org.gotson.komga.domain.persistence.LibraryRepository
@@ -24,6 +25,7 @@ import org.gotson.komga.domain.service.SeriesMetadataLifecycle
 import org.gotson.komga.infrastructure.search.SearchIndexLifecycle
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import java.time.LocalDateTime
 
 class TaskHandlerTest {
   private val taskEmitter = mockk<TaskEmitter>(relaxed = true)
@@ -159,5 +161,19 @@ class TaskHandlerTest {
     verify(exactly = 0) { taskEmitter.analyzeUnknownBooks(any<Collection<String>>()) }
     verify(exactly = 0) { taskEmitter.analyzeUnknownAndOutdatedBooks(any<Library>()) }
     verify(exactly = 0) { taskEmitter.repairExtensions(any(), any()) }
+  }
+
+  @Test
+  fun `given deleted book when handling analyze task then analysis is skipped`() {
+    // given
+    val book = makeBook("book1", id = "book1").copy(deletedDate = LocalDateTime.now())
+    every { bookRepository.findByIdOrNull(book.id) } returns book
+
+    // when
+    taskHandler.handleTask(Task.AnalyzeBook(book.id, priority = 7, groupId = book.seriesId))
+
+    // then
+    verify(exactly = 0) { bookLifecycle.analyzeAndPersist(any()) }
+    verify(exactly = 0) { taskEmitter.generateBookThumbnail(any<String>(), any()) }
   }
 }
