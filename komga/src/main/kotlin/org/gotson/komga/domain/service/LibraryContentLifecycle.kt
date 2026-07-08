@@ -49,6 +49,7 @@ data class LibraryScanSummary(
   val scannedBookCount: Int,
   val countedBookCount: Int,
   val bookIdsToAnalyze: Set<String> = emptySet(),
+  val recoveredFromUnavailable: Boolean = false,
 )
 
 @Service
@@ -93,6 +94,7 @@ class LibraryContentLifecycle(
     }
 
     var fileScanResult: ScanResult? = null
+    val recoveredFromUnavailable = library.unavailableDate != null
     val bookIdsToAnalyze = mutableSetOf<String>()
 
     measureTime {
@@ -397,7 +399,7 @@ class LibraryContentLifecycle(
 
     eventPublisher.publishEvent(DomainEvent.LibraryScanned(library))
     val scanResult = checkNotNull(fileScanResult)
-    return LibraryScanSummary(scanResult.limited, scanResult.scannedBookCount, scanResult.countedBookCount, bookIdsToAnalyze)
+    return LibraryScanSummary(scanResult.limited, scanResult.scannedBookCount, scanResult.countedBookCount, bookIdsToAnalyze, recoveredFromUnavailable)
   }
 
   private fun applyScanLimitPriority(

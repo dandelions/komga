@@ -62,7 +62,12 @@ class TaskHandler(
                   logger.info { "Daily scan file limit reached for library '${it.name}', scheduling continuation tomorrow" }
                   taskEmitter.scanLibraryTomorrow(task.libraryId, task.scanDeep, task.priority)
                 }
-                if (it.scanOnlyNewBooks) {
+                if (scanSummary.recoveredFromUnavailable) {
+                  if (scanSummary.bookIdsToAnalyze.isEmpty())
+                    taskEmitter.analyzeUnknownOutdatedAndErrorBooks(it)
+                  else
+                    taskEmitter.analyzeUnknownOutdatedAndErrorBooks(scanSummary.bookIdsToAnalyze)
+                } else if (it.scanOnlyNewBooks) {
                   if (scanSummary.bookIdsToAnalyze.isEmpty())
                     taskEmitter.analyzeUnknownBooks(it)
                   else

@@ -127,6 +127,53 @@ class TaskHandlerTest {
   }
 
   @Test
+  fun `given library recovered from unavailable when handling scan task with book ids then error books are scheduled for analysis`() {
+    // given
+    val library = makeLibrary(id = "library1")
+    every { libraryRepository.findByIdOrNull(library.id) } returns library
+    every { libraryRepository.findAllByParentId(library.id) } returns emptyList()
+    every { libraryContentLifecycle.scanRootFolder(library, false) } returns
+      LibraryScanSummary(
+        limited = false,
+        scannedBookCount = 1,
+        countedBookCount = 1,
+        bookIdsToAnalyze = setOf("book1"),
+        recoveredFromUnavailable = true,
+      )
+
+    // when
+    taskHandler.handleTask(Task.ScanLibrary(library.id, scanDeep = false, priority = 7))
+
+    // then
+    verify(exactly = 1) { taskEmitter.analyzeUnknownOutdatedAndErrorBooks(setOf("book1")) }
+    verify(exactly = 0) { taskEmitter.analyzeUnknownAndOutdatedBooks(any<Collection<String>>()) }
+    verify(exactly = 0) { taskEmitter.analyzeUnknownBooks(any<Collection<String>>()) }
+  }
+
+  @Test
+  fun `given library recovered from unavailable when handling scan task without book ids then error books are scheduled for library analysis`() {
+    // given
+    val library = makeLibrary(id = "library1")
+    every { libraryRepository.findByIdOrNull(library.id) } returns library
+    every { libraryRepository.findAllByParentId(library.id) } returns emptyList()
+    every { libraryContentLifecycle.scanRootFolder(library, false) } returns
+      LibraryScanSummary(
+        limited = false,
+        scannedBookCount = 0,
+        countedBookCount = 0,
+        recoveredFromUnavailable = true,
+      )
+
+    // when
+    taskHandler.handleTask(Task.ScanLibrary(library.id, scanDeep = false, priority = 7))
+
+    // then
+    verify(exactly = 1) { taskEmitter.analyzeUnknownOutdatedAndErrorBooks(library) }
+    verify(exactly = 0) { taskEmitter.analyzeUnknownAndOutdatedBooks(any<Library>()) }
+    verify(exactly = 0) { taskEmitter.analyzeUnknownBooks(any<Library>()) }
+  }
+
+  @Test
   fun `given library scans only new books when handling scan task then only unknown books are scheduled for analysis`() {
     // given
     val library = makeLibrary(id = "library1").copy(scanOnlyNewBooks = true)

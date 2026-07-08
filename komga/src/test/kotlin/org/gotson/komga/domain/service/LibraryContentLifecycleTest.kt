@@ -801,6 +801,22 @@ class LibraryContentLifecycleTest(
 
       assertThat(thrown).isExactlyInstanceOf(DirectoryNotFoundException::class.java)
     }
+
+    @Test
+    fun `given unavailable library when scanning succeeds then summary reports recovered from unavailable`() {
+      // given
+      val library = makeLibrary().copy(unavailableDate = LocalDateTime.now())
+      libraryRepository.insert(library)
+
+      every { mockScanner.scanRootFolder(any()) } returns emptyMap<Series, List<Book>>().toScanResult()
+
+      // when
+      val scanSummary = libraryContentLifecycle.scanRootFolder(library)
+
+      // then
+      assertThat(scanSummary.recoveredFromUnavailable).isTrue
+      assertThat(libraryRepository.findById(library.id).unavailableDate).isNull()
+    }
   }
 
   @Nested
