@@ -356,7 +356,10 @@ class SeriesLifecycle(
         historicalEventRepository.insert(HistoricalEvent.SeriesFolderDeleted(series, "Folder was deleted because it was empty"))
       }
 
-    softDeleteMany(listOf(series))
+    if (series.deletedDate != null)
+      deleteMany(listOf(series))
+    else
+      softDeleteMany(listOf(series))
   }
 
   private fun thumbnailsHouseKeeping(seriesId: String) {

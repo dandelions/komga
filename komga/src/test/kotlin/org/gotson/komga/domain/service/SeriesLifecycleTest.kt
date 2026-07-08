@@ -415,6 +415,39 @@ class SeriesLifecycleTest(
   }
 
   @Test
+  fun `given an unavailable series with an existing directory when deleting series then it is deleted from database`() {
+    Jimfs.newFileSystem(Configuration.unix()).use { fs ->
+      // given
+      val root = fs.getPath("/root")
+      Files.createDirectory(root)
+      val seriesPath = root.resolve("series")
+      Files.createDirectory(seriesPath)
+      val book1Path = seriesPath.resolve("book1.cbz")
+      Files.createFile(book1Path)
+      val book2Path = seriesPath.resolve("book2.cbz")
+      Files.createFile(book2Path)
+
+      val series = makeSeries(name = "series", libraryId = library.id, url = seriesPath.toUri().toURL()).copy(deletedDate = LocalDateTime.now())
+      val books =
+        listOf(
+          makeBook("1", libraryId = library.id, seriesId = series.id, url = book1Path.toUri().toURL()),
+          makeBook("2", libraryId = library.id, seriesId = series.id, url = book2Path.toUri().toURL()),
+        )
+
+      seriesLifecycle.createSeries(series)
+      seriesLifecycle.addBooks(series, books)
+
+      // when
+      seriesLifecycle.deleteSeriesFiles(series)
+
+      // then
+      assertThat(seriesRepository.findByIdOrNull(series.id)).isNull()
+      assertThat(books.mapNotNull { bookRepository.findByIdOrNull(it.id) }).isEmpty()
+      assertThat(Files.notExists(seriesPath))
+    }
+  }
+
+  @Test
   fun `given a series and a non-existent sidecar file when deleting series then series should be deleted`() {
     Jimfs.newFileSystem(Configuration.unix()).use { fs ->
       // given
