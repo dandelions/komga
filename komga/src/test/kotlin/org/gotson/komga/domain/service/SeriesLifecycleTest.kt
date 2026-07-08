@@ -34,6 +34,7 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import java.nio.file.Files
 import java.nio.file.Paths
+import java.time.LocalDateTime
 
 @SpringBootTest
 class SeriesLifecycleTest(
@@ -389,6 +390,28 @@ class SeriesLifecycleTest(
 
     // then
     verify(exactly = 0) { bookLifecycle.softDeleteMany(any()) }
+  }
+
+  @Test
+  fun `given an unavailable series with a non-existent directory when deleting series then it is deleted from database`() {
+    // given
+    val seriesPath = Paths.get("/non-existent")
+    val series = makeSeries(name = "series", libraryId = library.id, url = seriesPath.toUri().toURL()).copy(deletedDate = LocalDateTime.now())
+    val books =
+      listOf(
+        makeBook("1", libraryId = library.id, seriesId = series.id),
+        makeBook("2", libraryId = library.id, seriesId = series.id),
+      )
+
+    seriesLifecycle.createSeries(series)
+    seriesLifecycle.addBooks(series, books)
+
+    // when
+    seriesLifecycle.deleteSeriesFiles(series)
+
+    // then
+    assertThat(seriesRepository.findByIdOrNull(series.id)).isNull()
+    assertThat(books.mapNotNull { bookRepository.findByIdOrNull(it.id) }).isEmpty()
   }
 
   @Test

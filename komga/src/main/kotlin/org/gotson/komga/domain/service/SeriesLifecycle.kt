@@ -326,7 +326,15 @@ class SeriesLifecycle(
   }
 
   fun deleteSeriesFiles(series: Series) {
-    if (series.path.notExists()) return logger.info { "Cannot delete series folder, path does not exist: ${series.path}" }
+    if (series.path.notExists()) {
+      if (series.deletedDate != null) {
+        logger.info { "Series folder does not exist, deleting unavailable series from database: $series" }
+        deleteMany(listOf(series))
+      } else {
+        logger.info { "Cannot delete series folder, path does not exist: ${series.path}" }
+      }
+      return
+    }
     if (!series.path.isWritable()) return logger.info { "Cannot delete series folder, path is not writable: ${series.path}" }
 
     val thumbnails =
