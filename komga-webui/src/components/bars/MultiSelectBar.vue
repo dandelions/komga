@@ -23,6 +23,15 @@
         <span>{{ $tc('common.n_selected', value.length) }}</span>
       </v-toolbar-title>
 
+      <v-btn icon @click="doDelete" v-if="isAdmin">
+        <v-tooltip bottom>
+          <template v-slot:activator="{ on }">
+            <v-icon v-on="on">mdi-delete</v-icon>
+          </template>
+          <span>{{ $t('menu.delete') }}</span>
+        </v-tooltip>
+      </v-btn>
+
       <v-spacer/>
 
       <v-btn icon @click="markRead" v-if="kind === 'books' || kind === 'series'">
@@ -88,14 +97,6 @@
         </v-tooltip>
       </v-btn>
 
-      <v-btn icon @click="doDelete" v-if="isAdmin">
-        <v-tooltip bottom>
-          <template v-slot:activator="{ on }">
-            <v-icon v-on="on">mdi-delete</v-icon>
-          </template>
-          <span>{{ $t('menu.delete') }}</span>
-        </v-tooltip>
-      </v-btn>
     </toolbar-sticky>
   </v-scroll-y-transition>
 </template>
