@@ -1468,9 +1468,20 @@ export default Vue.extend({
       this.$nextTick(() => window.scrollTo({top: 0, left: 0, behavior: 'auto'}))
     },
     wordBlockStyle(item: RenderedWordBlock): object {
+      const dimensions = this.wordBlockDisplayDimensions(item)
       return {
-        width: `${Math.max(1, Math.round(item.w * this.textScale()))}px`,
-        height: `${item.height}px`,
+        width: `${dimensions.width}px`,
+        height: `${dimensions.height}px`,
+      }
+    },
+    wordBlockDisplayDimensions(item: RenderedWordBlock): {width: number, height: number} {
+      const sourceWidth = Math.max(1, item.w)
+      const sourceHeight = Math.max(1, item.h)
+      const maxWidth = Math.max(1, this.targetWidth - this.horizontalContentPadding() * 2)
+      const scale = Math.min(this.textScale(), maxWidth / sourceWidth)
+      return {
+        width: Math.max(1, Math.round(sourceWidth * scale)),
+        height: Math.max(1, Math.round(sourceHeight * scale)),
       }
     },
     imageBlockStyle(item: RenderedImageBlock): object {
@@ -1483,12 +1494,13 @@ export default Vue.extend({
       if (item.type === 'indent') return item.width
       if (item.type === 'break') return 0
       if (item.type === 'image') return item.width
-      return item.w * this.textScale()
+      return this.wordBlockDisplayDimensions(item).width
     },
     reflowItemDisplayHeight(item: ReflowItem): number {
       if (item.type === 'indent') return 1
       if (item.type === 'break') return 0
-      return item.height
+      if (item.type === 'image') return item.height
+      return this.wordBlockDisplayDimensions(item).height
     },
     indentStyle(item: LineIndentItem): object {
       if (this.verticalText) {
@@ -5111,6 +5123,8 @@ export default Vue.extend({
 
 .word-block {
   display: inline-block;
+  flex: 0 1 auto;
+  min-width: 0;
   height: auto;
   max-width: 100%;
   object-fit: contain;
