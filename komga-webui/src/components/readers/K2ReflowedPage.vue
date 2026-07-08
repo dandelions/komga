@@ -872,7 +872,7 @@ export default Vue.extend({
       }
 
       const regions = this.collectImageRegions(candidates, coloredTiles, denseTiles, texturedTiles, tileColumns, tileRows, tileSize, roi)
-        .flatMap(region => this.splitColorImageRegion(pixels, width, region))
+        .flatMap(region => this.splitImageRegion(pixels, width, region, threshold))
       return this.expandImageRegions(regions, Math.max(2, Math.round(tileSize * 0.6)), roi, width, height)
     },
     imageTileMetrics(
@@ -1068,6 +1068,102 @@ export default Vue.extend({
           this.colorCoverage(pixels, width, colorRegion, stepX) >= 0.22,
         )
     },
+    splitImageRegion(pixels: Uint8ClampedArray, width: number, region: ImageRegion, threshold: number): ImageRegion[] {
+      const colorRegions = this.splitColorImageRegion(pixels, width, region)
+      if (colorRegions.length === 0) return []
+      if (colorRegions.length !== 1 || !this.sameImageRegion(colorRegions[0], region)) return colorRegions
+      return this.splitDenseImageRegion(pixels, width, region, threshold)
+    },
+    splitDenseImageRegion(pixels: Uint8ClampedArray, width: number, region: ImageRegion, threshold: number): ImageRegion[] {
+      if (region.w < 80 || region.h < 60) return [region]
+      const right = region.x + region.w
+      const bottom = region.y + region.h
+      const columnInk = new Array(region.w).fill(0)
+
+      for (let x = region.x; x < right; x++) {
+        let count = 0
+        for (let y = region.y; y < bottom; y++) {
+          if (this.pixelIsInk(pixels, width, x, y, threshold)) count++
+        }
+        columnInk[x - region.x] = count
+      }
+
+      const minimumColumnInk = Math.max(8, Math.round(region.h * 0.16))
+      const maxGap = Math.max(4, Math.round(region.w * 0.018))
+      const bands = [] as Array<{start: number, end: number}>
+      let start = -1
+      let lastInk = -1
+      columnInk.forEach((count, index) => {
+        if (count >= minimumColumnInk) {
+          if (start < 0) start = index
+          lastInk = index
+        } else if (start >= 0 && index - lastInk > maxGap) {
+          bands.push({start: region.x + start, end: region.x + lastInk + 1})
+          start = -1
+        }
+      })
+      if (start >= 0) bands.push({start: region.x + start, end: region.x + lastInk + 1})
+
+      const paddingX = Math.max(8, Math.round(region.w * 0.025))
+      const paddingY = Math.max(8, Math.round(region.h * 0.025))
+      const denseRegions = bands
+        .map(band => this.denseBoundsInColumnBand(pixels, width, region, band, threshold, paddingX, paddingY))
+        .filter((denseRegion): denseRegion is ImageRegion =>
+          !!denseRegion &&
+          denseRegion.w >= Math.max(44, region.w * 0.08) &&
+          denseRegion.h >= Math.max(36, region.h * 0.08) &&
+          denseRegion.w * denseRegion.h >= region.w * region.h * 0.012 &&
+          this.denseInkCoverage(pixels, width, denseRegion, threshold) >= 0.10,
+        )
+
+      return denseRegions.length > 0 ? denseRegions : [region]
+    },
+    denseBoundsInColumnBand(
+      pixels: Uint8ClampedArray,
+      width: number,
+      region: ImageRegion,
+      band: {start: number, end: number},
+      threshold: number,
+      paddingX: number,
+      paddingY: number,
+    ): ImageRegion | undefined {
+      let left = band.end
+      let top = region.y + region.h
+      let denseRight = band.start - 1
+      let denseBottom = region.y - 1
+
+      for (let x = band.start; x < band.end; x++) {
+        for (let y = region.y; y < region.y + region.h; y++) {
+          if (!this.pixelIsInk(pixels, width, x, y, threshold)) continue
+          left = Math.min(left, x)
+          top = Math.min(top, y)
+          denseRight = Math.max(denseRight, x)
+          denseBottom = Math.max(denseBottom, y)
+        }
+      }
+
+      if (denseRight < left || denseBottom < top) return undefined
+      const x = Math.max(region.x, left - paddingX)
+      const y = Math.max(region.y, top - paddingY)
+      const tightenedRight = Math.min(region.x + region.w, denseRight + paddingX + 1)
+      const tightenedBottom = Math.min(region.y + region.h, denseBottom + paddingY + 1)
+      return {x, y, w: Math.max(1, tightenedRight - x), h: Math.max(1, tightenedBottom - y)}
+    },
+    denseInkCoverage(pixels: Uint8ClampedArray, width: number, region: ImageRegion, threshold: number): number {
+      const step = Math.max(1, Math.round(Math.sqrt(Math.max(1, region.w * region.h) / 40000)))
+      let sampled = 0
+      let ink = 0
+      for (let y = region.y; y < region.y + region.h; y += step) {
+        for (let x = region.x; x < region.x + region.w; x += step) {
+          sampled++
+          if (this.pixelIsInk(pixels, width, x, y, threshold)) ink++
+        }
+      }
+      return sampled === 0 ? 0 : ink / sampled
+    },
+    sameImageRegion(a: ImageRegion, b: ImageRegion): boolean {
+      return a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h
+    },
     colorBoundsInBand(
       pixels: Uint8ClampedArray,
       width: number,
@@ -1120,6 +1216,12 @@ export default Vue.extend({
       const max = Math.max(pixels[offset], pixels[offset + 1], pixels[offset + 2])
       const min = Math.min(pixels[offset], pixels[offset + 1], pixels[offset + 2])
       return max - min >= 28 && max > 36
+    },
+    pixelIsInk(pixels: Uint8ClampedArray, width: number, x: number, y: number, threshold: number): boolean {
+      const offset = (y * width + x) * 4
+      const alpha = pixels[offset + 3]
+      const luma = 0.299 * pixels[offset] + 0.587 * pixels[offset + 1] + 0.114 * pixels[offset + 2]
+      return alpha !== 0 && luma < threshold
     },
     mergeImageRegions(regions: ImageRegion[]): ImageRegion[] {
       if (regions.length <= 1) return regions

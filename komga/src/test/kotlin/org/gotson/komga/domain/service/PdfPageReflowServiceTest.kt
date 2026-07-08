@@ -233,6 +233,28 @@ class PdfPageReflowServiceTest {
   }
 
   @Test
+  fun `given dense image beside text when reflowing page then side text is not preserved as image`() {
+    val pageBytes = denseSideImageWithTextPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+        cropRegions = listOf(PdfPageReflowRegion(x = 0, y = 0, w = 320, h = 220)),
+      )
+
+    val images = response.items.filter { it.type == "image" }
+    val wordBlocks = response.items.filter { it.type == "word" }
+
+    assertThat(images).hasSize(1)
+    assertThat(images.first().w).isLessThan(150)
+    assertThat(wordBlocks).hasSizeGreaterThanOrEqualTo(10)
+  }
+
+  @Test
   fun `given colored decorated text page when reflowing page then page is not preserved as image`() {
     val pageBytes = coloredDecoratedTextPage()
     val book = makeBook("book")
@@ -518,6 +540,39 @@ class PdfPageReflowServiceTest {
       }
     }
     drawTerminalScreenshot(graphics, 55, 285, 210, 95)
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun denseSideImageWithTextPage(): ByteArray {
+    val image = BufferedImage(320, 220, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    for (y in 54 until 178) {
+      for (x in 28 until 140) {
+        val value =
+          when ((x * 17 + y * 31 + x * y) % 9) {
+            0, 1, 2 -> 18
+            3, 4 -> 92
+            5, 6 -> 176
+            else -> 232
+          }
+        image.setRGB(x, y, Color(value, value, value).rgb)
+      }
+    }
+    graphics.color = Color.BLACK
+    graphics.fillRect(58, 164, 52, 8)
+    listOf(62, 88, 114, 140, 166).forEach { y ->
+      listOf(152, 178, 204, 230, 256, 282).forEach { x ->
+        if (x + 12 < image.width) {
+          graphics.fillRect(x, y, 12, 18)
+        }
+      }
+    }
     graphics.dispose()
 
     val output = ByteArrayOutputStream()

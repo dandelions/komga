@@ -661,8 +661,8 @@ class PdfPageReflowService(
     val structuralRegions = detectStructuralLineArtRegions(image, roi, threshold)
     val tightenedRegions =
       (regions + structuralRegions).flatMap { region ->
-        splitColorImageRegion(image, region).map { colorRegion ->
-          tightenLineArtRegion(image, colorRegion, threshold)
+        splitImageRegion(image, region, threshold).map { splitRegion ->
+          tightenLineArtRegion(image, splitRegion, threshold)
         }
       }
     return expandImageRegions(mergeImageRegions(tightenedRegions), max(2, (tileSize * 0.6).roundToInt()), roi, image.width, image.height)
@@ -1178,6 +1178,114 @@ class PdfPageReflowService(
 
     if (colorRegions.isEmpty()) return emptyList()
     return colorRegions
+  }
+
+  private fun splitImageRegion(
+    image: BufferedImage,
+    region: Roi,
+    threshold: Int,
+  ): List<Roi> {
+    val colorRegions = splitColorImageRegion(image, region)
+    if (colorRegions.isEmpty()) return emptyList()
+    if (colorRegions.size != 1 || colorRegions.first() != clampRoi(region, image.width, image.height)) return colorRegions
+    return splitDenseImageRegion(image, region, threshold)
+  }
+
+  private fun splitDenseImageRegion(
+    image: BufferedImage,
+    region: Roi,
+    threshold: Int,
+  ): List<Roi> {
+    val block = clampRoi(region, image.width, image.height)
+    if (block.w < 80 || block.h < 60) return listOf(region)
+    val inkThreshold = adaptiveInkThreshold(threshold, estimateBackgroundLuma(image, block))
+    val columnInk = IntArray(block.w)
+
+    for (x in block.x until block.x + block.w) {
+      var count = 0
+      for (y in block.y until block.y + block.h) {
+        if (isInk(image.getRGB(x, y), inkThreshold)) count++
+      }
+      columnInk[x - block.x] = count
+    }
+
+    val minimumColumnInk = max(8, (block.h * 0.16).roundToInt())
+    val maxGap = max(4, (block.w * 0.018).roundToInt())
+    val bands = mutableListOf<LineBand>()
+    var start = -1
+    var lastInk = -1
+    columnInk.forEachIndexed { index, count ->
+      if (count >= minimumColumnInk) {
+        if (start < 0) start = index
+        lastInk = index
+      } else if (start >= 0 && index - lastInk > maxGap) {
+        bands += LineBand(block.x + start, block.x + lastInk + 1)
+        start = -1
+      }
+    }
+    if (start >= 0) bands += LineBand(block.x + start, block.x + lastInk + 1)
+
+    val paddingX = max(8, (block.w * 0.025).roundToInt())
+    val paddingY = max(8, (block.h * 0.025).roundToInt())
+    val denseRegions =
+      bands
+        .mapNotNull { band -> denseBoundsInColumnBand(image, block, band, inkThreshold, paddingX, paddingY) }
+        .filter { denseRegion ->
+          denseRegion.w >= max(44, (block.w * 0.08).roundToInt()) &&
+            denseRegion.h >= max(36, (block.h * 0.08).roundToInt()) &&
+            denseRegion.w * denseRegion.h >= block.w * block.h * 0.012 &&
+            denseInkCoverage(image, denseRegion, inkThreshold) >= 0.10
+        }
+
+    return denseRegions.ifEmpty { listOf(region) }
+  }
+
+  private fun denseBoundsInColumnBand(
+    image: BufferedImage,
+    block: Roi,
+    band: LineBand,
+    inkThreshold: Int,
+    paddingX: Int,
+    paddingY: Int,
+  ): Roi? {
+    var left = band.end
+    var top = block.y + block.h
+    var right = band.start - 1
+    var bottom = block.y - 1
+
+    for (x in band.start until band.end) {
+      for (y in block.y until block.y + block.h) {
+        if (!isInk(image.getRGB(x, y), inkThreshold)) continue
+        left = min(left, x)
+        top = min(top, y)
+        right = max(right, x)
+        bottom = max(bottom, y)
+      }
+    }
+
+    if (right < left || bottom < top) return null
+    val x = max(block.x, left - paddingX)
+    val y = max(block.y, top - paddingY)
+    val tightenedRight = min(block.x + block.w, right + paddingX + 1)
+    val tightenedBottom = min(block.y + block.h, bottom + paddingY + 1)
+    return Roi(x, y, max(1, tightenedRight - x), max(1, tightenedBottom - y))
+  }
+
+  private fun denseInkCoverage(
+    image: BufferedImage,
+    region: Roi,
+    inkThreshold: Int,
+  ): Double {
+    val step = max(1, kotlin.math.sqrt(max(1, region.w * region.h) / 40000.0).roundToInt())
+    var sampled = 0
+    var ink = 0
+    for (y in region.y until region.y + region.h step step) {
+      for (x in region.x until region.x + region.w step step) {
+        sampled++
+        if (isInk(image.getRGB(x, y), inkThreshold)) ink++
+      }
+    }
+    return if (sampled == 0) 0.0 else ink.toDouble() / sampled
   }
 
   private fun colorBoundsInBand(
