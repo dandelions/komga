@@ -303,7 +303,16 @@ class LibraryContentLifecycle(
             }
 
             // add new books
-            val existingBooksUrls = existingBooks.filterNot { it.deletedDate != null }.map { it.url }
+            val restoredBookUrls =
+              if (library.scanOnlyNewBooks) {
+                emptySet()
+              } else {
+                val restoredBooks = restoreDeletedBooksByUrl(existingSeries, existingBooks, newBooks)
+                bookIdsToAnalyze += restoredBooks.map { it.id }
+                if (restoredBooks.isNotEmpty()) seriesToSortAndRefresh.add(existingSeries)
+                restoredBooks.map { it.url }.toSet()
+              }
+            val existingBooksUrls = existingBooks.filterNot { it.deletedDate != null }.map { it.url } + restoredBookUrls
             val booksToAdd = newBooks.filterNot { newBook -> existingBooksUrls.contains(newBook.url) }
             logger.info { "Adding new books: $booksToAdd" }
             seriesLifecycle.addBooks(existingSeries, booksToAdd)
@@ -448,6 +457,43 @@ class LibraryContentLifecycle(
       countedBookCount = countedBookCount,
       limited = true,
     )
+  }
+
+  private fun restoreDeletedBooksByUrl(
+    series: Series,
+    existingBooks: Collection<Book>,
+    scannedBooks: Collection<Book>,
+  ): List<Book> {
+    val deletedBooksByUrl = existingBooks.filter { it.deletedDate != null && it.fileHash.isBlank() }.associateBy { it.url }
+    if (deletedBooksByUrl.isEmpty()) return emptyList()
+
+    return scannedBooks.mapNotNull { scannedBook ->
+      val deletedBook = deletedBooksByUrl[scannedBook.url] ?: return@mapNotNull null
+      logger.info { "Restoring soft-deleted book with same URL instead of adding duplicate. Deleted: $deletedBook, Scanned: $scannedBook" }
+      val restoredBook =
+        deletedBook.copy(
+          name = scannedBook.name,
+          url = scannedBook.url,
+          fileLastModified = scannedBook.fileLastModified,
+          fileSize = scannedBook.fileSize,
+          fileHash = "",
+          fileHashKoreader = "",
+          number = scannedBook.number,
+          seriesId = series.id,
+          libraryId = series.libraryId,
+          deletedDate = null,
+          oneshot = scannedBook.oneshot,
+        )
+
+      transactionTemplate.executeWithoutResult {
+        mediaRepository.findById(deletedBook.id).let { media ->
+          mediaRepository.update(media.copy(status = Media.Status.OUTDATED))
+        }
+        bookRepository.update(restoredBook)
+      }
+
+      restoredBook
+    }
   }
 
   private fun Map<Series, List<Book>>.filterBooks(predicate: (Book) -> Boolean): Map<Series, List<Book>> =

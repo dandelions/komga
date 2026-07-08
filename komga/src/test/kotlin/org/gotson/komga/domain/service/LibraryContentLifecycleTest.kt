@@ -806,6 +806,41 @@ class LibraryContentLifecycleTest(
   @Nested
   inner class Restore {
     @Test
+    fun `given deleted unavailable book without hash when scanning same file then book is restored instead of duplicated`() {
+      // given
+      val library = makeLibrary()
+      libraryRepository.insert(library)
+
+      every { mockScanner.scanRootFolder(any()) }
+        .returnsMany(
+          mapOf(makeSeries(name = "series") to listOf(makeBook("book1"))).toScanResult(),
+          mapOf(makeSeries(name = "series") to listOf(makeBook("book1"))).toScanResult(),
+        )
+      libraryContentLifecycle.scanRootFolder(library)
+
+      val existingBook = bookRepository.findAll().single()
+      bookRepository.update(existingBook.copy(fileHash = "", deletedDate = LocalDateTime.now()))
+      mediaRepository.update(mediaRepository.findById(existingBook.id).copy(status = Media.Status.ERROR))
+
+      // when
+      val scanSummary = libraryContentLifecycle.scanRootFolder(library, scanDeep = true)
+
+      // then
+      val allBooks = bookRepository.findAll()
+
+      verify(exactly = 2) { mockScanner.scanRootFolder(any()) }
+
+      assertThat(allBooks).hasSize(1)
+      with(allBooks.single()) {
+        assertThat(id).isEqualTo(existingBook.id)
+        assertThat(deletedDate).isNull()
+        assertThat(fileHash).isEmpty()
+      }
+      assertThat(mediaRepository.findById(existingBook.id).status).isEqualTo(Media.Status.OUTDATED)
+      assertThat(scanSummary.bookIdsToAnalyze).containsExactly(existingBook.id)
+    }
+
+    @Test
     fun `given existing series when removing files and scanning, restoring files and scanning then restored books are available and media status is not set to outdated`() {
       // given
       val library = makeLibrary()
