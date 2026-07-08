@@ -817,6 +817,32 @@ class LibraryContentLifecycleTest(
       assertThat(scanSummary.recoveredFromUnavailable).isTrue
       assertThat(libraryRepository.findById(library.id).unavailableDate).isNull()
     }
+
+    @Test
+    fun `given deleted book is still missing when scanning again then book is deleted from database`() {
+      // given
+      val library = makeLibrary()
+      libraryRepository.insert(library)
+
+      every { mockScanner.scanRootFolder(any()) }
+        .returnsMany(
+          mapOf(makeSeries(name = "series") to listOf(makeBook("book1"), makeBook("book2"))).toScanResult(),
+          mapOf(makeSeries(name = "series") to listOf(makeBook("book1"))).toScanResult(),
+          mapOf(makeSeries(name = "series") to listOf(makeBook("book1"))).toScanResult(),
+        )
+
+      libraryContentLifecycle.scanRootFolder(library)
+      libraryContentLifecycle.scanRootFolder(library)
+
+      val deletedBook = bookRepository.findAll().single { it.name == "book2" }
+      assertThat(deletedBook.deletedDate).isNotNull()
+
+      // when
+      libraryContentLifecycle.scanRootFolder(library)
+
+      // then
+      assertThat(bookRepository.findAll().map { it.name }).containsExactly("book1")
+    }
   }
 
   @Nested

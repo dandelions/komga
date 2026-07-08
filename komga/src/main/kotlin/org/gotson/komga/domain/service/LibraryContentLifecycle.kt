@@ -173,6 +173,11 @@ class LibraryContentLifecycle(
           .map { (series, books) ->
             series.copy(libraryId = library.id) to books.map { it.copy(libraryId = library.id) }
           }.toMap()
+      val scannedBookUrls = scannedSeries.values.flatten().map { it.url }
+
+      if (!scanResult.limited && !library.scanOnlyNewBooks) {
+        deleteDeletedBooksStillMissing(library, scannedBookUrls)
+      }
 
       // delete series that don't exist anymore
       if (scanResult.limited) {
@@ -201,7 +206,7 @@ class LibraryContentLifecycle(
           logger.info { "Library is configured to scan only new books, skipping missing book cleanup for library: ${library.name}" }
           mutableListOf()
         } else {
-          scannedSeries.values.flatten().map { it.url }.let { urls ->
+          scannedBookUrls.let { urls ->
             val books = bookRepository.findAllNotDeletedByLibraryIdAndUrlNotIn(library.id, urls)
             if (books.isNotEmpty()) {
               logger.info { "Soft deleting books not on disk anymore: $books" }
@@ -495,6 +500,17 @@ class LibraryContentLifecycle(
       }
 
       restoredBook
+    }
+  }
+
+  private fun deleteDeletedBooksStillMissing(
+    library: Library,
+    scannedBookUrls: Collection<URL>,
+  ) {
+    val booksToDelete = bookRepository.findAllDeletedByLibraryIdAndUrlNotIn(library.id, scannedBookUrls)
+    if (booksToDelete.isNotEmpty()) {
+      logger.info { "Deleting books already marked unavailable and still missing on disk: $booksToDelete" }
+      bookLifecycle.deleteMany(booksToDelete)
     }
   }
 
