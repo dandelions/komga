@@ -128,6 +128,12 @@ private data class VerticalTextLine(
   val blocks: List<Roi>,
 )
 
+private data class VerticalGuideRun(
+  val x: Int,
+  val start: Int,
+  val end: Int,
+)
+
 private data class EncodedReflowImage(
   val mimeType: String,
   val bytes: ByteArray,
@@ -1500,6 +1506,139 @@ class PdfPageReflowService(
     return masked
   }
 
+  private fun suppressHorizontalGuideRules(
+    ink: ByteArray,
+    width: Int,
+    height: Int,
+    roi: Roi,
+  ): ByteArray {
+    val clamped = clampRoi(roi, width, height)
+    val minRunHeight = max(42, min(140, (clamped.h * 0.08).roundToInt()))
+    val maxRunWidth = max(3, min(6, (clamped.w * 0.01).roundToInt()))
+    val runs = mutableListOf<VerticalGuideRun>()
+
+    for (x in clamped.x until clamped.x + clamped.w) {
+      var runStart = -1
+      var lastInk = -1
+      for (y in clamped.y until clamped.y + clamped.h) {
+        if (ink[y * width + x].toInt() != 0) {
+          if (runStart < 0) runStart = y
+          lastInk = y
+        } else if (runStart >= 0) {
+          if (lastInk - runStart + 1 >= minRunHeight) runs += VerticalGuideRun(x, runStart, lastInk + 1)
+          runStart = -1
+        }
+      }
+      if (runStart >= 0 && lastInk - runStart + 1 >= minRunHeight) {
+        runs += VerticalGuideRun(x, runStart, lastInk + 1)
+      }
+    }
+
+    if (runs.isEmpty()) return ink
+
+    val guideRegions =
+      mergeVerticalGuideRuns(runs)
+        .filter { it.w <= maxRunWidth }
+        .filter { region ->
+          val sideBands = horizontalSideInkBandCount(ink, width, clamped, region)
+          val requiredBands = if (region.h >= minRunHeight * 2) 2 else 3
+          sideBands >= requiredBands
+        }
+
+    if (guideRegions.isEmpty()) return ink
+
+    val suppressed = ink.copyOf()
+    guideRegions.forEach { region ->
+      for (y in region.y until region.y + region.h) {
+        for (x in region.x until region.x + region.w) {
+          suppressed[y * width + x] = 0
+        }
+      }
+    }
+    return suppressed
+  }
+
+  private fun mergeVerticalGuideRuns(runs: List<VerticalGuideRun>): List<Roi> {
+    if (runs.isEmpty()) return emptyList()
+    val sorted = runs.sortedWith(compareBy<VerticalGuideRun> { it.x }.thenBy { it.start })
+    val regions = mutableListOf<Roi>()
+    var left = sorted.first().x
+    var right = sorted.first().x + 1
+    var top = sorted.first().start
+    var bottom = sorted.first().end
+
+    sorted.drop(1).forEach { run ->
+      val overlap = max(0, min(bottom, run.end) - max(top, run.start))
+      val minHeight = min(bottom - top, run.end - run.start)
+      val connected = run.x <= right && overlap >= max(1, (minHeight * 0.55).roundToInt())
+      if (connected) {
+        right = max(right, run.x + 1)
+        top = min(top, run.start)
+        bottom = max(bottom, run.end)
+      } else {
+        regions += Roi(left, top, right - left, bottom - top)
+        left = run.x
+        right = run.x + 1
+        top = run.start
+        bottom = run.end
+      }
+    }
+
+    regions += Roi(left, top, right - left, bottom - top)
+    return regions
+  }
+
+  private fun horizontalSideInkBandCount(
+    ink: ByteArray,
+    width: Int,
+    roi: Roi,
+    guide: Roi,
+  ): Int {
+    val searchGap = max(3, min(8, roi.w / 80))
+    val searchWidth = max(24, min(140, roi.w / 3))
+    val leftStart = max(roi.x, guide.x - searchWidth)
+    val leftEnd = max(leftStart, guide.x - searchGap)
+    val rightStart = min(roi.x + roi.w, guide.x + guide.w + searchGap)
+    val rightEnd = min(roi.x + roi.w, guide.x + guide.w + searchGap + searchWidth)
+
+    var bands = 0
+    var inBand = false
+    var blankRows = 0
+    for (y in guide.y until guide.y + guide.h) {
+      val hasSideInk =
+        countRowInk(ink, width, y, leftStart, leftEnd) >= 2 ||
+          countRowInk(ink, width, y, rightStart, rightEnd) >= 2
+      if (hasSideInk) {
+        if (!inBand) {
+          bands++
+          inBand = true
+        }
+        blankRows = 0
+      } else if (inBand) {
+        blankRows++
+        if (blankRows > 2) {
+          inBand = false
+          blankRows = 0
+        }
+      }
+    }
+    return bands
+  }
+
+  private fun countRowInk(
+    ink: ByteArray,
+    width: Int,
+    y: Int,
+    startX: Int,
+    endX: Int,
+  ): Int {
+    var count = 0
+    for (x in startX until endX) {
+      if (ink[y * width + x].toInt() != 0) count++
+    }
+    return count
+  }
+
   private fun manualRoi(
     width: Int,
     height: Int,
@@ -1521,34 +1660,35 @@ class PdfPageReflowService(
     imageRegions: List<Roi>,
   ): List<PdfPageReflowItemDto> {
     val items = mutableListOf<PdfPageReflowItemDto>()
-    val columns = detectHorizontalColumns(image, ink, roi, options)
+    val textInk = suppressHorizontalGuideRules(ink, image.width, image.height, roi)
+    val columns = detectHorizontalColumns(image, textInk, roi, options)
     val detectedLines =
       columns.flatMap { column ->
         val lineBands =
           detectBands(roi.y, roi.y + roi.h) { y ->
             var count = 0
             for (x in column.start until column.end) {
-              if (ink[y * image.width + x].toInt() != 0) count++
+              if (textInk[y * image.width + x].toInt() != 0) count++
             }
             count >= 1
           }.filter { it.end - it.start >= 2 }
 
         lineBands.mapNotNull { line ->
-          val lineBounds = tightHorizontalLineBounds(image, ink, column, line) ?: return@mapNotNull null
+          val lineBounds = tightHorizontalLineBounds(image, textInk, column, line) ?: return@mapNotNull null
           val wordBands =
             detectBands(column.start, column.end) { x ->
               var count = 0
               for (y in line.start until line.end) {
-                if (ink[y * image.width + x].toInt() != 0) count++
+                if (textInk[y * image.width + x].toInt() != 0) count++
               }
               count >= 1
             }
           val blocks =
             mergeCloseBands(wordBands, max(1, options.wordGap))
               .mapNotNull { wordBand ->
-                horizontalWordBlock(image, ink, wordBand, line, lineBounds)
+                horizontalWordBlock(image, textInk, wordBand, line, lineBounds)
               }.filter { it.w >= 2 && it.h >= 2 }
-              .let { mergeHorizontalGlyphFragments(it, line, image, ink, options) }
+              .let { mergeHorizontalGlyphFragments(it, line, image, textInk, options) }
 
           if (blocks.isEmpty()) null else HorizontalTextLine(column, line, blocks)
         }
@@ -1556,7 +1696,7 @@ class PdfPageReflowService(
     val glyphHeight = horizontalCharacterSourceHeight(detectedLines.flatMap { it.blocks })
     val filteredLines =
       detectedLines.mapNotNull { line ->
-        val blocks = filterNoiseBlocks(line.blocks, glyphHeight, image, ink, options, horizontal = true)
+        val blocks = filterNoiseBlocks(line.blocks, glyphHeight, image, textInk, options, horizontal = true)
         if (blocks.isEmpty()) null else line.copy(blocks = blocks)
       }
     val lines = normalizeHorizontalTextColumns(filteredLines)

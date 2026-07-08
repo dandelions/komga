@@ -2042,23 +2042,141 @@ export default Vue.extend({
         }
       }
 
-      const columns = this.detectColumns(isInk, width, height, roi)
+      const textInk = this.suppressHorizontalGuideRules(ink, width, height, roi)
+      const textIsInk = (x: number, y: number): boolean => {
+        if (x < 0 || x >= width || y < 0 || y >= height) return false
+        if (this.isInsideImageRegion(x, y, imageRegions)) return false
+        return textInk[y * width + x] === 1
+      }
+
+      const columns = this.detectColumns(textIsInk, width, height, roi)
       const wordLines = [] as WordLine[]
 
       columns.forEach(column => {
         const columnWidth = column.end - column.start
         if (columnWidth < 8) return
-        const lines = this.detectLines(isInk, column, roi)
+        const lines = this.detectLines(textIsInk, column, roi)
         lines.forEach(line => {
-          const words = this.detectWords(isInk, column, line)
+          const words = this.detectWords(textIsInk, column, line)
           if (words.length > 0) wordLines.push({column, line, words})
         })
       })
 
       return {
-        lines: this.normalizeHorizontalTextColumns(this.filterHorizontalNoiseLines(wordLines, isInk)),
+        lines: this.normalizeHorizontalTextColumns(this.filterHorizontalNoiseLines(wordLines, textIsInk)),
         imageRegions,
       }
+    },
+    suppressHorizontalGuideRules(ink: Uint8Array, width: number, height: number, roi: Roi): Uint8Array {
+      const clamped = this.clampRoi(roi, width, height)
+      const minRunHeight = Math.max(42, Math.min(140, Math.round(clamped.h * 0.08)))
+      const maxRunWidth = Math.max(3, Math.min(6, Math.round(clamped.w * 0.01)))
+      const runs = [] as Array<{x: number, start: number, end: number}>
+
+      for (let x = clamped.x; x < clamped.x + clamped.w; x++) {
+        let runStart = -1
+        let lastInk = -1
+        for (let y = clamped.y; y < clamped.y + clamped.h; y++) {
+          if (ink[y * width + x] === 1) {
+            if (runStart < 0) runStart = y
+            lastInk = y
+          } else if (runStart >= 0) {
+            if (lastInk - runStart + 1 >= minRunHeight) runs.push({x, start: runStart, end: lastInk + 1})
+            runStart = -1
+          }
+        }
+        if (runStart >= 0 && lastInk - runStart + 1 >= minRunHeight) {
+          runs.push({x, start: runStart, end: lastInk + 1})
+        }
+      }
+
+      if (runs.length === 0) return ink
+      const guideRegions = this.mergeVerticalGuideRuns(runs)
+        .filter(region => region.w <= maxRunWidth)
+        .filter(region => {
+          const sideBands = this.horizontalSideInkBandCount(ink, width, clamped, region)
+          const requiredBands = region.h >= minRunHeight * 2 ? 2 : 3
+          return sideBands >= requiredBands
+        })
+      if (guideRegions.length === 0) return ink
+
+      const suppressed = ink.slice()
+      guideRegions.forEach(region => {
+        for (let y = region.y; y < region.y + region.h; y++) {
+          for (let x = region.x; x < region.x + region.w; x++) {
+            suppressed[y * width + x] = 0
+          }
+        }
+      })
+      return suppressed
+    },
+    mergeVerticalGuideRuns(runs: Array<{x: number, start: number, end: number}>): WordBlock[] {
+      if (runs.length === 0) return []
+      const sorted = runs.slice().sort((a, b) => a.x - b.x || a.start - b.start)
+      const regions = [] as WordBlock[]
+      let left = sorted[0].x
+      let right = sorted[0].x + 1
+      let top = sorted[0].start
+      let bottom = sorted[0].end
+
+      sorted.slice(1).forEach(run => {
+        const overlap = Math.max(0, Math.min(bottom, run.end) - Math.max(top, run.start))
+        const minHeight = Math.min(bottom - top, run.end - run.start)
+        const connected = run.x <= right && overlap >= Math.max(1, Math.round(minHeight * 0.55))
+        if (connected) {
+          right = Math.max(right, run.x + 1)
+          top = Math.min(top, run.start)
+          bottom = Math.max(bottom, run.end)
+        } else {
+          regions.push({x: left, y: top, w: right - left, h: bottom - top})
+          left = run.x
+          right = run.x + 1
+          top = run.start
+          bottom = run.end
+        }
+      })
+
+      regions.push({x: left, y: top, w: right - left, h: bottom - top})
+      return regions
+    },
+    horizontalSideInkBandCount(ink: Uint8Array, width: number, roi: Roi, guide: WordBlock): number {
+      const searchGap = Math.max(3, Math.min(8, Math.floor(roi.w / 80)))
+      const searchWidth = Math.max(24, Math.min(140, Math.floor(roi.w / 3)))
+      const leftStart = Math.max(roi.x, guide.x - searchWidth)
+      const leftEnd = Math.max(leftStart, guide.x - searchGap)
+      const rightStart = Math.min(roi.x + roi.w, guide.x + guide.w + searchGap)
+      const rightEnd = Math.min(roi.x + roi.w, guide.x + guide.w + searchGap + searchWidth)
+      let bands = 0
+      let inBand = false
+      let blankRows = 0
+
+      for (let y = guide.y; y < guide.y + guide.h; y++) {
+        const hasSideInk =
+          this.countRowInk(ink, width, y, leftStart, leftEnd) >= 2 ||
+          this.countRowInk(ink, width, y, rightStart, rightEnd) >= 2
+        if (hasSideInk) {
+          if (!inBand) {
+            bands++
+            inBand = true
+          }
+          blankRows = 0
+        } else if (inBand) {
+          blankRows++
+          if (blankRows > 2) {
+            inBand = false
+            blankRows = 0
+          }
+        }
+      }
+
+      return bands
+    },
+    countRowInk(ink: Uint8Array, width: number, y: number, startX: number, endX: number): number {
+      let count = 0
+      for (let x = startX; x < endX; x++) {
+        if (ink[y * width + x] === 1) count++
+      }
+      return count
     },
     detectImageRegions(pixels: Uint8ClampedArray, width: number, height: number, roi: Roi, threshold: number): ImageRegion[] {
       const tileSize = Math.max(12, Math.min(28, Math.round(Math.min(roi.w, roi.h) / 64)))

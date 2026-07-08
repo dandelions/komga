@@ -62,6 +62,26 @@ class PdfPageReflowServiceTest {
   }
 
   @Test
+  fun `given horizontal code block with left guide when reflowing page then guide does not merge rows`() {
+    val pageBytes = horizontalCodeBlockWithLeftGuidePage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+        cropRegions = listOf(PdfPageReflowRegion(x = 15, y = 15, w = 250, h = 150)),
+      )
+
+    val wordBlocks = response.items.filter { it.type == "word" }
+
+    assertThat(wordBlocks).hasSizeGreaterThanOrEqualTo(5)
+    assertThat(wordBlocks.mapNotNull { it.h }.max()).isLessThan(32)
+  }
+
+  @Test
   fun `given high resolution vertical glyph split by internal blank when reflowing page then fragments are merged`() {
     val pageBytes = highResolutionVerticalFragmentGlyphPage()
     val book = makeBook("book")
@@ -667,6 +687,24 @@ class PdfPageReflowServiceTest {
     graphics.fillRect(82, 44, 15, 5)
     graphics.fillRect(82, 70, 15, 5)
     graphics.fillRect(82, 96, 15, 5)
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun horizontalCodeBlockWithLeftGuidePage(): ByteArray {
+    val image = BufferedImage(280, 180, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color.BLACK
+    graphics.fillRect(34, 30, 3, 118)
+    listOf(34, 58, 82, 106, 130).forEach { y ->
+      listOf(52, 66, 80).forEach { x -> graphics.fillRect(x, y, 8, 14) }
+      listOf(108, 122, 136, 150, 164, 178, 192, 206).forEach { x -> graphics.fillRect(x, y, 9, 14) }
+    }
     graphics.dispose()
 
     val output = ByteArrayOutputStream()
