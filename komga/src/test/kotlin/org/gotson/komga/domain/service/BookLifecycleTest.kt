@@ -42,6 +42,7 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import java.nio.file.Files
 import java.nio.file.Paths
+import java.time.LocalDateTime
 import java.time.ZonedDateTime
 
 @SpringBootTest
@@ -201,6 +202,24 @@ class BookLifecycleTest(
 
     // then
     verify(exactly = 0) { bookLifecycle.softDeleteMany(any()) }
+  }
+
+  @Test
+  fun `given an unavailable book with a non-existent file when deleting book then it is deleted from database`() {
+    // given
+    val seriesPath = Paths.get("/non-existent-series")
+    val bookPath = seriesPath.resolve("book1.cbz")
+    val series = makeSeries(name = "series", libraryId = library.id, url = seriesPath.toUri().toURL())
+    val book = makeBook("1", libraryId = library.id, seriesId = series.id, url = bookPath.toUri().toURL()).copy(deletedDate = LocalDateTime.now())
+
+    seriesLifecycle.createSeries(series)
+    seriesLifecycle.addBooks(series, listOf(book))
+
+    // when
+    bookLifecycle.deleteBookFiles(book)
+
+    // then
+    assertThat(bookRepository.findByIdOrNull(book.id)).isNull()
   }
 
   @Test

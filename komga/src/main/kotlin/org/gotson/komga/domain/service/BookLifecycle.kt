@@ -595,7 +595,15 @@ class BookLifecycle(
   }
 
   fun deleteBookFiles(book: Book) {
-    if (book.path.notExists()) return logger.info { "Cannot delete book file, path does not exist: ${book.path}" }
+    if (book.path.notExists()) {
+      if (book.deletedDate != null) {
+        logger.info { "Book file does not exist, deleting unavailable book from database: $book" }
+        deleteOne(book)
+      } else {
+        logger.info { "Cannot delete book file, path does not exist: ${book.path}" }
+      }
+      return
+    }
     if (!book.path.isWritable()) return logger.info { "Cannot delete book file, path is not writable: ${book.path}" }
 
     val thumbnails =
