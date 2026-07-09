@@ -174,13 +174,16 @@ class LibraryContentLifecycle(
             series.copy(libraryId = library.id) to books.map { it.copy(libraryId = library.id) }
           }.toMap()
       val scannedBookUrls = scannedSeries.values.flatten().map { it.url }
+      val skipDestructiveCleanup = shouldSkipDestructiveCleanup(library, scanResult, scannedBookUrls)
 
-      if (!scanResult.limited && !library.scanOnlyNewBooks && library.emptyTrashAfterScan) {
+      if (!skipDestructiveCleanup && !scanResult.limited && !library.scanOnlyNewBooks && library.emptyTrashAfterScan) {
         deleteDeletedBooksStillMissing(library, scannedBookUrls)
       }
 
       // delete series that don't exist anymore
-      if (scanResult.limited) {
+      if (skipDestructiveCleanup) {
+        logger.warn { "Skipping missing series and book cleanup because scan result looks incomplete for library: ${library.name}" }
+      } else if (scanResult.limited) {
         logger.info { "Scan reached the daily file limit, skipping missing series and book cleanup for library: ${library.name}" }
       } else if (library.scanOnlyNewBooks) {
         logger.info { "Library is configured to scan only new books, skipping missing series cleanup for library: ${library.name}" }
@@ -200,7 +203,9 @@ class LibraryContentLifecycle(
 
       // delete books that don't exist anymore. We need to do this now, so trash bin can work
       val seriesToSortAndRefresh =
-        if (scanResult.limited) {
+        if (skipDestructiveCleanup) {
+          mutableListOf()
+        } else if (scanResult.limited) {
           mutableListOf()
         } else if (library.scanOnlyNewBooks) {
           logger.info { "Library is configured to scan only new books, skipping missing book cleanup for library: ${library.name}" }
@@ -377,7 +382,9 @@ class LibraryContentLifecycle(
       }
 
       // cleanup sidecars that don't exist anymore
-      if (scanResult.limited) {
+      if (skipDestructiveCleanup) {
+        logger.warn { "Skipping sidecar cleanup because scan result looks incomplete for library: ${library.name}" }
+      } else if (scanResult.limited) {
         logger.info { "Scan reached the daily file limit, skipping sidecar cleanup for library: ${library.name}" }
       } else if (library.scanOnlyNewBooks) {
         logger.info { "Library is configured to scan only new books, skipping sidecar cleanup for library: ${library.name}" }
@@ -391,7 +398,9 @@ class LibraryContentLifecycle(
         }
       }
 
-      if (scanResult.limited) {
+      if (skipDestructiveCleanup) {
+        logger.warn { "Skipping full-scan cleanup because scan result looks incomplete for library: ${library.name}" }
+      } else if (scanResult.limited) {
         logger.info { "Scan reached the daily file limit, skipping full-scan cleanup for library: ${library.name}" }
       } else if (library.scanOnlyNewBooks) {
         logger.info { "Library is configured to scan only new books, skipping full-scan cleanup for library: ${library.name}" }
@@ -512,6 +521,26 @@ class LibraryContentLifecycle(
       logger.info { "Deleting books already marked unavailable and still missing on disk: $booksToDelete" }
       bookLifecycle.deleteMany(booksToDelete)
     }
+  }
+
+  private fun shouldSkipDestructiveCleanup(
+    library: Library,
+    scanResult: ScanResult,
+    scannedBookUrls: Collection<URL>,
+  ): Boolean {
+    if (scanResult.limited || library.scanOnlyNewBooks || scannedBookUrls.isNotEmpty()) return false
+
+    val hasExistingAvailableSeries =
+      seriesRepository
+        .findAllNotDeletedByLibraryIdAndUrlNotIn(library.id, emptyList())
+        .isNotEmpty()
+    if (!hasExistingAvailableSeries) return false
+
+    val unavailableLibrary = library.copy(unavailableDate = LocalDateTime.now())
+    libraryRepository.update(unavailableLibrary)
+    eventPublisher.publishEvent(DomainEvent.LibraryUpdated(unavailableLibrary))
+    logger.warn { "Scan returned no books while library has existing content, marking library unavailable and skipping destructive cleanup: ${library.name}" }
+    return true
   }
 
   private fun Map<Series, List<Book>>.filterBooks(predicate: (Book) -> Boolean): Map<Series, List<Book>> =
