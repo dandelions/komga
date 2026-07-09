@@ -175,7 +175,7 @@ class LibraryContentLifecycle(
           }.toMap()
       val scannedBookUrls = scannedSeries.values.flatten().map { it.url }
 
-      if (!scanResult.limited && !library.scanOnlyNewBooks) {
+      if (!scanResult.limited && !library.scanOnlyNewBooks && library.emptyTrashAfterScan) {
         deleteDeletedBooksStillMissing(library, scannedBookUrls)
       }
 
