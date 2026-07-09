@@ -69,9 +69,9 @@ class TaskHandler(
                     taskEmitter.analyzeUnknownOutdatedAndErrorBooks(scanSummary.bookIdsToAnalyze)
                 } else if (it.scanOnlyNewBooks) {
                   if (scanSummary.bookIdsToAnalyze.isEmpty())
-                    taskEmitter.analyzeUnknownBooks(it)
+                    taskEmitter.analyzeUnknownOutdatedAndErrorBooks(it)
                   else
-                    taskEmitter.analyzeUnknownBooks(scanSummary.bookIdsToAnalyze)
+                    taskEmitter.analyzeUnknownOutdatedAndErrorBooks(scanSummary.bookIdsToAnalyze)
                 } else {
                   if (scanSummary.bookIdsToAnalyze.isEmpty())
                     taskEmitter.analyzeUnknownAndOutdatedBooks(it)

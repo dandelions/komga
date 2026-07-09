@@ -174,7 +174,7 @@ class TaskHandlerTest {
   }
 
   @Test
-  fun `given library scans only new books when handling scan task then only unknown books are scheduled for analysis`() {
+  fun `given library scans only new books when handling scan task then pending books are scheduled for analysis`() {
     // given
     val library = makeLibrary(id = "library1").copy(scanOnlyNewBooks = true)
     every { libraryRepository.findByIdOrNull(library.id) } returns library
@@ -186,13 +186,14 @@ class TaskHandlerTest {
     taskHandler.handleTask(Task.ScanLibrary(library.id, scanDeep = false, priority = 7))
 
     // then
-    verify(exactly = 1) { taskEmitter.analyzeUnknownBooks(setOf("book1", "book2")) }
+    verify(exactly = 1) { taskEmitter.analyzeUnknownOutdatedAndErrorBooks(setOf("book1", "book2")) }
     verify(exactly = 0) { taskEmitter.analyzeUnknownAndOutdatedBooks(any<Collection<String>>()) }
+    verify(exactly = 0) { taskEmitter.analyzeUnknownBooks(any<Collection<String>>()) }
     verify(exactly = 0) { taskEmitter.repairExtensions(any(), any()) }
   }
 
   @Test
-  fun `given library scans only new books and no book ids are returned when handling scan task then unknown books are scheduled`() {
+  fun `given library scans only new books and no book ids are returned when handling scan task then pending books are scheduled`() {
     // given
     val library = makeLibrary(id = "library1").copy(scanOnlyNewBooks = true)
     every { libraryRepository.findByIdOrNull(library.id) } returns library
@@ -204,9 +205,10 @@ class TaskHandlerTest {
     taskHandler.handleTask(Task.ScanLibrary(library.id, scanDeep = false, priority = 7))
 
     // then
-    verify(exactly = 1) { taskEmitter.analyzeUnknownBooks(library) }
+    verify(exactly = 1) { taskEmitter.analyzeUnknownOutdatedAndErrorBooks(library) }
     verify(exactly = 0) { taskEmitter.analyzeUnknownBooks(any<Collection<String>>()) }
     verify(exactly = 0) { taskEmitter.analyzeUnknownAndOutdatedBooks(any<Library>()) }
+    verify(exactly = 0) { taskEmitter.analyzeUnknownBooks(any<Library>()) }
     verify(exactly = 0) { taskEmitter.repairExtensions(any(), any()) }
   }
 
