@@ -107,12 +107,15 @@
 
       <template v-if="totalPages > 0">
         <div v-if="totalPages > 1" class="pagination-row">
-          <v-pagination
-            v-model="page"
-            :total-visible="paginationVisible"
-            :length="totalPages"
-          />
-          <page-jump v-model="page" :length="totalPages"/>
+          <div class="pagination-row-track">
+            <v-pagination
+              v-model="page"
+              class="book-pagination"
+              :total-visible="paginationVisible"
+              :length="totalPages"
+            />
+            <page-jump v-model="page" class="book-page-jump" :length="totalPages"/>
+          </div>
         </div>
 
         <item-browser
@@ -180,12 +183,15 @@
         </v-list>
 
         <div v-if="totalPages > 1" class="pagination-row">
-          <v-pagination
-            v-model="page"
-            :total-visible="paginationVisible"
-            :length="totalPages"
-          />
-          <page-jump v-model="page" :length="totalPages"/>
+          <div class="pagination-row-track">
+            <v-pagination
+              v-model="page"
+              class="book-pagination"
+              :total-visible="paginationVisible"
+              :length="totalPages"
+            />
+            <page-jump v-model="page" class="book-page-jump" :length="totalPages"/>
+          </div>
         </div>
       </template>
     </v-container>
@@ -840,8 +846,7 @@ export default Vue.extend({
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
-  justify-content: center;
-  gap: 6px;
+  justify-content: flex-start;
   overflow-x: auto;
   overflow-y: hidden;
   padding: 2px 0;
@@ -849,7 +854,20 @@ export default Vue.extend({
   -webkit-overflow-scrolling: touch;
 }
 
-.pagination-row ::v-deep .v-pagination {
+.pagination-row-track {
+  display: inline-flex;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: max-content;
+  min-width: max-content;
+  margin: 0 auto;
+}
+
+.pagination-row ::v-deep .book-pagination {
+  flex: 0 0 auto;
   flex-wrap: nowrap;
   margin: 0;
 }
