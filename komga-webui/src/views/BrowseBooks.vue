@@ -838,10 +838,57 @@ export default Vue.extend({
 <style scoped>
 .pagination-row {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 0;
+  white-space: nowrap;
+  -webkit-overflow-scrolling: touch;
+}
+
+.pagination-row ::v-deep .v-pagination {
+  flex-wrap: nowrap;
+  margin: 0;
+}
+
+.pagination-row ::v-deep .v-pagination__item,
+.pagination-row ::v-deep .v-pagination__navigation {
+  min-width: 30px;
+  width: 30px;
+  height: 30px;
+  margin: 0 2px;
+  font-size: .78rem;
+}
+
+.pagination-row ::v-deep .page-jump {
+  flex: 0 0 auto;
+  gap: 4px;
+  margin: 2px 0;
+}
+
+.pagination-row ::v-deep .page-jump-label,
+.pagination-row ::v-deep .page-jump-total {
+  font-size: .78rem;
+}
+
+.pagination-row ::v-deep .page-jump-input {
+  flex-basis: 58px;
+  max-width: 58px;
+  font-size: .78rem;
+}
+
+.pagination-row ::v-deep .page-jump-input .v-input__slot {
+  min-height: 30px;
+}
+
+.pagination-row ::v-deep .page-jump-button {
+  min-width: 42px;
+  height: 30px;
+  padding: 0 8px;
+  font-size: .75rem;
 }
 
 .book-list-view {
