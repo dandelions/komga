@@ -687,6 +687,11 @@ export default Vue.extend({
       const rotation = this.normalizedRotation(this.rotation)
       const angle = this.skewCorrection || 0
       const contrastEnhancement = this.contrastEnhancement
+      // pageDisplayUrls are produced by DivinaReader's rotation/correction
+      // pipeline (for example after finishing a crop). Processing them again
+      // would rotate an already rotated page and make the crop coordinates no
+      // longer match the displayed image.
+      if (this.pageDisplayUrls[page.number]) return
       if ((!rotation && !angle && !this.contrastEnhancement) || this.deskewedPageUrls[page.number] || this.deskewedPagePending[page.number]) return
 
       const image = event.target as HTMLImageElement

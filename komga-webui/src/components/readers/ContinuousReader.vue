@@ -318,6 +318,10 @@ export default Vue.extend({
       const rotation = this.normalizedRotation(this.rotation)
       const angle = this.skewCorrection || 0
       const contrastEnhancement = this.contrastEnhancement
+      // A parent-provided display URL is already rotated/corrected. Reusing it
+      // directly keeps subsequent crop coordinates and the reading image in
+      // the same coordinate system.
+      if (this.pageDisplayUrls[page.number]) return
       if ((!rotation && !angle && !this.contrastEnhancement) || this.deskewedPageUrls[page.number] || this.deskewedPagePending[page.number]) return
 
       const image = event.target as HTMLImageElement

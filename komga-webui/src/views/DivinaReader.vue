@@ -897,6 +897,7 @@ import {getBookReadRouteFromMedia} from '@/functions/book-format'
 import {TocEntry} from '@/types/epub'
 import {flattenToc} from '@/functions/toc'
 import {CLIENT_SETTING, ClientSettingUserUpdateDto} from '@/types/komga-clientsettings'
+import {enhanceTextContrast} from '@/functions/image-enhancement'
 
 const REFLOW_SETTINGS_STORAGE_PREFIX = 'komga.pdfReflowSettings.'
 const READER_IMAGE_SETTINGS_STORAGE_PREFIX = 'komga.readerImageSettings.'
@@ -1876,7 +1877,8 @@ export default Vue.extend({
       this.readerCropImageRequestId = requestId
       const rotation = this.readerRotation
       const angle = this.readerSkewCorrection || 0
-      if ((!rotation && !angle) || !this.currentPage?.url) {
+      const contrastEnhancement = this.readerContrastEnhancement
+      if ((!rotation && !angle && !contrastEnhancement) || !this.currentPage?.url) {
         this.revokeReaderCropImageUrl()
         return
       }
@@ -1884,9 +1886,9 @@ export default Vue.extend({
       try {
         const image = await this.loadReaderCropImage(this.currentPage.url)
         if (requestId !== this.readerCropImageRequestId) return
-        const canvas = this.processedReaderCropCanvas(image, rotation, angle)
+        const canvas = this.processedReaderCropCanvas(image, rotation, angle, contrastEnhancement)
         const url = await this.readerCropCanvasObjectUrl(canvas)
-        if (requestId === this.readerCropImageRequestId && this.readerRotation === rotation && this.readerSkewCorrection === angle) {
+        if (requestId === this.readerCropImageRequestId && this.readerRotation === rotation && this.readerSkewCorrection === angle && this.readerContrastEnhancement === contrastEnhancement) {
           const previousUrl = this.readerCropImageUrl
           this.readerCropImageUrl = url
           if (previousUrl && previousUrl !== url) URL.revokeObjectURL(previousUrl)
@@ -1908,9 +1910,14 @@ export default Vue.extend({
         image.src = url
       })
     },
-    processedReaderCropCanvas(image: HTMLImageElement, rotation: number, skewCorrection: number): HTMLCanvasElement {
+    processedReaderCropCanvas(image: HTMLImageElement, rotation: number, skewCorrection: number, contrastEnhancement: boolean = this.readerContrastEnhancement): HTMLCanvasElement {
       const rotatedCanvas = rotation ? this.rotatedReaderImageCanvas(image, rotation) : this.sourceReaderImageCanvas(image)
-      return skewCorrection ? this.skewCorrectedReaderCropCanvas(rotatedCanvas, skewCorrection) : rotatedCanvas
+      const canvas = skewCorrection ? this.skewCorrectedReaderCropCanvas(rotatedCanvas, skewCorrection) : rotatedCanvas
+      if (contrastEnhancement) {
+        const context = canvas.getContext('2d')
+        if (context) enhanceTextContrast(context, canvas.width, canvas.height, {enabled: true})
+      }
+      return canvas
     },
     sourceReaderImageCanvas(image: HTMLImageElement): HTMLCanvasElement {
       const canvas = document.createElement('canvas')
