@@ -39,7 +39,7 @@
                  :class="imgClass(spread)"
                  class="img-fit-all"
                  :style="imageStyle(page)"
-                 @load="ensureDeskewedPageUrl(page, $event)"
+                 @load="pageImageLoaded(page, $event)"
             />
           </div>
         </div>
@@ -139,6 +139,7 @@ export default Vue.extend({
       spreads: [] as PageDtoWithUrl[][],
       pendingScrollPosition: 'top' as 'top' | 'bottom',
       activeCropSegment: 0,
+      pageAspectRatios: {} as Record<number, number>,
       deskewedPageUrls: {} as Record<number, string>,
       deskewedPagePending: {} as Record<number, boolean>,
     }
@@ -319,8 +320,18 @@ export default Vue.extend({
         ),
       )
     },
+    heightPageNavigationEnabled(): boolean {
+      if (this.scale !== ScaleType.HEIGHT || this.cropNavigationEnabled) return false
+      const viewportWidth = Math.max(1, this.$vuetify.breakpoint.width)
+      const viewportHeight = Math.max(1, this.$vuetify.breakpoint.height)
+      const viewportRatio = viewportWidth / viewportHeight
+      return this.pages.some(page => {
+        const ratio = this.pageRatio(page)
+        return ratio !== undefined && ratio > viewportRatio + 0.001
+      })
+    },
     effectivePageLayout(): PagedReaderLayout {
-      return this.cropNavigationEnabled ? PagedReaderLayout.SINGLE_PAGE : this.pageLayout
+      return this.cropNavigationEnabled || this.heightPageNavigationEnabled ? PagedReaderLayout.SINGLE_PAGE : this.pageLayout
     },
     isDoublePages(): boolean {
       return this.effectivePageLayout === PagedReaderLayout.DOUBLE_PAGES || this.effectivePageLayout === PagedReaderLayout.DOUBLE_NO_COVER
@@ -434,14 +445,13 @@ export default Vue.extend({
       return segments[this.normalizedActiveCropSegmentIndex(segments.length)]
     },
     cropSegments(page: PageDtoWithUrl, regionIndex: number = this.activeCropRegion): CropSegment[] {
-      const crop = this.effectiveCropRegion(page.number, regionIndex)
+      const crop = this.effectiveCropRegion(page.number, regionIndex) || this.implicitHeightCropRegion()
       if (!crop) return []
-
-      const axis = this.cropSegmentAxis()
-      if (!axis) return [this.singleCropSegment(crop)]
 
       const pageRatio = this.pageRatio(page)
       if (!pageRatio) return [this.singleCropSegment(crop)]
+
+      const axis = this.cropSegmentAxis(crop, pageRatio)
 
       const span = this.cropSegmentViewportSpan(crop, pageRatio, axis)
       const cropSpan = axis === 'vertical' ? crop.h : crop.w
@@ -485,6 +495,10 @@ export default Vue.extend({
         }
       })
     },
+    implicitHeightCropRegion(): CropRegion | undefined {
+      if (this.scale !== ScaleType.HEIGHT || this.cropNavigationEnabled) return undefined
+      return {x: 0, y: 0, w: 100, h: 100}
+    },
     singleCropSegment(crop: CropRegion, axis?: CropSegmentAxis): CropSegment {
       return {
         crop,
@@ -495,22 +509,36 @@ export default Vue.extend({
         nextOverlapPercent: 0,
       }
     },
-    cropSegmentAxis(): CropSegmentAxis | undefined {
+    cropSegmentAxis(crop: CropRegion, pageRatio: number): CropSegmentAxis {
       switch (this.scale) {
         case ScaleType.WIDTH:
         case ScaleType.WIDTH_SHRINK_ONLY:
           return 'vertical'
         case ScaleType.HEIGHT:
           return 'horizontal'
-        default:
-          return undefined
       }
+
+      // SCREEN and ORIGINAL can overflow in either direction after the crop is
+      // enlarged. Split along the overflowing axis so a single crop region is
+      // fully readable before navigation advances to the next source page.
+      const viewportWidth = Math.max(1, this.$vuetify.breakpoint.width)
+      const viewportHeight = Math.max(1, this.$vuetify.breakpoint.height)
+      const viewportRatio = viewportWidth / viewportHeight
+      const cropRatio = crop.w * pageRatio / crop.h
+      return cropRatio <= viewportRatio ? 'vertical' : 'horizontal'
     },
     pageRatio(page: PageDtoWithUrl): number | undefined {
-      const width = this.displayPageWidth(page)
-      const height = this.displayPageHeight(page)
-      if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return undefined
-      return width / height
+      const width = Number(page.width)
+      const height = Number(page.height)
+      if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
+        const sourceRatio = width / height
+        return Math.abs(this.normalizedRotation(this.rotation)) === 90 ? 1 / sourceRatio : sourceRatio
+      }
+
+      // The loaded image may already contain the reader rotation, so its
+      // measured ratio is the final display ratio and must not be rotated again.
+      const displayedRatio = this.pageAspectRatios[page.number]
+      return Number.isFinite(displayedRatio) && displayedRatio > 0 ? displayedRatio : undefined
     },
     displayPageWidth(page: PageDtoWithUrl): number {
       return Math.abs(this.normalizedRotation(this.rotation)) === 90 ? Number(page.height) : Number(page.width)
@@ -646,6 +674,14 @@ export default Vue.extend({
       const numberValue = Number(value)
       if (!Number.isFinite(numberValue)) return fallback
       return Math.max(0, Math.min(100, numberValue))
+    },
+    pageImageLoaded(page: PageDtoWithUrl, event: Event) {
+      const image = event.target as HTMLImageElement
+      if (image?.naturalWidth > 0 && image.naturalHeight > 0) {
+        const ratio = image.naturalWidth / image.naturalHeight
+        if (this.pageAspectRatios[page.number] !== ratio) this.$set(this.pageAspectRatios, page.number, ratio)
+      }
+      this.ensureDeskewedPageUrl(page, event)
     },
     async ensureDeskewedPageUrl(page: PageDtoWithUrl, event: Event) {
       const rotation = this.normalizedRotation(this.rotation)

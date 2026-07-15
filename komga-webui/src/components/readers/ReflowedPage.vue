@@ -948,6 +948,9 @@ export default Vue.extend({
       this.reflow()
     },
     rotation() {
+      this.draftRoi = undefined
+      this.drawingCrop = false
+      this.cropWarning = ''
       this.revokeObjectUrl()
       if (this.cropMode) {
         this.ensureCropImage(this.controlSkewCorrection)
@@ -1625,7 +1628,8 @@ export default Vue.extend({
           nextObjectUrl = rotatedUrl
           image = await this.decodeImageUrl(nextObjectUrl)
         }
-        if (requestId !== undefined && requestId !== this.requestId) {
+        const sourceChanged = url !== this.page.url || rotation !== this.normalizedRotation(this.rotation)
+        if (sourceChanged || (requestId !== undefined && requestId !== this.requestId)) {
           URL.revokeObjectURL(nextObjectUrl)
           return image
         }
@@ -2023,6 +2027,7 @@ export default Vue.extend({
       this.objectUrl = ''
       this.objectUrlSource = ''
       this.objectUrlBytes = 0
+      this.imageSize = {w: 0, h: 0}
     },
     revokeCropObjectUrl(cancelCropRequests: boolean = true) {
       if (cancelCropRequests) this.cropImageRequestId += 1

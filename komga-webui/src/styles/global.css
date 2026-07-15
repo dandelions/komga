@@ -13,3 +13,24 @@ html {
 .link-underline:hover {
     text-decoration: underline;
 }
+.toolbar-count-title {
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
+.toolbar-count-title > span {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.toolbar-count-value {
+    flex: 0 0 auto !important;
+    margin-left: 12px;
+    margin-right: 12px;
+}
+
+.toolbar-count-value > span {
+    font-size: 1.1rem;
+}

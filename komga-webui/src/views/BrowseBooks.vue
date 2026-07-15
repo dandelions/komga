@@ -6,12 +6,12 @@
                             :library="library"
                             :analyze-search="filteredAnalyzeSearch"/>
 
-      <v-toolbar-title>
+      <v-toolbar-title class="toolbar-count-title" :title="toolbarTitle">
         <span>{{ toolbarTitle }}</span>
-        <v-chip label class="mx-4" v-if="totalElements">
-          <span style="font-size: 1.1rem">{{ totalElements }}</span>
-        </v-chip>
       </v-toolbar-title>
+      <v-chip v-if="totalElements !== null" label class="toolbar-count-value">
+        <span>{{ totalElements }}</span>
+      </v-chip>
 
       <v-spacer/>
 

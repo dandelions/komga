@@ -328,6 +328,8 @@ export default Vue.extend({
       this.reflow()
     },
     rotation() {
+      this.draftRoi = undefined
+      this.drawingCrop = false
       this.revokeObjectUrl()
       if (this.cropMode) {
         this.ensureCropImage()
@@ -528,12 +530,15 @@ export default Vue.extend({
     },
     async ensureCropImage() {
       if (this.objectUrl && this.imageSize.w && this.imageSize.h) return
+      const requestId = this.requestId + 1
+      this.requestId = requestId
       this.loading = true
       try {
-        const image = await this.loadPageImage(this.page.url)
+        const image = await this.loadPageImage(this.page.url, requestId)
+        if (requestId !== this.requestId) return
         this.imageSize = {w: image.naturalWidth, h: image.naturalHeight}
       } finally {
-        this.loading = false
+        if (requestId === this.requestId) this.loading = false
       }
     },
     async loadPageImage(url: string, requestId?: number): Promise<HTMLImageElement> {
@@ -556,7 +561,8 @@ export default Vue.extend({
           nextObjectUrl = rotatedUrl
           image = await this.decodeImageUrl(nextObjectUrl)
         }
-        if (requestId !== undefined && requestId !== this.requestId) {
+        const sourceChanged = url !== this.page.url || rotation !== this.normalizedRotation(this.rotation)
+        if (sourceChanged || (requestId !== undefined && requestId !== this.requestId)) {
           URL.revokeObjectURL(nextObjectUrl)
           return image
         }
@@ -827,6 +833,7 @@ export default Vue.extend({
       if (this.objectUrl) URL.revokeObjectURL(this.objectUrl)
       this.objectUrl = ''
       this.objectUrlSource = ''
+      this.imageSize = {w: 0, h: 0}
     },
     buildInkMap(imageData: ImageData, width: number, height: number): Uint8Array {
       const pixels = imageData.data
