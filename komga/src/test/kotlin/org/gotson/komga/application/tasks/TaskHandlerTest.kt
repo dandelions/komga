@@ -74,6 +74,16 @@ class TaskHandlerTest {
   }
 
   @Test
+  fun `given library without root when handling scan task then it is skipped`() {
+    val library = Library("group", null)
+    every { libraryRepository.findByIdOrNull(library.id) } returns library
+
+    taskHandler.handleTask(Task.ScanLibrary(library.id))
+
+    verify(exactly = 0) { libraryContentLifecycle.scanRootFolder(any(), any()) }
+  }
+
+  @Test
   fun `given scan reaches daily file limit when handling scan task then continuation is scheduled`() {
     // given
     val library = makeLibrary(id = "library1")

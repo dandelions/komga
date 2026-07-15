@@ -371,6 +371,25 @@ class FileSystemScannerTest {
   }
 
   @Test
+  fun `given excluded paths when scanning then excluded files and subtrees are not returned`() {
+    Jimfs.newFileSystem(Configuration.unix()).use { fs ->
+      val root = fs.getPath("/root")
+      Files.createDirectory(root)
+      val included = makeSubDir(root, "included", listOf("keep.cbz", "skip.cbz"))
+      val excluded = makeSubDir(root, "excluded", listOf("hidden.cbz"))
+
+      val scan =
+        scanner.scanRootFolder(
+          root,
+          excludedPaths = setOf(included.resolve("skip.cbz"), excluded),
+        ).series
+
+      assertThat(scan.keys.map { it.name }).containsExactly("included")
+      assertThat(scan.values.flatten().map { it.name }).containsExactly("keep")
+    }
+  }
+
+  @Test
   fun `given directory structure with hidden directories when scanning then hidden directories are not returned`() {
     Jimfs.newFileSystem(Configuration.unix()).use { fs ->
       // given

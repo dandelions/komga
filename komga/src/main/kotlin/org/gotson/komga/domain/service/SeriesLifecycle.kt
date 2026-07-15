@@ -170,6 +170,71 @@ class SeriesLifecycle(
     return seriesRepository.findByIdOrNull(series.id)!!
   }
 
+  fun moveBooksToLibrary(
+    bookIds: Collection<String>,
+    targetLibraryId: String,
+  ) {
+    val targetLibrary = requireNotNull(libraryRepository.findByIdOrNull(targetLibraryId)) { "Target library does not exist" }
+    val books = bookIds.distinct().map { id -> requireNotNull(bookRepository.findByIdOrNull(id)) { "Book does not exist: $id" } }
+    require(books.isNotEmpty()) { "No books selected" }
+    require(books.none { it.deletedDate != null }) { "Deleted books cannot be moved" }
+    require(books.none { it.libraryId == targetLibraryId }) { "A book is already in the target library" }
+
+    targetLibrary.path?.let { targetPath ->
+      val normalizedTarget = targetPath.toAbsolutePath().normalize()
+      require(books.all { it.path.toAbsolutePath().normalize().startsWith(normalizedTarget) }) {
+        "All selected books must be located inside the target library root folder"
+      }
+    }
+
+    books.forEach { book ->
+      require(bookRepository.findNotDeletedByLibraryIdAndUrlOrNull(targetLibraryId, book.url) == null) {
+        "A book with the same path already exists in the target library: ${book.url}"
+      }
+    }
+
+    val sourceSeriesToRefresh = mutableSetOf<String>()
+    val targetSeriesToRefresh = mutableSetOf<String>()
+    val movedBooks = mutableListOf<Book>()
+
+    books.groupBy { it.seriesId }.forEach { (sourceSeriesId, seriesBooks) ->
+      val sourceSeries = requireNotNull(seriesRepository.findByIdOrNull(sourceSeriesId)) { "Source series does not exist: $sourceSeriesId" }
+      val targetSeries =
+        seriesRepository.findNotDeletedByLibraryIdAndUrlOrNull(targetLibraryId, sourceSeries.url)
+          ?: createSeries(
+            Series(
+              name = sourceSeries.name,
+              url = sourceSeries.url,
+              fileLastModified = sourceSeries.fileLastModified,
+              libraryId = targetLibraryId,
+              oneshot = sourceSeries.oneshot,
+            ),
+          )
+
+      movedBooks += seriesBooks.map { it.copy(seriesId = targetSeries.id, libraryId = targetLibraryId) }
+      sourceSeriesToRefresh += sourceSeries.id
+      targetSeriesToRefresh += targetSeries.id
+    }
+
+    transactionTemplate.executeWithoutResult {
+      bookRepository.update(movedBooks)
+    }
+    movedBooks.forEach { eventPublisher.publishEvent(DomainEvent.BookUpdated(it)) }
+
+    sourceSeriesToRefresh.forEach { seriesId ->
+      seriesRepository.findByIdOrNull(seriesId)?.let { series ->
+        if (bookRepository.findAllBySeriesId(seriesId).isEmpty()) deleteMany(listOf(series)) else sortBooks(series)
+      }
+    }
+    targetSeriesToRefresh.forEach { seriesId ->
+      seriesRepository.findByIdOrNull(seriesId)?.let { series ->
+        sortBooks(series)
+        taskEmitter.refreshSeriesMetadata(series.id)
+        taskEmitter.aggregateSeriesMetadata(series.id)
+      }
+    }
+  }
+
   fun softDeleteMany(series: Collection<Series>) {
     logger.info { "Soft delete series: $series" }
     val deletedDate = LocalDateTime.now()

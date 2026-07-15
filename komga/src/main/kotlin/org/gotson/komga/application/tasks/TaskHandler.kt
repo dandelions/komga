@@ -3,7 +3,6 @@ package org.gotson.komga.application.tasks
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.micrometer.core.instrument.MeterRegistry
 import org.gotson.komga.domain.model.BookAction
-import org.gotson.komga.domain.model.Library
 import org.gotson.komga.domain.persistence.BookRepository
 import org.gotson.komga.domain.persistence.LibraryRepository
 import org.gotson.komga.domain.persistence.SeriesRepository
@@ -55,7 +54,7 @@ class TaskHandler(
         when (task) {
           is Task.ScanLibrary ->
             libraryRepository.findByIdOrNull(task.libraryId)?.let { library ->
-              findLeafLibraries(library).forEach {
+              listOfNotNull(library.takeIf { it.root != null }).forEach {
                 val scanSummary = libraryContentLifecycle.scanRootFolder(it, task.scanDeep)
                 if (taskCancelled(task, owner)) return@measureTime
                 if (scanSummary.limited) {
@@ -237,9 +236,4 @@ class TaskHandler(
     return cancelled
   }
 
-  private fun findLeafLibraries(library: Library): Collection<Library> {
-    val children = libraryRepository.findAllByParentId(library.id)
-    if (children.isEmpty()) return if (library.root != null) listOf(library) else emptyList()
-    return children.flatMap { findLeafLibraries(it) }
-  }
 }

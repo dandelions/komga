@@ -108,6 +108,26 @@ class SeriesLifecycleTest(
   }
 
   @Test
+  fun `given selected books when moving to another library then ids and associated data are preserved`() {
+    val targetLibrary = makeLibrary(name = "target")
+    libraryRepository.insert(targetLibrary.copy(root = null))
+    val sourceSeries = seriesLifecycle.createSeries(makeSeries(name = "series", libraryId = library.id))
+    val books = listOf(makeBook("book 1", libraryId = library.id), makeBook("book 2", libraryId = library.id))
+    seriesLifecycle.addBooks(sourceSeries, books)
+
+    seriesLifecycle.moveBooksToLibrary(books.map { it.id }, targetLibrary.id)
+
+    val movedBooks = books.map { bookRepository.findByIdOrNull(it.id)!! }
+    assertThat(movedBooks).allMatch { it.libraryId == targetLibrary.id }
+    assertThat(movedBooks.map { it.id }).containsExactlyInAnyOrderElementsOf(books.map { it.id })
+    assertThat(movedBooks.map { it.seriesId }.distinct()).hasSize(1)
+    assertThat(seriesRepository.findByIdOrNull(sourceSeries.id)).isNull()
+    assertThat(seriesRepository.findByIdOrNull(movedBooks.first().seriesId)?.libraryId).isEqualTo(targetLibrary.id)
+    assertThat(movedBooks).allMatch { mediaRepository.findByIdOrNull(it.id) != null }
+    assertThat(movedBooks).allMatch { bookMetadataRepository.findByIdOrNull(it.id) != null }
+  }
+
+  @Test
   fun `given series when removing a book then remaining books are indexed in sequence`() {
     // given
     val books =

@@ -455,6 +455,11 @@
       "tab_general": "常規",
       "tab_poster": "海報"
     },
+    "move_books": {
+      "confirm": "移動",
+      "target_library": "目標書庫",
+      "title": "移動選取的書籍"
+    },
     "edit_library": {
       "button_browse": "瀏覽",
       "button_cancel": "取消",
@@ -917,6 +922,7 @@
     "empty_trash": "清理垃圾",
     "mark_read": "標記為已讀",
     "mark_unread": "標記為未讀",
+    "move_to_library": "移動到書庫",
     "pin": "釘選",
     "refresh_metadata": "刷新元資料",
     "scan_library_files": "掃描書庫檔案",

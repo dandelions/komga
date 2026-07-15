@@ -458,6 +458,11 @@
       "tab_general": "General",
       "tab_poster": "Poster"
     },
+    "move_books": {
+      "confirm": "Move",
+      "target_library": "Target library",
+      "title": "Move selected books"
+    },
     "edit_library": {
       "button_browse": "Browse",
       "button_cancel": "Cancel",
@@ -946,6 +951,7 @@
     "empty_trash": "Empty trash",
     "mark_read": "Mark as read",
     "mark_unread": "Mark as unread",
+    "move_to_library": "Move to library",
     "pin": "Pin",
     "refresh_metadata": "Refresh metadata",
     "scan_library_files": "Scan library files",

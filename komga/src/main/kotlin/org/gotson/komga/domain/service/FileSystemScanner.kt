@@ -56,6 +56,7 @@ class FileSystemScanner(
     maxCountedBooks: Int? = null,
     consumeCountedBook: (Book) -> Boolean = { true },
     countBook: (Book) -> Boolean = { true },
+    excludedPaths: Set<Path> = emptySet(),
   ): ScanResult {
     val scanForExtensions =
       buildList {
@@ -66,6 +67,7 @@ class FileSystemScanner(
     logger.info { "Scanning folder: $root" }
     logger.info { "Scan for extensions: $scanForExtensions" }
     logger.info { "Excluded directory patterns: $directoryExclusions" }
+    logger.info { "Excluded paths: $excludedPaths" }
     logger.info { "Force directory modified time: $forceDirectoryModifiedTime" }
     logger.info { "Max counted books: ${maxCountedBooks ?: "unlimited"}" }
 
@@ -97,7 +99,9 @@ class FileSystemScanner(
             logger.trace { "preVisit: $dir (regularFile:${attrs.isRegularFile}, directory:${attrs.isDirectory}, symbolicLink:${attrs.isSymbolicLink}, other:${attrs.isOther})" }
             if (limitReached) return FileVisitResult.SKIP_SUBTREE
 
-            if (dir.name.startsWith(".") ||
+            val normalizedDir = dir.toAbsolutePath().normalize()
+            if (excludedPaths.any { normalizedDir.startsWith(it.toAbsolutePath().normalize()) } ||
+              dir.name.startsWith(".") ||
               directoryExclusions.any { exclude ->
                 dir.pathString.contains(exclude, true)
               }
@@ -120,6 +124,8 @@ class FileSystemScanner(
           ): FileVisitResult {
             logger.trace { "visitFile: $file (regularFile:${attrs.isRegularFile}, directory:${attrs.isDirectory}, symbolicLink:${attrs.isSymbolicLink}, other:${attrs.isOther})" }
             if (limitReached) return FileVisitResult.SKIP_SIBLINGS
+            val normalizedFile = file.toAbsolutePath().normalize()
+            if (excludedPaths.any { normalizedFile.startsWith(it.toAbsolutePath().normalize()) }) return FileVisitResult.CONTINUE
 
             if (!attrs.isSymbolicLink && !attrs.isDirectory) {
               if (scanForExtensions.contains(file.extension.lowercase()) &&

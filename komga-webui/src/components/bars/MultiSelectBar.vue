@@ -88,6 +88,15 @@
         </v-tooltip>
       </v-btn>
 
+      <v-btn icon @click="moveBooksDialog = true" v-if="isAdmin && kind === 'books'">
+        <v-tooltip bottom>
+          <template v-slot:activator="{ on }">
+            <v-icon v-on="on">mdi-folder-move</v-icon>
+          </template>
+          <span>{{ $t('menu.move_to_library') }}</span>
+        </v-tooltip>
+      </v-btn>
+
       <v-btn icon @click="edit" v-if="isAdmin && (kind === 'books' || kind === 'series')">
         <v-tooltip bottom>
           <template v-slot:activator="{ on }">
@@ -97,6 +106,13 @@
         </v-tooltip>
       </v-btn>
 
+      <move-books-dialog
+        v-if="kind === 'books'"
+        v-model="moveBooksDialog"
+        :books="value"
+        @moved="booksMoved"
+      />
+
     </toolbar-sticky>
   </v-scroll-y-transition>
 </template>
@@ -104,12 +120,15 @@
 <script lang="ts">
 import Vue from 'vue'
 import ToolbarSticky from './ToolbarSticky.vue'
+import MoveBooksDialog from '@/components/dialogs/MoveBooksDialog.vue'
 
 export default Vue.extend({
   name: 'MultiSelectBar',
-  components: { ToolbarSticky },
+  components: {MoveBooksDialog, ToolbarSticky},
   data: () => {
-    return {}
+    return {
+      moveBooksDialog: false,
+    }
   },
   props: {
     value: {
@@ -169,6 +188,10 @@ export default Vue.extend({
     },
     bulkEdit () {
       this.$emit('bulk-edit')
+    },
+    booksMoved () {
+      this.$emit('moved')
+      this.unselectAll()
     },
     doDelete () {
       this.$emit('delete')

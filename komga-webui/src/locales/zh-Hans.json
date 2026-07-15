@@ -458,6 +458,11 @@
       "tab_general": "常规",
       "tab_poster": "海报"
     },
+    "move_books": {
+      "confirm": "移动",
+      "target_library": "目标库",
+      "title": "移动选中的书籍"
+    },
     "edit_library": {
       "button_browse": "浏览",
       "button_cancel": "取消",
@@ -946,6 +951,7 @@
     "empty_trash": "清理垃圾",
     "mark_read": "标记为已读",
     "mark_unread": "标记为未读",
+    "move_to_library": "移动到库",
     "pin": "固定",
     "refresh_metadata": "刷新元数据",
     "scan_library_files": "扫描库文件",

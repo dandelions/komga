@@ -99,6 +99,14 @@ class LibraryContentLifecycle(
 
     measureTime {
       val root = library.root ?: throw DirectoryNotFoundException("Library root folder is not configured: ${library.name}")
+      val rootPath = Paths.get(root.toURI()).toAbsolutePath().normalize()
+      val descendantLibraries = findDescendantLibraries(library.id)
+      val descendantSeriesIds = descendantLibraries.flatMap { seriesRepository.findAllIdsByLibraryId(it.id) }
+      val excludedPaths =
+        (descendantLibraries.mapNotNull { it.path } + bookRepository.findAllBySeriesIds(descendantSeriesIds).map { it.path })
+          .map { it.toAbsolutePath().normalize() }
+          .filter { it != rootPath && it.startsWith(rootPath) }
+          .toSet()
       val existingBooksByUrl =
         if (scanLimitUsage != null) {
           bookRepository
@@ -119,17 +127,18 @@ class LibraryContentLifecycle(
         try {
           if (scanLimitUsage == null) {
             fileSystemScanner.scanRootFolder(
-              Paths.get(root.toURI()),
+              rootPath,
               library.scanForceModifiedTime,
               library.oneshotsDirectory,
               library.scanCbx,
               library.scanPdf,
               library.scanEpub,
               library.scanDirectoryExclusions,
+              excludedPaths = excludedPaths,
             )
           } else {
             fileSystemScanner.scanRootFolder(
-              Paths.get(root.toURI()),
+              rootPath,
               library.scanForceModifiedTime,
               library.oneshotsDirectory,
               library.scanCbx,
@@ -143,6 +152,7 @@ class LibraryContentLifecycle(
               consumeCountedBook = {
                 komgaSettingsProvider.tryConsumeLibraryScanFile()
               },
+              excludedPaths = excludedPaths,
             )
           }
         } catch (e: DirectoryNotFoundException) {
@@ -415,6 +425,11 @@ class LibraryContentLifecycle(
     val scanResult = checkNotNull(fileScanResult)
     return LibraryScanSummary(scanResult.limited, scanResult.scannedBookCount, scanResult.countedBookCount, bookIdsToAnalyze, recoveredFromUnavailable)
   }
+
+  private fun findDescendantLibraries(libraryId: String): Collection<Library> =
+    libraryRepository.findAllByParentId(libraryId).flatMap { child ->
+      listOf(child) + findDescendantLibraries(child.id)
+    }
 
   private fun applyScanLimitPriority(
     scanResult: ScanResult,

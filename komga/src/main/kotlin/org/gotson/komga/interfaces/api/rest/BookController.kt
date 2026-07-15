@@ -38,6 +38,7 @@ import org.gotson.komga.domain.service.PdfPageReflowDto
 import org.gotson.komga.domain.service.PdfPageReflowOptions
 import org.gotson.komga.domain.service.PdfPageReflowRegion
 import org.gotson.komga.domain.service.PdfPageReflowService
+import org.gotson.komga.domain.service.SeriesLifecycle
 import org.gotson.komga.infrastructure.image.ImageAnalyzer
 import org.gotson.komga.infrastructure.jooq.UnpagedSorted
 import org.gotson.komga.infrastructure.mediacontainer.ContentDetector
@@ -59,6 +60,7 @@ import org.gotson.komga.interfaces.api.persistence.BookDtoRepository
 import org.gotson.komga.interfaces.api.rest.dto.BookDto
 import org.gotson.komga.interfaces.api.rest.dto.BookImportBatchDto
 import org.gotson.komga.interfaces.api.rest.dto.BookMetadataUpdateDto
+import org.gotson.komga.interfaces.api.rest.dto.BookMoveBatchDto
 import org.gotson.komga.interfaces.api.rest.dto.PageDto
 import org.gotson.komga.interfaces.api.rest.dto.R2Positions
 import org.gotson.komga.interfaces.api.rest.dto.ReadListDto
@@ -109,6 +111,7 @@ class BookController(
   private val taskEmitter: TaskEmitter,
   private val bookAnalyzer: BookAnalyzer,
   private val bookLifecycle: BookLifecycle,
+  private val seriesLifecycle: SeriesLifecycle,
   private val bookRepository: BookRepository,
   private val bookMetadataRepository: BookMetadataRepository,
   private val mediaRepository: MediaRepository,
@@ -124,6 +127,20 @@ class BookController(
   private val pdfPageReflowService: PdfPageReflowService,
   private val objectMapper: ObjectMapper,
 ) {
+  @Operation(summary = "Move books to another library", tags = [OpenApiConfiguration.TagNames.BOOKS])
+  @PostMapping("api/v1/books/move")
+  @PreAuthorize("hasRole('ADMIN')")
+  @ResponseStatus(HttpStatus.NO_CONTENT)
+  fun moveBooks(
+    @RequestBody request: BookMoveBatchDto,
+  ) {
+    try {
+      seriesLifecycle.moveBooksToLibrary(request.bookIds, request.libraryId)
+    } catch (e: IllegalArgumentException) {
+      throw ResponseStatusException(HttpStatus.BAD_REQUEST, e.message, e)
+    }
+  }
+
   @Deprecated("use /v1/books/list instead")
   @PageableAsQueryParam
   @GetMapping("api/v1/books")
