@@ -324,7 +324,7 @@
     </div>
     <div v-else-if="deferReflow" class="reflow-setup-preview" @click="collapseControls">
       <img
-        :src="page.url"
+        :src="cropImageUrl"
         class="reflow-setup-image"
         alt=""
         draggable="false"
@@ -912,6 +912,7 @@ export default Vue.extend({
         this.drawingCrop = false
         this.cropMode = false
         this.$emit('crop-mode-change', false)
+        this.revokeObjectUrl()
         if (this.deferReflow) {
           this.loading = false
           this.error = false
@@ -919,6 +920,7 @@ export default Vue.extend({
           this.reflowItems = []
           this.pages = []
           this.virtualPageIndex = 0
+          this.ensureCropImage(this.controlSkewCorrection)
           return
         }
         this.reflow()
@@ -952,11 +954,10 @@ export default Vue.extend({
       this.drawingCrop = false
       this.cropWarning = ''
       this.revokeObjectUrl()
-      if (this.cropMode) {
+      if (this.cropMode || this.deferReflow) {
         this.ensureCropImage(this.controlSkewCorrection)
         return
       }
-      if (this.deferReflow) return
       this.reflow()
     },
     cachedItems: {
@@ -975,6 +976,7 @@ export default Vue.extend({
         this.pages = []
         this.virtualPageIndex = 0
         this.requestId += 1
+        this.ensureCropImage(this.controlSkewCorrection)
         return
       }
       if (this.cropMode) return
