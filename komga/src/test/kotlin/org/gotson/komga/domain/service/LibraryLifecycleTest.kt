@@ -129,20 +129,16 @@ class LibraryLifecycleTest(
     }
 
     @Test
-    fun `given parent library when adding child library without root folder then exception is thrown`() {
+    fun `given parent library when adding child library without root folder then it is created`() {
       // given
       val parent = libraryLifecycle.addLibrary(Library("parent", null))
 
       // when
-      val thrown =
-        catchThrowable {
-          libraryLifecycle.addLibrary(Library("child", null, parentId = parent.id))
-        }
+      val child = libraryLifecycle.addLibrary(Library("child", null, parentId = parent.id))
 
       // then
-      assertThat(thrown)
-        .isInstanceOf(IllegalArgumentException::class.java)
-        .hasMessageContaining("Child library root folder is required")
+      assertThat(child.root).isNull()
+      assertThat(child.parentId).isEqualTo(parent.id)
     }
   }
 
@@ -330,7 +326,7 @@ class LibraryLifecycleTest(
     }
 
     @Test
-    fun `given child library when updating without root folder then exception is thrown`(
+    fun `given child library when updating without root folder then it is updated`(
       @TempDir childRoot: Path,
     ) {
       // given
@@ -338,15 +334,12 @@ class LibraryLifecycleTest(
       val child = libraryLifecycle.addLibrary(Library("child", childRoot.toUri().toURL(), parentId = parent.id))
 
       // when
-      val thrown =
-        catchThrowable {
-          libraryLifecycle.updateLibrary(child.copy(root = null))
-        }
+      libraryLifecycle.updateLibrary(child.copy(root = null))
 
       // then
-      assertThat(thrown)
-        .isInstanceOf(IllegalArgumentException::class.java)
-        .hasMessageContaining("Child library root folder is required")
+      val updated = libraryRepository.findById(child.id)
+      assertThat(updated.root).isNull()
+      assertThat(updated.parentId).isEqualTo(parent.id)
     }
   }
 }

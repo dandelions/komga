@@ -106,9 +106,6 @@ class LibraryLifecycle(
     if (library.parentId == library.id)
       throw IllegalArgumentException("A library cannot be its own parent")
 
-    if (library.parentId != null && library.root == null)
-      throw IllegalArgumentException("Child library root folder is required")
-
     val libraryPath = library.path
     if (libraryPath != null) {
       if (!Files.exists(libraryPath))
