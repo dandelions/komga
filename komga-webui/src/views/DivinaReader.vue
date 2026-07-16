@@ -1039,6 +1039,7 @@ export default Vue.extend({
       reflowSetupMode: false,
       reflowMode: false,
       k2ReflowMode: false,
+      pdfModeBookId: '',
       reflowStartAtEnd: false,
       k2ReflowStartAtEnd: false,
       reflowCropMode: false,
@@ -2131,6 +2132,8 @@ export default Vue.extend({
       this.clearReflowPrefetch()
       this.revokeReaderDeskewedPageUrls()
       this.book = await this.$komgaBooks.getBook(bookId)
+      this.pdfModeBookId = bookId
+      this.restorePdfMode(bookId)
       if (!this.isPdf) this.exitAllReflowModes()
       this.series = await this.$komgaSeries.getOneSeries(this.book.seriesId)
       this.showPdfToc = false
@@ -2370,6 +2373,21 @@ export default Vue.extend({
     reflowSettingsStorageKey(bookId: string = this.reflowSettingsBookId || this.bookId): string {
       return `${REFLOW_SETTINGS_STORAGE_PREFIX}${bookId}`
     },
+    pdfModeStorageKey(bookId: string = this.pdfModeBookId || this.bookId): string {
+      return `komga.pdf.reader.mode.${bookId}`
+    },
+    restorePdfMode(bookId: string) {
+      if (!this.book?.media || this.book.media.mediaProfile !== 'PDF') return
+      const mode = window.localStorage.getItem(this.pdfModeStorageKey(bookId))
+      if (mode === 'reflow') this.startReflowMode()
+      else if (mode === 'k2') this.toggleK2ReflowMode()
+      else this.exitAllReflowModes()
+    },
+    savePdfMode() {
+      if (!this.pdfModeBookId || !this.isPdf) return
+      const mode = this.k2ReflowMode ? 'k2' : (this.reflowMode || this.reflowSetupMode ? 'reflow' : 'normal')
+      window.localStorage.setItem(this.pdfModeStorageKey(), mode)
+    },
     loadReflowSettings(bookId: string = this.bookId) {
       if (!bookId) return
       this.loadingReflowSettings = true
@@ -2562,6 +2580,7 @@ export default Vue.extend({
       this.reflowSetupMode = true
       this.reflowMode = false
       this.k2ReflowMode = false
+      this.savePdfMode()
       this.reflowStartAtEnd = false
       this.reflowCropMode = false
       this.clearReflowPrefetch()
@@ -2573,6 +2592,7 @@ export default Vue.extend({
       this.reflowSetupMode = false
       this.reflowMode = true
       this.k2ReflowMode = false
+      this.savePdfMode()
       this.reflowStartAtEnd = false
       this.reflowCropMode = false
       this.clearReflowPrefetch()
@@ -2590,6 +2610,7 @@ export default Vue.extend({
       this.reflowMode = false
       this.reflowCropMode = false
       this.reflowStartAtEnd = false
+      this.savePdfMode()
       this.clearReflowPrefetch()
       this.$nextTick(() => this.scrollToPageEdge('top'))
     },
@@ -2604,6 +2625,7 @@ export default Vue.extend({
       this.k2ReflowMode = true
       this.reflowSetupMode = false
       this.reflowMode = false
+      this.savePdfMode()
       this.reflowCropMode = false
       this.reflowStartAtEnd = false
       this.k2ReflowStartAtEnd = false
@@ -2612,6 +2634,7 @@ export default Vue.extend({
     },
     exitK2ReflowMode() {
       this.k2ReflowMode = false
+      this.savePdfMode()
       this.reflowCropMode = false
       this.$nextTick(() => this.scrollToPageEdge('top'))
     },
@@ -2622,6 +2645,7 @@ export default Vue.extend({
       this.reflowCropMode = false
       this.reflowStartAtEnd = false
       this.clearReflowPrefetch()
+      this.savePdfMode()
     },
     collapseActiveReflowControls(): boolean {
       const reflow = (this.k2ReflowMode ? this.$refs.k2ReflowedPage : this.$refs.reflowedPage) as any
