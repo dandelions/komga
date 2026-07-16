@@ -466,6 +466,11 @@
       "target_library": "目標書庫",
       "title": "移動選取的書籍"
     },
+    "move_series": {
+      "confirm": "移動",
+      "target_library": "目標庫",
+      "title": "移動選取的系列"
+    },
     "edit_library": {
       "button_browse": "瀏覽",
       "button_cancel": "取消",

@@ -469,6 +469,11 @@
       "target_library": "Target library",
       "title": "Move selected books"
     },
+    "move_series": {
+      "confirm": "Move",
+      "target_library": "Target library",
+      "title": "Move selected series"
+    },
     "edit_library": {
       "button_browse": "Browse",
       "button_cancel": "Cancel",

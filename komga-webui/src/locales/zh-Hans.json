@@ -469,6 +469,11 @@
       "target_library": "目标库",
       "title": "移动选中的书籍"
     },
+    "move_series": {
+      "confirm": "移动",
+      "target_library": "目标库",
+      "title": "移动选中的系列"
+    },
     "edit_library": {
       "button_browse": "浏览",
       "button_cancel": "取消",
