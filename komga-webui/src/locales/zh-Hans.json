@@ -963,6 +963,7 @@
     "mark_read": "标记为已读",
     "mark_unread": "标记为未读",
     "move_to_library": "移动到库",
+    "include_child_libraries": "包含子库",
     "pin": "固定",
     "refresh_metadata": "刷新元数据",
     "scan_library_files": "扫描库文件",
@@ -985,6 +986,7 @@
   "navigation": {
     "home": "主页",
     "libraries": "库",
+    "show_child_libraries": "显示子库内容",
     "logout": "退出登录"
   },
   "no_libraries_pinned": {

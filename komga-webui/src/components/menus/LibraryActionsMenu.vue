@@ -16,6 +16,10 @@
         <v-list-item @click="confirmAnalyzeModal = true" v-if="isAdmin">
           <v-list-item-title>{{ $t('menu.analyze') }}</v-list-item-title>
         </v-list-item>
+        <v-list-item v-if="isAdmin" @click="includeChildren = !includeChildren">
+          <v-list-item-action><v-checkbox :input-value="includeChildren" hide-details @click.stop="includeChildren = !includeChildren"/></v-list-item-action>
+          <v-list-item-title>{{ $t('menu.include_child_libraries') }}</v-list-item-title>
+        </v-list-item>
         <v-list-item @click="confirmRefreshMetadataModal = true" v-if="isAdmin">
           <v-list-item-title>{{ $t('menu.refresh_metadata') }}</v-list-item-title>
         </v-list-item>
@@ -83,6 +87,7 @@ export default Vue.extend({
       confirmAnalyzeModal: false,
       confirmRefreshMetadataModal: false,
       confirmEmptyTrash: false,
+      includeChildren: false,
     }
   },
   computed: {
@@ -91,11 +96,20 @@ export default Vue.extend({
     },
   },
   methods: {
+    childLibraries(): LibraryDto[] {
+      const all = this.$store.getters.getLibraries as LibraryDto[]
+      const result: LibraryDto[] = []
+      const visit = (id: string) => all.filter(l => l.parentId === id).forEach(l => { result.push(l); visit(l.id) })
+      visit(this.library.id)
+      return result
+    },
     scan(scanDeep: boolean) {
-      this.$komgaLibraries.scanLibrary(this.library, scanDeep)
+      const libraries = this.includeChildren ? [this.library, ...this.childLibraries()] : [this.library]
+      libraries.forEach(library => this.$komgaLibraries.scanLibrary(library, scanDeep))
     },
     analyze() {
-      this.$komgaLibraries.analyzeLibrary(this.library, this.analyzeSearch)
+      const libraries = this.includeChildren ? [this.library, ...this.childLibraries()] : [this.library]
+      libraries.forEach(library => this.$komgaLibraries.analyzeLibrary(library, this.analyzeSearch))
     },
     refreshMetadata() {
       this.$komgaLibraries.refreshMetadata(this.library)

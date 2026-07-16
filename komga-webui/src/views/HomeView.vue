@@ -120,6 +120,11 @@
               <libraries-actions-menu @reorder="showReorder = true"/>
             </v-list-item-action>
           </v-list-item>
+          <v-list-item @click="toggleShowChildLibraries">
+            <v-list-item-icon><v-icon>mdi-file-tree</v-icon></v-list-item-icon>
+            <v-list-item-content><v-list-item-title>{{ $t('navigation.show_child_libraries') }}</v-list-item-title></v-list-item-content>
+            <v-list-item-action><v-checkbox :input-value="showChildLibraries" hide-details @click.stop="toggleShowChildLibraries"/></v-list-item-action>
+          </v-list-item>
 
           <!--   PINNED LIBRARIES     -->
           <library-drawer-item
@@ -432,6 +437,7 @@ export default Vue.extend({
       expandTaskDetails: false,
       expandedLibraries: {} as { [key: string]: boolean },
       showReorder: false,
+      showChildLibraries: typeof localStorage === 'undefined' || localStorage.getItem('komga.showChildLibraries') !== 'false',
     }
   },
   async created() {
@@ -532,6 +538,11 @@ export default Vue.extend({
     },
   },
   methods: {
+    toggleShowChildLibraries() {
+      this.showChildLibraries = !this.showChildLibraries
+      localStorage.setItem('komga.showChildLibraries', `${this.showChildLibraries}`)
+      this.$router.go(0)
+    },
     checkRoute(to) {
       this.expandSettings = to.path.includes('/settings/')
       this.expandMediaManagement = to.path.includes('/media-management/')
