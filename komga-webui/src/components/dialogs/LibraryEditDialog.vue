@@ -551,12 +551,15 @@ export default Vue.extend({
       }]
     },
     parentLibraryOptions(): any[] {
-      return this.$store.getters.getLibraries
+      return [{
+        text: this.$t('dialog.edit_library.parent_library_none').toString(),
+        value: null,
+      }, ...this.$store.getters.getLibraries
         .filter((it: LibraryDto) => it.id !== this.library?.id && it.parentId !== this.library?.id)
         .map((it: LibraryDto) => ({
           text: it.name,
           value: it.id,
-        }))
+        }))]
     },
 
     importComicInfo: {

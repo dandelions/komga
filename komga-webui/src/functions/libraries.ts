@@ -13,13 +13,11 @@ function getEffectiveLibraryIdsForLibrary(
   if (visited.has(library.id)) return []
   visited.add(library.id)
 
-  if (library.root) return [library.id]
-
   const childIds = libraries
     .filter(it => it.parentId === library.id)
     .flatMap(it => getEffectiveLibraryIdsForLibrary(it, libraries, new Set(visited)))
 
-  return childIds.length > 0 ? childIds : [library.id]
+  return [library.id, ...childIds]
 }
 
 export function getEffectiveLibraryIds(

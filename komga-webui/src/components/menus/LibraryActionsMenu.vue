@@ -16,8 +16,8 @@
         <v-list-item @click="confirmAnalyzeModal = true" v-if="isAdmin">
           <v-list-item-title>{{ $t('menu.analyze') }}</v-list-item-title>
         </v-list-item>
-        <v-list-item v-if="isAdmin" @click="includeChildren = !includeChildren">
-          <v-list-item-action><v-checkbox :input-value="includeChildren" hide-details @click.stop="includeChildren = !includeChildren"/></v-list-item-action>
+        <v-list-item v-if="isAdmin" @click="toggleIncludeChildren">
+          <v-list-item-action><v-checkbox :input-value="includeChildren" hide-details @click.stop="toggleIncludeChildren"/></v-list-item-action>
           <v-list-item-title>{{ $t('menu.include_child_libraries') }}</v-list-item-title>
         </v-list-item>
         <v-list-item @click="confirmRefreshMetadataModal = true" v-if="isAdmin">
@@ -95,7 +95,22 @@ export default Vue.extend({
       return this.$store.getters.meAdmin
     },
   },
+  mounted() {
+    this.loadIncludeChildren()
+  },
+  watch: {
+    library() {
+      this.loadIncludeChildren()
+    },
+  },
   methods: {
+    loadIncludeChildren() {
+      this.includeChildren = localStorage.getItem(`komga.includeChildLibraries.${this.library.id}`) === 'true'
+    },
+    toggleIncludeChildren() {
+      this.includeChildren = !this.includeChildren
+      localStorage.setItem(`komga.includeChildLibraries.${this.library.id}`, `${this.includeChildren}`)
+    },
     childLibraries(): LibraryDto[] {
       const all = this.$store.getters.getLibraries as LibraryDto[]
       const result: LibraryDto[] = []

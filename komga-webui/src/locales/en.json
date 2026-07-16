@@ -500,6 +500,7 @@
       "field_name": "Name",
       "field_oneshotsdirectory": "One-Shots directory",
       "field_parent_library": "Parent library",
+      "parent_library_none": "None (top-level library)",
       "field_repair_extensions": "Automatically repair incorrect file extensions",
       "field_root_folder": "Root folder",
       "field_scan_interval": "Scan interval",
