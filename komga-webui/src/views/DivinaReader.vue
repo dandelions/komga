@@ -972,6 +972,17 @@ function defaultReflowSettings(): any {
 
 function defaultReaderImageSettings(): any {
   return {
+    readingDirection: ReadingDirection.LEFT_TO_RIGHT,
+    pageLayout: PagedReaderLayout.SINGLE_PAGE,
+    leftNavigationAction: PagedNavigationAction.PREVIOUS,
+    swipe: true,
+    animations: true,
+    scale: ScaleType.SCREEN,
+    continuousScale: ContinuousScaleType.WIDTH,
+    sidePadding: 0,
+    pageMargin: 0,
+    backgroundColor: 'black',
+    alwaysFullscreen: false,
     strokeStrength: 0,
     rotation: 0,
     skewCorrection: 0,
@@ -1204,6 +1215,12 @@ export default Vue.extend({
     next()
   },
   watch: {
+    settings: {
+      deep: true,
+      handler() {
+        this.saveReaderImageSettings()
+      },
+    },
     page: {
       handler(val, old) {
         if (val) {
@@ -1642,6 +1659,17 @@ export default Vue.extend({
       const previousSkew = this.settings.skewCorrection
       const previousContrastEnhancement = this.settings.contrastEnhancement
       this.settings.strokeStrength = normalized.strokeStrength
+      this.settings.readingDirection = normalized.readingDirection
+      this.settings.pageLayout = normalized.pageLayout
+      this.settings.leftNavigationAction = normalized.leftNavigationAction
+      this.settings.swipe = normalized.swipe
+      this.settings.animations = normalized.animations
+      this.settings.scale = normalized.scale
+      this.settings.continuousScale = normalized.continuousScale
+      this.settings.sidePadding = normalized.sidePadding
+      this.settings.pageMargin = normalized.pageMargin
+      this.settings.backgroundColor = normalized.backgroundColor
+      this.settings.alwaysFullscreen = normalized.alwaysFullscreen
       this.settings.rotation = normalized.rotation
       this.settings.skewCorrection = normalized.skewCorrection
       this.settings.contrastEnhancement = normalized.contrastEnhancement
@@ -1656,6 +1684,17 @@ export default Vue.extend({
     normalizedReaderImageSettings(settings: Record<string, any> = {}): Record<string, any> {
       settings = settings || {}
       return {
+        readingDirection: Object.values(ReadingDirection).includes(settings.readingDirection) ? settings.readingDirection : ReadingDirection.LEFT_TO_RIGHT,
+        pageLayout: Object.values(PagedReaderLayout).includes(settings.pageLayout) ? settings.pageLayout : PagedReaderLayout.SINGLE_PAGE,
+        leftNavigationAction: Object.values(PagedNavigationAction).includes(settings.leftNavigationAction) ? settings.leftNavigationAction : PagedNavigationAction.PREVIOUS,
+        swipe: settings.swipe !== false,
+        animations: settings.animations !== false,
+        scale: Object.values(ScaleType).includes(settings.scale) ? settings.scale : ScaleType.SCREEN,
+        continuousScale: Object.values(ContinuousScaleType).includes(settings.continuousScale) ? settings.continuousScale : ContinuousScaleType.WIDTH,
+        sidePadding: Number(settings.sidePadding) || 0,
+        pageMargin: Number(settings.pageMargin) || 0,
+        backgroundColor: settings.backgroundColor || 'black',
+        alwaysFullscreen: settings.alwaysFullscreen === true,
         strokeStrength: Math.round(Math.max(0, Math.min(3, Number(settings.strokeStrength) || 0)) * 10) / 10,
         rotation: this.normalizedReaderRotation(settings.rotation),
         skewCorrection: this.normalizedReaderSkewCorrection(settings.skewCorrection),
