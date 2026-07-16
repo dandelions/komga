@@ -58,6 +58,12 @@
                       />
                     </v-col>
                   </v-row>
+                  <v-row>
+                    <v-col>
+                      <v-switch v-model="form.showChildLibraries" :label="$t('dialog.edit_library.show_child_libraries')" />
+                      <v-switch v-model="form.includeChildLibraries" :label="$t('dialog.edit_library.include_child_libraries')" />
+                    </v-col>
+                  </v-row>
 
                   <v-row>
                     <v-col>
@@ -512,6 +518,8 @@ export default Vue.extend({
         analyzeDimensions: true,
         oneshotsDirectory: '',
         parentId: null as string | null,
+        showChildLibraries: true,
+        includeChildLibraries: false,
       },
       validationFieldNames: new Map([]),
     }
@@ -685,6 +693,8 @@ export default Vue.extend({
       this.form.analyzeDimensions = library ? library.analyzeDimensions : true
       this.form.oneshotsDirectory = library ? library.oneshotsDirectory : ''
       this.form.parentId = library ? library.parentId : null
+      this.form.showChildLibraries = library ? localStorage.getItem(`komga.showChildLibraries.${library.id}`) !== 'false' : true
+      this.form.includeChildLibraries = library ? localStorage.getItem(`komga.includeChildLibraries.${library.id}`) === 'true' : false
       this.$v.$reset()
     },
     validateLibrary() {
@@ -733,6 +743,8 @@ export default Vue.extend({
         try {
           if (this.library) {
             await this.$store.dispatch('updateLibrary', {libraryId: this.library.id, library: library})
+            localStorage.setItem(`komga.showChildLibraries.${this.library.id}`, `${this.form.showChildLibraries}`)
+            localStorage.setItem(`komga.includeChildLibraries.${this.library.id}`, `${this.form.includeChildLibraries}`)
           } else {
             await this.$store.dispatch('postLibrary', library)
           }

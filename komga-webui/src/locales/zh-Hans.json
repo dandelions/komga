@@ -501,6 +501,8 @@
       "field_oneshotsdirectory": "单行本目录",
       "field_parent_library": "父库",
       "parent_library_none": "无（顶层库）",
+      "show_child_libraries": "显示子库内容",
+      "include_child_libraries": "扫描和分析子库",
       "field_repair_extensions": "自动修复不正确的文件扩展名",
       "field_root_folder": "根文件夹",
       "field_scan_interval": "扫描间隔",
