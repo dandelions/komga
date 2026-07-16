@@ -458,6 +458,12 @@
       "tab_general": "常规",
       "tab_poster": "海报"
     },
+    "move_libraries": {
+      "confirm": "移动",
+      "root_hint": "留空可将选中的库移动到顶层。",
+      "target_parent": "新的父库",
+      "title": "移动选中的库"
+    },
     "move_books": {
       "confirm": "移动",
       "target_library": "目标库",

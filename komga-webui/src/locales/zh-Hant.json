@@ -455,6 +455,12 @@
       "tab_general": "常規",
       "tab_poster": "海報"
     },
+    "move_libraries": {
+      "confirm": "移動",
+      "root_hint": "留空可將選取的書庫移動到頂層。",
+      "target_parent": "新的父書庫",
+      "title": "移動選取的書庫"
+    },
     "move_books": {
       "confirm": "移動",
       "target_library": "目標書庫",

@@ -458,6 +458,12 @@
       "tab_general": "General",
       "tab_poster": "Poster"
     },
+    "move_libraries": {
+      "confirm": "Move",
+      "root_hint": "Leave empty to move the selected libraries to the top level.",
+      "target_parent": "New parent library",
+      "title": "Move selected libraries"
+    },
     "move_books": {
       "confirm": "Move",
       "target_library": "Target library",
