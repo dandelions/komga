@@ -97,7 +97,7 @@ class FileSystemScannerTest {
       listOf("unchanged.cbz", "changed.cbz").forEach { Files.createFile(root.resolve(it)) }
 
       // when
-      val scanResult = scanner.scanRootFolder(root, maxCountedBooks = 1) { book -> book.name == "changed" }
+      val scanResult = scanner.scanRootFolder(root, maxCountedBooks = 1, countBook = { book -> book.name == "changed" })
 
       // then
       assertThat(scanResult.limited).isFalse
@@ -379,10 +379,11 @@ class FileSystemScannerTest {
       val excluded = makeSubDir(root, "excluded", listOf("hidden.cbz"))
 
       val scan =
-        scanner.scanRootFolder(
-          root,
-          excludedPaths = setOf(included.resolve("skip.cbz"), excluded),
-        ).series
+        scanner
+          .scanRootFolder(
+            root,
+            excludedPaths = setOf(included.resolve("skip.cbz"), excluded),
+          ).series
 
       assertThat(scan.keys.map { it.name }).containsExactly("included")
       assertThat(scan.values.flatten().map { it.name }).containsExactly("keep")

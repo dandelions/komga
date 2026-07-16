@@ -69,7 +69,7 @@ class TaskHandlerTest {
 
   @BeforeEach
   fun clearMockCalls() {
-    clearMocks(taskEmitter, answers = false)
+    clearMocks(taskEmitter, libraryContentLifecycle, answers = false)
     every { tasksRepository.exists(any(), any()) } returns true
   }
 
@@ -78,7 +78,7 @@ class TaskHandlerTest {
     val library = Library("group", null)
     every { libraryRepository.findByIdOrNull(library.id) } returns library
 
-    taskHandler.handleTask(Task.ScanLibrary(library.id))
+    taskHandler.handleTask(Task.ScanLibrary(library.id, scanDeep = false))
 
     verify(exactly = 0) { libraryContentLifecycle.scanRootFolder(any(), any()) }
   }

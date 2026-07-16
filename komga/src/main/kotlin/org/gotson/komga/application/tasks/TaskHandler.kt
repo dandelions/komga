@@ -235,5 +235,4 @@ class TaskHandler(
     if (cancelled) logger.info { "Task $task was cancelled, skipping follow-up tasks" }
     return cancelled
   }
-
 }

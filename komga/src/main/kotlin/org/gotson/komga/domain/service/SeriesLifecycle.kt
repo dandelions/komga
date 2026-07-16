@@ -182,7 +182,14 @@ class SeriesLifecycle(
 
     targetLibrary.path?.let { targetPath ->
       val normalizedTarget = targetPath.toAbsolutePath().normalize()
-      require(books.all { it.path.toAbsolutePath().normalize().startsWith(normalizedTarget) }) {
+      require(
+        books.all {
+          it.path
+            .toAbsolutePath()
+            .normalize()
+            .startsWith(normalizedTarget)
+        },
+      ) {
         "All selected books must be located inside the target library root folder"
       }
     }
