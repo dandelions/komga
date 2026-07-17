@@ -7,6 +7,7 @@ type TextContrastOptions = {
   enabled?: boolean,
   nightDisplay?: boolean,
   matchBackground?: boolean,
+  matchBackgroundMode?: 'monochrome' | 'grayscale',
   backgroundLuma?: number,
 }
 
@@ -37,11 +38,18 @@ export function enhanceTextContrastData(
   const backgroundValue = targetDark ? 0 : 255
   const matchedForeground = options.matchBackground ? matchedForegroundMask(data, width, height, stats) : undefined
   if (matchedForeground) {
+    const monochrome = options.matchBackgroundMode === 'monochrome'
+    const foregroundValue = targetDark ? 255 : 0
     const invertForeground = targetDark !== stats.sourceDark
     for (let i = 0; i < width * height; i++) {
       const offset = i * 4
       if (!matchedForeground[i]) {
         setGrayPixel(data, offset, backgroundValue)
+        continue
+      }
+
+      if (monochrome) {
+        setGrayPixel(data, offset, foregroundValue)
         continue
       }
 

@@ -34,4 +34,12 @@ describe('image enhancement', () => {
 
     expect(Array.from(data.filter((_, index) => index % 4 === 0))).toEqual([0, 0, 0, 15, 235, 15, 0])
   })
+
+  test('match background supports monochrome output', () => {
+    const data = grayPixels(255, 240, 255, 240, 20, 240, 255)
+
+    enhanceTextContrastData(data, 7, 1, {matchBackground: true, matchBackgroundMode: 'monochrome', backgroundLuma: 255})
+
+    expect(Array.from(data.filter((_, index) => index % 4 === 0))).toEqual([255, 255, 255, 0, 0, 0, 255])
+  })
 })

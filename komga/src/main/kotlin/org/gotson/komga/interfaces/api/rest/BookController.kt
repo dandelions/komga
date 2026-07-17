@@ -558,6 +558,8 @@ class BookController(
     contrastEnhancement: Boolean,
     @RequestParam(value = "matchBackground", defaultValue = "false")
     matchBackground: Boolean,
+    @RequestParam(value = "matchBackgroundMode", defaultValue = "grayscale")
+    matchBackgroundMode: String,
     @RequestParam(value = "imageQuality", defaultValue = "80")
     imageQuality: Int,
     @RequestParam(value = "blockSpacing", defaultValue = "6")
@@ -601,6 +603,7 @@ class BookController(
             strokeStrength = strokeStrength,
             contrastEnhancement = contrastEnhancement,
             matchBackground = matchBackground,
+            matchBackgroundMode = if (matchBackgroundMode == "monochrome") "monochrome" else "grayscale",
             imageQuality = normalizePdfReflowImageQuality(imageQuality),
             blockSpacing = blockSpacing,
             verticalText = verticalText,
@@ -691,6 +694,8 @@ class BookController(
     contrastEnhancement: Boolean,
     @RequestParam(value = "matchBackground", defaultValue = "false")
     matchBackground: Boolean,
+    @RequestParam(value = "matchBackgroundMode", defaultValue = "grayscale")
+    matchBackgroundMode: String,
     @RequestParam(value = "imageQuality", defaultValue = "80")
     imageQuality: Int,
     @RequestParam(value = "blockSpacing", defaultValue = "6")
@@ -736,6 +741,7 @@ class BookController(
                 strokeStrength = strokeStrength,
                 contrastEnhancement = contrastEnhancement,
                 matchBackground = matchBackground,
+                matchBackgroundMode = if (matchBackgroundMode == "monochrome") "monochrome" else "grayscale",
                 imageQuality = normalizePdfReflowImageQuality(imageQuality),
                 blockSpacing = blockSpacing,
                 verticalText = verticalText,

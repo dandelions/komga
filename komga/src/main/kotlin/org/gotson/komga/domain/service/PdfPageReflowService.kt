@@ -48,6 +48,7 @@ data class PdfPageReflowOptions(
   val strokeStrength: Double,
   val contrastEnhancement: Boolean,
   val matchBackground: Boolean,
+  val matchBackgroundMode: String,
   val imageQuality: Int = 80,
   val blockSpacing: Int,
   val verticalText: Boolean,
@@ -3200,7 +3201,7 @@ class PdfPageReflowService(
         val color =
           if (options.matchBackground && !options.contrastEnhancement) {
             if (matchedForeground!![y * block.w + x]) {
-              matchedForegroundColor(rgb, backgroundLuma, options.darkDisplay)
+              matchedForegroundColor(rgb, backgroundLuma, options.darkDisplay, options.matchBackgroundMode)
             } else {
               background
             }
@@ -3267,7 +3268,7 @@ class PdfPageReflowService(
         val color =
           if (options.matchBackground && !options.contrastEnhancement) {
             if (matchedForeground!![y * source.w + x]) {
-              matchedForegroundColor(rgb, backgroundLuma, options.darkDisplay)
+              matchedForegroundColor(rgb, backgroundLuma, options.darkDisplay, options.matchBackgroundMode)
             } else {
               background
             }
@@ -3288,7 +3289,6 @@ class PdfPageReflowService(
     image: BufferedImage,
     options: PdfPageReflowOptions,
   ) {
-    if (options.matchBackground && !options.contrastEnhancement) return
     val strength = clamp(options.strokeStrength, 0.0, 3.0)
     if (strength <= 0.0) return
 
@@ -3679,7 +3679,9 @@ class PdfPageReflowService(
     rgb: Int,
     backgroundLuma: Double,
     darkDisplay: Boolean,
+    matchBackgroundMode: String,
   ): Color {
+    if (matchBackgroundMode == "monochrome") return if (darkDisplay) Color.WHITE else Color.BLACK
     val sourceDark = backgroundLuma < 128.0
     val sourceLuma = clamp(pixelLuma(rgb).roundToInt(), 0, 255)
     val outputLuma = if (darkDisplay != sourceDark) 255 - sourceLuma else sourceLuma

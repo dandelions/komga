@@ -70,6 +70,13 @@
           <span>背景</span>
           <input type="checkbox" :checked="matchBackground" @change="setMatchBackground"/>
         </label>
+        <label v-if="matchBackground" class="k2-control k2-compact">
+          <span>输出</span>
+          <select :value="matchBackgroundMode" @change="setMatchBackgroundMode">
+            <option value="grayscale">灰阶</option>
+            <option value="monochrome">黑白</option>
+          </select>
+        </label>
         <label class="k2-control k2-compact">
           <span>Word gap</span>
           <input type="number" min="1" max="30" step="1" :value="wordGap" @input="setWordGap"/>
@@ -230,9 +237,11 @@ type K2Settings = {
   strokeStrength: number,
   contrastEnhancement: boolean,
   matchBackground: boolean,
+  matchBackgroundMode: MatchBackgroundMode,
   wordGap: number,
   outputPadding: number,
 }
+type MatchBackgroundMode = 'monochrome' | 'grayscale'
 type DetectionCanvasSource = { canvas: HTMLCanvasElement, scale: number }
 
 const DEFAULT_THRESHOLD = 185
@@ -308,6 +317,7 @@ export default Vue.extend({
     strokeStrength: 0.8,
     contrastEnhancement: false,
     matchBackground: false,
+    matchBackgroundMode: 'grayscale' as MatchBackgroundMode,
     wordGap: DEFAULT_WORD_GAP,
     outputPadding: DEFAULT_OUTPUT_PADDING,
   }),
@@ -436,6 +446,7 @@ export default Vue.extend({
       this.strokeStrength = Math.round(this.clampNumber(Number(this.settings.strokeStrength), 0, 3, 0.8) * 10) / 10
       this.contrastEnhancement = this.settings.contrastEnhancement === true
       this.matchBackground = this.settings.matchBackground === true
+      this.matchBackgroundMode = this.settings.matchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale'
       this.wordGap = Math.round(this.clampNumber(Number(this.settings.wordGap), 1, 30, DEFAULT_WORD_GAP))
       this.outputPadding = Math.round(this.clampNumber(Number(this.settings.outputPadding), 0, 48, DEFAULT_OUTPUT_PADDING))
     },
@@ -447,6 +458,7 @@ export default Vue.extend({
         strokeStrength: this.strokeStrength,
         contrastEnhancement: this.contrastEnhancement,
         matchBackground: this.matchBackground,
+        matchBackgroundMode: this.matchBackgroundMode,
         wordGap: this.wordGap,
         outputPadding: this.outputPadding,
       } as K2Settings)
@@ -647,6 +659,7 @@ export default Vue.extend({
           enabled: this.contrastEnhancement,
           nightDisplay: this.darkDisplay,
           matchBackground: this.matchBackground,
+          matchBackgroundMode: this.matchBackgroundMode,
           backgroundLuma: this.sourceBackgroundLuma(),
         })
         return
@@ -2279,6 +2292,11 @@ export default Vue.extend({
     setMatchBackground(event: Event) {
       const target = event.target as HTMLInputElement
       this.matchBackground = target.checked
+      this.emitSettingsChange()
+    },
+    setMatchBackgroundMode(event: Event) {
+      const target = event.target as HTMLSelectElement
+      this.matchBackgroundMode = target.value === 'monochrome' ? 'monochrome' : 'grayscale'
       this.emitSettingsChange()
     },
     setWordGap(event: Event) {

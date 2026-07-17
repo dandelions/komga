@@ -165,6 +165,30 @@ class PdfPageReflowServiceTest {
   }
 
   @Test
+  fun `given matched background when changing stroke then returned word image gets bolder`() {
+    val pageBytes = horizontalShortGlyphPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+
+    val plain =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(matchBackground = true, strokeStrength = 0.0),
+        cropRegions = listOf(PdfPageReflowRegion(x = 40, y = 30, w = 120, h = 70)),
+      )
+    val bold =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(matchBackground = true, strokeStrength = 2.0),
+        cropRegions = listOf(PdfPageReflowRegion(x = 40, y = 30, w = 120, h = 70)),
+      )
+
+    assertThat(darkPixelCount(firstWordImage(bold))).isGreaterThan(darkPixelCount(firstWordImage(plain)))
+  }
+
+  @Test
   fun `given rotation when reflowing page then source dimensions are rotated`() {
     val pageBytes = horizontalShortGlyphPage()
     val book = makeBook("book")
@@ -492,6 +516,7 @@ class PdfPageReflowServiceTest {
       strokeStrength = 0.1,
       contrastEnhancement = false,
       matchBackground = false,
+      matchBackgroundMode = "grayscale",
       blockSpacing = 6,
       verticalText = false,
       verticalDirection = "rtl",

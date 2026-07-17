@@ -285,6 +285,7 @@
           @image-quality-change="setReflowImageQuality"
           @contrast-enhancement-change="setReflowContrastEnhancement"
           @match-background-change="setReflowMatchBackground"
+          @match-background-mode-change="setReflowMatchBackgroundMode"
           @block-spacing-change="setReflowBlockSpacing"
           @rotation-change="setReaderRotation"
           @crop-mode-change="setReflowCropMode"
@@ -666,6 +667,13 @@
                 <v-list-item>
                   <settings-switch v-model="reflowSettings.matchBackground" label="背景跟随底色"/>
                 </v-list-item>
+                <v-list-item v-if="reflowSettings.matchBackground">
+                  <settings-select
+                    :items="reflowMatchBackgroundModes"
+                    v-model="reflowSettings.matchBackgroundMode"
+                    label="跟随输出"
+                  />
+                </v-list-item>
                 <v-list-item>
                   <settings-select
                     :items="reflowImageQualities"
@@ -947,6 +955,7 @@ function defaultReflowSettings(): any {
     strokeStrength: 0.1,
     contrastEnhancement: false,
     matchBackground: false,
+    matchBackgroundMode: 'grayscale',
     imageQuality: 80,
     blockSpacing: 6,
     verticalText: false,
@@ -964,6 +973,7 @@ function defaultReflowSettings(): any {
       strokeStrength: 0.8,
       contrastEnhancement: false,
       matchBackground: false,
+      matchBackgroundMode: 'grayscale',
       wordGap: 3,
       outputPadding: 16,
     },
@@ -1121,6 +1131,10 @@ export default Vue.extend({
       reflowProcessingModes: [
         {text: '本地重排', value: 'local'},
         {text: '服务端重排', value: 'server'},
+      ],
+      reflowMatchBackgroundModes: [
+        {text: '灰阶', value: 'grayscale'},
+        {text: '黑白', value: 'monochrome'},
       ],
       reflowImageQualities: [90, 80, 70, 60, 50, 40].map(value => ({
         text: `${value}%`,
@@ -1395,6 +1409,7 @@ export default Vue.extend({
         strokeStrength: this.reflowSettings.strokeStrength,
         contrastEnhancement: this.reflowSettings.contrastEnhancement,
         matchBackground: this.reflowSettings.matchBackground,
+        matchBackgroundMode: this.reflowSettings.matchBackgroundMode,
         imageQuality: this.reflowSettings.imageQuality,
         verticalText: this.reflowSettings.verticalText,
         verticalDirection: this.reflowSettings.verticalDirection,
@@ -2452,6 +2467,7 @@ export default Vue.extend({
         strokeStrength: Math.round(this.clampReflowNumber(settings.strokeStrength, 0.1, 3, this.reflowSettings.strokeStrength) * 10) / 10,
         contrastEnhancement: settings.contrastEnhancement === true,
         matchBackground: settings.matchBackground === true,
+        matchBackgroundMode: settings.matchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale',
         imageQuality: this.normalizedReflowImageQuality(settings.imageQuality),
         blockSpacing: Math.round(this.clampReflowNumber(settings.blockSpacing, 0, 24, this.reflowSettings.blockSpacing)),
         verticalText: typeof settings.verticalText === 'boolean' ? settings.verticalText : this.reflowSettings.verticalText,
@@ -2474,6 +2490,7 @@ export default Vue.extend({
         strokeStrength: Math.round(this.clampReflowNumber(settings.strokeStrength, 0, 3, this.reflowSettings.k2Settings.strokeStrength) * 10) / 10,
         contrastEnhancement: settings.contrastEnhancement === true,
         matchBackground: settings.matchBackground === true,
+        matchBackgroundMode: settings.matchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale',
         wordGap: Math.round(this.clampReflowNumber(settings.wordGap, 1, 30, this.reflowSettings.k2Settings.wordGap)),
         outputPadding: Math.round(this.clampReflowNumber(settings.outputPadding, 0, 48, this.reflowSettings.k2Settings.outputPadding)),
       }
@@ -2749,6 +2766,9 @@ export default Vue.extend({
     },
     setReflowMatchBackground(matchBackground: boolean) {
       this.reflowSettings.matchBackground = matchBackground === true
+    },
+    setReflowMatchBackgroundMode(matchBackgroundMode: string) {
+      this.reflowSettings.matchBackgroundMode = matchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale'
     },
     setReflowBlockSpacing(blockSpacing: number) {
       this.reflowSettings.blockSpacing = Math.max(0, Math.min(24, Math.round(blockSpacing)))

@@ -156,6 +156,13 @@
           <span>背景跟随底色</span>
           <input type="checkbox" :checked="matchBackground" @change="setMatchBackground"/>
         </label>
+        <label v-if="matchBackground" class="reflow-column-control">
+          <span>跟随输出</span>
+          <select :value="matchBackgroundMode" @change="setMatchBackgroundMode">
+            <option value="grayscale">灰阶</option>
+            <option value="monochrome">黑白</option>
+          </select>
+        </label>
         <label class="reflow-column-control">
           <span>字块质量</span>
           <select :value="controlImageQuality" @change="setImageQuality">
@@ -420,6 +427,7 @@ type ReflowOptions = {
   strokeStrength: number,
   contrastEnhancement: boolean,
   matchBackground: boolean,
+  matchBackgroundMode: MatchBackgroundMode,
   imageQuality: number,
   blockSpacing: number,
   verticalText: boolean,
@@ -448,6 +456,7 @@ type Roi = {
 }
 
 type PageParity = 'odd' | 'even'
+type MatchBackgroundMode = 'monochrome' | 'grayscale'
 type VerticalDirection = 'ltr' | 'rtl'
 type CropRegionIndex = number
 type CropTarget = 'text' | 'image'
@@ -748,6 +757,9 @@ export default Vue.extend({
     },
     matchBackground(): boolean {
       return this.options.matchBackground === true
+    },
+    matchBackgroundMode(): MatchBackgroundMode {
+      return this.options.matchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale'
     },
     blockSpacing(): number {
       return this.clampNumber(this.options.blockSpacing, 0, 24, 6)
@@ -1184,6 +1196,7 @@ export default Vue.extend({
       params.set('strokeStrength', String(this.strokeStrength))
       params.set('contrastEnhancement', String(this.contrastEnhancement))
       params.set('matchBackground', String(this.matchBackground))
+      params.set('matchBackgroundMode', this.matchBackgroundMode)
       params.set('imageQuality', String(this.imageQuality))
       params.set('blockSpacing', String(this.blockSpacing))
       params.set('verticalText', String(this.verticalText))
@@ -1538,6 +1551,7 @@ export default Vue.extend({
         strokeStrength: this.options.strokeStrength,
         contrastEnhancement: this.options.contrastEnhancement,
         matchBackground: this.options.matchBackground,
+        matchBackgroundMode: this.matchBackgroundMode,
         imageQuality: this.imageQuality,
         verticalText: this.options.verticalText,
         verticalDirection: this.options.verticalDirection,
@@ -1694,6 +1708,7 @@ export default Vue.extend({
           enabled: this.contrastEnhancement,
           nightDisplay: this.darkDisplay,
           matchBackground: this.matchBackground,
+          matchBackgroundMode: this.matchBackgroundMode,
           backgroundLuma: this.sourceBackgroundLuma(),
         })
         return
@@ -4834,7 +4849,6 @@ export default Vue.extend({
       return Math.min(maxIndent, sourceHeight * this.textScale())
     },
     boldenSourceCanvas(targetContext: CanvasRenderingContext2D, width: number, height: number) {
-      if (this.matchBackground && !this.contrastEnhancement) return
       const strength = this.strokeStrength
       if (strength <= 0) return
 
@@ -5055,6 +5069,10 @@ export default Vue.extend({
     setMatchBackground(event: Event) {
       const target = event.target as HTMLInputElement
       this.$emit('match-background-change', target.checked)
+    },
+    setMatchBackgroundMode(event: Event) {
+      const target = event.target as HTMLSelectElement
+      this.$emit('match-background-mode-change', target.value === 'monochrome' ? 'monochrome' : 'grayscale')
     },
     setBlockSpacing(event: Event) {
       const target = event.target as HTMLInputElement
