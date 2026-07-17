@@ -45,6 +45,23 @@ class PdfPageReflowServiceTest {
   }
 
   @Test
+  fun `given match background when reflowing page then word pixels remain visible`() {
+    val pageBytes = horizontalShortGlyphPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(matchBackground = true, strokeStrength = 0.0),
+        cropRegions = listOf(PdfPageReflowRegion(x = 40, y = 30, w = 120, h = 70)),
+      )
+
+    assertThat(darkPixelCount(firstWordImage(response))).isGreaterThan(0)
+  }
+
+  @Test
   fun `given high resolution horizontal glyph split by internal blank when reflowing page then fragments are merged`() {
     val pageBytes = highResolutionHorizontalFragmentGlyphPage()
     val book = makeBook("book")

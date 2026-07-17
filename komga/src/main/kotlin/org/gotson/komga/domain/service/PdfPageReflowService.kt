@@ -3199,7 +3199,7 @@ class PdfPageReflowService(
         val rgb = image.getRGB(block.x + x, block.y + y)
         val color =
           if (options.matchBackground && !options.contrastEnhancement) {
-            Color(matchBackgroundGray(rgb, backgroundLuma, options.darkDisplay), true)
+            matchBackgroundColor(rgb, backgroundLuma, options.darkDisplay)
           } else if (isInk(rgb, inkThreshold)) {
             foreground
           } else {
@@ -3261,7 +3261,7 @@ class PdfPageReflowService(
         val rgb = image.getRGB(source.x + x, source.y + y)
         val color =
           if (options.matchBackground && !options.contrastEnhancement) {
-            Color(matchBackgroundGray(rgb, backgroundLuma, options.darkDisplay), true)
+            matchBackgroundColor(rgb, backgroundLuma, options.darkDisplay)
           } else if (isInk(rgb, inkThreshold)) {
             foreground
           } else {
@@ -3631,11 +3631,11 @@ class PdfPageReflowService(
     return clamp(min(threshold.toDouble(), backgroundLuma - gap).roundToInt(), 1, 254)
   }
 
-  private fun matchBackgroundGray(
+  private fun matchBackgroundColor(
     rgb: Int,
     backgroundLuma: Double,
     targetDark: Boolean,
-  ): Int {
+  ): Color {
     val sourceDark = backgroundLuma < 128.0
     val maxDelta = if (sourceDark) 255.0 - backgroundLuma else backgroundLuma
     val minDelta = max(3.0, min(12.0, maxDelta * 0.025))
@@ -3645,7 +3645,8 @@ class PdfPageReflowService(
     val normalized = clamp((delta - minDelta) / contrastRange, 0.0, 1.0)
     val foreground = normalized.pow(0.48)
     val value = if (targetDark) 255.0 * foreground else 255.0 * (1.0 - foreground)
-    return clamp(value.roundToInt(), 0, 255)
+    val gray = clamp(value.roundToInt(), 0, 255)
+    return Color(gray, gray, gray)
   }
 
   private fun isInk(
