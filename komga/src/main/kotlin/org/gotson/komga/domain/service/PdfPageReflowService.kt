@@ -25,6 +25,7 @@ import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.system.measureTimeMillis
 
@@ -3182,7 +3183,8 @@ class PdfPageReflowService(
     val background = if (options.darkDisplay) Color.BLACK else Color.WHITE
     val foreground = if (options.darkDisplay) Color.WHITE else Color.BLACK
     val threshold = clamp(options.threshold, 50, 230)
-    val inkThreshold = adaptiveInkThreshold(threshold, estimateBackgroundLuma(image, block))
+    val backgroundLuma = estimateBackgroundLuma(image, block)
+    val inkThreshold = adaptiveInkThreshold(threshold, backgroundLuma)
 
     if (!normalizeColors) {
       val graphics = output.createGraphics()
@@ -3195,7 +3197,14 @@ class PdfPageReflowService(
     for (y in 0 until block.h) {
       for (x in 0 until block.w) {
         val rgb = image.getRGB(block.x + x, block.y + y)
-        val color = if (isInk(rgb, inkThreshold)) foreground else background
+        val color =
+          if (options.matchBackground && !options.contrastEnhancement) {
+            Color(matchBackgroundGray(rgb, backgroundLuma, options.darkDisplay), true)
+          } else if (isInk(rgb, inkThreshold)) {
+            foreground
+          } else {
+            background
+          }
         output.setRGB(x, y, color.rgb)
       }
     }
@@ -3241,7 +3250,8 @@ class PdfPageReflowService(
 
     graphics.dispose()
     val threshold = clamp(options.threshold, 50, 230)
-    val inkThreshold = adaptiveInkThreshold(threshold, estimateBackgroundLuma(image, source))
+    val backgroundLuma = estimateBackgroundLuma(image, source)
+    val inkThreshold = adaptiveInkThreshold(threshold, backgroundLuma)
     for (y in 0 until source.h) {
       val targetY = offsetY + y
       if (targetY !in 0 until outputHeight) continue
@@ -3249,7 +3259,14 @@ class PdfPageReflowService(
         val targetX = offsetX + x
         if (targetX !in 0 until outputWidth) continue
         val rgb = image.getRGB(source.x + x, source.y + y)
-        val color = if (isInk(rgb, inkThreshold)) foreground else background
+        val color =
+          if (options.matchBackground && !options.contrastEnhancement) {
+            Color(matchBackgroundGray(rgb, backgroundLuma, options.darkDisplay), true)
+          } else if (isInk(rgb, inkThreshold)) {
+            foreground
+          } else {
+            background
+          }
         output.setRGB(targetX, targetY, color.rgb)
       }
     }
@@ -3612,6 +3629,23 @@ class PdfPageReflowService(
     if (backgroundLuma <= 80.0) return threshold
     val gap = max(12.0, min(28.0, backgroundLuma * 0.10))
     return clamp(min(threshold.toDouble(), backgroundLuma - gap).roundToInt(), 1, 254)
+  }
+
+  private fun matchBackgroundGray(
+    rgb: Int,
+    backgroundLuma: Double,
+    targetDark: Boolean,
+  ): Int {
+    val sourceDark = backgroundLuma < 128.0
+    val maxDelta = if (sourceDark) 255.0 - backgroundLuma else backgroundLuma
+    val minDelta = max(3.0, min(12.0, maxDelta * 0.025))
+    val contrastRange = max(24.0, maxDelta * 0.36)
+    val luma = pixelLuma(rgb)
+    val delta = if (sourceDark) luma - backgroundLuma else backgroundLuma - luma
+    val normalized = clamp((delta - minDelta) / contrastRange, 0.0, 1.0)
+    val foreground = normalized.pow(0.48)
+    val value = if (targetDark) 255.0 * foreground else 255.0 * (1.0 - foreground)
+    return clamp(value.roundToInt(), 0, 255)
   }
 
   private fun isInk(

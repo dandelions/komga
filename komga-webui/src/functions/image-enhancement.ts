@@ -24,7 +24,7 @@ export function enhanceTextContrast(
   context.putImageData(imageData, 0, 0)
 }
 
-function enhanceTextContrastData(
+export function enhanceTextContrastData(
   data: Uint8ClampedArray,
   width: number,
   height: number,
@@ -38,9 +38,9 @@ function enhanceTextContrastData(
   const baseMinDelta = options.enabled ? 10 : 0
   const maxDelta = stats.sourceDark ? 255 - stats.background : stats.background
   const minDelta = options.matchBackground
-    ? Math.max(baseMinDelta, Math.min(72, Math.max(24, maxDelta * 0.18)))
+    ? Math.max(baseMinDelta, Math.min(12, Math.max(3, maxDelta * 0.025)))
     : baseMinDelta
-  const contrastRange = Math.max(28, maxDelta * (options.enabled ? 0.32 : 0.55))
+  const contrastRange = Math.max(24, maxDelta * (options.enabled ? 0.32 : options.matchBackground ? 0.36 : 0.55))
 
   for (let i = 0; i < width * height; i++) {
     const offset = i * 4
@@ -57,7 +57,7 @@ function enhanceTextContrastData(
     }
 
     const normalized = clamp((delta - minDelta) / contrastRange, 0, 1)
-    const foreground = Math.pow(normalized, options.enabled ? 0.55 : 0.7)
+    const foreground = Math.pow(normalized, options.enabled ? 0.55 : options.matchBackground ? 0.48 : 0.7)
     const output = targetDark
       ? Math.round(255 * foreground)
       : Math.round(255 * (1 - foreground))
