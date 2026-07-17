@@ -4834,6 +4834,7 @@ export default Vue.extend({
       return Math.min(maxIndent, sourceHeight * this.textScale())
     },
     boldenSourceCanvas(targetContext: CanvasRenderingContext2D, width: number, height: number) {
+      if (this.matchBackground && !this.contrastEnhancement) return
       const strength = this.strokeStrength
       if (strength <= 0) return
 

@@ -37,9 +37,16 @@ export function enhanceTextContrastData(
   const backgroundValue = targetDark ? 0 : 255
   const matchedForeground = options.matchBackground ? matchedForegroundMask(data, width, height, stats) : undefined
   if (matchedForeground) {
-    const foregroundValue = targetDark ? 255 : 0
+    const invertForeground = targetDark !== stats.sourceDark
     for (let i = 0; i < width * height; i++) {
-      setGrayPixel(data, i * 4, matchedForeground[i] ? foregroundValue : backgroundValue)
+      const offset = i * 4
+      if (!matchedForeground[i]) {
+        setGrayPixel(data, offset, backgroundValue)
+        continue
+      }
+
+      const sourceLuma = pixelLuma(data, offset)
+      setGrayPixel(data, offset, invertForeground ? 255 - sourceLuma : sourceLuma)
     }
     return
   }
