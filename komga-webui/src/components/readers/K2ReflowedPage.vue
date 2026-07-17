@@ -70,8 +70,8 @@
           <span>背景</span>
           <input type="checkbox" :checked="matchBackground" @change="setMatchBackground"/>
         </label>
-        <label v-if="matchBackground" class="k2-control k2-compact">
-          <span>输出</span>
+        <label class="k2-control k2-compact">
+          <span>文字显示</span>
           <select :value="matchBackgroundMode" @change="setMatchBackgroundMode">
             <option value="grayscale">灰阶</option>
             <option value="monochrome">黑白</option>
@@ -638,7 +638,7 @@ export default Vue.extend({
       return canvas.getContext('2d')
     },
     wordOutputBackground(): string {
-      return this.darkDisplay ? '#000' : (this.contrastEnhancement || this.matchBackground) ? '#fff' : this.pageBackground || '#fff'
+      return this.darkDisplay ? '#000' : '#fff'
     },
     fillWordSliceBackground(context: CanvasRenderingContext2D, width: number, height: number) {
       context.fillStyle = this.wordOutputBackground()
@@ -654,7 +654,8 @@ export default Vue.extend({
       this.pageBackground = '#fff'
     },
     finishWordSlice(context: CanvasRenderingContext2D, width: number, height: number) {
-      if (this.contrastEnhancement || this.matchBackground) {
+      const textModeEnabled = this.matchBackgroundMode === 'grayscale' || this.matchBackgroundMode === 'monochrome'
+      if (this.contrastEnhancement || this.matchBackground || textModeEnabled) {
         enhanceTextContrast(context, width, height, {
           enabled: this.contrastEnhancement,
           nightDisplay: this.darkDisplay,

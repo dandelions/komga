@@ -3178,14 +3178,18 @@ class PdfPageReflowService(
     options: PdfPageReflowOptions,
   ): BufferedImage {
     val block = clampRoi(roi, image.width, image.height)
-    val normalizeColors = options.darkDisplay || options.contrastEnhancement || options.matchBackground
+    val normalizeColors =
+      options.darkDisplay ||
+        options.contrastEnhancement ||
+        options.matchBackground ||
+        options.matchBackgroundMode.isNotBlank()
     val output = BufferedImage(block.w, block.h, BufferedImage.TYPE_INT_ARGB)
     val background = if (options.darkDisplay) Color.BLACK else Color.WHITE
     val threshold = clamp(options.threshold, 50, 230)
     val backgroundLuma = estimateBackgroundLuma(image, block)
     val inkThreshold = adaptiveInkThreshold(threshold, backgroundLuma)
     val matchedForeground =
-      if (options.matchBackground && !options.contrastEnhancement) matchBackgroundMask(image, block, backgroundLuma) else null
+      if (options.matchBackground) matchBackgroundMask(image, block, backgroundLuma) else null
 
     if (!normalizeColors) {
       val graphics = output.createGraphics()
@@ -3198,17 +3202,18 @@ class PdfPageReflowService(
     for (y in 0 until block.h) {
       for (x in 0 until block.w) {
         val rgb = image.getRGB(block.x + x, block.y + y)
+        val matched = matchedForeground?.get(y * block.w + x)
         val color =
-          if (options.matchBackground && !options.contrastEnhancement) {
-            if (matchedForeground!![y * block.w + x]) {
-              matchedForegroundColor(rgb, backgroundLuma, options.darkDisplay, options.matchBackgroundMode)
+          if (matched == false) {
+            background
+          } else if (options.matchBackgroundMode == "monochrome" || options.contrastEnhancement) {
+            if (matched == true || isInk(rgb, inkThreshold)) {
+              if (options.darkDisplay) Color.WHITE else Color.BLACK
             } else {
               background
             }
-          } else if (isInk(rgb, inkThreshold)) {
-            if (options.darkDisplay) Color.WHITE else Color.BLACK
           } else {
-            background
+            grayscaleTextColor(rgb, backgroundLuma, options.darkDisplay)
           }
         output.setRGB(x, y, color.rgb)
       }
@@ -3229,7 +3234,11 @@ class PdfPageReflowService(
   ): BufferedImage {
     val output = BufferedImage(outputWidth, outputHeight, BufferedImage.TYPE_INT_ARGB)
     val background = if (options.darkDisplay) Color.BLACK else Color.WHITE
-    val normalizeColors = options.darkDisplay || options.contrastEnhancement || options.matchBackground
+    val normalizeColors =
+      options.darkDisplay ||
+        options.contrastEnhancement ||
+        options.matchBackground ||
+        options.matchBackgroundMode.isNotBlank()
     val graphics = output.createGraphics()
     graphics.color = background
     graphics.fillRect(0, 0, outputWidth, outputHeight)
@@ -3257,7 +3266,7 @@ class PdfPageReflowService(
     val backgroundLuma = estimateBackgroundLuma(image, source)
     val inkThreshold = adaptiveInkThreshold(threshold, backgroundLuma)
     val matchedForeground =
-      if (options.matchBackground && !options.contrastEnhancement) matchBackgroundMask(image, source, backgroundLuma) else null
+      if (options.matchBackground) matchBackgroundMask(image, source, backgroundLuma) else null
     for (y in 0 until source.h) {
       val targetY = offsetY + y
       if (targetY !in 0 until outputHeight) continue
@@ -3265,17 +3274,18 @@ class PdfPageReflowService(
         val targetX = offsetX + x
         if (targetX !in 0 until outputWidth) continue
         val rgb = image.getRGB(source.x + x, source.y + y)
+        val matched = matchedForeground?.get(y * source.w + x)
         val color =
-          if (options.matchBackground && !options.contrastEnhancement) {
-            if (matchedForeground!![y * source.w + x]) {
-              matchedForegroundColor(rgb, backgroundLuma, options.darkDisplay, options.matchBackgroundMode)
+          if (matched == false) {
+            background
+          } else if (options.matchBackgroundMode == "monochrome" || options.contrastEnhancement) {
+            if (matched == true || isInk(rgb, inkThreshold)) {
+              if (options.darkDisplay) Color.WHITE else Color.BLACK
             } else {
               background
             }
-          } else if (isInk(rgb, inkThreshold)) {
-            if (options.darkDisplay) Color.WHITE else Color.BLACK
           } else {
-            background
+            grayscaleTextColor(rgb, backgroundLuma, options.darkDisplay)
           }
         output.setRGB(targetX, targetY, color.rgb)
       }
@@ -3675,13 +3685,11 @@ class PdfPageReflowService(
     return foreground
   }
 
-  private fun matchedForegroundColor(
+  private fun grayscaleTextColor(
     rgb: Int,
     backgroundLuma: Double,
     darkDisplay: Boolean,
-    matchBackgroundMode: String,
   ): Color {
-    if (matchBackgroundMode == "monochrome") return if (darkDisplay) Color.WHITE else Color.BLACK
     val sourceDark = backgroundLuma < 128.0
     val sourceLuma = clamp(pixelLuma(rgb).roundToInt(), 0, 255)
     val outputLuma = if (darkDisplay != sourceDark) 255 - sourceLuma else sourceLuma

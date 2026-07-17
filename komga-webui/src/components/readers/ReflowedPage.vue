@@ -150,15 +150,15 @@
         </label>
         <label class="reflow-column-control reflow-checkbox-control">
           <span>文字/背景增强</span>
-          <input type="checkbox" :checked="contrastEnhancement" @change="setContrastEnhancement"/>
+          <input type="checkbox" :checked="controlContrastEnhancement" @change="setContrastEnhancement"/>
         </label>
         <label class="reflow-column-control reflow-checkbox-control">
           <span>背景跟随底色</span>
-          <input type="checkbox" :checked="matchBackground" @change="setMatchBackground"/>
+          <input type="checkbox" :checked="controlMatchBackground" @change="setMatchBackground"/>
         </label>
-        <label v-if="matchBackground" class="reflow-column-control">
-          <span>跟随输出</span>
-          <select :value="matchBackgroundMode" @change="setMatchBackgroundMode">
+        <label class="reflow-column-control">
+          <span>文字显示</span>
+          <select :value="controlMatchBackgroundMode" @change="setMatchBackgroundMode">
             <option value="grayscale">灰阶</option>
             <option value="monochrome">黑白</option>
           </select>
@@ -575,6 +575,9 @@ type ReflowOptionsSnapshot = {
   verticalText: boolean,
   verticalDirection: VerticalDirection,
   strokeStrength: number,
+  contrastEnhancement: boolean,
+  matchBackground: boolean,
+  matchBackgroundMode: MatchBackgroundMode,
   imageQuality: number,
   blockSpacing: number,
   cropRoisKey: string,
@@ -711,6 +714,9 @@ export default Vue.extend({
       pendingVerticalText: false,
       pendingVerticalDirection: 'rtl' as VerticalDirection,
       pendingStrokeStrength: 0.1,
+      pendingContrastEnhancement: false,
+      pendingMatchBackground: false,
+      pendingMatchBackgroundMode: 'grayscale' as MatchBackgroundMode,
       pendingImageQuality: DEFAULT_REFLOW_IMAGE_QUALITY,
       pendingBlockSpacing: 6,
       optionsSnapshot: undefined as ReflowOptionsSnapshot | undefined,
@@ -782,6 +788,15 @@ export default Vue.extend({
     },
     controlStrokeStrength(): number {
       return this.roundStrokeStrength(this.pendingStrokeStrength)
+    },
+    controlContrastEnhancement(): boolean {
+      return this.pendingContrastEnhancement === true
+    },
+    controlMatchBackground(): boolean {
+      return this.pendingMatchBackground === true
+    },
+    controlMatchBackgroundMode(): MatchBackgroundMode {
+      return this.pendingMatchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale'
     },
     controlImageQuality(): number {
       return this.normalizedImageQuality(this.pendingImageQuality)
@@ -1031,6 +1046,9 @@ export default Vue.extend({
       if (force || !previous || snapshot.verticalText !== previous.verticalText) this.pendingVerticalText = snapshot.verticalText
       if (force || !previous || snapshot.verticalDirection !== previous.verticalDirection) this.pendingVerticalDirection = snapshot.verticalDirection
       if (force || !previous || snapshot.strokeStrength !== previous.strokeStrength) this.pendingStrokeStrength = snapshot.strokeStrength
+      if (force || !previous || snapshot.contrastEnhancement !== previous.contrastEnhancement) this.pendingContrastEnhancement = snapshot.contrastEnhancement
+      if (force || !previous || snapshot.matchBackground !== previous.matchBackground) this.pendingMatchBackground = snapshot.matchBackground
+      if (force || !previous || snapshot.matchBackgroundMode !== previous.matchBackgroundMode) this.pendingMatchBackgroundMode = snapshot.matchBackgroundMode
       if (force || !previous || snapshot.imageQuality !== previous.imageQuality) this.pendingImageQuality = snapshot.imageQuality
       if (force || !previous || snapshot.blockSpacing !== previous.blockSpacing) this.pendingBlockSpacing = snapshot.blockSpacing
       if (force || !previous || snapshot.cropRoisKey !== previous.cropRoisKey) this.syncCropRoisFromOptions()
@@ -1045,6 +1063,9 @@ export default Vue.extend({
         verticalText: this.options.verticalText === true,
         verticalDirection: this.options.verticalDirection === 'ltr' ? 'ltr' : 'rtl',
         strokeStrength: this.roundStrokeStrength(this.options.strokeStrength),
+        contrastEnhancement: this.options.contrastEnhancement === true,
+        matchBackground: this.options.matchBackground === true,
+        matchBackgroundMode: this.options.matchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale',
         imageQuality: this.normalizedImageQuality(this.options.imageQuality),
         blockSpacing: this.clampNumber(this.options.blockSpacing, 0, 24, 6),
         cropRoisKey: JSON.stringify(this.options.cropRoisByParity || {}),
@@ -1684,7 +1705,7 @@ export default Vue.extend({
       return canvas.getContext('2d')
     },
     wordOutputBackground(): string {
-      return this.darkDisplay ? '#000' : (this.contrastEnhancement || this.matchBackground) ? '#fff' : this.pageBackground || '#fff'
+      return this.darkDisplay ? '#000' : '#fff'
     },
     fillWordSliceBackground(context: CanvasRenderingContext2D, width: number, height: number) {
       context.fillStyle = this.wordOutputBackground()
@@ -1703,7 +1724,8 @@ export default Vue.extend({
       this.pageBackground = '#fff'
     },
     finishWordSlice(context: CanvasRenderingContext2D, width: number, height: number) {
-      if (this.contrastEnhancement || this.matchBackground) {
+      const textModeEnabled = this.matchBackgroundMode === 'grayscale' || this.matchBackgroundMode === 'monochrome'
+      if (this.contrastEnhancement || this.matchBackground || textModeEnabled) {
         enhanceTextContrast(context, width, height, {
           enabled: this.contrastEnhancement,
           nightDisplay: this.darkDisplay,
@@ -5064,15 +5086,15 @@ export default Vue.extend({
     },
     setContrastEnhancement(event: Event) {
       const target = event.target as HTMLInputElement
-      this.$emit('contrast-enhancement-change', target.checked)
+      this.pendingContrastEnhancement = target.checked
     },
     setMatchBackground(event: Event) {
       const target = event.target as HTMLInputElement
-      this.$emit('match-background-change', target.checked)
+      this.pendingMatchBackground = target.checked
     },
     setMatchBackgroundMode(event: Event) {
       const target = event.target as HTMLSelectElement
-      this.$emit('match-background-mode-change', target.value === 'monochrome' ? 'monochrome' : 'grayscale')
+      this.pendingMatchBackgroundMode = target.value === 'monochrome' ? 'monochrome' : 'grayscale'
     },
     setBlockSpacing(event: Event) {
       const target = event.target as HTMLInputElement
@@ -5087,6 +5109,9 @@ export default Vue.extend({
       this.$emit('vertical-text-change', this.controlVerticalText)
       this.$emit('vertical-direction-change', this.controlVerticalDirection)
       this.$emit('stroke-strength-change', this.controlStrokeStrength)
+      this.$emit('contrast-enhancement-change', this.controlContrastEnhancement)
+      this.$emit('match-background-change', this.controlMatchBackground)
+      this.$emit('match-background-mode-change', this.controlMatchBackgroundMode)
       this.$emit('image-quality-change', this.controlImageQuality)
       this.$emit('block-spacing-change', this.controlBlockSpacing)
       this.$emit('crop-rois-change', this.cropRoisPayload())

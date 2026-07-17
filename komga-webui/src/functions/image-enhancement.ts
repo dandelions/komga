@@ -17,7 +17,7 @@ export function enhanceTextContrast(
   height: number,
   options: TextContrastOptions = {},
 ) {
-  if (!options.enabled && !options.nightDisplay && !options.matchBackground) return
+  if (!options.enabled && !options.nightDisplay && !options.matchBackground && !options.matchBackgroundMode) return
   if (width <= 0 || height <= 0) return
 
   const imageData = context.getImageData(0, 0, width, height)
@@ -36,33 +36,14 @@ export function enhanceTextContrastData(
 
   const targetDark = options.nightDisplay === true
   const backgroundValue = targetDark ? 0 : 255
+  const foregroundValue = targetDark ? 255 : 0
+  const outputMode = options.matchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale'
   const matchedForeground = options.matchBackground ? matchedForegroundMask(data, width, height, stats) : undefined
-  if (matchedForeground) {
-    const monochrome = options.matchBackgroundMode === 'monochrome'
-    const foregroundValue = targetDark ? 255 : 0
-    const invertForeground = targetDark !== stats.sourceDark
-    for (let i = 0; i < width * height; i++) {
-      const offset = i * 4
-      if (!matchedForeground[i]) {
-        setGrayPixel(data, offset, backgroundValue)
-        continue
-      }
-
-      if (monochrome) {
-        setGrayPixel(data, offset, foregroundValue)
-        continue
-      }
-
-      const sourceLuma = pixelLuma(data, offset)
-      setGrayPixel(data, offset, invertForeground ? 255 - sourceLuma : sourceLuma)
-    }
-    return
-  }
-
   const baseMinDelta = options.enabled ? 10 : 0
   const maxDelta = stats.sourceDark ? 255 - stats.background : stats.background
-  const minDelta = baseMinDelta
+  const binaryMinDelta = Math.min(12, Math.max(3, maxDelta * 0.025))
   const contrastRange = Math.max(24, maxDelta * (options.enabled ? 0.32 : 0.55))
+  const invertForeground = targetDark !== stats.sourceDark
 
   for (let i = 0; i < width * height; i++) {
     const offset = i * 4
@@ -71,19 +52,35 @@ export function enhanceTextContrastData(
       continue
     }
 
-    const luma = pixelLuma(data, offset)
-    const delta = stats.sourceDark ? luma - stats.background : stats.background - luma
-    if (delta <= minDelta) {
+    if (matchedForeground && !matchedForeground[i]) {
       setGrayPixel(data, offset, backgroundValue)
       continue
     }
 
-    const normalized = clamp((delta - minDelta) / contrastRange, 0, 1)
-    const foreground = Math.pow(normalized, options.enabled ? 0.55 : 0.7)
-    const output = targetDark
-      ? Math.round(255 * foreground)
-      : Math.round(255 * (1 - foreground))
-    setGrayPixel(data, offset, output)
+    const luma = pixelLuma(data, offset)
+    const delta = stats.sourceDark ? luma - stats.background : stats.background - luma
+
+    if (outputMode === 'monochrome') {
+      const foreground = matchedForeground ? true : delta > binaryMinDelta
+      setGrayPixel(data, offset, foreground ? foregroundValue : backgroundValue)
+      continue
+    }
+
+    if (options.enabled) {
+      if (delta <= baseMinDelta) {
+        setGrayPixel(data, offset, backgroundValue)
+        continue
+      }
+      const normalized = clamp((delta - baseMinDelta) / contrastRange, 0, 1)
+      const foreground = Math.pow(normalized, 0.55)
+      const output = targetDark
+        ? Math.round(255 * foreground)
+        : Math.round(255 * (1 - foreground))
+      setGrayPixel(data, offset, output)
+      continue
+    }
+
+    setGrayPixel(data, offset, invertForeground ? 255 - luma : luma)
   }
 }
 

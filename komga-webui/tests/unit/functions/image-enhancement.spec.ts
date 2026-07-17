@@ -42,4 +42,20 @@ describe('image enhancement', () => {
 
     expect(Array.from(data.filter((_, index) => index % 4 === 0))).toEqual([255, 255, 255, 0, 0, 0, 255])
   })
+
+  test('grayscale output works without matching the background', () => {
+    const data = grayPixels(255, 180, 20)
+
+    enhanceTextContrastData(data, 3, 1, {matchBackgroundMode: 'grayscale', backgroundLuma: 255})
+
+    expect(Array.from(data.filter((_, index) => index % 4 === 0))).toEqual([255, 180, 20])
+  })
+
+  test('monochrome output works without matching the background', () => {
+    const data = grayPixels(255, 180, 20)
+
+    enhanceTextContrastData(data, 3, 1, {matchBackgroundMode: 'monochrome', backgroundLuma: 255})
+
+    expect(Array.from(data.filter((_, index) => index % 4 === 0))).toEqual([255, 0, 0])
+  })
 })

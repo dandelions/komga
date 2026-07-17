@@ -667,11 +667,11 @@
                 <v-list-item>
                   <settings-switch v-model="reflowSettings.matchBackground" label="背景跟随底色"/>
                 </v-list-item>
-                <v-list-item v-if="reflowSettings.matchBackground">
+                <v-list-item>
                   <settings-select
                     :items="reflowMatchBackgroundModes"
                     v-model="reflowSettings.matchBackgroundMode"
-                    label="跟随输出"
+                    label="文字显示"
                   />
                 </v-list-item>
                 <v-list-item>
