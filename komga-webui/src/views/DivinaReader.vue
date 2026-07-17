@@ -930,6 +930,7 @@ export default Vue.extend({
     },
     reflowCacheKey(): string {
       return JSON.stringify({
+        renderVersion: 2,
         width: this.reflowTargetWidth,
         autoCropBorder: this.reflowSettings.autoCropBorder,
         textScale: this.reflowSettings.textScale,
@@ -1692,5 +1693,9 @@ export default Vue.extend({
 .reader-night-mode .reader-frame img,
 .reader-night-mode .reader-frame canvas {
   filter: invert(1) hue-rotate(180deg) brightness(0.92);
+}
+
+.reader-night-mode .reflow-reader .reflow-wrapper {
+  background: #000000;
 }
 </style>

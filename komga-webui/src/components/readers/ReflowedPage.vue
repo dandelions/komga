@@ -370,7 +370,7 @@ export default Vue.extend({
         const context = canvas.getContext('2d')
         if (!context) throw new Error('Canvas is unavailable')
         context.drawImage(image, 0, 0)
-        this.boldenSourceCanvas(context, canvas.width, canvas.height)
+        this.prepareSourceCanvas(context, canvas.width, canvas.height)
         const imageData = context.getImageData(0, 0, canvas.width, canvas.height)
         const lines = this.detectWordLines(imageData, canvas.width, canvas.height)
         if (requestId !== this.requestId) return
@@ -817,99 +817,58 @@ export default Vue.extend({
 
       return rendered
     },
-    boldenSourceCanvas(targetContext: CanvasRenderingContext2D, width: number, height: number) {
+    prepareSourceCanvas(targetContext: CanvasRenderingContext2D, width: number, height: number) {
       const strength = this.strokeStrength
-      if (strength <= 0) return
-
-      const threshold = Math.min(245, this.clampNumber(this.options.threshold, 50, 230, THRESHOLD) + 18)
       const imageData = targetContext.getImageData(0, 0, width, height)
       const data = imageData.data
-      const original = new Uint8ClampedArray(data)
-      let mask = new Uint8Array(width * height)
-      let maskIndexes = [] as number[]
+      const luminanceHistogram = new Uint32Array(256)
+      let opaquePixelCount = 0
 
       for (let i = 0; i < width * height; i++) {
         const offset = i * 4
-        const alpha = original[offset + 3]
-        if (alpha === 0) continue
-        const luma = 0.299 * original[offset] + 0.587 * original[offset + 1] + 0.114 * original[offset + 2]
-        if (luma < threshold) {
-          mask[i] = 1
-          maskIndexes.push(i)
+        if (data[offset + 3] === 0) continue
+        const luma = Math.round(0.299 * data[offset] + 0.587 * data[offset + 1] + 0.114 * data[offset + 2])
+        luminanceHistogram[luma]++
+        opaquePixelCount++
+      }
+
+      const percentileTarget = Math.max(0, Math.floor((opaquePixelCount - 1) * 0.9))
+      let seenPixels = 0
+      let backgroundLuma = 255
+      for (let luma = 0; luma < luminanceHistogram.length; luma++) {
+        seenPixels += luminanceHistogram[luma]
+        if (seenPixels > percentileTarget) {
+          backgroundLuma = luma
+          break
         }
       }
 
-      const fullPasses = Math.floor(strength)
-      const fractional = strength - fullPasses
-      for (let pass = 0; pass < fullPasses; pass++) {
-        const expanded = this.expandedInkMask(mask, maskIndexes, width, height)
-        mask = expanded.mask
-        maskIndexes = expanded.indexes
-      }
+      // Normalize both the white word tiles and their light gray surroundings to
+      // one paper color. The night reader's existing image filter turns it black.
+      const backgroundCutoff = Math.max(180, Math.min(225, backgroundLuma - 10))
+      const darkenAmount = Math.min(0.54, Math.max(0, strength) * 0.18)
 
-      if (fullPasses > 0) this.applyInkMask(data, maskIndexes)
-
-      if (fractional > 0) {
-        this.applyFractionalInkExpansion(data, maskIndexes, width, height, fractional)
+      for (let i = 0; i < width * height; i++) {
+        const offset = i * 4
+        if (data[offset + 3] === 0) continue
+        const luma = 0.299 * data[offset] + 0.587 * data[offset + 1] + 0.114 * data[offset + 2]
+        if (luma >= backgroundCutoff) {
+          data[offset] = 255
+          data[offset + 1] = 255
+          data[offset + 2] = 255
+        } else if (darkenAmount > 0) {
+          // Darken only existing ink continuously. Never grow the ink mask into
+          // neighboring pixels, which was the source of jagged glyph edges.
+          const inkWeight = Math.max(0, Math.min(1, (backgroundCutoff - luma) / backgroundCutoff))
+          const factor = 1 - darkenAmount * inkWeight
+          data[offset] = Math.round(data[offset] * factor)
+          data[offset + 1] = Math.round(data[offset + 1] * factor)
+          data[offset + 2] = Math.round(data[offset + 2] * factor)
+        }
+        data[offset + 3] = 255
       }
 
       targetContext.putImageData(imageData, 0, 0)
-    },
-    expandedInkMask(mask: Uint8Array, sourceIndexes: number[], width: number, height: number): {mask: Uint8Array, indexes: number[]} {
-      const expanded = new Uint8Array(mask)
-      const indexes = sourceIndexes.slice()
-      for (const i of sourceIndexes) {
-        const y = Math.floor(i / width)
-        const x = i - y * width
-        for (let dy = -1; dy <= 1; dy++) {
-          const ny = y + dy
-          if (ny < 0 || ny >= height) continue
-          for (let dx = -1; dx <= 1; dx++) {
-            const nx = x + dx
-            if (nx < 0 || nx >= width) continue
-            const ni = ny * width + nx
-            if (expanded[ni]) continue
-            expanded[ni] = 1
-            indexes.push(ni)
-          }
-        }
-      }
-      return {mask: expanded, indexes}
-    },
-    applyInkMask(data: Uint8ClampedArray, indexes: number[]) {
-      for (const i of indexes) {
-        const offset = i * 4
-        data[offset] = Math.min(data[offset], 0)
-        data[offset + 1] = Math.min(data[offset + 1], 0)
-        data[offset + 2] = Math.min(data[offset + 2], 0)
-        data[offset + 3] = 255
-      }
-    },
-    applyFractionalInkExpansion(data: Uint8ClampedArray, indexes: number[], width: number, height: number, strength: number) {
-      for (const i of indexes) {
-        const y = Math.floor(i / width)
-        const x = i - y * width
-        const centerOffset = i * 4
-        this.darkenPixel(data, centerOffset, Math.min(1, strength))
-        for (let dy = -1; dy <= 1; dy++) {
-          const ny = y + dy
-          if (ny < 0 || ny >= height) continue
-          for (let dx = -1; dx <= 1; dx++) {
-            if (dx === 0 && dy === 0) continue
-            const nx = x + dx
-            if (nx < 0 || nx >= width) continue
-            const influence = strength * (Math.abs(dx) + Math.abs(dy) === 1 ? 0.7 : 0.45)
-            this.darkenPixel(data, (ny * width + nx) * 4, influence)
-          }
-        }
-      }
-    },
-    darkenPixel(data: Uint8ClampedArray, offset: number, influence: number) {
-      const clampedInfluence = Math.max(0, Math.min(1, influence))
-      data[offset] = Math.round(data[offset] * (1 - clampedInfluence))
-      data[offset + 1] = Math.round(data[offset + 1] * (1 - clampedInfluence))
-      data[offset + 2] = Math.round(data[offset + 2] * (1 - clampedInfluence))
-      data[offset + 3] = Math.max(data[offset + 3], Math.round(255 * clampedInfluence))
     },
     isParagraphStart(line: WordLine, previousLine: WordLine | undefined): boolean {
       if (!previousLine) return true
@@ -1060,6 +1019,7 @@ export default Vue.extend({
 .reflow-wrapper {
   width: 100%;
   min-height: 100vh;
+  background: #ffffff;
   padding: 16px;
   box-sizing: border-box;
   display: flex;
