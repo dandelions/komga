@@ -25,7 +25,6 @@ import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.system.measureTimeMillis
 
@@ -3185,6 +3184,8 @@ class PdfPageReflowService(
     val threshold = clamp(options.threshold, 50, 230)
     val backgroundLuma = estimateBackgroundLuma(image, block)
     val inkThreshold = adaptiveInkThreshold(threshold, backgroundLuma)
+    val matchedForeground =
+      if (options.matchBackground && !options.contrastEnhancement) matchBackgroundMask(image, block, backgroundLuma) else null
 
     if (!normalizeColors) {
       val graphics = output.createGraphics()
@@ -3199,7 +3200,7 @@ class PdfPageReflowService(
         val rgb = image.getRGB(block.x + x, block.y + y)
         val color =
           if (options.matchBackground && !options.contrastEnhancement) {
-            matchBackgroundColor(rgb, backgroundLuma, options.darkDisplay)
+            if (matchedForeground!![y * block.w + x]) foreground else background
           } else if (isInk(rgb, inkThreshold)) {
             foreground
           } else {
@@ -3252,6 +3253,8 @@ class PdfPageReflowService(
     val threshold = clamp(options.threshold, 50, 230)
     val backgroundLuma = estimateBackgroundLuma(image, source)
     val inkThreshold = adaptiveInkThreshold(threshold, backgroundLuma)
+    val matchedForeground =
+      if (options.matchBackground && !options.contrastEnhancement) matchBackgroundMask(image, source, backgroundLuma) else null
     for (y in 0 until source.h) {
       val targetY = offsetY + y
       if (targetY !in 0 until outputHeight) continue
@@ -3261,7 +3264,7 @@ class PdfPageReflowService(
         val rgb = image.getRGB(source.x + x, source.y + y)
         val color =
           if (options.matchBackground && !options.contrastEnhancement) {
-            matchBackgroundColor(rgb, backgroundLuma, options.darkDisplay)
+            if (matchedForeground!![y * source.w + x]) foreground else background
           } else if (isInk(rgb, inkThreshold)) {
             foreground
           } else {
@@ -3631,22 +3634,38 @@ class PdfPageReflowService(
     return clamp(min(threshold.toDouble(), backgroundLuma - gap).roundToInt(), 1, 254)
   }
 
-  private fun matchBackgroundColor(
-    rgb: Int,
+  private fun matchBackgroundMask(
+    image: BufferedImage,
+    roi: Roi,
     backgroundLuma: Double,
-    targetDark: Boolean,
-  ): Color {
+  ): BooleanArray {
+    val block = clampRoi(roi, image.width, image.height)
+    val pixels = block.w * block.h
+    val deltas = DoubleArray(pixels)
+    val strong = BooleanArray(pixels)
+    val foreground = BooleanArray(pixels)
     val sourceDark = backgroundLuma < 128.0
     val maxDelta = if (sourceDark) 255.0 - backgroundLuma else backgroundLuma
-    val minDelta = max(3.0, min(12.0, maxDelta * 0.025))
-    val contrastRange = max(24.0, maxDelta * 0.36)
-    val luma = pixelLuma(rgb)
-    val delta = if (sourceDark) luma - backgroundLuma else backgroundLuma - luma
-    val normalized = clamp((delta - minDelta) / contrastRange, 0.0, 1.0)
-    val foreground = normalized.pow(0.48)
-    val value = if (targetDark) 255.0 * foreground else 255.0 * (1.0 - foreground)
-    val gray = clamp(value.roundToInt(), 0, 255)
-    return Color(gray, gray, gray)
+    val weakDelta = min(12.0, max(3.0, maxDelta * 0.025))
+    val strongDelta = min(48.0, max(18.0, maxDelta * 0.12))
+
+    for (y in 0 until block.h) {
+      for (x in 0 until block.w) {
+        val index = y * block.w + x
+        val luma = pixelLuma(image.getRGB(block.x + x, block.y + y))
+        val delta = if (sourceDark) luma - backgroundLuma else backgroundLuma - luma
+        deltas[index] = delta
+        if (delta > strongDelta) strong[index] = true
+      }
+    }
+
+    for (y in 0 until block.h) {
+      for (x in 0 until block.w) {
+        val index = y * block.w + x
+        foreground[index] = strong[index] || (deltas[index] > weakDelta && hasNeighbor(strong, block.w, block.h, x, y, 1))
+      }
+    }
+    return foreground
   }
 
   private fun isInk(
