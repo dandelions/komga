@@ -268,6 +268,7 @@
           :cached-items="cachedReflowItems(currentPage)"
           :cached-page-background="cachedReflowBackground(currentPage)"
           :cached-transfer-stats="cachedReflowTransferStats(currentPage)"
+          :continuation-pages="reflowContinuationPages"
           :cache-key="reflowCacheKey"
           :night-display="nightDisplay"
           :server-reflow="reflowSettings.processingMode === 'server'"
@@ -906,11 +907,12 @@ import {TocEntry} from '@/types/epub'
 import {flattenToc} from '@/functions/toc'
 import {CLIENT_SETTING, ClientSettingUserUpdateDto} from '@/types/komga-clientsettings'
 import {enhanceTextContrast} from '@/functions/image-enhancement'
+import {surroundingReflowPageNumbers} from '@/functions/reflow-stream'
 
 const REFLOW_SETTINGS_STORAGE_PREFIX = 'komga.pdfReflowSettings.'
 const READER_IMAGE_SETTINGS_STORAGE_PREFIX = 'komga.readerImageSettings.'
-const REFLOW_CACHE_RADIUS = 4
-const REFLOW_PREFETCH_COUNT = 3
+const REFLOW_CACHE_RADIUS = 2
+const REFLOW_CONTINUATION_COUNT = 2
 const REFLOW_PREFETCH_DELAY_MS = 800
 const MAX_REFLOW_CROP_REGIONS = 8
 
@@ -1061,6 +1063,7 @@ export default Vue.extend({
       saveReaderImageSettingsServerDebounced: undefined as undefined | ((bookId?: string, settings?: Record<string, any>) => void),
       reflowCache: {} as Record<string, any>,
       reflowPrefetchPages: [] as number[],
+      reflowSourceHistory: [] as number[],
       reflowPrefetchTimer: undefined as number | undefined,
       reflowPrefetchIdleHandle: undefined as number | undefined,
       reflowSettings: defaultReflowSettings(),
@@ -1309,15 +1312,22 @@ export default Vue.extend({
     currentPage(): PageDtoWithUrl {
       return this.pages[this.page - 1]
     },
-    nextReflowPage(): PageDtoWithUrl | undefined {
-      if (!this.reflowMode || this.continuousReader || this.page >= this.pagesCount) return undefined
-      return this.pages[this.page]
-    },
     prefetchReflowPages(): PageDtoWithUrl[] {
       if (!this.reflowMode) return []
       return this.reflowPrefetchPages
         .map(pageNumber => this.pages[pageNumber - 1])
         .filter((page): page is PageDtoWithUrl => !!page)
+    },
+    reflowContinuationPages(): Array<{pageNumber: number, items: any[]}> {
+      const continuation = [] as Array<{pageNumber: number, items: any[]}>
+      for (let offset = 1; offset <= REFLOW_CONTINUATION_COUNT; offset++) {
+        const pageNumber = this.page + offset
+        const page = this.pages[pageNumber - 1]
+        const items = this.cachedReflowItems(page)
+        if (!page || !items) break
+        continuation.push({pageNumber, items})
+      }
+      return continuation
     },
     isPdf(): boolean {
       return this.book.media?.mediaProfile === 'PDF'
@@ -2612,6 +2622,7 @@ export default Vue.extend({
       this.savePdfMode()
       this.reflowStartAtEnd = false
       this.reflowCropMode = false
+      this.reflowSourceHistory = []
       this.clearReflowPrefetch()
       this.$nextTick(() => this.scrollToPageEdge('top'))
     },
@@ -2627,6 +2638,7 @@ export default Vue.extend({
       this.reflowMode = false
       this.reflowCropMode = false
       this.reflowStartAtEnd = false
+      this.reflowSourceHistory = []
       this.savePdfMode()
       this.clearReflowPrefetch()
       this.$nextTick(() => this.scrollToPageEdge('top'))
@@ -2876,12 +2888,10 @@ export default Vue.extend({
     },
     scheduleNextReflowPrefetch() {
       this.clearReflowPrefetch()
-      if (!this.nextReflowPage || this.reflowCropMode) return
+      if (this.reflowCropMode) return
       const sourcePage = this.page
       const nextPageNumbers =
-        Array
-          .from({length: REFLOW_PREFETCH_COUNT}, (_, index) => sourcePage + index + 1)
-          .filter(pageNumber => pageNumber <= this.pagesCount)
+        surroundingReflowPageNumbers(sourcePage, this.pagesCount)
           .filter(pageNumber => !this.cachedReflowItems(this.pages[pageNumber - 1]))
       if (nextPageNumbers.length === 0) return
       this.reflowPrefetchTimer = window.setTimeout(() => {
@@ -2906,20 +2916,25 @@ export default Vue.extend({
       const reflow = this.$refs.reflowedPage as any
       reflow?.nextPage?.()
     },
-    reflowSourcePreviousPage() {
+    reflowSourcePreviousPage(sourcePageCount: number = 1) {
       this.cacheCurrentReflowPage()
       if (this.page > 1) {
+        const historyPage = this.reflowSourceHistory.pop()
+        const fallbackStep = Math.max(1, Math.round(sourcePageCount || 1))
+        const targetPage = historyPage || Math.max(1, this.page - fallbackStep)
         this.reflowStartAtEnd = true
-        this.goTo(this.page - 1)
+        this.goTo(targetPage)
       } else {
         this.jumpToPrevious()
       }
     },
-    reflowSourceNextPage() {
+    reflowSourceNextPage(sourcePageCount: number = 1) {
       this.cacheCurrentReflowPage()
       if (this.page < this.pagesCount) {
+        const step = Math.max(1, Math.round(sourcePageCount || 1))
+        this.reflowSourceHistory.push(this.page)
         this.reflowStartAtEnd = false
-        this.goTo(this.page + 1)
+        this.goTo(Math.min(this.pagesCount, this.page + step))
       } else {
         this.jumpToNext()
       }

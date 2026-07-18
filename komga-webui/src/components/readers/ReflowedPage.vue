@@ -339,7 +339,7 @@
       />
     </div>
     <div v-else class="reflow-wrapper" :class="{'vertical-reflow-wrapper': verticalText}" :style="reflowWrapperStyle" @click="collapseControls">
-      <div v-if="reflowItems.length === 0" class="reflow-status">No text blocks detected</div>
+      <div v-if="paginationItems.length === 0" class="reflow-status">No text blocks detected</div>
       <template v-for="(item, i) in visibleItems">
         <span
           v-if="item.type === 'break'"
@@ -371,14 +371,14 @@
       </template>
     </div>
     <div
-      v-if="reflowItems.length > 0"
+      v-if="paginationItems.length > 0"
       ref="measureWrapper"
       class="reflow-measure-wrapper"
       :class="{'vertical-reflow-wrapper': verticalText}"
       :style="measureWrapperStyle"
       aria-hidden="true"
     >
-      <template v-for="(item, i) in reflowItems">
+      <template v-for="(item, i) in paginationItems">
         <span
           v-if="item.type === 'break'"
           :key="`measure-break-${i}`"
@@ -415,6 +415,7 @@
 import Vue from 'vue'
 import {PageDtoWithUrl} from '@/types/komga-books'
 import {enhanceTextContrast} from '@/functions/image-enhancement'
+import {contiguousReflowPageCount, mergeReflowContinuationItems, ReflowContinuationPage} from '@/functions/reflow-stream'
 
 type ReflowOptions = {
   autoCropBorder: boolean,
@@ -633,6 +634,10 @@ export default Vue.extend({
       type: Object as () => ReflowTransferStats | undefined,
       default: undefined,
     },
+    continuationPages: {
+      type: Array as () => Array<ReflowContinuationPage<ReflowItem>>,
+      default: () => [],
+    },
     cacheKey: {
       type: String,
       default: '',
@@ -725,7 +730,13 @@ export default Vue.extend({
   },
   computed: {
     visibleItems(): ReflowItem[] {
-      return this.pages[this.virtualPageIndex] || this.reflowItems
+      return this.pages[this.virtualPageIndex] || this.paginationItems
+    },
+    paginationItems(): ReflowItem[] {
+      return mergeReflowContinuationItems(this.reflowItems, this.page.number, this.continuationPages)
+    },
+    streamPageCount(): number {
+      return contiguousReflowPageCount(this.page.number, this.continuationPages)
     },
     textScalePercent(): number {
       return this.clampNumber(this.options.textScale, 10, 140, WORD_SCALE * 100)
@@ -992,6 +1003,13 @@ export default Vue.extend({
         if (this.deferReflow || this.cropMode) return
         this.reflow()
       },
+    },
+    continuationPages: {
+      handler() {
+        if (this.deferReflow || this.cropMode || this.preload) return
+        this.repaginate(false)
+      },
+      deep: true,
     },
     deferReflow(defer) {
       if (defer) {
@@ -1271,14 +1289,14 @@ export default Vue.extend({
     },
     repaginate(resetPage: boolean = true) {
       this.updateViewportMetrics()
-      if (this.reflowItems.length === 0) {
+      if (this.paginationItems.length === 0) {
         this.pages = []
         this.virtualPageIndex = 0
         return
       }
 
       if (this.verticalText) {
-        this.pages = this.paginateVerticalItemsEstimated(this.reflowItems)
+        this.pages = this.paginateVerticalItemsEstimated(this.paginationItems)
         if (resetPage) {
           this.setInitialVirtualPage()
         } else {
@@ -1287,7 +1305,7 @@ export default Vue.extend({
         return
       }
 
-      const estimatedPages = this.paginateItemsEstimated(this.reflowItems)
+      const estimatedPages = this.paginateItemsEstimated(this.paginationItems)
       this.pages = estimatedPages
       if (resetPage) {
         this.setInitialVirtualPage()
@@ -1316,7 +1334,8 @@ export default Vue.extend({
     },
     paginateItemsFromDom(): ReflowItem[][] | undefined {
       const measureWrapper = this.$refs.measureWrapper as HTMLElement | undefined
-      if (!measureWrapper || measureWrapper.children.length !== this.reflowItems.length) return undefined
+      const paginationItems = this.paginationItems
+      if (!measureWrapper || measureWrapper.children.length !== paginationItems.length) return undefined
 
       const pageHeight = Math.max(120, this.pageContentHeight() - 32 - VIEWPORT_PAGE_BUFFER)
       const rows = [] as Array<{indexes: number[], top: number, bottom: number}>
@@ -1333,7 +1352,7 @@ export default Vue.extend({
       }
 
       Array.from(measureWrapper.children).forEach((child, index) => {
-        const item = this.reflowItems[index]
+        const item = paginationItems[index]
         const element = child as HTMLElement
         const top = element.offsetTop
         const bottom = element.offsetTop + element.offsetHeight
@@ -1375,7 +1394,7 @@ export default Vue.extend({
           currentPage = []
           pageStartTop = row.top
         }
-        row.indexes.forEach(index => currentPage.push(this.reflowItems[index]))
+        row.indexes.forEach(index => currentPage.push(paginationItems[index]))
       })
 
       if (currentPage.length > 0) pages.push(currentPage)
@@ -1493,7 +1512,7 @@ export default Vue.extend({
         this.scrollToTop()
         return
       }
-      this.$emit('source-next')
+      this.$emit('source-next', this.streamPageCount)
     },
     previousPage() {
       if (this.virtualPageIndex > 0) {
@@ -1501,7 +1520,7 @@ export default Vue.extend({
         this.scrollToTop()
         return
       }
-      this.$emit('source-previous')
+      this.$emit('source-previous', this.streamPageCount)
     },
     scrollToTop() {
       this.$nextTick(() => window.scrollTo({top: 0, left: 0, behavior: 'auto'}))
