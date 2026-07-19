@@ -1,5 +1,6 @@
 import {
   contiguousReflowPageCount,
+  hasVerticalParagraphBlankTail,
   mergeReflowContinuationItems,
   reflowPrefetchPageNumbers,
   retainedReflowHistoryPageNumbers,
@@ -59,5 +60,10 @@ describe('reflow stream', () => {
 
     expect(visibleReflowSourcePageNumber(items, 1)).toBe(2)
     expect(visibleReflowSourcePageNumber([{type: 'break'}] as Item[], 3)).toBe(3)
+  })
+
+  test('requires at least two vertical character spaces at the previous line tail', () => {
+    expect(hasVerticalParagraphBlankTail(19, 10)).toBe(false)
+    expect(hasVerticalParagraphBlankTail(20, 10)).toBe(true)
   })
 })

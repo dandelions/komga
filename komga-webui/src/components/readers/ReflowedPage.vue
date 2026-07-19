@@ -419,6 +419,7 @@ import {PageDtoWithUrl} from '@/types/komga-books'
 import {enhanceTextContrast} from '@/functions/image-enhancement'
 import {
   contiguousReflowPageCount,
+  hasVerticalParagraphBlankTail,
   mergeReflowContinuationItems,
   ReflowContinuationPage,
   visibleReflowSourcePageNumber,
@@ -4054,24 +4055,30 @@ export default Vue.extend({
       return bestSplit
     },
     tightVerticalBlock(isInk: (x: number, y: number) => boolean, column: Column, start: number, end: number): WordBlock | undefined {
+      let minX = column.end
+      let maxX = column.start
       let minY = end
       let maxY = start
 
       for (let y = start; y < end; y++) {
         for (let x = column.start; x < column.end; x++) {
           if (!isInk(x, y)) continue
+          minX = Math.min(minX, x)
+          maxX = Math.max(maxX, x)
           minY = Math.min(minY, y)
           maxY = Math.max(maxY, y)
         }
       }
 
-      if (maxY < minY) return undefined
+      if (maxX < minX || maxY < minY) return undefined
+      const left = Math.max(column.start, minX - BLOCK_PADDING)
+      const right = Math.min(column.end - 1, maxX + BLOCK_PADDING)
       const top = Math.max(start, minY - BLOCK_PADDING)
       const bottom = Math.min(end - 1, maxY + BLOCK_PADDING)
       return {
-        x: column.start,
+        x: left,
         y: top,
-        w: column.end - column.start,
+        w: right - left + 1,
         h: bottom - top + 1,
       }
     },
@@ -4923,7 +4930,7 @@ export default Vue.extend({
         this.verticalCharacterSourceHeight(line),
         this.verticalCharacterSourceHeight(previousLine),
       )
-      return blankTail >= Math.max(6, charHeight * 0.8)
+      return hasVerticalParagraphBlankTail(blankTail, charHeight)
     },
     verticalLineBottom(line: WordLine): number | undefined {
       const words = line.words.filter(word => !this.isRuleLikeBlock(word))

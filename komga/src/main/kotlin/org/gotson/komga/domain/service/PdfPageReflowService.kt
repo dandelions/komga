@@ -37,6 +37,7 @@ private const val REFLOW_INLINE_TARGET_MAX_BYTES = 220 * 1024
 private const val REFLOW_INLINE_MAX_PIXELS = 1_400_000
 private const val REFLOW_INLINE_MAX_SIDE = 1800
 private const val REFLOW_INLINE_MIN_SCALE = 0.35
+private const val VERTICAL_PARAGRAPH_BLANK_BLOCKS = 2.0
 
 data class PdfPageReflowOptions(
   val targetWidth: Int,
@@ -2497,7 +2498,7 @@ class PdfPageReflowService(
         verticalCharacterSourceHeight(line.blocks),
         verticalCharacterSourceHeight(previousLine.blocks),
       )
-    return blankTail >= max(6.0, characterHeight * 2.0)
+    return blankTail >= max(6.0, characterHeight * VERTICAL_PARAGRAPH_BLANK_BLOCKS)
   }
 
   private fun verticalLineBottom(line: VerticalTextLine): Int? =

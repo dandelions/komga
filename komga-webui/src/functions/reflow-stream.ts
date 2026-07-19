@@ -84,3 +84,7 @@ export function visibleReflowSourcePageNumber<T extends ReflowStreamItem>(items:
   )
   return Number(sourceItem?.sourcePageNumber) || fallbackPageNumber
 }
+
+export function hasVerticalParagraphBlankTail(blankTail: number, characterHeight: number, blankBlocks: number = 2): boolean {
+  return blankTail >= Math.max(6, characterHeight * blankBlocks)
+}
