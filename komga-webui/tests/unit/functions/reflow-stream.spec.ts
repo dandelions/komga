@@ -3,9 +3,10 @@ import {
   mergeReflowContinuationItems,
   reflowPrefetchPageNumbers,
   retainedReflowHistoryPageNumbers,
+  visibleReflowSourcePageNumber,
 } from '@/functions/reflow-stream'
 
-type Item = {type: 'word' | 'indent' | 'break', value?: string}
+type Item = {type: 'word' | 'indent' | 'break', value?: string, sourcePageNumber?: number}
 
 describe('reflow stream', () => {
   test('continues the next source page inline when it has no first-line indent', () => {
@@ -16,6 +17,7 @@ describe('reflow stream', () => {
     )
 
     expect(merged.map(item => item.type)).toEqual(['word', 'word'])
+    expect(merged.map(item => item.sourcePageNumber)).toEqual([1, 2])
   })
 
   test('starts a new line when the next source page begins with an indent', () => {
@@ -45,5 +47,17 @@ describe('reflow stream', () => {
 
   test('retains the two latest continuous source-page segments for back navigation', () => {
     expect(retainedReflowHistoryPageNumbers([1, 6, 11], 4, 2)).toEqual([6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
+  })
+
+  test('uses the last visible content block source page for crop selection', () => {
+    const items = [
+      {type: 'word', sourcePageNumber: 1},
+      {type: 'break'},
+      {type: 'word', sourcePageNumber: 2},
+      {type: 'break'},
+    ] as Item[]
+
+    expect(visibleReflowSourcePageNumber(items, 1)).toBe(2)
+    expect(visibleReflowSourcePageNumber([{type: 'break'}] as Item[], 3)).toBe(3)
   })
 })

@@ -1318,14 +1318,14 @@ export default Vue.extend({
         .map(pageNumber => this.pages[pageNumber - 1])
         .filter((page): page is PageDtoWithUrl => !!page)
     },
-    reflowContinuationPages(): Array<{pageNumber: number, items: any[]}> {
-      const continuation = [] as Array<{pageNumber: number, items: any[]}>
+    reflowContinuationPages(): Array<{pageNumber: number, pageUrl: string, items: any[]}> {
+      const continuation = [] as Array<{pageNumber: number, pageUrl: string, items: any[]}>
       for (let offset = 1; offset <= REFLOW_CONTINUATION_COUNT; offset++) {
         const pageNumber = this.page + offset
         const page = this.pages[pageNumber - 1]
         const items = this.cachedReflowItems(page)
         if (!page || !items) break
-        continuation.push({pageNumber, items})
+        continuation.push({pageNumber, pageUrl: page.url, items})
       }
       return continuation
     },

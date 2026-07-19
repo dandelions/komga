@@ -1,9 +1,11 @@
 export type ReflowStreamItem = {
   type: string,
+  sourcePageNumber?: number,
 }
 
 export type ReflowContinuationPage<T extends ReflowStreamItem> = {
   pageNumber: number,
+  pageUrl?: string,
   items: T[],
 }
 
@@ -12,13 +14,13 @@ export function mergeReflowContinuationItems<T extends ReflowStreamItem>(
   currentPageNumber: number,
   continuationPages: Array<ReflowContinuationPage<T>>,
 ): T[] {
-  const items = currentItems.slice()
+  const items = currentItems.map(item => ({...item, sourcePageNumber: currentPageNumber} as T))
   while (items[items.length - 1]?.type === 'break') items.pop()
   let expectedPageNumber = currentPageNumber + 1
 
   for (const continuation of continuationPages) {
     if (continuation.pageNumber !== expectedPageNumber || !Array.isArray(continuation.items)) break
-    const continuationItems = continuation.items.slice()
+    const continuationItems = continuation.items.map(item => ({...item, sourcePageNumber: continuation.pageNumber} as T))
     while (continuationItems[0]?.type === 'break') continuationItems.shift()
     while (continuationItems[continuationItems.length - 1]?.type === 'break') continuationItems.pop()
     if (continuationItems.length > 0) {
@@ -74,4 +76,11 @@ export function retainedReflowHistoryPageNumbers(
     for (let offset = 0; offset <= continuationCount; offset++) pageNumbers.add(sourcePage + offset)
   })
   return Array.from(pageNumbers)
+}
+
+export function visibleReflowSourcePageNumber<T extends ReflowStreamItem>(items: T[], fallbackPageNumber: number): number {
+  const sourceItem = items.slice().reverse().find(item =>
+    (item.type === 'word' || item.type === 'image') && Number(item.sourcePageNumber) > 0,
+  )
+  return Number(sourceItem?.sourcePageNumber) || fallbackPageNumber
 }

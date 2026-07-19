@@ -415,7 +415,12 @@
 import Vue from 'vue'
 import {PageDtoWithUrl} from '@/types/komga-books'
 import {enhanceTextContrast} from '@/functions/image-enhancement'
-import {contiguousReflowPageCount, mergeReflowContinuationItems, ReflowContinuationPage} from '@/functions/reflow-stream'
+import {
+  contiguousReflowPageCount,
+  mergeReflowContinuationItems,
+  ReflowContinuationPage,
+  visibleReflowSourcePageNumber,
+} from '@/functions/reflow-stream'
 
 type ReflowOptions = {
   autoCropBorder: boolean,
@@ -511,7 +516,9 @@ type LineIndentItem = {
   sourceWidth: number,
 }
 
-type ReflowItem = RenderedWordBlock | RenderedImageBlock | LineBreakItem | LineIndentItem
+type ReflowItem = (RenderedWordBlock | RenderedImageBlock | LineBreakItem | LineIndentItem) & {
+  sourcePageNumber?: number,
+}
 
 type WordLine = {
   column: Column,
@@ -688,6 +695,10 @@ export default Vue.extend({
       objectUrlBytes: 0,
       cropObjectUrl: '',
       cropObjectUrlSkewCorrection: 0,
+      cropObjectUrlSource: '',
+      cropPageNumber: 0,
+      cropPageUrl: '',
+      cropImageSize: {w: 0, h: 0},
       cropImageRequestId: 0,
       requestId: 0,
       reflowRunning: false,
@@ -860,11 +871,24 @@ export default Vue.extend({
     pageParity(): PageParity {
       return this.page.number % 2 === 0 ? 'even' : 'odd'
     },
+    activeVisibleSourcePageNumber(): number {
+      return visibleReflowSourcePageNumber(this.visibleItems, this.page.number)
+    },
+    activeVisibleSourcePageUrl(): string {
+      if (this.activeVisibleSourcePageNumber === this.page.number) return this.page.url
+      return this.continuationPages.find(page => page.pageNumber === this.activeVisibleSourcePageNumber)?.pageUrl || this.page.url
+    },
+    selectionPageNumber(): number {
+      return this.cropPageNumber || this.activeVisibleSourcePageNumber
+    },
+    selectionPageParity(): PageParity {
+      return this.selectionPageNumber % 2 === 0 ? 'even' : 'odd'
+    },
     pageParityLabel(): string {
-      return this.pageParity === 'even' ? '偶数页' : '奇数页'
+      return this.selectionPageParity === 'even' ? '偶数页' : '奇数页'
     },
     pageParityShortLabel(): string {
-      return this.pageParity === 'even' ? '偶数' : '奇数'
+      return this.selectionPageParity === 'even' ? '偶数' : '奇数'
     },
     cropRegionCountOptions(): number[] {
       return Array.from({length: MAX_CROP_REGIONS}, (_, index) => index + 1)
@@ -890,16 +914,22 @@ export default Vue.extend({
         : `拖拽选择${this.pageParityShortLabel}区域${this.activeCropRegion + 1}`
     },
     cropRoi(): Roi | undefined {
-      return this.effectiveCropRoi(this.pageParity, this.activeCropRegion)
+      return this.effectiveCropRoi(this.selectionPageParity, this.activeCropRegion)
     },
     manualImagePageKey(): string {
       return String(this.page.number)
     },
+    selectionManualImagePageKey(): string {
+      return String(this.selectionPageNumber)
+    },
     manualImageRoi(): Roi | undefined {
-      return this.effectiveManualImageRoi(this.activeManualImageRegion)
+      return this.manualImageRoisByPage[this.selectionManualImagePageKey]?.[this.activeManualImageRegion]
     },
     cropImageUrl(): string {
       return this.cropObjectUrl || this.objectUrl
+    },
+    cropDisplayImageSize(): {w: number, h: number} {
+      return this.cropImageSize.w && this.cropImageSize.h ? this.cropImageSize : this.imageSize
     },
     transferStatsLabel(): string {
       if (!this.transferStats) return ''
@@ -911,9 +941,12 @@ export default Vue.extend({
       return this.draftRoi || (this.cropTarget === 'image' ? this.manualImageRoi : this.cropRoi)
     },
     cropRects(): CropRect[] {
-      if (!this.imageSize.w || !this.imageSize.h) return []
+      if (!this.cropDisplayImageSize.w || !this.cropDisplayImageSize.h) return []
       if (this.cropTarget === 'image') {
-        const rois = this.effectiveManualImageRois()
+        const rois = Array.from(
+          {length: this.manualImageRegionCount},
+          (_, index) => this.manualImageRoisByPage[this.selectionManualImagePageKey]?.[index],
+        )
         return this.manualImageRegionIndexes
           .map(region => {
             const roi = region === this.activeManualImageRegion ? this.activeRoi : rois[region]
@@ -926,13 +959,13 @@ export default Vue.extend({
           })
           .filter((rect): rect is CropRect => !!rect)
       }
-      const rois = this.effectiveCropRois(this.pageParity)
+      const rois = this.effectiveCropRois(this.selectionPageParity)
       return this.cropRegionIndexes
         .map(region => {
           const roi = region === this.activeCropRegion ? this.activeRoi : rois[region]
           if (!roi) return undefined
           return {
-            key: `${this.pageParity}-${region}`,
+            key: `${this.selectionPageParity}-${region}`,
             active: region === this.activeCropRegion,
             style: this.cropRectStyle(roi),
           } as CropRect
@@ -949,6 +982,9 @@ export default Vue.extend({
         this.draftRoi = undefined
         this.drawingCrop = false
         this.cropMode = false
+        this.cropPageNumber = 0
+        this.cropPageUrl = ''
+        this.cropImageSize = {w: 0, h: 0}
         this.$emit('crop-mode-change', false)
         this.revokeObjectUrl()
         if (this.deferReflow) {
@@ -1636,30 +1672,51 @@ export default Vue.extend({
     },
     async ensureCropImage(skewCorrection: number = this.controlSkewCorrection) {
       const normalizedSkewCorrection = this.normalizedSkewCorrection(skewCorrection)
+      const pageUrl = this.cropPageUrl || this.activeVisibleSourcePageUrl
+      const sourceKey = this.pageImageSourceKey(pageUrl)
       const cropImageRequestId = this.cropImageRequestId + 1
       this.cropImageRequestId = cropImageRequestId
-      if (this.objectUrl && this.imageSize.w && this.imageSize.h) {
+      if (this.objectUrl && this.objectUrlSource === sourceKey && this.imageSize.w && this.imageSize.h) {
+        this.cropImageSize = {...this.imageSize}
         if (!normalizedSkewCorrection) {
           this.revokeCropObjectUrl()
           return
         }
-        if (this.cropObjectUrl && this.cropObjectUrlSkewCorrection === normalizedSkewCorrection) return
+        if (
+          this.cropObjectUrl &&
+          this.cropObjectUrlSource === sourceKey &&
+          this.cropObjectUrlSkewCorrection === normalizedSkewCorrection
+        ) return
         this.loading = true
         try {
           const image = await this.decodeImageUrl(this.objectUrl)
           if (cropImageRequestId !== this.cropImageRequestId) return
-          await this.prepareCropObjectUrl(image, normalizedSkewCorrection, cropImageRequestId)
+          await this.prepareCropObjectUrl(image, normalizedSkewCorrection, cropImageRequestId, sourceKey)
         } finally {
           if (cropImageRequestId === this.cropImageRequestId) this.loading = false
         }
         return
       }
+      if (
+        this.cropObjectUrl &&
+        this.cropObjectUrlSource === sourceKey &&
+        this.cropObjectUrlSkewCorrection === normalizedSkewCorrection &&
+        this.cropImageSize.w &&
+        this.cropImageSize.h
+      ) return
       this.loading = true
       try {
-        const image = await this.loadPageImage(this.page.url)
+        const image = await this.loadPageImage(pageUrl)
         if (cropImageRequestId !== this.cropImageRequestId) return
-        this.imageSize = {w: image.naturalWidth, h: image.naturalHeight}
-        await this.prepareCropObjectUrl(image, normalizedSkewCorrection, cropImageRequestId)
+        this.cropImageSize = {w: image.naturalWidth, h: image.naturalHeight}
+        if (pageUrl === this.page.url) this.imageSize = {...this.cropImageSize}
+        await this.prepareCropObjectUrl(
+          image,
+          normalizedSkewCorrection,
+          cropImageRequestId,
+          sourceKey,
+          pageUrl !== this.page.url,
+        )
       } finally {
         if (cropImageRequestId === this.cropImageRequestId) this.loading = false
       }
@@ -1718,6 +1775,9 @@ export default Vue.extend({
     pageImageUrl(url: string): string {
       const separator = url.includes('?') ? '&' : '?'
       return `${url}${separator}contentNegotiation=false`
+    },
+    pageImageSourceKey(url: string): string {
+      return `${this.pageImageUrl(url)}#rotation=${this.normalizedRotation(this.rotation)}`
     },
     canvasContext(canvas: HTMLCanvasElement, willReadFrequently: boolean = false): CanvasRenderingContext2D | null {
       if (willReadFrequently) return canvas.getContext('2d', {willReadFrequently: true})
@@ -1963,8 +2023,14 @@ export default Vue.extend({
       const bottom = this.clampNumber(Math.ceil((block.y + block.h) / scale), y + 1, height, height)
       return {x, y, w: right - x, h: bottom - y}
     },
-    async prepareCropObjectUrl(image: HTMLImageElement, skewCorrection: number, cropImageRequestId: number = this.cropImageRequestId) {
-      if (!skewCorrection) return
+    async prepareCropObjectUrl(
+      image: HTMLImageElement,
+      skewCorrection: number,
+      cropImageRequestId: number = this.cropImageRequestId,
+      sourceKey: string = this.pageImageSourceKey(this.page.url),
+      forceObjectUrl: boolean = false,
+    ) {
+      if (!skewCorrection && !forceObjectUrl) return
 
       const canvas = document.createElement('canvas')
       canvas.width = image.naturalWidth
@@ -1972,12 +2038,13 @@ export default Vue.extend({
       const context = this.canvasContext(canvas)
       if (!context) return
       context.drawImage(image, 0, 0)
-      const correctedCanvas = this.skewCorrectedCanvas(canvas, skewCorrection)
+      const correctedCanvas = skewCorrection ? this.skewCorrectedCanvas(canvas, skewCorrection) : canvas
       const url = await this.canvasObjectUrl(correctedCanvas)
       if (cropImageRequestId === this.cropImageRequestId) {
         const previousUrl = this.cropObjectUrl
         this.cropObjectUrl = url
         this.cropObjectUrlSkewCorrection = skewCorrection
+        this.cropObjectUrlSource = sourceKey
         if (previousUrl && previousUrl !== url) URL.revokeObjectURL(previousUrl)
       } else {
         URL.revokeObjectURL(url)
@@ -2092,6 +2159,7 @@ export default Vue.extend({
       if (this.cropObjectUrl) URL.revokeObjectURL(this.cropObjectUrl)
       this.cropObjectUrl = ''
       this.cropObjectUrlSkewCorrection = 0
+      this.cropObjectUrlSource = ''
     },
     detectWordLines(imageData: ImageData, width: number, height: number, cropRoi?: Roi): DetectedReflowContent {
       const pixels = imageData.data
@@ -5209,16 +5277,20 @@ export default Vue.extend({
       this.cropWarning = ''
       if (this.cropMode && this.cropTarget === target) {
         this.cropMode = false
+        this.clearCropSource()
         this.$emit('crop-mode-change', false)
         return
       }
 
       try {
         this.cropTarget = target
+        this.cropPageNumber = this.activeVisibleSourcePageNumber
+        this.cropPageUrl = this.activeVisibleSourcePageUrl
         await this.ensureCropImage()
         this.cropMode = true
         this.$emit('crop-mode-change', true)
       } catch (e) {
+        this.clearCropSource()
         this.error = true
         this.errorMessage = e instanceof Error ? e.message : String(e)
       }
@@ -5227,6 +5299,7 @@ export default Vue.extend({
       this.cropMode = false
       this.draftRoi = undefined
       this.drawingCrop = false
+      this.clearCropSource()
       this.$emit('crop-mode-change', false)
     },
     resetCrop() {
@@ -5237,6 +5310,7 @@ export default Vue.extend({
       this.drawingCrop = false
       this.cropWarning = ''
       this.cropMode = false
+      this.clearCropSource()
       this.$emit('crop-mode-change', false)
     },
     resetManualImageRegion() {
@@ -5247,11 +5321,12 @@ export default Vue.extend({
       this.drawingCrop = false
       this.cropWarning = ''
       this.cropMode = false
+      this.clearCropSource()
       this.$emit('crop-mode-change', false)
       this.$emit('manual-image-rois-change', this.manualImageRoisPayload())
     },
     startCrop(event: PointerEvent) {
-      if (!this.cropMode || !this.imageSize.w || !this.imageSize.h) return
+      if (!this.cropMode || !this.cropDisplayImageSize.w || !this.cropDisplayImageSize.h) return
       const target = event.currentTarget as HTMLElement
       target.setPointerCapture(event.pointerId)
       this.drawingCrop = true
@@ -5278,6 +5353,7 @@ export default Vue.extend({
           this.setCurrentCropRoi(roi)
         }
         this.cropMode = false
+        this.clearCropSource()
         this.$emit('crop-mode-change', false)
       }
       event.preventDefault()
@@ -5289,10 +5365,11 @@ export default Vue.extend({
     cropPoint(event: PointerEvent): {x: number, y: number} {
       const image = this.$refs.cropImage as HTMLImageElement | undefined
       const rect = image?.getBoundingClientRect()
-      if (!rect || !this.imageSize.w || !this.imageSize.h) return {x: 0, y: 0}
+      const imageSize = this.cropDisplayImageSize
+      if (!rect || !imageSize.w || !imageSize.h) return {x: 0, y: 0}
       return {
-        x: this.clampNumber((event.clientX - rect.left) * this.imageSize.w / (rect.width || 1), 0, this.imageSize.w, 0),
-        y: this.clampNumber((event.clientY - rect.top) * this.imageSize.h / (rect.height || 1), 0, this.imageSize.h, 0),
+        x: this.clampNumber((event.clientX - rect.left) * imageSize.w / (rect.width || 1), 0, imageSize.w, 0),
+        y: this.clampNumber((event.clientY - rect.top) * imageSize.h / (rect.height || 1), 0, imageSize.h, 0),
       }
     },
     normalizedRoi(start: {x: number, y: number}, end: {x: number, y: number}): Roi {
@@ -5306,26 +5383,35 @@ export default Vue.extend({
       }
     },
     cropRectStyle(roi: Roi): object {
-      if (!this.imageSize.w || !this.imageSize.h) return {}
+      const imageSize = this.cropDisplayImageSize
+      if (!imageSize.w || !imageSize.h) return {}
       return {
-        left: `${roi.x / this.imageSize.w * 100}%`,
-        top: `${roi.y / this.imageSize.h * 100}%`,
-        width: `${roi.w / this.imageSize.w * 100}%`,
-        height: `${roi.h / this.imageSize.h * 100}%`,
+        left: `${roi.x / imageSize.w * 100}%`,
+        top: `${roi.y / imageSize.h * 100}%`,
+        width: `${roi.w / imageSize.w * 100}%`,
+        height: `${roi.h / imageSize.h * 100}%`,
       }
     },
+    clearCropSource() {
+      this.revokeCropObjectUrl()
+      this.cropPageNumber = 0
+      this.cropPageUrl = ''
+      this.cropImageSize = {w: 0, h: 0}
+    },
     setCurrentCropRoi(roi: Roi | undefined) {
-      const rois = this.cropRoisByParity[this.pageParity].slice()
-      const explicit = this.explicitCropRoisByParity[this.pageParity].slice()
+      const parity = this.selectionPageParity
+      const rois = this.cropRoisByParity[parity].slice()
+      const explicit = this.explicitCropRoisByParity[parity].slice()
       rois[this.activeCropRegion] = roi
       explicit[this.activeCropRegion] = !!roi
-      this.$set(this.cropRoisByParity, this.pageParity, rois)
-      this.$set(this.explicitCropRoisByParity, this.pageParity, explicit)
+      this.$set(this.cropRoisByParity, parity, rois)
+      this.$set(this.explicitCropRoisByParity, parity, explicit)
     },
     setCurrentManualImageRoi(roi: Roi | undefined) {
-      const pageRegions = (this.manualImageRoisByPage[this.manualImagePageKey] || Array(MAX_CROP_REGIONS).fill(undefined)).slice()
+      const pageKey = this.selectionManualImagePageKey
+      const pageRegions = (this.manualImageRoisByPage[pageKey] || Array(MAX_CROP_REGIONS).fill(undefined)).slice()
       pageRegions[this.activeManualImageRegion] = roi
-      this.$set(this.manualImageRoisByPage, this.manualImagePageKey, pageRegions)
+      this.$set(this.manualImageRoisByPage, pageKey, pageRegions)
     },
   },
 })
