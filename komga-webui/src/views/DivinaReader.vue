@@ -907,12 +907,13 @@ import {TocEntry} from '@/types/epub'
 import {flattenToc} from '@/functions/toc'
 import {CLIENT_SETTING, ClientSettingUserUpdateDto} from '@/types/komga-clientsettings'
 import {enhanceTextContrast} from '@/functions/image-enhancement'
-import {reflowPrefetchPageNumbers} from '@/functions/reflow-stream'
+import {reflowPrefetchPageNumbers, retainedReflowHistoryPageNumbers} from '@/functions/reflow-stream'
 
 const REFLOW_SETTINGS_STORAGE_PREFIX = 'komga.pdfReflowSettings.'
 const READER_IMAGE_SETTINGS_STORAGE_PREFIX = 'komga.readerImageSettings.'
 const REFLOW_CACHE_BEHIND_COUNT = 2
 const REFLOW_CONTINUATION_COUNT = 2
+const REFLOW_HISTORY_CACHE_COUNT = 2
 const REFLOW_PREFETCH_AHEAD_COUNT = REFLOW_CONTINUATION_COUNT * 2
 const REFLOW_PREFETCH_DELAY_MS = 120
 const MAX_REFLOW_CROP_REGIONS = 8
@@ -2866,16 +2867,23 @@ export default Vue.extend({
       })
     },
     pruneReflowCache() {
+      const retainedHistoryPages = new Set(retainedReflowHistoryPageNumbers(
+        this.reflowSourceHistory,
+        REFLOW_CONTINUATION_COUNT,
+        REFLOW_HISTORY_CACHE_COUNT,
+      ))
       Object.keys(this.reflowCache).forEach(key => {
         const separator = key.indexOf('|')
         const pageNumber = Number(key.substring(0, separator))
         const cacheKey = key.substring(separator + 1)
         const behindCurrentPage = this.page - pageNumber
         const aheadOfCurrentPage = pageNumber - this.page
-        if (
-          cacheKey !== this.reflowCacheKey ||
+        const outsideActiveWindow =
           behindCurrentPage > REFLOW_CACHE_BEHIND_COUNT ||
           aheadOfCurrentPage > REFLOW_PREFETCH_AHEAD_COUNT
+        if (
+          cacheKey !== this.reflowCacheKey ||
+          (outsideActiveWindow && !retainedHistoryPages.has(pageNumber))
         ) this.$delete(this.reflowCache, key)
       })
     },

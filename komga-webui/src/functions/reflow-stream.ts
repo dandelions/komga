@@ -59,3 +59,15 @@ export function reflowPrefetchPageNumbers(
   }
   return pageNumbers
 }
+
+export function retainedReflowHistoryPageNumbers(
+  sourceHistory: number[],
+  continuationCount: number = 2,
+  historyCount: number = 2,
+): number[] {
+  const pageNumbers = new Set<number>()
+  sourceHistory.slice(-historyCount).forEach(sourcePage => {
+    for (let offset = 0; offset <= continuationCount; offset++) pageNumbers.add(sourcePage + offset)
+  })
+  return Array.from(pageNumbers)
+}

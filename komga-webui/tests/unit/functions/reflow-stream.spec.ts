@@ -2,6 +2,7 @@ import {
   contiguousReflowPageCount,
   mergeReflowContinuationItems,
   reflowPrefetchPageNumbers,
+  retainedReflowHistoryPageNumbers,
 } from '@/functions/reflow-stream'
 
 type Item = {type: 'word' | 'indent' | 'break', value?: string}
@@ -40,5 +41,9 @@ describe('reflow stream', () => {
   test('prefetches four pages ahead before two pages behind', () => {
     expect(reflowPrefetchPageNumbers(5, 10)).toEqual([6, 7, 8, 9, 4, 3])
     expect(reflowPrefetchPageNumbers(1, 10)).toEqual([2, 3, 4, 5])
+  })
+
+  test('retains the two latest continuous source-page segments for back navigation', () => {
+    expect(retainedReflowHistoryPageNumbers([1, 4, 7])).toEqual([4, 5, 6, 7, 8, 9])
   })
 })
