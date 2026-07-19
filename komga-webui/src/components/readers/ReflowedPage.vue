@@ -26,6 +26,7 @@
         <button
           type="button"
           class="reflow-control reflow-icon-control reflow-compact-control"
+          :class="{'reflow-night-active': nightDisplay}"
           :title="nightDisplay ? '白天模式' : '黑夜模式'"
           :aria-label="nightDisplay ? '白天模式' : '黑夜模式'"
           @click="$emit('toggle-night-display')"
@@ -77,6 +78,7 @@
           <button
             type="button"
             class="reflow-control reflow-icon-control"
+            :class="{'reflow-night-active': nightDisplay}"
             :title="nightDisplay ? '白天模式' : '黑夜模式'"
             :aria-label="nightDisplay ? '白天模式' : '黑夜模式'"
             @click="$emit('toggle-night-display')"
@@ -5594,15 +5596,12 @@ export default Vue.extend({
 }
 
 .reflow-pull-control {
-  width: 28px;
-  height: 18px;
-  min-height: 18px;
-  flex-basis: 28px;
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  flex-basis: 30px;
   padding: 0;
-  border: 0;
-  border-radius: 0 0 5px 5px;
-  background: transparent;
-  opacity: 0.86;
+  opacity: 1;
   pointer-events: auto;
 }
 
@@ -5864,6 +5863,16 @@ export default Vue.extend({
   padding: 0;
 }
 
+.reflow-control .v-icon {
+  color: currentColor !important;
+}
+
+.reflow-night-active {
+  border-color: #2563eb;
+  background: #dbeafe;
+  color: #1e40af;
+}
+
 .reflow-control:disabled {
   color: #9e9e9e;
 }
@@ -5909,9 +5918,10 @@ export default Vue.extend({
   color: #eeeeee;
 }
 
-.reflowed-page-dark .reflow-pull-control {
-  border: 0;
-  background: transparent;
+.reflowed-page-dark .reflow-night-active {
+  border-color: #90caf9;
+  background: #e3f2fd;
+  color: #0d47a1;
 }
 
 .reflowed-page-dark .reflow-column-control input[type="checkbox"] {
