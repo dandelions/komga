@@ -1245,15 +1245,14 @@ export default Vue.extend({
           this.goToPage = val
           this.updateRoute()
           this.clearReflowPrefetch()
-          this.$nextTick(() => {
-            if (this.reflowMode && this.cachedReflowItems(this.currentPage)) this.scheduleNextReflowPrefetch()
-          })
+          if (this.reflowMode) this.scheduleNextReflowPrefetch()
         }
       },
       immediate: true,
     },
     reflowCacheKey() {
       this.clearReflowPrefetch()
+      if (this.reflowMode) this.scheduleNextReflowPrefetch()
     },
     reflowSettings: {
       handler() {
@@ -2623,6 +2622,7 @@ export default Vue.extend({
       this.reflowCropMode = false
       this.reflowSourceHistory = []
       this.clearReflowPrefetch()
+      this.scheduleNextReflowPrefetch()
       this.$nextTick(() => this.scrollToPageEdge('top'))
     },
     setReflowEnabled(enabled: boolean) {
@@ -2880,16 +2880,25 @@ export default Vue.extend({
       this.reflowPrefetchPages = []
     },
     scheduleNextReflowPrefetch() {
-      this.clearReflowPrefetch()
-      if (this.reflowCropMode) return
+      if (this.reflowPrefetchTimer !== undefined) {
+        window.clearTimeout(this.reflowPrefetchTimer)
+        this.reflowPrefetchTimer = undefined
+      }
+      if (this.reflowCropMode) {
+        this.reflowPrefetchPages = []
+        return
+      }
       const sourcePage = this.page
       const pageNumbers =
         surroundingReflowPageNumbers(sourcePage, this.pagesCount)
           .filter(pageNumber => !this.cachedReflowItems(this.pages[pageNumber - 1]))
-      if (pageNumbers.length === 0) return
+      if (pageNumbers.length === 0) {
+        this.reflowPrefetchPages = []
+        return
+      }
 
       const priorityPage = sourcePage < this.pagesCount && pageNumbers.includes(sourcePage + 1) ? sourcePage + 1 : undefined
-      if (priorityPage !== undefined) this.reflowPrefetchPages = [priorityPage]
+      this.reflowPrefetchPages = priorityPage === undefined ? [] : [priorityPage]
       const backgroundPages = pageNumbers.filter(pageNumber => pageNumber !== priorityPage)
       if (backgroundPages.length === 0) return
 
