@@ -38,12 +38,12 @@ describe('reflow stream', () => {
     expect(mergeReflowContinuationItems<Item>([], 1, continuation).map(item => item.value)).toEqual(['page-2'])
   })
 
-  test('prefetches four pages ahead before two pages behind', () => {
-    expect(reflowPrefetchPageNumbers(5, 10)).toEqual([6, 7, 8, 9, 4, 3])
-    expect(reflowPrefetchPageNumbers(1, 10)).toEqual([2, 3, 4, 5])
+  test('prefetches five pages ahead before two pages behind', () => {
+    expect(reflowPrefetchPageNumbers(5, 12)).toEqual([6, 7, 8, 9, 10, 4, 3])
+    expect(reflowPrefetchPageNumbers(1, 10)).toEqual([2, 3, 4, 5, 6])
   })
 
   test('retains the two latest continuous source-page segments for back navigation', () => {
-    expect(retainedReflowHistoryPageNumbers([1, 4, 7])).toEqual([4, 5, 6, 7, 8, 9])
+    expect(retainedReflowHistoryPageNumbers([1, 6, 11], 4, 2)).toEqual([6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
   })
 })

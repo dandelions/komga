@@ -50,7 +50,7 @@ export function reflowPrefetchPageNumbers(
   currentPage: number,
   pagesCount: number,
   behindCount: number = 2,
-  aheadCount: number = 4,
+  aheadCount: number = 5,
 ): number[] {
   const pageNumbers = [] as number[]
   for (let offset = 1; offset <= aheadCount; offset++) {
