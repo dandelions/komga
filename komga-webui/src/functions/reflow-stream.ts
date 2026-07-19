@@ -42,11 +42,19 @@ export function contiguousReflowPageCount<T extends ReflowStreamItem>(
   return count
 }
 
-export function surroundingReflowPageNumbers(currentPage: number, pagesCount: number, radius: number = 2): number[] {
+export function reflowPrefetchPageNumbers(
+  currentPage: number,
+  pagesCount: number,
+  behindCount: number = 2,
+  aheadCount: number = 4,
+): number[] {
   const pageNumbers = [] as number[]
-  for (let offset = -radius; offset <= radius; offset++) {
-    if (offset === 0) continue
+  for (let offset = 1; offset <= aheadCount; offset++) {
     const pageNumber = currentPage + offset
+    if (pageNumber >= 1 && pageNumber <= pagesCount) pageNumbers.push(pageNumber)
+  }
+  for (let offset = 1; offset <= behindCount; offset++) {
+    const pageNumber = currentPage - offset
     if (pageNumber >= 1 && pageNumber <= pagesCount) pageNumbers.push(pageNumber)
   }
   return pageNumbers

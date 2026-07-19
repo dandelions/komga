@@ -907,12 +907,13 @@ import {TocEntry} from '@/types/epub'
 import {flattenToc} from '@/functions/toc'
 import {CLIENT_SETTING, ClientSettingUserUpdateDto} from '@/types/komga-clientsettings'
 import {enhanceTextContrast} from '@/functions/image-enhancement'
-import {surroundingReflowPageNumbers} from '@/functions/reflow-stream'
+import {reflowPrefetchPageNumbers} from '@/functions/reflow-stream'
 
 const REFLOW_SETTINGS_STORAGE_PREFIX = 'komga.pdfReflowSettings.'
 const READER_IMAGE_SETTINGS_STORAGE_PREFIX = 'komga.readerImageSettings.'
-const REFLOW_CACHE_RADIUS = 2
+const REFLOW_CACHE_BEHIND_COUNT = 2
 const REFLOW_CONTINUATION_COUNT = 2
+const REFLOW_PREFETCH_AHEAD_COUNT = REFLOW_CONTINUATION_COUNT * 2
 const REFLOW_PREFETCH_DELAY_MS = 120
 const MAX_REFLOW_CROP_REGIONS = 8
 
@@ -2869,7 +2870,13 @@ export default Vue.extend({
         const separator = key.indexOf('|')
         const pageNumber = Number(key.substring(0, separator))
         const cacheKey = key.substring(separator + 1)
-        if (cacheKey !== this.reflowCacheKey || Math.abs(pageNumber - this.page) > REFLOW_CACHE_RADIUS) this.$delete(this.reflowCache, key)
+        const behindCurrentPage = this.page - pageNumber
+        const aheadOfCurrentPage = pageNumber - this.page
+        if (
+          cacheKey !== this.reflowCacheKey ||
+          behindCurrentPage > REFLOW_CACHE_BEHIND_COUNT ||
+          aheadOfCurrentPage > REFLOW_PREFETCH_AHEAD_COUNT
+        ) this.$delete(this.reflowCache, key)
       })
     },
     clearReflowPrefetch() {
@@ -2890,7 +2897,12 @@ export default Vue.extend({
       }
       const sourcePage = this.page
       const pageNumbers =
-        surroundingReflowPageNumbers(sourcePage, this.pagesCount)
+        reflowPrefetchPageNumbers(
+          sourcePage,
+          this.pagesCount,
+          REFLOW_CACHE_BEHIND_COUNT,
+          REFLOW_PREFETCH_AHEAD_COUNT,
+        )
           .filter(pageNumber => !this.cachedReflowItems(this.pages[pageNumber - 1]))
       if (pageNumbers.length === 0) {
         this.reflowPrefetchPages = []

@@ -1,7 +1,7 @@
 import {
   contiguousReflowPageCount,
   mergeReflowContinuationItems,
-  surroundingReflowPageNumbers,
+  reflowPrefetchPageNumbers,
 } from '@/functions/reflow-stream'
 
 type Item = {type: 'word' | 'indent' | 'break', value?: string}
@@ -37,8 +37,8 @@ describe('reflow stream', () => {
     expect(mergeReflowContinuationItems<Item>([], 1, continuation).map(item => item.value)).toEqual(['page-2'])
   })
 
-  test('prefetches two source pages before and after the current page', () => {
-    expect(surroundingReflowPageNumbers(5, 10)).toEqual([3, 4, 6, 7])
-    expect(surroundingReflowPageNumbers(1, 10)).toEqual([2, 3])
+  test('prefetches four pages ahead before two pages behind', () => {
+    expect(reflowPrefetchPageNumbers(5, 10)).toEqual([6, 7, 8, 9, 4, 3])
+    expect(reflowPrefetchPageNumbers(1, 10)).toEqual([2, 3, 4, 5])
   })
 })
