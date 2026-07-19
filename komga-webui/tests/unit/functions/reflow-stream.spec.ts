@@ -10,9 +10,9 @@ type Item = {type: 'word' | 'indent' | 'break', value?: string}
 describe('reflow stream', () => {
   test('continues the next source page inline when it has no first-line indent', () => {
     const merged = mergeReflowContinuationItems<Item>(
-      [{type: 'word', value: 'page-1'}],
+      [{type: 'word', value: 'page-1'}, {type: 'break'}],
       1,
-      [{pageNumber: 2, items: [{type: 'word', value: 'page-2'}]}],
+      [{pageNumber: 2, items: [{type: 'break'}, {type: 'word', value: 'page-2'}, {type: 'break'}]}],
     )
 
     expect(merged.map(item => item.type)).toEqual(['word', 'word'])

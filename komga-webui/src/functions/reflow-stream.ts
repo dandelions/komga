@@ -13,15 +13,19 @@ export function mergeReflowContinuationItems<T extends ReflowStreamItem>(
   continuationPages: Array<ReflowContinuationPage<T>>,
 ): T[] {
   const items = currentItems.slice()
+  while (items[items.length - 1]?.type === 'break') items.pop()
   let expectedPageNumber = currentPageNumber + 1
 
   for (const continuation of continuationPages) {
     if (continuation.pageNumber !== expectedPageNumber || !Array.isArray(continuation.items)) break
-    if (continuation.items.length > 0) {
+    const continuationItems = continuation.items.slice()
+    while (continuationItems[0]?.type === 'break') continuationItems.shift()
+    while (continuationItems[continuationItems.length - 1]?.type === 'break') continuationItems.pop()
+    if (continuationItems.length > 0) {
       const lastItem = items[items.length - 1]
-      const firstItem = continuation.items[0]
+      const firstItem = continuationItems[0]
       if (firstItem.type === 'indent' && lastItem?.type !== 'break') items.push({type: 'break'} as T)
-      items.push(...continuation.items)
+      items.push(...continuationItems)
     }
     expectedPageNumber++
   }
