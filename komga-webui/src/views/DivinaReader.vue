@@ -913,7 +913,7 @@ const REFLOW_SETTINGS_STORAGE_PREFIX = 'komga.pdfReflowSettings.'
 const READER_IMAGE_SETTINGS_STORAGE_PREFIX = 'komga.readerImageSettings.'
 const REFLOW_CACHE_RADIUS = 2
 const REFLOW_CONTINUATION_COUNT = 2
-const REFLOW_PREFETCH_DELAY_MS = 800
+const REFLOW_PREFETCH_DELAY_MS = 120
 const MAX_REFLOW_CROP_REGIONS = 8
 
 function defaultCropRegionsByParity(enabled: boolean = false): any {
@@ -1065,7 +1065,6 @@ export default Vue.extend({
       reflowPrefetchPages: [] as number[],
       reflowSourceHistory: [] as number[],
       reflowPrefetchTimer: undefined as number | undefined,
-      reflowPrefetchIdleHandle: undefined as number | undefined,
       reflowSettings: defaultReflowSettings(),
       goToPage: 1,
       settings: {
@@ -2878,34 +2877,26 @@ export default Vue.extend({
         window.clearTimeout(this.reflowPrefetchTimer)
         this.reflowPrefetchTimer = undefined
       }
-      if (this.reflowPrefetchIdleHandle !== undefined) {
-        const cancelIdleCallback = (window as any).cancelIdleCallback
-        if (cancelIdleCallback) cancelIdleCallback(this.reflowPrefetchIdleHandle)
-        else window.clearTimeout(this.reflowPrefetchIdleHandle)
-        this.reflowPrefetchIdleHandle = undefined
-      }
       this.reflowPrefetchPages = []
     },
     scheduleNextReflowPrefetch() {
       this.clearReflowPrefetch()
       if (this.reflowCropMode) return
       const sourcePage = this.page
-      const nextPageNumbers =
+      const pageNumbers =
         surroundingReflowPageNumbers(sourcePage, this.pagesCount)
           .filter(pageNumber => !this.cachedReflowItems(this.pages[pageNumber - 1]))
-      if (nextPageNumbers.length === 0) return
+      if (pageNumbers.length === 0) return
+
+      const priorityPage = sourcePage < this.pagesCount && pageNumbers.includes(sourcePage + 1) ? sourcePage + 1 : undefined
+      if (priorityPage !== undefined) this.reflowPrefetchPages = [priorityPage]
+      const backgroundPages = pageNumbers.filter(pageNumber => pageNumber !== priorityPage)
+      if (backgroundPages.length === 0) return
+
       this.reflowPrefetchTimer = window.setTimeout(() => {
         this.reflowPrefetchTimer = undefined
-        const startPrefetch = () => {
-          this.reflowPrefetchIdleHandle = undefined
-          if (this.page === sourcePage && !this.reflowCropMode) this.reflowPrefetchPages = nextPageNumbers
-        }
-        const requestIdleCallback = (window as any).requestIdleCallback
-        if (requestIdleCallback) {
-          this.reflowPrefetchIdleHandle = requestIdleCallback(startPrefetch, {timeout: 2500})
-        } else {
-          this.reflowPrefetchIdleHandle = window.setTimeout(startPrefetch, 350)
-        }
+        if (this.page !== sourcePage || this.reflowCropMode) return
+        this.reflowPrefetchPages = priorityPage === undefined ? backgroundPages : [priorityPage, ...backgroundPages]
       }, REFLOW_PREFETCH_DELAY_MS)
     },
     reflowPreviousPage() {

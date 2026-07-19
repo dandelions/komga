@@ -16,7 +16,9 @@ import java.util.Base64
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutionException
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import javax.imageio.IIOImage
 import javax.imageio.ImageIO
 import javax.imageio.ImageWriteParam
@@ -154,6 +156,11 @@ private data class PdfPageReflowCacheKey(
 class PdfPageReflowService(
   private val bookLifecycle: BookLifecycle,
 ) {
+  private val reflowThreadNumber = AtomicInteger()
+  private val reflowExecutor =
+    Executors.newFixedThreadPool(2) { runnable ->
+      Thread(runnable, "pdf-reflow-${reflowThreadNumber.incrementAndGet()}").apply { isDaemon = true }
+    }
   private val reflowPageCache =
     Caffeine
       .newBuilder()
@@ -186,17 +193,23 @@ class PdfPageReflowService(
     val existingFuture = inFlightReflows.putIfAbsent(key, currentFuture)
     if (existingFuture != null) return existingFuture.awaitReflow()
 
-    return try {
-      val response = reflowPage(book, pageNumber, options, cropRegions, manualImageRegions)
-      reflowPageCache.put(key, response)
-      currentFuture.complete(response)
-      response
+    try {
+      reflowExecutor.execute {
+        try {
+          val response = reflowPage(book, pageNumber, options, cropRegions, manualImageRegions)
+          reflowPageCache.put(key, response)
+          currentFuture.complete(response)
+        } catch (e: Exception) {
+          currentFuture.completeExceptionally(e)
+        } finally {
+          inFlightReflows.remove(key, currentFuture)
+        }
+      }
     } catch (e: Exception) {
       currentFuture.completeExceptionally(e)
-      throw e
-    } finally {
       inFlightReflows.remove(key, currentFuture)
     }
+    return currentFuture.awaitReflow()
   }
 
   private fun CompletableFuture<PdfPageReflowDto>.awaitReflow(): PdfPageReflowDto =
@@ -208,6 +221,7 @@ class PdfPageReflowService(
 
   @PreDestroy
   fun clearReflowCache() {
+    reflowExecutor.shutdownNow()
     reflowPageCache.invalidateAll()
     inFlightReflows.clear()
   }
