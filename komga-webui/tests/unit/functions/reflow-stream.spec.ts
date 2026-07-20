@@ -2,8 +2,10 @@ import {
   contiguousReflowPageCount,
   hasVerticalParagraphBlankTail,
   mergeReflowContinuationItems,
+  reflowCropSourcePageNumber,
   reflowPrefetchPageNumbers,
   retainedReflowHistoryPageNumbers,
+  verticalReflowLineIndent,
   visibleReflowSourcePageNumber,
 } from '@/functions/reflow-stream'
 
@@ -65,5 +67,17 @@ describe('reflow stream', () => {
   test('requires at least two vertical character spaces at the previous line tail', () => {
     expect(hasVerticalParagraphBlankTail(19, 10)).toBe(false)
     expect(hasVerticalParagraphBlankTail(20, 10)).toBe(true)
+  })
+
+  test('removes crop-top whitespace from continuous vertical lines', () => {
+    expect(verticalReflowLineIndent(35, false, 24)).toBe(0)
+    expect(verticalReflowLineIndent(8, true, 24)).toBe(24)
+    expect(verticalReflowLineIndent(35, true, 24)).toBe(35)
+  })
+
+  test('keeps the image crop source page for the following text crop', () => {
+    expect(reflowCropSourcePageNumber('text', 4, 5)).toBe(5)
+    expect(reflowCropSourcePageNumber('image', 4, 5)).toBe(4)
+    expect(reflowCropSourcePageNumber('text', 4, 0)).toBe(4)
   })
 })

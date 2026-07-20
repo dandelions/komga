@@ -503,6 +503,24 @@ class PdfPageReflowServiceTest {
     assertThat(response.items.map { it.type }).containsSubsequence("break", "indent", "word")
   }
 
+  @Test
+  fun `given continuous vertical lines with different top margins when reflowing page then crop whitespace is removed`() {
+    val pageBytes = verticalContinuousLinesPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(verticalText = true),
+        cropRegions = listOf(PdfPageReflowRegion(x = 0, y = 0, w = 140, h = 150)),
+      )
+
+    assertThat(response.items.filter { it.type == "word" }).hasSizeGreaterThanOrEqualTo(6)
+    assertThat(response.items.filter { it.type == "indent" }).isEmpty()
+  }
+
   private fun defaultOptions() =
     PdfPageReflowOptions(
       targetWidth = 900,
@@ -897,6 +915,21 @@ class PdfPageReflowServiceTest {
     graphics.color = Color.BLACK
     listOf(20, 42).forEach { y -> graphics.fillRect(90, y, 10, 12) }
     listOf(20, 42, 64, 86, 108).forEach { y -> graphics.fillRect(50, y, 10, 12) }
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun verticalContinuousLinesPage(): ByteArray {
+    val image = BufferedImage(140, 150, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color.BLACK
+    listOf(20, 42, 64, 86, 108).forEach { y -> graphics.fillRect(90, y, 10, 12) }
+    listOf(50, 72, 94, 116).forEach { y -> graphics.fillRect(50, y, 10, 12) }
     graphics.dispose()
 
     val output = ByteArrayOutputStream()

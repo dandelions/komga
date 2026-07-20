@@ -2419,7 +2419,7 @@ class PdfPageReflowService(
         if (startParagraph) {
           max(verticalLineIndentSourceHeight(line), verticalParagraphIndentSourceHeight(line))
         } else {
-          verticalLineIndentSourceHeight(line)
+          0
         }
       if (indent > 0) items += verticalIndentItem(indent, textScale)
 

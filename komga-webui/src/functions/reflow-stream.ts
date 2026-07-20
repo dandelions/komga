@@ -88,3 +88,17 @@ export function visibleReflowSourcePageNumber<T extends ReflowStreamItem>(items:
 export function hasVerticalParagraphBlankTail(blankTail: number, characterHeight: number, blankBlocks: number = 2): boolean {
   return blankTail >= Math.max(6, characterHeight * blankBlocks)
 }
+
+export function verticalReflowLineIndent(rawIndent: number, paragraphStart: boolean, paragraphIndent: number): number {
+  if (!paragraphStart) return 0
+  return Math.max(0, rawIndent, paragraphIndent)
+}
+
+export function reflowCropSourcePageNumber(
+  target: 'text' | 'image',
+  visiblePageNumber: number,
+  followUpPageNumber: number,
+): number {
+  if (target === 'text' && followUpPageNumber > 0) return followUpPageNumber
+  return visiblePageNumber
+}

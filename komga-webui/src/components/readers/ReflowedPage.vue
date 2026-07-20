@@ -421,7 +421,9 @@ import {
   contiguousReflowPageCount,
   hasVerticalParagraphBlankTail,
   mergeReflowContinuationItems,
+  reflowCropSourcePageNumber,
   ReflowContinuationPage,
+  verticalReflowLineIndent,
   visibleReflowSourcePageNumber,
 } from '@/functions/reflow-stream'
 
@@ -701,6 +703,8 @@ export default Vue.extend({
       cropObjectUrlSource: '',
       cropPageNumber: 0,
       cropPageUrl: '',
+      followUpCropPageNumber: 0,
+      followUpCropPageUrl: '',
       cropImageSize: {w: 0, h: 0},
       cropImageRequestId: 0,
       requestId: 0,
@@ -987,6 +991,8 @@ export default Vue.extend({
         this.cropMode = false
         this.cropPageNumber = 0
         this.cropPageUrl = ''
+        this.followUpCropPageNumber = 0
+        this.followUpCropPageUrl = ''
         this.cropImageSize = {w: 0, h: 0}
         this.$emit('crop-mode-change', false)
         this.revokeObjectUrl()
@@ -1547,18 +1553,22 @@ export default Vue.extend({
     },
     nextPage() {
       if (this.virtualPageIndex < this.pages.length - 1) {
+        this.clearFollowUpCropSource()
         this.virtualPageIndex++
         this.scrollToTop()
         return
       }
+      this.clearFollowUpCropSource()
       this.$emit('source-next', this.streamPageCount)
     },
     previousPage() {
       if (this.virtualPageIndex > 0) {
+        this.clearFollowUpCropSource()
         this.virtualPageIndex--
         this.scrollToTop()
         return
       }
+      this.clearFollowUpCropSource()
       this.$emit('source-previous', this.streamPageCount)
     },
     scrollToTop() {
@@ -4838,9 +4848,11 @@ export default Vue.extend({
         const startParagraph = this.isVerticalParagraphStart(line, lines[index - 1])
         if (startParagraph && rendered.length > 0) this.appendBreakIfNeeded(rendered)
 
-        const indent = startParagraph
-          ? Math.max(this.verticalLineIndentSourceHeight(line), this.verticalParagraphIndentSourceHeight(line))
-          : this.verticalLineIndentSourceHeight(line)
+        const indent = verticalReflowLineIndent(
+          this.verticalLineIndentSourceHeight(line),
+          startParagraph,
+          this.verticalParagraphIndentSourceHeight(line),
+        )
         if (indent > 0) rendered.push({type: 'indent', sourceWidth: indent, width: this.scaledVerticalIndentHeight(indent)})
 
         line.words.forEach(block => {
@@ -5285,6 +5297,7 @@ export default Vue.extend({
       this.drawingCrop = false
       this.cropWarning = ''
       if (this.cropMode && this.cropTarget === target) {
+        this.rememberManualImageCropSource()
         this.cropMode = false
         this.clearCropSource()
         this.$emit('crop-mode-change', false)
@@ -5293,9 +5306,15 @@ export default Vue.extend({
 
       try {
         this.cropTarget = target
-        this.cropPageNumber = this.activeVisibleSourcePageNumber
-        this.cropPageUrl = this.activeVisibleSourcePageUrl
+        const useFollowUpSource = target === 'text' && this.followUpCropPageNumber > 0
+        this.cropPageNumber = reflowCropSourcePageNumber(
+          target,
+          this.activeVisibleSourcePageNumber,
+          this.followUpCropPageNumber,
+        )
+        this.cropPageUrl = useFollowUpSource ? this.followUpCropPageUrl : this.activeVisibleSourcePageUrl
         await this.ensureCropImage()
+        this.clearFollowUpCropSource()
         this.cropMode = true
         this.$emit('crop-mode-change', true)
       } catch (e) {
@@ -5305,6 +5324,7 @@ export default Vue.extend({
       }
     },
     finishCropMode() {
+      this.rememberManualImageCropSource()
       this.cropMode = false
       this.draftRoi = undefined
       this.drawingCrop = false
@@ -5358,6 +5378,7 @@ export default Vue.extend({
         if (this.cropTarget === 'image') {
           this.setCurrentManualImageRoi(roi)
           this.$emit('manual-image-rois-change', this.manualImageRoisPayload())
+          this.rememberManualImageCropSource()
         } else {
           this.setCurrentCropRoi(roi)
         }
@@ -5406,6 +5427,15 @@ export default Vue.extend({
       this.cropPageNumber = 0
       this.cropPageUrl = ''
       this.cropImageSize = {w: 0, h: 0}
+    },
+    rememberManualImageCropSource() {
+      if (this.cropTarget !== 'image' || this.cropPageNumber <= 0 || !this.cropPageUrl) return
+      this.followUpCropPageNumber = this.cropPageNumber
+      this.followUpCropPageUrl = this.cropPageUrl
+    },
+    clearFollowUpCropSource() {
+      this.followUpCropPageNumber = 0
+      this.followUpCropPageUrl = ''
     },
     setCurrentCropRoi(roi: Roi | undefined) {
       const parity = this.selectionPageParity
