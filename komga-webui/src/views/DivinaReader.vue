@@ -1195,7 +1195,7 @@ export default Vue.extend({
     this.readerImageSettingsBookId = this.bookId
     this.loadReaderImageSettings(this.bookId)
     this.reflowSettingsBookId = this.bookId
-    this.loadReflowSettings(this.bookId)
+    await this.loadReflowSettings(this.bookId)
 
     this.setup(this.bookId, Number(this.$route.query.page))
   },
@@ -1228,7 +1228,7 @@ export default Vue.extend({
       this.readerImageSettingsBookId = to.params.bookId
       this.loadReaderImageSettings(to.params.bookId)
       this.reflowSettingsBookId = to.params.bookId
-      this.loadReflowSettings(to.params.bookId)
+      await this.loadReflowSettings(to.params.bookId)
       this.setup(to.params.bookId, Number(to.query.page))
     }
     next()
@@ -2413,23 +2413,49 @@ export default Vue.extend({
       const mode = this.k2ReflowMode ? 'k2' : (this.reflowMode || this.reflowSetupMode ? 'reflow' : 'normal')
       window.localStorage.setItem(this.pdfModeStorageKey(), mode)
     },
-    loadReflowSettings(bookId: string = this.bookId) {
+    async loadReflowSettings(bookId: string = this.bookId) {
       if (!bookId) return
       this.loadingReflowSettings = true
       try {
         const defaults = defaultReflowSettings()
         let loaded = {} as Record<string, any>
-        const serverSettings = this.readServerReflowSettings()[bookId]
         const localRaw = window.localStorage.getItem(this.reflowSettingsStorageKey(bookId))
-        const raw = serverSettings ? JSON.stringify(serverSettings) : localRaw
-        if (raw) loaded = JSON.parse(raw)
+        let loadedFromLocal = false
+        let loadedFromServer = false
+        if (localRaw) {
+          try {
+            loaded = JSON.parse(localRaw)
+            loadedFromLocal = true
+          } catch (e) {
+            window.localStorage.removeItem(this.reflowSettingsStorageKey(bookId))
+            this.$debug('Unable to parse local PDF reflow settings, loading server copy', e)
+          }
+        }
+        if (!loadedFromLocal) {
+          await this.$store.dispatch('getClientSettingsUser')
+          if (this.reflowSettingsBookId !== bookId) return
+          const serverSettings = this.readServerReflowSettings()[bookId]
+          if (serverSettings) {
+            loaded = serverSettings
+            loadedFromServer = true
+          }
+        }
+        if (this.reflowSettingsBookId !== bookId) return
         this.reflowSettings = this.normalizedReflowSettings({...defaults, ...loaded})
-        if (!serverSettings && localRaw) this.saveReflowSettingsServerDebounced?.(bookId, this.reflowSettings)
+        if (loadedFromServer) {
+          try {
+            window.localStorage.setItem(this.reflowSettingsStorageKey(bookId), JSON.stringify(this.reflowSettings))
+          } catch (e) {
+            this.$debug('Unable to cache server PDF reflow settings locally', e)
+          }
+        }
+        if (loadedFromLocal) this.saveReflowSettingsServerDebounced?.(bookId, this.reflowSettings)
       } catch (e) {
+        if (this.reflowSettingsBookId !== bookId) return
         this.reflowSettings = defaultReflowSettings()
         this.$debug('Unable to load PDF reflow settings', e)
       } finally {
-        this.$nextTick(() => this.loadingReflowSettings = false)
+        if (this.reflowSettingsBookId === bookId) this.$nextTick(() => this.loadingReflowSettings = false)
       }
     },
     saveReflowSettings() {
@@ -2445,6 +2471,7 @@ export default Vue.extend({
     async saveReflowSettingsServer(bookId: string = this.reflowSettingsBookId || this.bookId, settings: Record<string, any> = this.normalizedReflowSettings(this.reflowSettings)) {
       if (!bookId) return
       try {
+        await this.$store.dispatch('getClientSettingsUser')
         const all = this.readServerReflowSettings()
         all[bookId] = this.normalizedReflowSettings(settings)
         const newSettings = {} as Record<string, ClientSettingUserUpdateDto>
