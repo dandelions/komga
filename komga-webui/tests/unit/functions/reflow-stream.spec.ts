@@ -2,6 +2,7 @@ import {
   contiguousReflowPageCount,
   hasVerticalParagraphBlankTail,
   mergeReflowContinuationItems,
+  reflowCurrentSourcePageNumber,
   reflowPrefetchPageNumbers,
   reflowVirtualPageIndexForSource,
   retainedReflowHistoryPageNumbers,
@@ -85,5 +86,11 @@ describe('reflow stream', () => {
     expect(reflowVirtualPageIndexForSource(pages, 5)).toBe(1)
     expect(reflowVirtualPageIndexForSource(pages, 6)).toBe(2)
     expect(reflowVirtualPageIndexForSource(pages, 7)).toBe(-1)
+  })
+
+  test('uses the displayed source page after continuation cache loss', () => {
+    expect(reflowCurrentSourcePageNumber(5, 1, 12)).toBe(5)
+    expect(reflowCurrentSourcePageNumber(0, 1, 12)).toBe(1)
+    expect(reflowCurrentSourcePageNumber(99, 1, 12)).toBe(12)
   })
 })

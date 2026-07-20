@@ -908,7 +908,7 @@ import {TocEntry} from '@/types/epub'
 import {flattenToc} from '@/functions/toc'
 import {CLIENT_SETTING, ClientSettingUserUpdateDto} from '@/types/komga-clientsettings'
 import {enhanceTextContrast} from '@/functions/image-enhancement'
-import {reflowPrefetchPageNumbers, retainedReflowHistoryPageNumbers} from '@/functions/reflow-stream'
+import {reflowCurrentSourcePageNumber, reflowPrefetchPageNumbers, retainedReflowHistoryPageNumbers} from '@/functions/reflow-stream'
 
 const REFLOW_SETTINGS_STORAGE_PREFIX = 'komga.pdfReflowSettings.'
 const READER_IMAGE_SETTINGS_STORAGE_PREFIX = 'komga.readerImageSettings.'
@@ -2979,25 +2979,28 @@ export default Vue.extend({
       const reflow = this.$refs.reflowedPage as any
       reflow?.nextPage?.()
     },
-    reflowSourcePreviousPage(sourcePageCount: number = 1) {
+    reflowSourcePreviousPage() {
       this.cacheCurrentReflowPage()
-      if (this.page > 1) {
+      const visiblePage = reflowCurrentSourcePageNumber(this.reflowVisiblePage, this.page, this.pagesCount)
+      if (visiblePage > this.page) {
+        this.reflowStartAtEnd = true
+        this.goTo(visiblePage - 1)
+      } else if (this.page > 1) {
         const historyPage = this.reflowSourceHistory.pop()
-        const fallbackStep = Math.max(1, Math.round(sourcePageCount || 1))
-        const targetPage = historyPage || Math.max(1, this.page - fallbackStep)
+        const targetPage = historyPage || Math.max(1, this.page - 1)
         this.reflowStartAtEnd = true
         this.goTo(targetPage)
       } else {
         this.jumpToPrevious()
       }
     },
-    reflowSourceNextPage(sourcePageCount: number = 1) {
+    reflowSourceNextPage() {
       this.cacheCurrentReflowPage()
-      if (this.page < this.pagesCount) {
-        const step = Math.max(1, Math.round(sourcePageCount || 1))
+      const visiblePage = reflowCurrentSourcePageNumber(this.reflowVisiblePage, this.page, this.pagesCount)
+      if (visiblePage < this.pagesCount) {
         this.reflowSourceHistory.push(this.page)
         this.reflowStartAtEnd = false
-        this.goTo(Math.min(this.pagesCount, this.page + step))
+        this.goTo(visiblePage + 1)
       } else {
         this.jumpToNext()
       }

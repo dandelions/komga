@@ -100,3 +100,9 @@ export function reflowVirtualPageIndexForSource<T extends ReflowStreamItem>(page
     (item.type === 'word' || item.type === 'image') && item.sourcePageNumber === sourcePageNumber,
   ))
 }
+
+export function reflowCurrentSourcePageNumber(visiblePageNumber: number, rootPageNumber: number, pagesCount: number): number {
+  const fallback = Math.max(1, Math.round(Number(rootPageNumber) || 1))
+  const total = Math.max(1, Math.round(Number(pagesCount) || fallback))
+  return Math.max(1, Math.min(total, Math.round(Number(visiblePageNumber) || fallback)))
+}
