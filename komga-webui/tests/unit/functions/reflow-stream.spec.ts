@@ -2,7 +2,6 @@ import {
   contiguousReflowPageCount,
   hasVerticalParagraphBlankTail,
   mergeReflowContinuationItems,
-  reflowCurrentSourcePageNumber,
   reflowPrefetchPageNumbers,
   reflowVirtualPageIndexForSource,
   retainedReflowHistoryPageNumbers,
@@ -88,9 +87,15 @@ describe('reflow stream', () => {
     expect(reflowVirtualPageIndexForSource(pages, 7)).toBe(-1)
   })
 
-  test('uses the displayed source page after continuation cache loss', () => {
-    expect(reflowCurrentSourcePageNumber(5, 1, 12)).toBe(5)
-    expect(reflowCurrentSourcePageNumber(0, 1, 12)).toBe(1)
-    expect(reflowCurrentSourcePageNumber(99, 1, 12)).toBe(12)
+  test('keeps the nearest virtual page when one source spans multiple screens', () => {
+    const pages = [
+      [{type: 'word', sourcePageNumber: 4}],
+      [{type: 'word', sourcePageNumber: 4}],
+      [{type: 'word', sourcePageNumber: 4}],
+      [{type: 'word', sourcePageNumber: 5}],
+    ] as Item[][]
+
+    expect(reflowVirtualPageIndexForSource(pages, 4, 2)).toBe(2)
+    expect(reflowVirtualPageIndexForSource(pages, 4, pages.length - 1)).toBe(2)
   })
 })

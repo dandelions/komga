@@ -186,7 +186,7 @@
                   <v-icon @click="previousBook" class="">mdi-undo</v-icon>
                   <v-icon @click="goToFirst" class="mx-2">mdi-skip-previous</v-icon>
                   <v-label>
-                    {{ readerDisplayPage }}
+                    {{ page }}
                   </v-label>
                 </template>
                 <template v-slot:append>
@@ -261,18 +261,18 @@
       >
         <reflowed-page
           ref="reflowedPage"
-          :page="currentPage"
+          :page="reflowRootPageDto"
           :target-width="reflowTargetWidth"
           :rotation="readerRotation"
           :options="reflowOptions"
-          :cached-items="cachedReflowItems(currentPage)"
-          :cached-page-background="cachedReflowBackground(currentPage)"
-          :cached-transfer-stats="cachedReflowTransferStats(currentPage)"
+          :cached-items="cachedReflowItems(reflowRootPageDto)"
+          :cached-page-background="cachedReflowBackground(reflowRootPageDto)"
+          :cached-transfer-stats="cachedReflowTransferStats(reflowRootPageDto)"
           :continuation-pages="reflowContinuationPages"
           :cache-key="reflowCacheKey"
           :night-display="nightDisplay"
           :server-reflow="reflowSettings.processingMode === 'server'"
-          :server-reflow-url="reflowPageUrl(currentPage)"
+          :server-reflow-url="reflowPageUrl(reflowRootPageDto)"
           :controls-top-offset="reflowControlsTopOffset"
           :start-at-end="reflowStartAtEnd"
           :defer-reflow="reflowSetupMode"
@@ -908,13 +908,12 @@ import {TocEntry} from '@/types/epub'
 import {flattenToc} from '@/functions/toc'
 import {CLIENT_SETTING, ClientSettingUserUpdateDto} from '@/types/komga-clientsettings'
 import {enhanceTextContrast} from '@/functions/image-enhancement'
-import {reflowCurrentSourcePageNumber, reflowPrefetchPageNumbers, retainedReflowHistoryPageNumbers} from '@/functions/reflow-stream'
+import {reflowPrefetchPageNumbers} from '@/functions/reflow-stream'
 
 const REFLOW_SETTINGS_STORAGE_PREFIX = 'komga.pdfReflowSettings.'
 const READER_IMAGE_SETTINGS_STORAGE_PREFIX = 'komga.readerImageSettings.'
 const REFLOW_CACHE_BEHIND_COUNT = 2
 const REFLOW_CONTINUATION_COUNT = 4
-const REFLOW_HISTORY_CACHE_COUNT = 2
 const REFLOW_PREFETCH_AHEAD_COUNT = REFLOW_CONTINUATION_COUNT + 1
 const REFLOW_PREFETCH_DELAY_MS = 120
 const MAX_REFLOW_CROP_REGIONS = 8
@@ -1056,7 +1055,7 @@ export default Vue.extend({
       k2ReflowMode: false,
       pdfModeBookId: '',
       reflowStartAtEnd: false,
-      reflowVisiblePage: 1,
+      reflowRootPage: 1,
       k2ReflowStartAtEnd: false,
       reflowCropMode: false,
       reflowSettingsBookId: '',
@@ -1067,7 +1066,6 @@ export default Vue.extend({
       saveReaderImageSettingsServerDebounced: undefined as undefined | ((bookId?: string, settings?: Record<string, any>) => void),
       reflowCache: {} as Record<string, any>,
       reflowPrefetchPages: [] as number[],
-      reflowSourceHistory: [] as number[],
       reflowPrefetchTimer: undefined as number | undefined,
       reflowSettings: defaultReflowSettings(),
       goToPage: 1,
@@ -1245,7 +1243,7 @@ export default Vue.extend({
     page: {
       handler(val, old) {
         if (val) {
-          this.reflowVisiblePage = val
+          if (!this.reflowMode) this.reflowRootPage = val
           this.markProgress(val)
           this.goToPage = val
           this.updateRoute()
@@ -1257,7 +1255,10 @@ export default Vue.extend({
     },
     reflowCacheKey() {
       this.clearReflowPrefetch()
-      if (this.reflowMode) this.scheduleNextReflowPrefetch()
+      if (this.reflowMode) {
+        this.reflowRootPage = this.page
+        this.scheduleNextReflowPrefetch()
+      }
     },
     reflowSettings: {
       handler() {
@@ -1315,8 +1316,8 @@ export default Vue.extend({
     currentPage(): PageDtoWithUrl {
       return this.pages[this.page - 1]
     },
-    readerDisplayPage(): number {
-      return this.reflowMode ? this.reflowVisiblePage || this.page : this.page
+    reflowRootPageDto(): PageDtoWithUrl {
+      return this.pages[this.reflowRootPage - 1] || this.currentPage
     },
     prefetchReflowPages(): PageDtoWithUrl[] {
       if (!this.reflowMode) return []
@@ -1327,7 +1328,7 @@ export default Vue.extend({
     reflowContinuationPages(): Array<{pageNumber: number, pageUrl: string, items: any[]}> {
       const continuation = [] as Array<{pageNumber: number, pageUrl: string, items: any[]}>
       for (let offset = 1; offset <= REFLOW_CONTINUATION_COUNT; offset++) {
-        const pageNumber = this.page + offset
+        const pageNumber = this.reflowRootPage + offset
         const page = this.pages[pageNumber - 1]
         const items = this.cachedReflowItems(page)
         if (!page || !items) break
@@ -2278,6 +2279,7 @@ export default Vue.extend({
     },
     goTo(page: number) {
       this.$debug('[goTo]', `page:${page}`)
+      this.reflowRootPage = page
       this.page = page
       this.markProgress(page)
     },
@@ -2637,6 +2639,7 @@ export default Vue.extend({
     openReflowSetupMode() {
       if (!this.isPdf) return
 
+      this.reflowRootPage = this.page
       this.reflowSetupMode = true
       this.reflowMode = false
       this.k2ReflowMode = false
@@ -2649,13 +2652,13 @@ export default Vue.extend({
     startReflowMode() {
       if (!this.isPdf) return
 
+      this.reflowRootPage = this.page
       this.reflowSetupMode = false
       this.reflowMode = true
       this.k2ReflowMode = false
       this.savePdfMode()
       this.reflowStartAtEnd = false
       this.reflowCropMode = false
-      this.reflowSourceHistory = []
       this.clearReflowPrefetch()
       this.scheduleNextReflowPrefetch()
       this.$nextTick(() => this.scrollToPageEdge('top'))
@@ -2668,11 +2671,11 @@ export default Vue.extend({
       }
     },
     exitReflowMode() {
+      this.reflowRootPage = this.page
       this.reflowSetupMode = false
       this.reflowMode = false
       this.reflowCropMode = false
       this.reflowStartAtEnd = false
-      this.reflowSourceHistory = []
       this.savePdfMode()
       this.clearReflowPrefetch()
       this.$nextTick(() => this.scrollToPageEdge('top'))
@@ -2869,7 +2872,7 @@ export default Vue.extend({
         transferStats: payload.transferStats,
       })
       this.pruneReflowCache()
-      if (payload.pageNumber === this.page) this.scheduleNextReflowPrefetch()
+      if (payload.pageNumber === this.reflowRootPage) this.scheduleNextReflowPrefetch()
     },
     reflowPageUrl(page: PageDtoWithUrl | undefined): string {
       if (!page) return ''
@@ -2893,30 +2896,30 @@ export default Vue.extend({
     forceCurrentReflow() {
       this.clearReflowPrefetch()
       this.reflowPrefetchPages = []
-      if (this.currentPage?.number) this.clearReflowCacheForPage(this.currentPage.number)
+      this.reflowRootPage = this.page
+      if (this.page) this.clearReflowCacheForPage(this.page)
       this.$nextTick(() => {
         const reflow = this.$refs.reflowedPage as any
         reflow?.forceReflow?.()
       })
     },
     pruneReflowCache() {
-      const retainedHistoryPages = new Set(retainedReflowHistoryPageNumbers(
-        this.reflowSourceHistory,
-        REFLOW_CONTINUATION_COUNT,
-        REFLOW_HISTORY_CACHE_COUNT,
-      ))
+      const firstRetainedPage = Math.max(1, Math.min(this.reflowRootPage, this.page) - REFLOW_CACHE_BEHIND_COUNT)
+      const lastRetainedPage = Math.min(
+        this.pagesCount,
+        Math.max(
+          this.reflowRootPage + REFLOW_CONTINUATION_COUNT,
+          this.page + REFLOW_PREFETCH_AHEAD_COUNT,
+        ),
+      )
       Object.keys(this.reflowCache).forEach(key => {
         const separator = key.indexOf('|')
         const pageNumber = Number(key.substring(0, separator))
         const cacheKey = key.substring(separator + 1)
-        const behindCurrentPage = this.page - pageNumber
-        const aheadOfCurrentPage = pageNumber - this.page
-        const outsideActiveWindow =
-          behindCurrentPage > REFLOW_CACHE_BEHIND_COUNT ||
-          aheadOfCurrentPage > REFLOW_PREFETCH_AHEAD_COUNT
+        const outsideActiveWindow = pageNumber < firstRetainedPage || pageNumber > lastRetainedPage
         if (
           cacheKey !== this.reflowCacheKey ||
-          (outsideActiveWindow && !retainedHistoryPages.has(pageNumber))
+          outsideActiveWindow
         ) this.$delete(this.reflowCache, key)
       })
     },
@@ -2936,7 +2939,7 @@ export default Vue.extend({
         this.reflowPrefetchPages = []
         return
       }
-      const sourcePage = this.reflowVisiblePage || this.page
+      const sourcePage = this.page
       const pageNumbers =
         reflowPrefetchPageNumbers(
           sourcePage,
@@ -2957,19 +2960,14 @@ export default Vue.extend({
 
       this.reflowPrefetchTimer = window.setTimeout(() => {
         this.reflowPrefetchTimer = undefined
-        if (this.reflowVisiblePage !== sourcePage || this.reflowCropMode) return
+        if (this.page !== sourcePage || this.reflowCropMode) return
         this.reflowPrefetchPages = priorityPage === undefined ? backgroundPages : [priorityPage, ...backgroundPages]
       }, REFLOW_PREFETCH_DELAY_MS)
     },
     setReflowVisiblePage(pageNumber: number) {
       const normalized = Math.max(1, Math.min(this.pagesCount, Math.round(Number(pageNumber) || this.page)))
-      if (normalized === this.reflowVisiblePage) return
-      this.reflowVisiblePage = normalized
-      this.goToPage = normalized
-      this.markProgress(normalized)
-      this.updateRoute(normalized)
-      this.clearReflowPrefetch()
-      this.scheduleNextReflowPrefetch()
+      if (normalized === this.page) return
+      this.page = normalized
     },
     reflowPreviousPage() {
       const reflow = this.$refs.reflowedPage as any
@@ -2981,26 +2979,18 @@ export default Vue.extend({
     },
     reflowSourcePreviousPage() {
       this.cacheCurrentReflowPage()
-      const visiblePage = reflowCurrentSourcePageNumber(this.reflowVisiblePage, this.page, this.pagesCount)
-      if (visiblePage > this.page) {
+      if (this.page > 1) {
         this.reflowStartAtEnd = true
-        this.goTo(visiblePage - 1)
-      } else if (this.page > 1) {
-        const historyPage = this.reflowSourceHistory.pop()
-        const targetPage = historyPage || Math.max(1, this.page - 1)
-        this.reflowStartAtEnd = true
-        this.goTo(targetPage)
+        this.goTo(this.page - 1)
       } else {
         this.jumpToPrevious()
       }
     },
     reflowSourceNextPage() {
       this.cacheCurrentReflowPage()
-      const visiblePage = reflowCurrentSourcePageNumber(this.reflowVisiblePage, this.page, this.pagesCount)
-      if (visiblePage < this.pagesCount) {
-        this.reflowSourceHistory.push(this.page)
+      if (this.page < this.pagesCount) {
         this.reflowStartAtEnd = false
-        this.goTo(visiblePage + 1)
+        this.goTo(this.page + 1)
       } else {
         this.jumpToNext()
       }

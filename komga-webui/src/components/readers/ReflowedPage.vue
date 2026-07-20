@@ -1347,7 +1347,6 @@ export default Vue.extend({
         } else if (!this.restoreDisplayedSourcePage()) {
           this.virtualPageIndex = this.clampNumber(this.virtualPageIndex, 0, Math.max(0, this.pages.length - 1), 0)
         }
-        this.syncDisplayedSourcePage(false)
         return
       }
 
@@ -1358,7 +1357,6 @@ export default Vue.extend({
       } else if (!this.restoreDisplayedSourcePage()) {
         this.virtualPageIndex = this.clampNumber(this.virtualPageIndex, 0, Math.max(0, this.pages.length - 1), 0)
       }
-      this.syncDisplayedSourcePage(false)
 
       this.$nextTick(() => {
         const pages = this.paginateItemsFromDom()
@@ -1370,7 +1368,6 @@ export default Vue.extend({
         } else if (!this.restoreDisplayedSourcePage()) {
           this.virtualPageIndex = this.clampNumber(this.virtualPageIndex, 0, Math.max(0, this.pages.length - 1), 0)
         }
-        this.syncDisplayedSourcePage(false)
       })
     },
     setInitialVirtualPage() {
@@ -1378,12 +1375,18 @@ export default Vue.extend({
         this.virtualPageIndex = 0
         return
       }
-      if (this.restoreDisplayedSourcePage()) return
-      this.virtualPageIndex = this.startAtEnd ? this.pages.length - 1 : 0
+      const targetPage = this.displayedSourcePageNumber || this.page.number
+      const preferredIndex = this.startAtEnd ? this.pages.length - 1 : 0
+      const targetIndex = reflowVirtualPageIndexForSource(this.pages, targetPage, preferredIndex)
+      this.virtualPageIndex = targetIndex >= 0 ? targetIndex : preferredIndex
     },
     restoreDisplayedSourcePage(): boolean {
-      if (!this.displayedSourcePageNumber || this.displayedSourcePageNumber === this.page.number) return false
-      const pageIndex = reflowVirtualPageIndexForSource(this.pages, this.displayedSourcePageNumber)
+      if (!this.displayedSourcePageNumber) return false
+      const pageIndex = reflowVirtualPageIndexForSource(
+        this.pages,
+        this.displayedSourcePageNumber,
+        this.virtualPageIndex,
+      )
       if (pageIndex < 0) return false
       this.virtualPageIndex = pageIndex
       return true

@@ -94,15 +94,21 @@ export function verticalReflowLineIndent(rawIndent: number, paragraphStart: bool
   return Math.max(0, rawIndent, paragraphIndent)
 }
 
-export function reflowVirtualPageIndexForSource<T extends ReflowStreamItem>(pages: T[][], sourcePageNumber: number): number {
+export function reflowVirtualPageIndexForSource<T extends ReflowStreamItem>(
+  pages: T[][],
+  sourcePageNumber: number,
+  preferredIndex: number = 0,
+): number {
   if (sourcePageNumber <= 0) return -1
-  return pages.findIndex(items => items.some(item =>
-    (item.type === 'word' || item.type === 'image') && item.sourcePageNumber === sourcePageNumber,
-  ))
-}
+  const matchingIndexes = pages
+    .map((items, index) => items.some(item =>
+      (item.type === 'word' || item.type === 'image') && item.sourcePageNumber === sourcePageNumber,
+    ) ? index : -1)
+    .filter(index => index >= 0)
+  if (matchingIndexes.length === 0) return -1
 
-export function reflowCurrentSourcePageNumber(visiblePageNumber: number, rootPageNumber: number, pagesCount: number): number {
-  const fallback = Math.max(1, Math.round(Number(rootPageNumber) || 1))
-  const total = Math.max(1, Math.round(Number(pagesCount) || fallback))
-  return Math.max(1, Math.min(total, Math.round(Number(visiblePageNumber) || fallback)))
+  const preferred = Math.max(0, Math.round(Number(preferredIndex) || 0))
+  return matchingIndexes.reduce((nearest, index) =>
+    Math.abs(index - preferred) < Math.abs(nearest - preferred) ? index : nearest,
+  )
 }
