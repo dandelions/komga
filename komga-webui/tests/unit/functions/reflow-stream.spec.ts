@@ -1,5 +1,6 @@
 import {
   contiguousReflowPageCount,
+  fitReflowImageDimensions,
   hasVerticalParagraphBlankTail,
   mergeReflowContinuationItems,
   reflowPrefetchPageNumbers,
@@ -97,5 +98,10 @@ describe('reflow stream', () => {
 
     expect(reflowVirtualPageIndexForSource(pages, 4, 2)).toBe(2)
     expect(reflowVirtualPageIndexForSource(pages, 4, pages.length - 1)).toBe(2)
+  })
+
+  test('fits a reflow image inside one screen without changing its aspect ratio', () => {
+    expect(fitReflowImageDimensions(600, 1800, 500, 900, 1)).toEqual({width: 300, height: 900})
+    expect(fitReflowImageDimensions(1800, 600, 900, 500, 1)).toEqual({width: 900, height: 300})
   })
 })

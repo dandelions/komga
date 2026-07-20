@@ -315,6 +315,7 @@
           class="crop-image"
           alt=""
           draggable="false"
+          @load="cropImageLoaded"
           @dragstart.prevent
         />
         <div
@@ -419,6 +420,7 @@ import {PageDtoWithUrl} from '@/types/komga-books'
 import {enhanceTextContrast} from '@/functions/image-enhancement'
 import {
   contiguousReflowPageCount,
+  fitReflowImageDimensions,
   hasVerticalParagraphBlankTail,
   mergeReflowContinuationItems,
   ReflowContinuationPage,
@@ -933,6 +935,11 @@ export default Vue.extend({
       return this.manualImageRoisByPage[this.selectionManualImagePageKey]?.[this.activeManualImageRegion]
     },
     cropImageUrl(): string {
+      if (
+        this.cropMode &&
+        this.cropPageUrl &&
+        !this.cropImageNeedsPreparation(this.controlSkewCorrection)
+      ) return this.pageImageUrl(this.cropPageUrl)
       return this.cropObjectUrl || this.objectUrl
     },
     cropDisplayImageSize(): {w: number, h: number} {
@@ -1612,21 +1619,28 @@ export default Vue.extend({
       }
     },
     imageBlockStyle(item: RenderedImageBlock): object {
+      const dimensions = this.imageBlockDisplayDimensions(item)
       return {
-        width: `${item.width}px`,
-        height: `${item.height}px`,
+        width: `${dimensions.width}px`,
+        height: `${dimensions.height}px`,
       }
+    },
+    imageBlockDisplayDimensions(item: RenderedImageBlock): {width: number, height: number} {
+      return this.scaledImageDimensions(
+        item.sourceWidth || item.w || item.width,
+        item.sourceHeight || item.h || item.height,
+      )
     },
     reflowItemDisplayWidth(item: ReflowItem): number {
       if (item.type === 'indent') return item.width
       if (item.type === 'break') return 0
-      if (item.type === 'image') return item.width
+      if (item.type === 'image') return this.imageBlockDisplayDimensions(item).width
       return this.wordBlockDisplayDimensions(item).width
     },
     reflowItemDisplayHeight(item: ReflowItem): number {
       if (item.type === 'indent') return 1
       if (item.type === 'break') return 0
-      if (item.type === 'image') return item.height
+      if (item.type === 'image') return this.imageBlockDisplayDimensions(item).height
       return this.wordBlockDisplayDimensions(item).height
     },
     indentStyle(item: LineIndentItem): object {
@@ -1706,6 +1720,11 @@ export default Vue.extend({
     async ensureCropImage(skewCorrection: number = this.controlSkewCorrection) {
       const normalizedSkewCorrection = this.normalizedSkewCorrection(skewCorrection)
       const pageUrl = this.cropPageUrl || this.displayedSourcePageUrl || this.page.url
+      if (this.cropMode && this.cropPageUrl && !this.cropImageNeedsPreparation(normalizedSkewCorrection)) {
+        this.revokeCropObjectUrl(false)
+        this.loading = false
+        return
+      }
       const sourceKey = this.pageImageSourceKey(pageUrl)
       const cropImageRequestId = this.cropImageRequestId + 1
       this.cropImageRequestId = cropImageRequestId
@@ -1811,6 +1830,16 @@ export default Vue.extend({
     },
     pageImageSourceKey(url: string): string {
       return `${this.pageImageUrl(url)}#rotation=${this.normalizedRotation(this.rotation)}`
+    },
+    cropImageNeedsPreparation(skewCorrection: number): boolean {
+      return this.normalizedRotation(this.rotation) !== 0 || this.normalizedSkewCorrection(skewCorrection) !== 0
+    },
+    cropImageLoaded(event: Event) {
+      if (!this.cropMode) return
+      const image = event.currentTarget as HTMLImageElement
+      if (!image.naturalWidth || !image.naturalHeight) return
+      this.cropImageSize = {w: image.naturalWidth, h: image.naturalHeight}
+      if (this.cropPageUrl === this.page.url) this.imageSize = {...this.cropImageSize}
     },
     canvasContext(canvas: HTMLCanvasElement, willReadFrequently: boolean = false): CanvasRenderingContext2D | null {
       if (willReadFrequently) return canvas.getContext('2d', {willReadFrequently: true})
@@ -4810,15 +4839,9 @@ export default Vue.extend({
       return max - min <= 32 && this.pixelLuma(data, offset) <= threshold
     },
     scaledImageDimensions(sourceWidth: number, sourceHeight: number): {width: number, height: number} {
-      const width = Math.max(1, sourceWidth)
-      const height = Math.max(1, sourceHeight)
       const maxWidth = Math.max(1, this.targetWidth - this.horizontalContentPadding() * 2)
-      const maxHeight = Math.max(80, this.pageContentHeight() - 32)
-      const scale = Math.max(0.01, Math.min(this.textScale(), maxWidth / width, maxHeight / height))
-      return {
-        width: Math.max(1, Math.round(width * scale)),
-        height: Math.max(1, Math.round(height * scale)),
-      }
+      const maxHeight = Math.max(80, this.pageContentHeight() - 32 - VIEWPORT_PAGE_BUFFER)
+      return fitReflowImageDimensions(sourceWidth, sourceHeight, maxWidth, maxHeight, this.textScale())
     },
     horizontalGlyphSourceHeight(lines: WordLine[]): number {
       const heights = lines.flatMap(line =>
@@ -5279,7 +5302,6 @@ export default Vue.extend({
       this.cropRegionCount = count
       if (this.activeCropRegion >= count) this.activeCropRegion = count - 1
       this.cropWarning = ''
-      this.$emit('crop-rois-change', this.cropRoisPayload())
     },
     setActiveCropRegion(region: CropRegionIndex) {
       if (region < 0 || region >= this.cropRegionCount) return
@@ -5295,7 +5317,6 @@ export default Vue.extend({
       this.manualImageRegionCount = count
       if (this.activeManualImageRegion >= count) this.activeManualImageRegion = count - 1
       this.cropWarning = ''
-      this.$emit('manual-image-rois-change', this.manualImageRoisPayload())
     },
     setActiveManualImageRegion(region: CropRegionIndex) {
       if (region < 0 || region >= this.manualImageRegionCount) return
@@ -5327,11 +5348,13 @@ export default Vue.extend({
         this.cropTarget = target
         this.cropPageNumber = this.displayedSourcePageNumber || this.page.number
         this.cropPageUrl = this.displayedSourcePageUrl || this.page.url
-        await this.ensureCropImage()
         this.cropMode = true
         this.$emit('crop-mode-change', true)
+        await this.ensureCropImage()
       } catch (e) {
+        this.cropMode = false
         this.clearCropSource()
+        this.$emit('crop-mode-change', false)
         this.error = true
         this.errorMessage = e instanceof Error ? e.message : String(e)
       }
@@ -5364,7 +5387,6 @@ export default Vue.extend({
       this.cropMode = false
       this.clearCropSource()
       this.$emit('crop-mode-change', false)
-      this.$emit('manual-image-rois-change', this.manualImageRoisPayload())
     },
     startCrop(event: PointerEvent) {
       if (!this.cropMode || !this.cropDisplayImageSize.w || !this.cropDisplayImageSize.h) return
@@ -5389,7 +5411,6 @@ export default Vue.extend({
         this.cropWarning = ''
         if (this.cropTarget === 'image') {
           this.setCurrentManualImageRoi(roi)
-          this.$emit('manual-image-rois-change', this.manualImageRoisPayload())
         } else {
           this.setCurrentCropRoi(roi)
         }

@@ -94,6 +94,28 @@ export function verticalReflowLineIndent(rawIndent: number, paragraphStart: bool
   return Math.max(0, rawIndent, paragraphIndent)
 }
 
+export function fitReflowImageDimensions(
+  sourceWidth: number,
+  sourceHeight: number,
+  maxWidth: number,
+  maxHeight: number,
+  preferredScale: number,
+): {width: number, height: number} {
+  const width = Math.max(1, Number(sourceWidth) || 1)
+  const height = Math.max(1, Number(sourceHeight) || 1)
+  const availableWidth = Math.max(1, Number(maxWidth) || 1)
+  const availableHeight = Math.max(1, Number(maxHeight) || 1)
+  const scale = Math.max(0.01, Math.min(
+    Math.max(0.01, Number(preferredScale) || 0.01),
+    availableWidth / width,
+    availableHeight / height,
+  ))
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+  }
+}
+
 export function reflowVirtualPageIndexForSource<T extends ReflowStreamItem>(
   pages: T[][],
   sourcePageNumber: number,
