@@ -186,7 +186,7 @@
                   <v-icon @click="previousBook" class="">mdi-undo</v-icon>
                   <v-icon @click="goToFirst" class="mx-2">mdi-skip-previous</v-icon>
                   <v-label>
-                    {{ page }}
+                    {{ readerDisplayPage }}
                   </v-label>
                 </template>
                 <template v-slot:append>
@@ -296,6 +296,7 @@
           @force-reflow="forceCurrentReflow"
           @exit-reflow="exitReflowMode"
           @reflowed="cacheReflowPage"
+          @visible-source-page-change="setReflowVisiblePage"
           @source-previous="reflowSourcePreviousPage"
           @source-next="reflowSourceNextPage"
           @show-pdf-toc="openPdfToc"
@@ -1055,6 +1056,7 @@ export default Vue.extend({
       k2ReflowMode: false,
       pdfModeBookId: '',
       reflowStartAtEnd: false,
+      reflowVisiblePage: 1,
       k2ReflowStartAtEnd: false,
       reflowCropMode: false,
       reflowSettingsBookId: '',
@@ -1243,6 +1245,7 @@ export default Vue.extend({
     page: {
       handler(val, old) {
         if (val) {
+          this.reflowVisiblePage = val
           this.markProgress(val)
           this.goToPage = val
           this.updateRoute()
@@ -1311,6 +1314,9 @@ export default Vue.extend({
     },
     currentPage(): PageDtoWithUrl {
       return this.pages[this.page - 1]
+    },
+    readerDisplayPage(): number {
+      return this.reflowMode ? this.reflowVisiblePage || this.page : this.page
     },
     prefetchReflowPages(): PageDtoWithUrl[] {
       if (!this.reflowMode) return []
@@ -2281,12 +2287,12 @@ export default Vue.extend({
     goToLast() {
       this.goTo(this.pagesCount)
     },
-    updateRoute() {
+    updateRoute(page: number = this.page) {
       this.$router.replace({
         name: this.$route.name,
         params: {bookId: this.$route.params.bookId},
         query: {
-          page: this.page.toString(),
+          page: page.toString(),
           context: this.context.origin,
           contextId: this.context.id,
           incognito: this.incognito.toString(),
@@ -2930,7 +2936,7 @@ export default Vue.extend({
         this.reflowPrefetchPages = []
         return
       }
-      const sourcePage = this.page
+      const sourcePage = this.reflowVisiblePage || this.page
       const pageNumbers =
         reflowPrefetchPageNumbers(
           sourcePage,
@@ -2951,9 +2957,19 @@ export default Vue.extend({
 
       this.reflowPrefetchTimer = window.setTimeout(() => {
         this.reflowPrefetchTimer = undefined
-        if (this.page !== sourcePage || this.reflowCropMode) return
+        if (this.reflowVisiblePage !== sourcePage || this.reflowCropMode) return
         this.reflowPrefetchPages = priorityPage === undefined ? backgroundPages : [priorityPage, ...backgroundPages]
       }, REFLOW_PREFETCH_DELAY_MS)
+    },
+    setReflowVisiblePage(pageNumber: number) {
+      const normalized = Math.max(1, Math.min(this.pagesCount, Math.round(Number(pageNumber) || this.page)))
+      if (normalized === this.reflowVisiblePage) return
+      this.reflowVisiblePage = normalized
+      this.goToPage = normalized
+      this.markProgress(normalized)
+      this.updateRoute(normalized)
+      this.clearReflowPrefetch()
+      this.scheduleNextReflowPrefetch()
     },
     reflowPreviousPage() {
       const reflow = this.$refs.reflowedPage as any

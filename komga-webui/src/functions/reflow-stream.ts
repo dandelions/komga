@@ -94,11 +94,9 @@ export function verticalReflowLineIndent(rawIndent: number, paragraphStart: bool
   return Math.max(0, rawIndent, paragraphIndent)
 }
 
-export function reflowCropSourcePageNumber(
-  target: 'text' | 'image',
-  visiblePageNumber: number,
-  followUpPageNumber: number,
-): number {
-  if (target === 'text' && followUpPageNumber > 0) return followUpPageNumber
-  return visiblePageNumber
+export function reflowVirtualPageIndexForSource<T extends ReflowStreamItem>(pages: T[][], sourcePageNumber: number): number {
+  if (sourcePageNumber <= 0) return -1
+  return pages.findIndex(items => items.some(item =>
+    (item.type === 'word' || item.type === 'image') && item.sourcePageNumber === sourcePageNumber,
+  ))
 }

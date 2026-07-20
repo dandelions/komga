@@ -421,8 +421,8 @@ import {
   contiguousReflowPageCount,
   hasVerticalParagraphBlankTail,
   mergeReflowContinuationItems,
-  reflowCropSourcePageNumber,
   ReflowContinuationPage,
+  reflowVirtualPageIndexForSource,
   verticalReflowLineIndent,
   visibleReflowSourcePageNumber,
 } from '@/functions/reflow-stream'
@@ -703,8 +703,8 @@ export default Vue.extend({
       cropObjectUrlSource: '',
       cropPageNumber: 0,
       cropPageUrl: '',
-      followUpCropPageNumber: 0,
-      followUpCropPageUrl: '',
+      displayedSourcePageNumber: 0,
+      displayedSourcePageUrl: '',
       cropImageSize: {w: 0, h: 0},
       cropImageRequestId: 0,
       requestId: 0,
@@ -886,7 +886,7 @@ export default Vue.extend({
       return this.continuationPages.find(page => page.pageNumber === this.activeVisibleSourcePageNumber)?.pageUrl || this.page.url
     },
     selectionPageNumber(): number {
-      return this.cropPageNumber || this.activeVisibleSourcePageNumber
+      return this.cropPageNumber || this.displayedSourcePageNumber || this.page.number
     },
     selectionPageParity(): PageParity {
       return this.selectionPageNumber % 2 === 0 ? 'even' : 'odd'
@@ -991,8 +991,8 @@ export default Vue.extend({
         this.cropMode = false
         this.cropPageNumber = 0
         this.cropPageUrl = ''
-        this.followUpCropPageNumber = 0
-        this.followUpCropPageUrl = ''
+        this.displayedSourcePageNumber = this.page.number
+        this.displayedSourcePageUrl = this.page.url
         this.cropImageSize = {w: 0, h: 0}
         this.$emit('crop-mode-change', false)
         this.revokeObjectUrl()
@@ -1344,9 +1344,10 @@ export default Vue.extend({
         this.pages = this.paginateVerticalItemsEstimated(this.paginationItems)
         if (resetPage) {
           this.setInitialVirtualPage()
-        } else {
+        } else if (!this.restoreDisplayedSourcePage()) {
           this.virtualPageIndex = this.clampNumber(this.virtualPageIndex, 0, Math.max(0, this.pages.length - 1), 0)
         }
+        this.syncDisplayedSourcePage(false)
         return
       }
 
@@ -1354,9 +1355,10 @@ export default Vue.extend({
       this.pages = estimatedPages
       if (resetPage) {
         this.setInitialVirtualPage()
-      } else {
+      } else if (!this.restoreDisplayedSourcePage()) {
         this.virtualPageIndex = this.clampNumber(this.virtualPageIndex, 0, Math.max(0, this.pages.length - 1), 0)
       }
+      this.syncDisplayedSourcePage(false)
 
       this.$nextTick(() => {
         const pages = this.paginateItemsFromDom()
@@ -1365,9 +1367,10 @@ export default Vue.extend({
         this.pages = pages
         if (resetPage) {
           this.setInitialVirtualPage()
-        } else {
+        } else if (!this.restoreDisplayedSourcePage()) {
           this.virtualPageIndex = this.clampNumber(this.virtualPageIndex, 0, Math.max(0, this.pages.length - 1), 0)
         }
+        this.syncDisplayedSourcePage(false)
       })
     },
     setInitialVirtualPage() {
@@ -1375,7 +1378,23 @@ export default Vue.extend({
         this.virtualPageIndex = 0
         return
       }
+      if (this.restoreDisplayedSourcePage()) return
       this.virtualPageIndex = this.startAtEnd ? this.pages.length - 1 : 0
+    },
+    restoreDisplayedSourcePage(): boolean {
+      if (!this.displayedSourcePageNumber || this.displayedSourcePageNumber === this.page.number) return false
+      const pageIndex = reflowVirtualPageIndexForSource(this.pages, this.displayedSourcePageNumber)
+      if (pageIndex < 0) return false
+      this.virtualPageIndex = pageIndex
+      return true
+    },
+    syncDisplayedSourcePage(allowRegression: boolean = true) {
+      const pageNumber = this.activeVisibleSourcePageNumber
+      if (!allowRegression && pageNumber < this.displayedSourcePageNumber) return
+      if (pageNumber === this.displayedSourcePageNumber && this.displayedSourcePageUrl) return
+      this.displayedSourcePageNumber = pageNumber
+      this.displayedSourcePageUrl = this.activeVisibleSourcePageUrl
+      if (!this.preload) this.$emit('visible-source-page-change', pageNumber)
     },
     paginateItemsFromDom(): ReflowItem[][] | undefined {
       const measureWrapper = this.$refs.measureWrapper as HTMLElement | undefined
@@ -1553,22 +1572,20 @@ export default Vue.extend({
     },
     nextPage() {
       if (this.virtualPageIndex < this.pages.length - 1) {
-        this.clearFollowUpCropSource()
         this.virtualPageIndex++
+        this.syncDisplayedSourcePage()
         this.scrollToTop()
         return
       }
-      this.clearFollowUpCropSource()
       this.$emit('source-next', this.streamPageCount)
     },
     previousPage() {
       if (this.virtualPageIndex > 0) {
-        this.clearFollowUpCropSource()
         this.virtualPageIndex--
+        this.syncDisplayedSourcePage()
         this.scrollToTop()
         return
       }
-      this.clearFollowUpCropSource()
       this.$emit('source-previous', this.streamPageCount)
     },
     scrollToTop() {
@@ -1685,7 +1702,7 @@ export default Vue.extend({
     },
     async ensureCropImage(skewCorrection: number = this.controlSkewCorrection) {
       const normalizedSkewCorrection = this.normalizedSkewCorrection(skewCorrection)
-      const pageUrl = this.cropPageUrl || this.activeVisibleSourcePageUrl
+      const pageUrl = this.cropPageUrl || this.displayedSourcePageUrl || this.page.url
       const sourceKey = this.pageImageSourceKey(pageUrl)
       const cropImageRequestId = this.cropImageRequestId + 1
       this.cropImageRequestId = cropImageRequestId
@@ -5297,7 +5314,6 @@ export default Vue.extend({
       this.drawingCrop = false
       this.cropWarning = ''
       if (this.cropMode && this.cropTarget === target) {
-        this.rememberManualImageCropSource()
         this.cropMode = false
         this.clearCropSource()
         this.$emit('crop-mode-change', false)
@@ -5306,15 +5322,9 @@ export default Vue.extend({
 
       try {
         this.cropTarget = target
-        const useFollowUpSource = target === 'text' && this.followUpCropPageNumber > 0
-        this.cropPageNumber = reflowCropSourcePageNumber(
-          target,
-          this.activeVisibleSourcePageNumber,
-          this.followUpCropPageNumber,
-        )
-        this.cropPageUrl = useFollowUpSource ? this.followUpCropPageUrl : this.activeVisibleSourcePageUrl
+        this.cropPageNumber = this.displayedSourcePageNumber || this.page.number
+        this.cropPageUrl = this.displayedSourcePageUrl || this.page.url
         await this.ensureCropImage()
-        this.clearFollowUpCropSource()
         this.cropMode = true
         this.$emit('crop-mode-change', true)
       } catch (e) {
@@ -5324,7 +5334,6 @@ export default Vue.extend({
       }
     },
     finishCropMode() {
-      this.rememberManualImageCropSource()
       this.cropMode = false
       this.draftRoi = undefined
       this.drawingCrop = false
@@ -5378,7 +5387,6 @@ export default Vue.extend({
         if (this.cropTarget === 'image') {
           this.setCurrentManualImageRoi(roi)
           this.$emit('manual-image-rois-change', this.manualImageRoisPayload())
-          this.rememberManualImageCropSource()
         } else {
           this.setCurrentCropRoi(roi)
         }
@@ -5427,15 +5435,6 @@ export default Vue.extend({
       this.cropPageNumber = 0
       this.cropPageUrl = ''
       this.cropImageSize = {w: 0, h: 0}
-    },
-    rememberManualImageCropSource() {
-      if (this.cropTarget !== 'image' || this.cropPageNumber <= 0 || !this.cropPageUrl) return
-      this.followUpCropPageNumber = this.cropPageNumber
-      this.followUpCropPageUrl = this.cropPageUrl
-    },
-    clearFollowUpCropSource() {
-      this.followUpCropPageNumber = 0
-      this.followUpCropPageUrl = ''
     },
     setCurrentCropRoi(roi: Roi | undefined) {
       const parity = this.selectionPageParity

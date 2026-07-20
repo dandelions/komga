@@ -2,8 +2,8 @@ import {
   contiguousReflowPageCount,
   hasVerticalParagraphBlankTail,
   mergeReflowContinuationItems,
-  reflowCropSourcePageNumber,
   reflowPrefetchPageNumbers,
+  reflowVirtualPageIndexForSource,
   retainedReflowHistoryPageNumbers,
   verticalReflowLineIndent,
   visibleReflowSourcePageNumber,
@@ -75,9 +75,15 @@ describe('reflow stream', () => {
     expect(verticalReflowLineIndent(35, true, 24)).toBe(35)
   })
 
-  test('keeps the image crop source page for the following text crop', () => {
-    expect(reflowCropSourcePageNumber('text', 4, 5)).toBe(5)
-    expect(reflowCropSourcePageNumber('image', 4, 5)).toBe(4)
-    expect(reflowCropSourcePageNumber('text', 4, 0)).toBe(4)
+  test('restores the virtual page containing the displayed source page', () => {
+    const pages = [
+      [{type: 'word', sourcePageNumber: 4}],
+      [{type: 'word', sourcePageNumber: 4}, {type: 'word', sourcePageNumber: 5}],
+      [{type: 'word', sourcePageNumber: 6}],
+    ] as Item[][]
+
+    expect(reflowVirtualPageIndexForSource(pages, 5)).toBe(1)
+    expect(reflowVirtualPageIndexForSource(pages, 6)).toBe(2)
+    expect(reflowVirtualPageIndexForSource(pages, 7)).toBe(-1)
   })
 })
