@@ -3,9 +3,10 @@ name: Build Komga
 on:
   push:
     branches:
-      - master
-    tags:
-      - 'v*'
+      - main  # 触发条件，可以根据需要修改
+  pull_request:
+    branches:
+      - main
 
 jobs:
   build:
