@@ -17,12 +17,13 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v2
+      uses: actions/checkout@v4
 
     - name: Set up JDK
-      uses: actions/setup-java@v2
+      uses: actions/setup-java@v4
       with:
         java-version: '21'  # 根据 Komga 的要求选择合适的 Java 版本
+        distribution: 'temurin'
 
     - name: Build with Gradle
       run: ./gradlew build  # 如果使用的是 Gradle 构建工具
@@ -34,7 +35,7 @@ jobs:
       # 你可以根据需要调整输出路径和文件名
 
     - name: Upload JAR
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v4
       with:
         name: komga-jar
         path: output/*.jar
