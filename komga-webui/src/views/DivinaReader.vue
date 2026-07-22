@@ -280,6 +280,7 @@
           @processing-mode-change="setReflowProcessingMode"
           @column-count-change="setReflowColumnCount"
           @skew-correction-change="setReflowSkewCorrection"
+          @auto-skew-correction-change="setReflowAutoSkewCorrection"
           @vertical-text-change="setReflowVerticalText"
           @vertical-direction-change="setReflowVerticalDirection"
           @stroke-strength-change="setReflowStrokeStrength"
@@ -292,6 +293,7 @@
           @crop-mode-change="setReflowCropMode"
           @crop-rois-change="setReflowCropRois"
           @manual-image-rois-change="setReflowManualImageRois"
+          @deskew-analysis-rois-change="setReflowDeskewAnalysisRois"
           @start-reflow="startReflowMode"
           @force-reflow="forceCurrentReflow"
           @exit-reflow="exitReflowMode"
@@ -953,6 +955,7 @@ function defaultReflowSettings(): any {
     textScale: 40,
     columnCount: 1,
     skewCorrection: 0,
+    autoSkewCorrection: false,
     threshold: 185,
     columnGap: 15,
     wordGap: 3,
@@ -970,6 +973,10 @@ function defaultReflowSettings(): any {
     marginLeft: 0,
     cropRoisByParity: defaultCropRegionsByParity(false),
     manualImageRoisByPage: defaultManualImageRegionsByPage(),
+    deskewAnalysisRoisByParity: {
+      odd: null,
+      even: null,
+    },
     k2Settings: {
       textScale: 80,
       maxColumns: 2,
@@ -1420,6 +1427,8 @@ export default Vue.extend({
         textScale: this.reflowSettings.textScale,
         columnCount: this.reflowSettings.columnCount,
         skewCorrection: this.reflowSettings.skewCorrection,
+        autoSkewCorrection: this.reflowSettings.autoSkewCorrection,
+        deskewAnalysisRoisByParity: this.reflowSettings.deskewAnalysisRoisByParity,
         threshold: this.reflowSettings.threshold,
         columnGap: this.reflowSettings.columnGap,
         wordGap: this.reflowSettings.wordGap,
@@ -2506,6 +2515,7 @@ export default Vue.extend({
         textScale: this.clampReflowNumber(settings.textScale, 10, 140, this.reflowSettings.textScale),
         columnCount: Math.round(this.clampReflowNumber(settings.columnCount, 1, 4, this.reflowSettings.columnCount)),
         skewCorrection: this.normalizedReflowSkewCorrection(settings.skewCorrection),
+        autoSkewCorrection: settings.autoSkewCorrection === true,
         threshold: this.clampReflowNumber(settings.threshold, 50, 230, this.reflowSettings.threshold),
         columnGap: this.clampReflowNumber(settings.columnGap, 5, 80, this.reflowSettings.columnGap),
         wordGap: this.clampReflowNumber(settings.wordGap, 1, 30, this.reflowSettings.wordGap),
@@ -2523,6 +2533,7 @@ export default Vue.extend({
         marginLeft: this.clampReflowNumber(settings.marginLeft, 0, 45, this.reflowSettings.marginLeft),
         cropRoisByParity: this.normalizedReflowCropRois(settings.cropRoisByParity),
         manualImageRoisByPage: this.normalizedReflowManualImageRois(settings.manualImageRoisByPage),
+        deskewAnalysisRoisByParity: this.normalizedReflowDeskewAnalysisRois(settings.deskewAnalysisRoisByParity),
         k2Settings: this.normalizedK2ReflowSettings(settings.k2Settings),
       }
     },
@@ -2605,6 +2616,12 @@ export default Vue.extend({
       return {
         regionCount,
         pages,
+      }
+    },
+    normalizedReflowDeskewAnalysisRois(deskewAnalysisRoisByParity: any): Record<string, object | null> {
+      return {
+        odd: this.normalizedReflowCropRoi(deskewAnalysisRoisByParity?.odd),
+        even: this.normalizedReflowCropRoi(deskewAnalysisRoisByParity?.even),
       }
     },
     normalizedReflowSkewCorrection(value: any): number {
@@ -2800,6 +2817,9 @@ export default Vue.extend({
     setReflowSkewCorrection(skewCorrection: number) {
       this.reflowSettings.skewCorrection = this.normalizedReflowSkewCorrection(skewCorrection)
     },
+    setReflowAutoSkewCorrection(autoSkewCorrection: boolean) {
+      this.reflowSettings.autoSkewCorrection = autoSkewCorrection === true
+    },
     setReflowVerticalText(verticalText: boolean) {
       this.reflowSettings.verticalText = verticalText
     },
@@ -2841,6 +2861,11 @@ export default Vue.extend({
     setReflowManualImageRois(manualImageRoisByPage: Record<string, any>) {
       const normalized = this.normalizedReflowManualImageRois(manualImageRoisByPage)
       this.$set(this.reflowSettings, 'manualImageRoisByPage', normalized)
+      this.clearReflowPrefetch()
+    },
+    setReflowDeskewAnalysisRois(deskewAnalysisRoisByParity: Record<string, any>) {
+      const normalized = this.normalizedReflowDeskewAnalysisRois(deskewAnalysisRoisByParity)
+      this.$set(this.reflowSettings, 'deskewAnalysisRoisByParity', normalized)
       this.clearReflowPrefetch()
     },
     setK2ReflowSettings(settings: Record<string, any>) {

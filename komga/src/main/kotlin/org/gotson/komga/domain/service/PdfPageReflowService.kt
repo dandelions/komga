@@ -4,7 +4,6 @@ import com.fasterxml.jackson.annotation.JsonInclude
 import com.github.benmanes.caffeine.cache.Caffeine
 import jakarta.annotation.PreDestroy
 import org.gotson.komga.domain.model.Book
-import org.gotson.komga.infrastructure.image.ImageType
 import org.springframework.stereotype.Service
 import java.awt.Color
 import java.awt.RenderingHints
@@ -45,6 +44,8 @@ data class PdfPageReflowOptions(
   val textScale: Int,
   val columnCount: Int,
   val skewCorrection: Double,
+  val autoSkewCorrection: Boolean = false,
+  val deskewAnalysisRegion: PdfPageReflowRegion? = null,
   val threshold: Int,
   val columnGap: Int,
   val wordGap: Int,
@@ -155,7 +156,7 @@ private data class PdfPageReflowCacheKey(
 
 @Service
 class PdfPageReflowService(
-  private val bookLifecycle: BookLifecycle,
+  private val pageImageCacheService: PdfPageImageCacheService,
 ) {
   private val reflowThreadNumber = AtomicInteger()
   private val reflowExecutor =
@@ -166,7 +167,7 @@ class PdfPageReflowService(
     Caffeine
       .newBuilder()
       .maximumSize(96)
-      .expireAfterAccess(15, TimeUnit.MINUTES)
+      .expireAfterAccess(3, TimeUnit.HOURS)
       .build<PdfPageReflowCacheKey, PdfPageReflowDto>()
 
   private val inFlightReflows = ConcurrentHashMap<PdfPageReflowCacheKey, CompletableFuture<PdfPageReflowDto>>()
@@ -177,7 +178,9 @@ class PdfPageReflowService(
     options: PdfPageReflowOptions,
     cropRegions: List<PdfPageReflowRegion> = emptyList(),
     manualImageRegions: List<PdfPageReflowRegion> = emptyList(),
+    pageCount: Int? = null,
   ): PdfPageReflowDto {
+    pageCount?.let { pageImageCacheService.prefetchAround(book, pageNumber, it) }
     val key =
       PdfPageReflowCacheKey(
         bookId = book.id,
@@ -239,13 +242,25 @@ class PdfPageReflowService(
 
     processingTimeMs =
       measureTimeMillis {
-        val pageContent = bookLifecycle.getBookPage(book, pageNumber, ImageType.PNG)
+        val pageContent = pageImageCacheService.getOriginalPage(book, pageNumber)
         val image =
           ImageIO.read(ByteArrayInputStream(pageContent.bytes))
             ?: error("Unable to decode rendered PDF page")
         val rotatedImage = rotatedImage(image, options.rotation)
         val pageBackground = detectPageBackground(rotatedImage)
-        val preparedPage = skewCorrectedImage(rotatedImage, options.skewCorrection, Color.WHITE)
+        val detectedSkewCorrection =
+          if (options.autoSkewCorrection) {
+            PdfAutoDeskew.detectAngle(
+              image = rotatedImage,
+              threshold = options.threshold,
+              verticalText = options.verticalText,
+              analysisRegion = options.deskewAnalysisRegion?.toAutoDeskewRegion(rotatedImage.width, rotatedImage.height),
+            )
+          } else {
+            0.0
+          }
+        val effectiveSkewCorrection = (detectedSkewCorrection + options.skewCorrection).coerceIn(-10.0, 10.0)
+        val preparedPage = skewCorrectedImage(rotatedImage, effectiveSkewCorrection, Color.WHITE)
         val pageManualImageRegions = manualImageRegions.mapNotNull { it.toRoi(preparedPage.width, preparedPage.height) }
         val regionImages =
           cropRegions
@@ -362,6 +377,11 @@ class PdfPageReflowService(
     val bottom = clamp(this.y + h, y + 1, height)
     return Roi(x, y, right - x, bottom - y)
   }
+
+  private fun PdfPageReflowRegion.toAutoDeskewRegion(
+    width: Int,
+    height: Int,
+  ): PdfAutoDeskewRegion? = toRoi(width, height)?.let { PdfAutoDeskewRegion(it.x, it.y, it.w, it.h) }
 
   private fun skewCorrectedImage(
     image: BufferedImage,

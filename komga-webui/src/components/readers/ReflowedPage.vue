@@ -215,6 +215,26 @@
             <button type="button" class="reflow-step-control" @click="adjustSkewCorrection(0.5)">+</button>
             <span class="reflow-font-value">{{ controlSkewCorrectionLabel }}</span>
           </label>
+          <label class="reflow-column-control reflow-checkbox-control">
+            <span>自动纠斜</span>
+            <input type="checkbox" :checked="controlAutoSkewCorrection" @change="setAutoSkewCorrection"/>
+          </label>
+          <button
+            type="button"
+            class="reflow-control"
+            :disabled="!controlAutoSkewCorrection"
+            @click="toggleDeskewAnalysisRegionMode"
+          >
+            {{ deskewAnalysisAreaLabel }}
+          </button>
+          <button
+            type="button"
+            class="reflow-control"
+            :disabled="!deskewAnalysisRoi && !(cropMode && cropTarget === 'deskew')"
+            @click="resetDeskewAnalysisRegion"
+          >
+            重置{{ pageParityShortLabel }}纠斜区
+          </button>
           <div class="reflow-region-controls">
             <label class="reflow-region-count-control">
               <span>区域数</span>
@@ -331,6 +351,7 @@
           />
           <button type="button" class="reflow-step-control" @click="adjustCropSkewCorrection(0.5)">+</button>
           <span class="reflow-font-value">{{ controlSkewCorrectionLabel }}</span>
+          <span v-if="controlAutoSkewCorrection" class="crop-auto-skew-label">自动 {{ detectedAutoSkewCorrectionLabel }}</span>
         </label>
       </div>
       <div v-if="cropWarning" class="crop-warning">{{ cropWarning }}</div>
@@ -458,6 +479,7 @@
 import Vue from 'vue'
 import {PageDtoWithUrl} from '@/types/komga-books'
 import {enhanceTextContrast} from '@/functions/image-enhancement'
+import {detectAutoDeskewAngle} from '@/functions/auto-deskew'
 import {mergeVerticalColumnBands} from '@/functions/vertical-reflow'
 import {
   contiguousReflowPageCount,
@@ -475,6 +497,7 @@ type ReflowOptions = {
   textScale: number,
   columnCount: number,
   skewCorrection: number,
+  autoSkewCorrection: boolean,
   threshold: number,
   columnGap: number,
   wordGap: number,
@@ -500,6 +523,7 @@ type ReflowOptions = {
     regionCount?: number,
     pages?: Record<string, Array<Roi | null | undefined>>,
   },
+  deskewAnalysisRoisByParity?: Partial<Record<PageParity, Roi | null | undefined>>,
 }
 
 type Roi = {
@@ -513,7 +537,7 @@ type PageParity = 'odd' | 'even'
 type MatchBackgroundMode = 'monochrome' | 'grayscale'
 type VerticalDirection = 'ltr' | 'rtl'
 type CropRegionIndex = number
-type CropTarget = 'text' | 'image'
+type CropTarget = 'text' | 'image' | 'deskew'
 
 type Column = {
   start: number,
@@ -628,6 +652,7 @@ type ReflowOptionsSnapshot = {
   textScale: number,
   columnCount: number,
   skewCorrection: number,
+  autoSkewCorrection: boolean,
   verticalText: boolean,
   verticalDirection: VerticalDirection,
   strokeStrength: number,
@@ -638,6 +663,7 @@ type ReflowOptionsSnapshot = {
   blockSpacing: number,
   cropRoisKey: string,
   manualImageRoisKey: string,
+  deskewAnalysisRoisKey: string,
 }
 
 const THRESHOLD = 185
@@ -744,6 +770,7 @@ export default Vue.extend({
       cropObjectUrl: '',
       cropObjectUrlSkewCorrection: 0,
       cropObjectUrlSource: '',
+      cropObjectUrlPreparationKey: '',
       cropPageNumber: 0,
       cropPageUrl: '',
       displayedSourcePageNumber: 0,
@@ -776,9 +803,15 @@ export default Vue.extend({
         even: Array(MAX_CROP_REGIONS).fill(false),
       } as Record<PageParity, boolean[]>,
       manualImageRoisByPage: {} as Record<string, Array<Roi | undefined>>,
+      deskewAnalysisRoisByParity: {
+        odd: undefined,
+        even: undefined,
+      } as Record<PageParity, Roi | undefined>,
       draftRoi: undefined as Roi | undefined,
       pendingColumnCount: 1,
       pendingSkewCorrection: 0,
+      pendingAutoSkewCorrection: false,
+      detectedAutoSkewCorrection: 0,
       pendingVerticalText: false,
       pendingVerticalDirection: 'rtl' as VerticalDirection,
       pendingStrokeStrength: 0.1,
@@ -853,6 +886,16 @@ export default Vue.extend({
     controlSkewCorrectionLabel(): string {
       const prefix = this.controlSkewCorrection > 0 ? '+' : ''
       return `${prefix}${this.controlSkewCorrection.toFixed(1)}°`
+    },
+    autoSkewCorrection(): boolean {
+      return this.options.autoSkewCorrection === true
+    },
+    controlAutoSkewCorrection(): boolean {
+      return this.pendingAutoSkewCorrection === true
+    },
+    detectedAutoSkewCorrectionLabel(): string {
+      const prefix = this.detectedAutoSkewCorrection > 0 ? '+' : ''
+      return `${prefix}${this.detectedAutoSkewCorrection.toFixed(1)}°`
     },
     controlVerticalText(): boolean {
       return this.pendingVerticalText === true
@@ -960,7 +1003,11 @@ export default Vue.extend({
     manualImageAreaLabel(): string {
       return this.cropMode && this.cropTarget === 'image' ? '完成' : `截取图片区域${this.activeManualImageRegion + 1}`
     },
+    deskewAnalysisAreaLabel(): string {
+      return this.cropMode && this.cropTarget === 'deskew' ? '完成' : `设置${this.pageParityShortLabel}纠斜文字区`
+    },
     cropToolbarLabel(): string {
+      if (this.cropTarget === 'deskew') return `拖拽选择${this.pageParityShortLabel}纠斜文字分析区`
       return this.cropTarget === 'image'
         ? `拖拽选择图片区域${this.activeManualImageRegion + 1}`
         : `拖拽选择${this.pageParityShortLabel}区域${this.activeCropRegion + 1}`
@@ -985,6 +1032,9 @@ export default Vue.extend({
     manualImageRoi(): Roi | undefined {
       return this.manualImageRoisByPage[this.selectionManualImagePageKey]?.[this.activeManualImageRegion]
     },
+    deskewAnalysisRoi(): Roi | undefined {
+      return this.deskewAnalysisRoisByParity[this.selectionPageParity]
+    },
     cropImageUrl(): string {
       if (
         this.cropMode &&
@@ -1003,10 +1053,18 @@ export default Vue.extend({
       return `源页 ${this.formatBytes(this.transferStats.originalImageBytes)} / 交互 ${this.formatBytes(this.transferStats.transferBytes)}${encodedImages}${processing}`
     },
     activeRoi(): Roi | undefined {
-      return this.draftRoi || (this.cropTarget === 'image' ? this.manualImageRoi : this.cropRoi)
+      if (this.draftRoi) return this.draftRoi
+      if (this.cropTarget === 'image') return this.manualImageRoi
+      if (this.cropTarget === 'deskew') return this.deskewAnalysisRoi
+      return this.cropRoi
     },
     cropRects(): CropRect[] {
       if (!this.cropDisplayImageSize.w || !this.cropDisplayImageSize.h) return []
+      if (this.cropTarget === 'deskew') {
+        return this.activeRoi
+          ? [{key: `deskew-${this.selectionPageParity}`, active: true, style: this.cropRectStyle(this.activeRoi)}]
+          : []
+      }
       if (this.cropTarget === 'image') {
         const rois = Array.from(
           {length: this.manualImageRegionCount},
@@ -1164,6 +1222,7 @@ export default Vue.extend({
       const previous = this.optionsSnapshot
       if (force || !previous || snapshot.columnCount !== previous.columnCount) this.pendingColumnCount = snapshot.columnCount
       if (force || !previous || snapshot.skewCorrection !== previous.skewCorrection) this.pendingSkewCorrection = snapshot.skewCorrection
+      if (force || !previous || snapshot.autoSkewCorrection !== previous.autoSkewCorrection) this.pendingAutoSkewCorrection = snapshot.autoSkewCorrection
       if (force || !previous || snapshot.verticalText !== previous.verticalText) this.pendingVerticalText = snapshot.verticalText
       if (force || !previous || snapshot.verticalDirection !== previous.verticalDirection) this.pendingVerticalDirection = snapshot.verticalDirection
       if (force || !previous || snapshot.strokeStrength !== previous.strokeStrength) this.pendingStrokeStrength = snapshot.strokeStrength
@@ -1174,6 +1233,7 @@ export default Vue.extend({
       if (force || !previous || snapshot.blockSpacing !== previous.blockSpacing) this.pendingBlockSpacing = snapshot.blockSpacing
       if (force || !previous || snapshot.cropRoisKey !== previous.cropRoisKey) this.syncCropRoisFromOptions()
       if (force || !previous || snapshot.manualImageRoisKey !== previous.manualImageRoisKey) this.syncManualImageRoisFromOptions()
+      if (force || !previous || snapshot.deskewAnalysisRoisKey !== previous.deskewAnalysisRoisKey) this.syncDeskewAnalysisRoisFromOptions()
       this.optionsSnapshot = snapshot
     },
     optionsSnapshotFromProps(): ReflowOptionsSnapshot {
@@ -1181,6 +1241,7 @@ export default Vue.extend({
         textScale: this.clampNumber(this.options.textScale, 10, 140, WORD_SCALE * 100),
         columnCount: Math.round(this.clampNumber(this.options.columnCount, 1, 4, 1)),
         skewCorrection: this.normalizedSkewCorrection(this.options.skewCorrection),
+        autoSkewCorrection: this.options.autoSkewCorrection === true,
         verticalText: this.options.verticalText === true,
         verticalDirection: this.options.verticalDirection === 'ltr' ? 'ltr' : 'rtl',
         strokeStrength: this.roundStrokeStrength(this.options.strokeStrength),
@@ -1191,6 +1252,7 @@ export default Vue.extend({
         blockSpacing: this.clampNumber(this.options.blockSpacing, 0, 24, 6),
         cropRoisKey: JSON.stringify(this.options.cropRoisByParity || {}),
         manualImageRoisKey: JSON.stringify(this.options.manualImageRoisByPage || {}),
+        deskewAnalysisRoisKey: JSON.stringify(this.options.deskewAnalysisRoisByParity || {}),
       }
     },
     async reflow() {
@@ -1258,8 +1320,12 @@ export default Vue.extend({
         if (!context) throw new Error('Canvas is unavailable')
         context.drawImage(image, 0, 0)
         this.pageBackground = this.detectPageBackground(context, canvas.width, canvas.height)
+        const autoSkewCorrection = this.autoSkewCorrection
+          ? this.detectCanvasAutoSkew(context, canvas.width, canvas.height, this.currentDeskewAnalysisRoi())
+          : 0
+        this.detectedAutoSkewCorrection = autoSkewCorrection
         this.enhanceSourceCanvas(context, canvas.width, canvas.height)
-        const skewCorrection = this.skewCorrection
+        const skewCorrection = this.effectiveSkewCorrection(autoSkewCorrection, this.skewCorrection)
         const deskewedCanvas = skewCorrection === 0 ? canvas : this.skewCorrectedCanvas(canvas, skewCorrection)
         const cropRois = this.reflowCropRois()
         const regionItems = [] as ReflowItem[][]
@@ -1332,6 +1398,7 @@ export default Vue.extend({
       params.set('textScale', String(this.textScalePercent))
       params.set('columnCount', String(this.columnCount))
       params.set('skewCorrection', String(this.skewCorrection))
+      params.set('autoSkewCorrection', String(this.autoSkewCorrection))
       params.set('threshold', String(this.clampNumber(this.options.threshold, 50, 230, THRESHOLD)))
       params.set('columnGap', String(this.clampNumber(this.options.columnGap, 5, 80, COLUMN_GAP)))
       params.set('wordGap', String(this.clampNumber(this.options.wordGap, 1, 30, WORD_GAP)))
@@ -1348,6 +1415,10 @@ export default Vue.extend({
       params.set('marginBottom', String(this.clampPercent(this.options.marginBottom)))
       params.set('marginLeft', String(this.clampPercent(this.options.marginLeft)))
       params.set('darkDisplay', String(this.darkDisplay))
+      const deskewAnalysisRoi = this.currentDeskewAnalysisRoi()
+      if (deskewAnalysisRoi) {
+        params.set('deskewAnalysisRegion', `${Math.round(deskewAnalysisRoi.x)},${Math.round(deskewAnalysisRoi.y)},${Math.round(deskewAnalysisRoi.w)},${Math.round(deskewAnalysisRoi.h)}`)
+      }
       this.reflowCropRois()
         .filter((roi): roi is Roi => !!roi)
         .forEach(roi => params.append('cropRegion', `${Math.round(roi.x)},${Math.round(roi.y)},${Math.round(roi.w)},${Math.round(roi.h)}`))
@@ -1719,6 +1790,8 @@ export default Vue.extend({
         autoCropBorder: this.options.autoCropBorder,
         columnCount: this.options.columnCount,
         skewCorrection: this.skewCorrection,
+        autoSkewCorrection: this.autoSkewCorrection,
+        deskewAnalysisRoi: this.currentDeskewAnalysisRoi(),
         threshold: this.options.threshold,
         columnGap: this.options.columnGap,
         wordGap: this.options.wordGap,
@@ -1771,8 +1844,12 @@ export default Vue.extend({
     async ensureCropImage(skewCorrection: number = this.controlSkewCorrection) {
       const normalizedSkewCorrection = this.normalizedSkewCorrection(skewCorrection)
       const pageUrl = this.cropPageUrl || this.displayedSourcePageUrl || this.page.url
+      const pageNumber = this.cropPageNumber || this.displayedSourcePageNumber || this.page.number
+      const pageParity: PageParity = pageNumber % 2 === 0 ? 'even' : 'odd'
+      const preparationKey = this.cropImagePreparationKey(normalizedSkewCorrection, pageParity)
       if (this.cropMode && this.cropPageUrl && !this.cropImageNeedsPreparation(normalizedSkewCorrection)) {
         this.revokeCropObjectUrl(false)
+        this.detectedAutoSkewCorrection = 0
         this.loading = false
         return
       }
@@ -1781,20 +1858,21 @@ export default Vue.extend({
       this.cropImageRequestId = cropImageRequestId
       if (this.objectUrl && this.objectUrlSource === sourceKey && this.imageSize.w && this.imageSize.h) {
         this.cropImageSize = {...this.imageSize}
-        if (!normalizedSkewCorrection) {
+        if (!this.cropImageNeedsPreparation(normalizedSkewCorrection)) {
           this.revokeCropObjectUrl()
+          this.detectedAutoSkewCorrection = 0
           return
         }
         if (
           this.cropObjectUrl &&
           this.cropObjectUrlSource === sourceKey &&
-          this.cropObjectUrlSkewCorrection === normalizedSkewCorrection
+          this.cropObjectUrlPreparationKey === preparationKey
         ) return
         this.loading = true
         try {
           const image = await this.decodeImageUrl(this.objectUrl)
           if (cropImageRequestId !== this.cropImageRequestId) return
-          await this.prepareCropObjectUrl(image, normalizedSkewCorrection, cropImageRequestId, sourceKey)
+          await this.prepareCropObjectUrl(image, normalizedSkewCorrection, cropImageRequestId, sourceKey, false, pageParity, preparationKey)
         } finally {
           if (cropImageRequestId === this.cropImageRequestId) this.loading = false
         }
@@ -1803,7 +1881,7 @@ export default Vue.extend({
       if (
         this.cropObjectUrl &&
         this.cropObjectUrlSource === sourceKey &&
-        this.cropObjectUrlSkewCorrection === normalizedSkewCorrection &&
+        this.cropObjectUrlPreparationKey === preparationKey &&
         this.cropImageSize.w &&
         this.cropImageSize.h
       ) return
@@ -1819,6 +1897,8 @@ export default Vue.extend({
           cropImageRequestId,
           sourceKey,
           pageUrl !== this.page.url,
+          pageParity,
+          preparationKey,
         )
       } finally {
         if (cropImageRequestId === this.cropImageRequestId) this.loading = false
@@ -1883,7 +1963,18 @@ export default Vue.extend({
       return `${this.pageImageUrl(url)}#rotation=${this.normalizedRotation(this.rotation)}`
     },
     cropImageNeedsPreparation(skewCorrection: number): boolean {
-      return this.normalizedRotation(this.rotation) !== 0 || this.normalizedSkewCorrection(skewCorrection) !== 0
+      return this.normalizedRotation(this.rotation) !== 0 ||
+        this.normalizedSkewCorrection(skewCorrection) !== 0 ||
+        this.controlAutoSkewCorrection
+    },
+    cropImagePreparationKey(skewCorrection: number, parity: PageParity = this.selectionPageParity): string {
+      return JSON.stringify({
+        skewCorrection: this.normalizedSkewCorrection(skewCorrection),
+        autoSkewCorrection: this.controlAutoSkewCorrection,
+        analysisRoi: this.currentDeskewAnalysisRoi(parity),
+        threshold: this.clampNumber(this.options.threshold, 50, 230, THRESHOLD),
+        verticalText: this.controlVerticalText,
+      })
     },
     cropImageLoaded(event: Event) {
       if (!this.cropMode) return
@@ -2143,8 +2234,10 @@ export default Vue.extend({
       cropImageRequestId: number = this.cropImageRequestId,
       sourceKey: string = this.pageImageSourceKey(this.page.url),
       forceObjectUrl: boolean = false,
+      pageParity: PageParity = this.selectionPageParity,
+      preparationKey: string = this.cropImagePreparationKey(skewCorrection, pageParity),
     ) {
-      if (!skewCorrection && !forceObjectUrl) return
+      if (!this.cropImageNeedsPreparation(skewCorrection) && !forceObjectUrl) return
 
       const canvas = document.createElement('canvas')
       canvas.width = image.naturalWidth
@@ -2152,13 +2245,26 @@ export default Vue.extend({
       const context = this.canvasContext(canvas)
       if (!context) return
       context.drawImage(image, 0, 0)
-      const correctedCanvas = skewCorrection ? this.skewCorrectedCanvas(canvas, skewCorrection) : canvas
+      this.pageBackground = this.detectPageBackground(context, canvas.width, canvas.height)
+      const autoSkewCorrection = this.controlAutoSkewCorrection
+        ? this.detectCanvasAutoSkew(
+          context,
+          canvas.width,
+          canvas.height,
+          this.currentDeskewAnalysisRoi(pageParity),
+          this.controlVerticalText,
+        )
+        : 0
+      this.detectedAutoSkewCorrection = autoSkewCorrection
+      const effectiveSkewCorrection = this.effectiveSkewCorrection(autoSkewCorrection, skewCorrection)
+      const correctedCanvas = effectiveSkewCorrection ? this.skewCorrectedCanvas(canvas, effectiveSkewCorrection) : canvas
       const url = await this.canvasObjectUrl(correctedCanvas)
       if (cropImageRequestId === this.cropImageRequestId) {
         const previousUrl = this.cropObjectUrl
         this.cropObjectUrl = url
-        this.cropObjectUrlSkewCorrection = skewCorrection
+        this.cropObjectUrlSkewCorrection = effectiveSkewCorrection
         this.cropObjectUrlSource = sourceKey
+        this.cropObjectUrlPreparationKey = preparationKey
         if (previousUrl && previousUrl !== url) URL.revokeObjectURL(previousUrl)
       } else {
         URL.revokeObjectURL(url)
@@ -2235,6 +2341,30 @@ export default Vue.extend({
       context.drawImage(sourceCanvas, -sourceCanvas.width / 2, -sourceCanvas.height / 2)
       return correctedCanvas
     },
+    detectCanvasAutoSkew(
+      context: CanvasRenderingContext2D,
+      width: number,
+      height: number,
+      analysisRoi?: Roi,
+      verticalText: boolean = this.verticalText,
+    ): number {
+      try {
+        const imageData = context.getImageData(0, 0, width, height)
+        return detectAutoDeskewAngle(
+          imageData.data,
+          width,
+          height,
+          this.clampNumber(this.options.threshold, 50, 230, THRESHOLD),
+          verticalText,
+          analysisRoi,
+        )
+      } catch (_) {
+        return 0
+      }
+    },
+    effectiveSkewCorrection(autoCorrection: number, manualCorrection: number): number {
+      return Math.round(this.clampNumber(autoCorrection + manualCorrection, -10, 10, 0) * 10) / 10
+    },
     rotatedImageCanvas(image: HTMLImageElement, degrees: number): HTMLCanvasElement {
       const rotation = this.normalizedRotation(degrees)
       const quarterTurn = Math.abs(rotation) === 90
@@ -2274,6 +2404,7 @@ export default Vue.extend({
       this.cropObjectUrl = ''
       this.cropObjectUrlSkewCorrection = 0
       this.cropObjectUrlSource = ''
+      this.cropObjectUrlPreparationKey = ''
     },
     detectWordLines(imageData: ImageData, width: number, height: number, cropRoi?: Roi): DetectedReflowContent {
       const pixels = imageData.data
@@ -3666,6 +3797,11 @@ export default Vue.extend({
       })
       this.manualImageRoisByPage = normalized
     },
+    syncDeskewAnalysisRoisFromOptions() {
+      const value = this.options.deskewAnalysisRoisByParity || {}
+      this.$set(this.deskewAnalysisRoisByParity, 'odd', this.normalizedStoredRoi(value.odd))
+      this.$set(this.deskewAnalysisRoisByParity, 'even', this.normalizedStoredRoi(value.even))
+    },
     normalizedCropRegionCount(value: any): number {
       const numberValue = Number(value)
       if (!Number.isFinite(numberValue)) return 2
@@ -3753,6 +3889,15 @@ export default Vue.extend({
         regionCount: this.manualImageRegionCount,
         pages,
       }
+    },
+    deskewAnalysisRoisPayload(): Record<PageParity, Roi | null> {
+      return {
+        odd: this.deskewAnalysisRoisByParity.odd ? {...this.deskewAnalysisRoisByParity.odd} : null,
+        even: this.deskewAnalysisRoisByParity.even ? {...this.deskewAnalysisRoisByParity.even} : null,
+      }
+    },
+    currentDeskewAnalysisRoi(parity: PageParity = this.pageParity): Roi | undefined {
+      return this.deskewAnalysisRoisByParity[parity]
     },
     effectiveManualImageRoi(region: CropRegionIndex): Roi | undefined {
       return this.manualImageRoisByPage[this.manualImagePageKey]?.[region]
@@ -5289,6 +5434,11 @@ export default Vue.extend({
     adjustSkewCorrection(delta: number) {
       this.pendingSkewCorrection = this.normalizedSkewCorrection(this.controlSkewCorrection + delta)
     },
+    setAutoSkewCorrection(event: Event) {
+      const target = event.target as HTMLInputElement
+      this.pendingAutoSkewCorrection = target.checked
+      if (this.cropMode || this.deferReflow) this.ensureCropImage(this.controlSkewCorrection)
+    },
     setCropSkewCorrection(event: Event) {
       const target = event.target as HTMLInputElement
       this.updateCropSkewCorrection(Number(target.value))
@@ -5342,6 +5492,7 @@ export default Vue.extend({
     applyReflowSettings() {
       this.$emit('column-count-change', this.controlColumnCount)
       this.$emit('skew-correction-change', this.controlSkewCorrection)
+      this.$emit('auto-skew-correction-change', this.controlAutoSkewCorrection)
       this.$emit('vertical-text-change', this.controlVerticalText)
       this.$emit('vertical-direction-change', this.controlVerticalDirection)
       this.$emit('stroke-strength-change', this.controlStrokeStrength)
@@ -5352,6 +5503,7 @@ export default Vue.extend({
       this.$emit('block-spacing-change', this.controlBlockSpacing)
       this.$emit('crop-rois-change', this.cropRoisPayload())
       this.$emit('manual-image-rois-change', this.manualImageRoisPayload())
+      this.$emit('deskew-analysis-rois-change', this.deskewAnalysisRoisPayload())
       if (this.deferReflow) {
         this.$emit('start-reflow')
         return
@@ -5417,6 +5569,9 @@ export default Vue.extend({
     async toggleManualImageRegionMode() {
       await this.toggleCropModeForTarget('image')
     },
+    async toggleDeskewAnalysisRegionMode() {
+      await this.toggleCropModeForTarget('deskew')
+    },
     async toggleCropModeForTarget(target: CropTarget) {
       this.controlsCollapsed = true
       this.draftRoi = undefined
@@ -5450,6 +5605,8 @@ export default Vue.extend({
       if (this.draftRoi && this.draftRoi.w > MIN_CROP_SIZE && this.draftRoi.h > MIN_CROP_SIZE) {
         if (this.cropTarget === 'image') {
           this.setCurrentManualImageRoi(this.draftRoi)
+        } else if (this.cropTarget === 'deskew') {
+          this.setCurrentDeskewAnalysisRoi(this.draftRoi)
         } else {
           this.setCurrentCropRoi(this.draftRoi)
         }
@@ -5476,6 +5633,17 @@ export default Vue.extend({
       this.controlsCollapsed = true
       this.cropTarget = 'image'
       this.setCurrentManualImageRoi(undefined)
+      this.draftRoi = undefined
+      this.drawingCrop = false
+      this.cropWarning = ''
+      this.cropMode = false
+      this.clearCropSource()
+      this.$emit('crop-mode-change', false)
+    },
+    resetDeskewAnalysisRegion() {
+      this.controlsCollapsed = true
+      this.cropTarget = 'deskew'
+      this.setCurrentDeskewAnalysisRoi(undefined)
       this.draftRoi = undefined
       this.drawingCrop = false
       this.cropWarning = ''
@@ -5600,6 +5768,9 @@ export default Vue.extend({
       const pageRegions = (this.manualImageRoisByPage[pageKey] || Array(MAX_CROP_REGIONS).fill(undefined)).slice()
       pageRegions[this.activeManualImageRegion] = roi
       this.$set(this.manualImageRoisByPage, pageKey, pageRegions)
+    },
+    setCurrentDeskewAnalysisRoi(roi: Roi | undefined) {
+      this.$set(this.deskewAnalysisRoisByParity, this.selectionPageParity, roi)
     },
   },
 })

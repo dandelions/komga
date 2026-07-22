@@ -22,6 +22,7 @@ import org.gotson.komga.domain.persistence.ReadProgressRepository
 import org.gotson.komga.domain.persistence.SeriesMetadataRepository
 import org.gotson.komga.domain.service.BookAnalyzer
 import org.gotson.komga.domain.service.BookLifecycle
+import org.gotson.komga.domain.service.PdfPageImageCacheService
 import org.gotson.komga.infrastructure.image.ImageType
 import org.gotson.komga.infrastructure.mediacontainer.ContentDetector
 import org.gotson.komga.infrastructure.openapi.OpenApiConfiguration
@@ -65,6 +66,7 @@ class CommonBookController(
   private val bookDtoRepository: BookDtoRepository,
   private val seriesMetadataRepository: SeriesMetadataRepository,
   private val bookLifecycle: BookLifecycle,
+  private val pdfPageImageCacheService: PdfPageImageCacheService,
   private val bookAnalyzer: BookAnalyzer,
   private val contentRestrictionChecker: ContentRestrictionChecker,
   private val contentDetector: ContentDetector,
@@ -137,6 +139,7 @@ class CommonBookController(
     request: ServletWebRequest,
     principal: KomgaPrincipal,
     acceptHeaders: MutableList<MediaType>?,
+    usePdfPageCache: Boolean = false,
   ) = bookRepository.findByIdOrNull((bookId))?.let { book ->
     val media = mediaRepository.findById(bookId)
     if (request.checkNotModified(getBookLastModified(media))) {
@@ -165,7 +168,12 @@ class CommonBookController(
           else -> throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid conversion format: $convertTo")
         }
 
-      val pageContent = bookLifecycle.getBookPage(book, pageNumber, convertFormat)
+      val pageContent =
+        if (usePdfPageCache && media.profile == MediaProfile.PDF && convertFormat == null) {
+          pdfPageImageCacheService.getOriginalPageAndPrefetch(book, pageNumber, media.pageCount)
+        } else {
+          bookLifecycle.getBookPage(book, pageNumber, convertFormat)
+        }
 
       ResponseEntity
         .ok()

@@ -520,7 +520,16 @@ class BookController(
     acceptHeaders: MutableList<MediaType>?,
     @RequestParam(value = "contentNegotiation", defaultValue = "true")
     contentNegotiation: Boolean,
-  ): ResponseEntity<ByteArray> = commonBookController.getBookPageInternal(bookId, if (zeroBasedIndex) pageNumber + 1 else pageNumber, convertTo, request, principal, if (contentNegotiation) acceptHeaders else null)
+  ): ResponseEntity<ByteArray> =
+    commonBookController.getBookPageInternal(
+      bookId,
+      if (zeroBasedIndex) pageNumber + 1 else pageNumber,
+      convertTo,
+      request,
+      principal,
+      if (contentNegotiation) acceptHeaders else null,
+      usePdfPageCache = !contentNegotiation && convertTo == null,
+    )
 
   @Operation(summary = "Get server reflowed PDF page", tags = [OpenApiConfiguration.TagNames.BOOK_PAGES])
   @GetMapping(
@@ -546,6 +555,10 @@ class BookController(
     columnCount: Int,
     @RequestParam(value = "skewCorrection", defaultValue = "0")
     skewCorrection: Double,
+    @RequestParam(value = "autoSkewCorrection", defaultValue = "false")
+    autoSkewCorrection: Boolean,
+    @RequestParam(value = "deskewAnalysisRegion", required = false)
+    deskewAnalysisRegion: String?,
     @RequestParam(value = "threshold", defaultValue = "185")
     threshold: Int,
     @RequestParam(value = "columnGap", defaultValue = "15")
@@ -597,6 +610,8 @@ class BookController(
             textScale = textScale,
             columnCount = columnCount,
             skewCorrection = skewCorrection,
+            autoSkewCorrection = autoSkewCorrection,
+            deskewAnalysisRegion = parsePdfReflowRegions(deskewAnalysisRegion?.let(::listOf)).firstOrNull(),
             threshold = threshold,
             columnGap = columnGap,
             wordGap = wordGap,
@@ -624,6 +639,7 @@ class BookController(
             options,
             cropRegions = parsedCropRegions,
             manualImageRegions = parsedManualImageRegions,
+            pageCount = media.pageCount,
           )
         val body = serverReflowResponseBytes(response)
 
@@ -682,6 +698,10 @@ class BookController(
     columnCount: Int,
     @RequestParam(value = "skewCorrection", defaultValue = "0")
     skewCorrection: Double,
+    @RequestParam(value = "autoSkewCorrection", defaultValue = "false")
+    autoSkewCorrection: Boolean,
+    @RequestParam(value = "deskewAnalysisRegion", required = false)
+    deskewAnalysisRegion: String?,
     @RequestParam(value = "threshold", defaultValue = "185")
     threshold: Int,
     @RequestParam(value = "columnGap", defaultValue = "15")
@@ -735,6 +755,8 @@ class BookController(
                 textScale = textScale,
                 columnCount = columnCount,
                 skewCorrection = skewCorrection,
+                autoSkewCorrection = autoSkewCorrection,
+                deskewAnalysisRegion = parsePdfReflowRegions(deskewAnalysisRegion?.let(::listOf)).firstOrNull(),
                 threshold = threshold,
                 columnGap = columnGap,
                 wordGap = wordGap,

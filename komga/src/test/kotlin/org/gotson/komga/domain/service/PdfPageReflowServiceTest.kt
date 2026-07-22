@@ -6,24 +6,28 @@ import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.gotson.komga.domain.model.TypedBytes
 import org.gotson.komga.domain.model.makeBook
-import org.gotson.komga.infrastructure.image.ImageType
 import org.junit.jupiter.api.Test
 import java.awt.Color
+import java.awt.RenderingHints
+import java.awt.geom.AffineTransform
 import java.awt.image.BufferedImage
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.util.Base64
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import javax.imageio.ImageIO
 
 class PdfPageReflowServiceTest {
   private val bookLifecycle = mockk<BookLifecycle>()
-  private val pdfPageReflowService = PdfPageReflowService(bookLifecycle)
+  private val pageImageCacheService = PdfPageImageCacheService(bookLifecycle)
+  private val pdfPageReflowService = PdfPageReflowService(pageImageCacheService)
 
   @Test
   fun `given horizontal short glyphs when reflowing page then word blocks preserve line height`() {
     val pageBytes = horizontalShortGlyphPage()
     val book = makeBook("book")
-    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
 
     val response =
       pdfPageReflowService.reflowPage(
@@ -48,7 +52,7 @@ class PdfPageReflowServiceTest {
   fun `given match background when reflowing page then word pixels remain visible`() {
     val pageBytes = horizontalShortGlyphPage()
     val book = makeBook("book")
-    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
 
     val response =
       pdfPageReflowService.reflowPage(
@@ -65,7 +69,7 @@ class PdfPageReflowServiceTest {
   fun `given high resolution horizontal glyph split by internal blank when reflowing page then fragments are merged`() {
     val pageBytes = highResolutionHorizontalFragmentGlyphPage()
     val book = makeBook("book")
-    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
 
     val response =
       pdfPageReflowService.reflowPage(
@@ -82,7 +86,7 @@ class PdfPageReflowServiceTest {
   fun `given horizontal code block with left guide when reflowing page then guide does not merge rows`() {
     val pageBytes = horizontalCodeBlockWithLeftGuidePage()
     val book = makeBook("book")
-    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
 
     val response =
       pdfPageReflowService.reflowPage(
@@ -102,7 +106,7 @@ class PdfPageReflowServiceTest {
   fun `given high resolution vertical glyph split by internal blank when reflowing page then fragments are merged`() {
     val pageBytes = highResolutionVerticalFragmentGlyphPage()
     val book = makeBook("book")
-    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
 
     val response =
       pdfPageReflowService.reflowPage(
@@ -119,7 +123,7 @@ class PdfPageReflowServiceTest {
   fun `given same page and options when reflowing from cache then page is rendered once`() {
     val pageBytes = horizontalShortGlyphPage()
     val book = makeBook("book")
-    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
 
     val first =
       pdfPageReflowService.reflowPageCached(
@@ -137,14 +141,38 @@ class PdfPageReflowServiceTest {
       )
 
     assertThat(second.items).isEqualTo(first.items)
-    verify(exactly = 1) { bookLifecycle.getBookPage(book, 1, ImageType.PNG) }
+    verify(exactly = 1) { bookLifecycle.getBookPage(book, 1) }
+  }
+
+  @Test
+  fun `given current PDF page when server reflow starts then original pages five before and after are cached`() {
+    val pageBytes = horizontalShortGlyphPage()
+    val book = makeBook("book")
+    val loadedPages = CountDownLatch(11)
+    every { bookLifecycle.getBookPage(book, any()) } answers {
+      loadedPages.countDown()
+      TypedBytes(pageBytes, "image/jpeg")
+    }
+
+    pdfPageReflowService.reflowPageCached(
+      book = book,
+      pageNumber = 6,
+      options = defaultOptions(),
+      cropRegions = listOf(PdfPageReflowRegion(x = 40, y = 30, w = 120, h = 70)),
+      pageCount = 11,
+    )
+
+    assertThat(loadedPages.await(5, TimeUnit.SECONDS)).isTrue()
+    (1..11).forEach { pageNumber ->
+      verify(exactly = 1) { bookLifecycle.getBookPage(book, pageNumber) }
+    }
   }
 
   @Test
   fun `given stronger stroke when reflowing page then returned word image is bolder`() {
     val pageBytes = horizontalShortGlyphPage()
     val book = makeBook("book")
-    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
 
     val plain =
       pdfPageReflowService.reflowPage(
@@ -168,7 +196,7 @@ class PdfPageReflowServiceTest {
   fun `given matched background when changing stroke then returned word image gets bolder`() {
     val pageBytes = horizontalShortGlyphPage()
     val book = makeBook("book")
-    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
 
     val plain =
       pdfPageReflowService.reflowPage(
@@ -192,7 +220,7 @@ class PdfPageReflowServiceTest {
   fun `given rotation when reflowing page then source dimensions are rotated`() {
     val pageBytes = horizontalShortGlyphPage()
     val book = makeBook("book")
-    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
 
     val response =
       pdfPageReflowService.reflowPage(
@@ -207,10 +235,49 @@ class PdfPageReflowServiceTest {
   }
 
   @Test
+  fun `given automatic deskew when reflowing cropped page then correction is applied before crop`() {
+    val pageBytes = skewedHorizontalTextPage(2.4)
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+    val cropRegion = PdfPageReflowRegion(x = 40, y = 40, w = 340, h = 440)
+    val analysisRegion = PdfAutoDeskewRegion(x = 45, y = 45, w = 330, h = 430)
+    val detectedAngle =
+      PdfAutoDeskew.detectAngle(
+        image = ImageIO.read(ByteArrayInputStream(pageBytes)),
+        threshold = 185,
+        verticalText = false,
+        analysisRegion = analysisRegion,
+      )
+
+    val automatic =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options =
+          defaultOptions().copy(
+            autoSkewCorrection = true,
+            deskewAnalysisRegion = PdfPageReflowRegion(analysisRegion.x, analysisRegion.y, analysisRegion.w, analysisRegion.h),
+          ),
+        cropRegions = listOf(cropRegion),
+      )
+    val manual =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(skewCorrection = detectedAngle),
+        cropRegions = listOf(cropRegion),
+      )
+
+    assertThat(detectedAngle).isNotZero()
+    assertThat(automatic.items).isNotEmpty
+    assertThat(automatic.items).isEqualTo(manual.items)
+  }
+
+  @Test
   fun `given gray crop background when reflowing page then background is not treated as content`() {
     val pageBytes = grayBackgroundPage()
     val book = makeBook("book")
-    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
 
     val response =
       pdfPageReflowService.reflowPage(
@@ -233,7 +300,7 @@ class PdfPageReflowServiceTest {
   fun `given image with side text when reflowing page then side text remains small word blocks`() {
     val pageBytes = imageWithSideTextPage()
     val book = makeBook("book")
-    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
 
     val response =
       pdfPageReflowService.reflowPage(
@@ -254,7 +321,7 @@ class PdfPageReflowServiceTest {
   fun `given dense gray image above text when reflowing page then image does not swallow lower text`() {
     val pageBytes = denseGrayImageAboveTextPage()
     val book = makeBook("book")
-    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
 
     val response =
       pdfPageReflowService.reflowPage(
@@ -276,7 +343,7 @@ class PdfPageReflowServiceTest {
   fun `given dark display color image when reflowing page then edge white background becomes dark`() {
     val pageBytes = colorImageWithCaptionPage()
     val book = makeBook("book")
-    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
 
     val response =
       pdfPageReflowService.reflowPage(
@@ -297,7 +364,7 @@ class PdfPageReflowServiceTest {
   fun `given two color images separated by text when reflowing page then middle text is not preserved as image`() {
     val pageBytes = twoColorImagesWithMiddleTextPage()
     val book = makeBook("book")
-    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
 
     val response =
       pdfPageReflowService.reflowPage(
@@ -319,7 +386,7 @@ class PdfPageReflowServiceTest {
   fun `given dense image beside text when reflowing page then side text is not preserved as image`() {
     val pageBytes = denseSideImageWithTextPage()
     val book = makeBook("book")
-    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
 
     val response =
       pdfPageReflowService.reflowPage(
@@ -341,7 +408,7 @@ class PdfPageReflowServiceTest {
   fun `given colored decorated text page when reflowing page then page is not preserved as image`() {
     val pageBytes = coloredDecoratedTextPage()
     val book = makeBook("book")
-    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
 
     val response =
       pdfPageReflowService.reflowPage(
@@ -359,7 +426,7 @@ class PdfPageReflowServiceTest {
   fun `given line art image between text when reflowing page then surrounding text is not preserved as image`() {
     val pageBytes = lineArtImageBetweenTextPage()
     val book = makeBook("book")
-    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
 
     val response =
       pdfPageReflowService.reflowPage(
@@ -381,7 +448,7 @@ class PdfPageReflowServiceTest {
   fun `given image quality when reflowing page then word block uses jpeg encoding`() {
     val pageBytes = horizontalShortGlyphPage()
     val book = makeBook("book")
-    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
 
     val response =
       pdfPageReflowService.reflowPage(
@@ -398,7 +465,7 @@ class PdfPageReflowServiceTest {
   fun `given lower image quality when reflowing page then encoded image bytes are smaller`() {
     val pageBytes = highDetailWordPage()
     val book = makeBook("book")
-    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
 
     val highQuality =
       pdfPageReflowService.reflowPage(
@@ -422,7 +489,7 @@ class PdfPageReflowServiceTest {
   fun `given horizontal lines without indent when reflowing page then lines stay in same paragraph`() {
     val pageBytes = horizontalParagraphPage(secondLineIndent = 0)
     val book = makeBook("book")
-    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
 
     val response =
       pdfPageReflowService.reflowPage(
@@ -439,7 +506,7 @@ class PdfPageReflowServiceTest {
   fun `given horizontal indented line when reflowing page then new paragraph starts before it`() {
     val pageBytes = horizontalParagraphPage(secondLineIndent = 30)
     val book = makeBook("book")
-    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
 
     val response =
       pdfPageReflowService.reflowPage(
@@ -455,7 +522,7 @@ class PdfPageReflowServiceTest {
   fun `given short heading line when reflowing page then next line keeps default paragraph indent`() {
     val pageBytes = horizontalShortHeadingParagraphPage()
     val book = makeBook("book")
-    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
 
     val response =
       pdfPageReflowService.reflowPage(
@@ -473,7 +540,7 @@ class PdfPageReflowServiceTest {
   fun `given wide crop around short lines when reflowing page then crop edge does not create paragraph`() {
     val pageBytes = horizontalShortLinesPage()
     val book = makeBook("book")
-    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
 
     val response =
       pdfPageReflowService.reflowPage(
@@ -491,7 +558,7 @@ class PdfPageReflowServiceTest {
   fun `given vertical line with long tail blank when reflowing page then next line starts a paragraph`() {
     val pageBytes = verticalParagraphPage()
     val book = makeBook("book")
-    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
 
     val response =
       pdfPageReflowService.reflowPage(
@@ -507,7 +574,7 @@ class PdfPageReflowServiceTest {
   fun `given continuous vertical lines with different top margins when reflowing page then crop whitespace is removed`() {
     val pageBytes = verticalContinuousLinesPage()
     val book = makeBook("book")
-    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
 
     val response =
       pdfPageReflowService.reflowPage(
@@ -525,7 +592,7 @@ class PdfPageReflowServiceTest {
   fun `given close vertical text columns when reflowing page then columns stay separate`() {
     val pageBytes = closeVerticalTextColumnsPage()
     val book = makeBook("book")
-    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
 
     val response =
       pdfPageReflowService.reflowPage(
@@ -544,7 +611,7 @@ class PdfPageReflowServiceTest {
   fun `given underlined heading when reflowing page then heading is not repeated as image`() {
     val pageBytes = underlinedHeadingPage()
     val book = makeBook("book")
-    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
 
     val response =
       pdfPageReflowService.reflowPage(
@@ -595,6 +662,30 @@ class PdfPageReflowServiceTest {
 
     val output = ByteArrayOutputStream()
     ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun skewedHorizontalTextPage(angle: Double): ByteArray {
+    val source = BufferedImage(420, 520, BufferedImage.TYPE_INT_RGB)
+    val sourceGraphics = source.createGraphics()
+    sourceGraphics.color = Color.WHITE
+    sourceGraphics.fillRect(0, 0, source.width, source.height)
+    sourceGraphics.color = Color.BLACK
+    repeat(16) { line ->
+      repeat(13) { glyph -> sourceGraphics.fillRect(65 + glyph * 23, 65 + line * 25, 13, 14) }
+    }
+    sourceGraphics.dispose()
+    val rotated = BufferedImage(source.width, source.height, BufferedImage.TYPE_INT_RGB)
+    val rotatedGraphics = rotated.createGraphics()
+    rotatedGraphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
+    rotatedGraphics.color = Color.WHITE
+    rotatedGraphics.fillRect(0, 0, rotated.width, rotated.height)
+    val transform = AffineTransform.getRotateInstance(Math.toRadians(angle), rotated.width / 2.0, rotated.height / 2.0)
+    rotatedGraphics.drawImage(source, transform, null)
+    rotatedGraphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(rotated, "png", output)
     return output.toByteArray()
   }
 
