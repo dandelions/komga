@@ -691,7 +691,8 @@ class PdfPageReflowService(
           )
         }
       }
-    return expandImageRegions(mergeImageRegions(tightenedRegions), max(2, (tileSize * 0.6).roundToInt()), roi, image.width, image.height)
+    val imageRegions = mergeImageRegions(tightenedRegions).filterNot { isUnderlinedTextRegion(image, it, threshold) }
+    return expandImageRegions(imageRegions, max(2, (tileSize * 0.6).roundToInt()), roi, image.width, image.height)
   }
 
   private data class ImageTileMetrics(
@@ -1117,6 +1118,65 @@ class PdfPageReflowService(
     }
 
     return hasLongHorizontal && hasLongVertical
+  }
+
+  private fun isUnderlinedTextRegion(
+    image: BufferedImage,
+    region: Roi,
+    threshold: Int,
+  ): Boolean {
+    val block = clampRoi(region, image.width, image.height)
+    if (block.w < 120 || block.h < 40 || block.w < block.h * 2) return false
+    val backgroundLuma = estimateBackgroundLuma(image, block)
+    if (backgroundLuma < 210.0) return false
+    val inkThreshold = adaptiveInkThreshold(threshold, backgroundLuma)
+    val longRun = max(96, (block.w * 0.50).roundToInt())
+    val ruleBands =
+      detectBands(block.y, block.y + block.h) { y ->
+        var run = 0
+        for (x in block.x until block.x + block.w) {
+          if (isInk(image.getRGB(x, y), inkThreshold)) {
+            run++
+            if (run >= longRun) return@detectBands true
+          } else {
+            run = 0
+          }
+        }
+        false
+      }
+    if (ruleBands.size != 1) return false
+
+    val rule = ruleBands.first()
+    val ruleThickness = rule.end - rule.start
+    val ruleCenter = (rule.start + rule.end) / 2.0
+    if (ruleThickness > max(8, (block.h * 0.10).roundToInt())) return false
+    if (ruleCenter < block.y + block.h * 0.25 || ruleCenter > block.y + block.h * 0.85) return false
+
+    val textHeight = rule.start - block.y
+    if (textHeight < max(16.0, block.h * 0.18)) return false
+    var textInk = 0
+    var longestVerticalRun = 0
+    val textColumnBands =
+      detectBands(block.x, block.x + block.w) { x ->
+        var columnInk = 0
+        var run = 0
+        for (y in block.y until rule.start) {
+          if (isInk(image.getRGB(x, y), inkThreshold)) {
+            columnInk++
+            textInk++
+            run++
+            longestVerticalRun = max(longestVerticalRun, run)
+          } else {
+            run = 0
+          }
+        }
+        columnInk >= max(2.0, textHeight * 0.08)
+      }.filter { it.end - it.start >= 2 && it.end - it.start <= block.w * 0.35 }
+
+    if (textColumnBands.size < 3) return false
+    if (longestVerticalRun >= max(64, (block.h * 0.55).roundToInt())) return false
+    val textCoverage = textInk.toDouble() / max(1, block.w * textHeight)
+    return textCoverage in 0.01..0.58
   }
 
   private fun tightenLineArtRegion(
@@ -2637,10 +2697,17 @@ class PdfPageReflowService(
     options: PdfPageReflowOptions,
   ): List<LineBand> {
     if (columns.size <= 1) return columns
-    val maxTextGap = max(6, clamp(options.wordGap, 1, 30) * 2)
-    val maxAdornmentGap = max(24, (clamp(options.columnGap, 5, 80) * 1.5).roundToInt())
-    val narrowAdornmentWidth = max(10, clamp(options.wordGap, 1, 30) * 5)
     val sorted = columns.sortedBy { it.start }
+    val widths = sorted.map { max(1, it.end - it.start) }.sorted()
+    val typicalWidth = widths[ceil((widths.size - 1) * 0.75).toInt()]
+    val maxFragmentGap = max(1, min(clamp(options.wordGap, 1, 30), (typicalWidth * 0.18).toInt()))
+    val maxAdornmentGap =
+      max(
+        maxFragmentGap,
+        min((clamp(options.columnGap, 5, 80) * 0.25).toInt(), (typicalWidth * 0.32).toInt()),
+      )
+    val narrowFragmentWidth = max(2, (typicalWidth * 0.55).toInt())
+    val maxMergedWidth = max(typicalWidth + maxFragmentGap, (typicalWidth * 1.65).toInt())
     val merged = mutableListOf<LineBand>()
     var current = sorted.first()
 
@@ -2648,8 +2715,11 @@ class PdfPageReflowService(
       val gap = next.start - current.end
       val currentWidth = current.end - current.start
       val nextWidth = next.end - next.start
-      val hasNarrowAdornment = currentWidth <= narrowAdornmentWidth || nextWidth <= narrowAdornmentWidth
-      if (gap <= maxTextGap || (hasNarrowAdornment && gap <= maxAdornmentGap)) {
+      val hasNarrowFragment = currentWidth <= narrowFragmentWidth || nextWidth <= narrowFragmentWidth
+      val remainsSingleColumnWidth = next.end - current.start <= maxMergedWidth
+      val closeFragment = gap <= maxFragmentGap
+      val closeAdornment = hasNarrowFragment && gap <= maxAdornmentGap
+      if (remainsSingleColumnWidth && (closeFragment || closeAdornment)) {
         current = current.copy(end = max(current.end, next.end))
       } else {
         merged += current

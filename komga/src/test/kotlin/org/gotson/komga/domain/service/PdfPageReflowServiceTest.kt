@@ -521,6 +521,43 @@ class PdfPageReflowServiceTest {
     assertThat(response.items.filter { it.type == "indent" }).isEmpty()
   }
 
+  @Test
+  fun `given close vertical text columns when reflowing page then columns stay separate`() {
+    val pageBytes = closeVerticalTextColumnsPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(verticalText = true),
+        cropRegions = listOf(PdfPageReflowRegion(x = 20, y = 10, w = 90, h = 120)),
+      )
+
+    val wordBlocks = response.items.filter { it.type == "word" }
+    assertThat(wordBlocks).hasSizeGreaterThanOrEqualTo(6)
+    assertThat(wordBlocks.mapNotNull { it.w }.max()).isLessThan(28)
+  }
+
+  @Test
+  fun `given underlined heading when reflowing page then heading is not repeated as image`() {
+    val pageBytes = underlinedHeadingPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1, ImageType.PNG) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+        cropRegions = listOf(PdfPageReflowRegion(x = 20, y = 20, w = 860, h = 250)),
+      )
+
+    assertThat(response.items.filter { it.type == "image" }).isEmpty()
+    assertThat(response.items.filter { it.type == "word" }).isNotEmpty
+  }
+
   private fun defaultOptions() =
     PdfPageReflowOptions(
       targetWidth = 900,
@@ -930,6 +967,43 @@ class PdfPageReflowServiceTest {
     graphics.color = Color.BLACK
     listOf(20, 42, 64, 86, 108).forEach { y -> graphics.fillRect(90, y, 10, 12) }
     listOf(50, 72, 94, 116).forEach { y -> graphics.fillRect(50, y, 10, 12) }
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun closeVerticalTextColumnsPage(): ByteArray {
+    val image = BufferedImage(130, 140, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color.BLACK
+    listOf(26, 58, 90).forEach { y ->
+      graphics.fillRect(49, y, 16, 18)
+      graphics.fillRect(70, y, 16, 18)
+    }
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun underlinedHeadingPage(): ByteArray {
+    val image = BufferedImage(900, 290, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color.BLACK
+    listOf(90, 150, 210, 270, 330, 390, 450, 510, 570, 630).forEachIndexed { index, x ->
+      graphics.fillRect(x, 40 + index % 2 * 2, 34, 72)
+    }
+    graphics.fillRect(70, 114, 650, 4)
+    listOf(90, 138, 186, 234, 282, 330, 378, 426, 474, 522, 570, 618, 666).forEach { x ->
+      graphics.fillRect(x, 180, 24, 30)
+    }
     graphics.dispose()
 
     val output = ByteArrayOutputStream()

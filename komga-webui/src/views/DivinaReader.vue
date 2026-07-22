@@ -236,13 +236,13 @@
 
         <div
           v-if="!reflowCropMode"
-          @click="k2OutsidePreviousPage"
+          @click="reflowOutsideNavigateLeftSide"
           class="reflow-click-left"
           :style="reflowClickLayerStyle"
         />
         <div
           v-if="!reflowCropMode"
-          @click="k2OutsideNextPage"
+          @click="reflowOutsideNavigateRightSide"
           class="reflow-click-right"
           :style="reflowClickLayerStyle"
         />
@@ -326,13 +326,13 @@
 
         <div
           v-if="reflowMode && !reflowCropMode"
-          @click="reflowOutsidePreviousPage"
+          @click="reflowOutsideNavigateLeftSide"
           class="reflow-click-left"
           :style="reflowClickLayerStyle"
         />
         <div
           v-if="reflowMode && !reflowCropMode"
-          @click="reflowOutsideNextPage"
+          @click="reflowOutsideNavigateRightSide"
           class="reflow-click-right"
           :style="reflowClickLayerStyle"
         />
@@ -638,7 +638,7 @@
                 />
               </v-list-item>
 
-              <v-list-item v-if="!activeReflowMode">
+              <v-list-item>
                 <settings-select
                   :items="pagedLeftNavigationActions"
                   v-model="pagedLeftNavigationAction"
@@ -2721,21 +2721,23 @@ export default Vue.extend({
       if (this.collapseActiveReflowControls()) return
       this.toggleToolbars()
     },
-    reflowOutsidePreviousPage() {
+    reflowOutsideNavigateLeftSide() {
       if (this.collapseActiveReflowControls()) return
-      this.reflowPreviousPage()
+      this.activeReflowNavigateLeftSide()
     },
-    reflowOutsideNextPage() {
+    reflowOutsideNavigateRightSide() {
       if (this.collapseActiveReflowControls()) return
-      this.reflowNextPage()
+      this.activeReflowNavigateRightSide()
     },
-    k2OutsidePreviousPage() {
-      if (this.collapseActiveReflowControls()) return
-      this.k2PreviousPage()
+    activeReflowNavigateLeftSide() {
+      this.pagedLeftNavigationAction === PagedNavigationAction.NEXT
+        ? this.activeReflowNextPage()
+        : this.activeReflowPreviousPage()
     },
-    k2OutsideNextPage() {
-      if (this.collapseActiveReflowControls()) return
-      this.k2NextPage()
+    activeReflowNavigateRightSide() {
+      this.pagedLeftNavigationAction === PagedNavigationAction.NEXT
+        ? this.activeReflowPreviousPage()
+        : this.activeReflowNextPage()
     },
     k2PreviousPage() {
       const reflow = this.$refs.k2ReflowedPage as any
@@ -2756,11 +2758,11 @@ export default Vue.extend({
     },
     reflowSwipeLeft() {
       if (!this.reflowTouchEnabled() || this.readingDirection === ReadingDirection.VERTICAL) return
-      this.activeReflowNextPage()
+      this.activeReflowNavigateRightSide()
     },
     reflowSwipeRight() {
       if (!this.reflowTouchEnabled() || this.readingDirection === ReadingDirection.VERTICAL) return
-      this.activeReflowPreviousPage()
+      this.activeReflowNavigateLeftSide()
     },
     reflowSwipeUp() {
       if (!this.reflowTouchEnabled() || this.readingDirection !== ReadingDirection.VERTICAL) return
