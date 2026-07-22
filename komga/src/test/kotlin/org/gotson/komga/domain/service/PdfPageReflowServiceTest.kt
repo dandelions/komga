@@ -625,6 +625,24 @@ class PdfPageReflowServiceTest {
     assertThat(response.items.filter { it.type == "word" }).isNotEmpty
   }
 
+  @Test
+  fun `given a wide text line when reflowing page then text is not repeated as image`() {
+    val pageBytes = underlinedHeadingPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+        cropRegions = listOf(PdfPageReflowRegion(x = 20, y = 150, w = 860, h = 100)),
+      )
+
+    assertThat(response.items.filter { it.type == "image" }).isEmpty()
+    assertThat(response.items.filter { it.type == "word" }).isNotEmpty
+  }
+
   private fun defaultOptions() =
     PdfPageReflowOptions(
       targetWidth = 900,
@@ -1091,7 +1109,9 @@ class PdfPageReflowServiceTest {
     listOf(90, 150, 210, 270, 330, 390, 450, 510, 570, 630).forEachIndexed { index, x ->
       graphics.fillRect(x, 40 + index % 2 * 2, 34, 72)
     }
-    graphics.fillRect(70, 114, 650, 4)
+    for (x in 70 until 720 step 42) {
+      graphics.fillRect(x, 114, minOf(38, 720 - x), 4)
+    }
     listOf(90, 138, 186, 234, 282, 330, 378, 426, 474, 522, 570, 618, 666).forEach { x ->
       graphics.fillRect(x, 180, 24, 30)
     }

@@ -1145,22 +1145,39 @@ class PdfPageReflowService(
     region: Roi,
     threshold: Int,
   ): Boolean {
-    val block = clampRoi(region, image.width, image.height)
+    val contextPaddingX = max(48, min(320, region.w))
+    val contextX = max(0, region.x - contextPaddingX)
+    val contextRight = min(image.width, region.x + region.w + contextPaddingX)
+    val contextBottom = min(image.height, region.y + region.h + max(12, (region.h * 0.35).roundToInt()))
+    val block = clampRoi(Roi(contextX, region.y, contextRight - contextX, contextBottom - region.y), image.width, image.height)
     if (block.w < 120 || block.h < 40 || block.w < block.h * 2) return false
     val backgroundLuma = estimateBackgroundLuma(image, block)
     if (backgroundLuma < 210.0) return false
     val inkThreshold = adaptiveInkThreshold(threshold, backgroundLuma)
-    val longRun = max(96, (block.w * 0.50).roundToInt())
+    val longRun = max(96, (region.w * 0.40).roundToInt())
+    val maximumRunGap = max(2, min(6, (region.w * 0.004).roundToInt()))
+    val minimumRunInk = max(72, (longRun * 0.70).roundToInt())
     val ruleBands =
       detectBands(block.y, block.y + block.h) { y ->
-        var run = 0
+        var runSpan = 0
+        var runInk = 0
+        var runGap = 0
         for (x in block.x until block.x + block.w) {
           if (isInk(image.getRGB(x, y), inkThreshold)) {
-            run++
-            if (run >= longRun) return@detectBands true
-          } else {
-            run = 0
+            runSpan++
+            runInk++
+            runGap = 0
+          } else if (runSpan > 0) {
+            runGap++
+            if (runGap <= maximumRunGap) {
+              runSpan++
+            } else {
+              runSpan = 0
+              runInk = 0
+              runGap = 0
+            }
           }
+          if (runSpan - runGap >= longRun && runInk >= minimumRunInk) return@detectBands true
         }
         false
       }
@@ -1170,7 +1187,7 @@ class PdfPageReflowService(
     val ruleThickness = rule.end - rule.start
     val ruleCenter = (rule.start + rule.end) / 2.0
     if (ruleThickness > max(8, (block.h * 0.10).roundToInt())) return false
-    if (ruleCenter < block.y + block.h * 0.25 || ruleCenter > block.y + block.h * 0.85) return false
+    if (ruleCenter < block.y + block.h * 0.20 || ruleCenter > block.y + block.h * 0.96) return false
 
     val textHeight = rule.start - block.y
     if (textHeight < max(16.0, block.h * 0.18)) return false
@@ -1194,7 +1211,7 @@ class PdfPageReflowService(
       }.filter { it.end - it.start >= 2 && it.end - it.start <= block.w * 0.35 }
 
     if (textColumnBands.size < 3) return false
-    if (longestVerticalRun >= max(64, (block.h * 0.55).roundToInt())) return false
+    if (longestVerticalRun >= max(64, (block.h * 0.75).roundToInt())) return false
     val textCoverage = textInk.toDouble() / max(1, block.w * textHeight)
     return textCoverage in 0.01..0.58
   }
@@ -1683,6 +1700,13 @@ class PdfPageReflowService(
         }
         inkCount >= minimumRowInk && longestRun < horizontalLimit * 0.65
       }
+
+    val singleLineRows =
+      rowBands
+        .filter { it.end - it.start >= max(8.0, block.h * 0.18) && it.end - it.start <= block.h * 0.78 }
+        .mapNotNull { band -> alignedTextRowBounds(image, block, band, inkThreshold) }
+        .filter { it.right - it.left >= block.w * 0.55 }
+    if (block.w >= block.h * 3.0 && singleLineRows.size == 1) return true
 
     val rows =
       rowBands

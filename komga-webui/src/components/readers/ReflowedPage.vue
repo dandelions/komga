@@ -336,7 +336,7 @@
             class="reflow-control"
             :class="{'reflow-region-active': cropPanMode}"
             @click="setCropPanMode(true)"
-          >移动</button>
+          >平移页面</button>
         </div>
         <label class="reflow-skew-control crop-skew-control">
           <span>手动纠斜</span>
@@ -385,6 +385,32 @@
             :class="{'crop-rect-active': rect.active, 'crop-rect-secondary': !rect.active}"
             :style="rect.style"
           />
+          <div
+            v-if="activeRoi"
+            class="crop-selection-controls"
+            :style="cropRectStyle(activeRoi)"
+          >
+            <button
+              type="button"
+              class="crop-move-handle"
+              :class="{'crop-move-handle-active': cropAdjustMode === 'move'}"
+              title="移动选区"
+              aria-label="移动选区"
+              @pointerdown.stop="startCropAdjustment($event, 'move')"
+            >
+              <v-icon x-small>mdi-cursor-move</v-icon>
+            </button>
+            <button
+              v-for="edge in cropResizeEdges"
+              :key="edge"
+              type="button"
+              class="crop-resize-handle"
+              :class="[`crop-resize-${edge}`, {'crop-resize-handle-active': cropAdjustMode === edge}]"
+              :title="cropResizeEdgeLabel(edge)"
+              :aria-label="cropResizeEdgeLabel(edge)"
+              @pointerdown.stop="startCropAdjustment($event, edge)"
+            />
+          </div>
         </div>
       </div>
     </div>
@@ -538,6 +564,8 @@ type MatchBackgroundMode = 'monochrome' | 'grayscale'
 type VerticalDirection = 'ltr' | 'rtl'
 type CropRegionIndex = number
 type CropTarget = 'text' | 'image' | 'deskew'
+type CropAdjustMode = 'move' | 'top' | 'right' | 'bottom' | 'left'
+type CropResizeEdge = Exclude<CropAdjustMode, 'move'>
 
 type Column = {
   start: number,
@@ -791,6 +819,11 @@ export default Vue.extend({
       activeManualImageRegion: 0 as CropRegionIndex,
       manualImageRegionCount: 1,
       drawingCrop: false,
+      cropAdjustMode: undefined as CropAdjustMode | undefined,
+      cropAdjustMoved: false,
+      cropAdjustPointerActive: false,
+      cropAdjustStartPoint: {x: 0, y: 0},
+      cropAdjustStartRoi: undefined as Roi | undefined,
       cropZoom: 1,
       cropPanMode: false,
       cropStart: {x: 0, y: 0},
@@ -1015,6 +1048,9 @@ export default Vue.extend({
     cropZoomPercent(): number {
       return Math.round(this.cropZoom * 100)
     },
+    cropResizeEdges(): CropResizeEdge[] {
+      return ['top', 'right', 'bottom', 'left']
+    },
     cropStageStyle(): object {
       return {
         width: `${this.cropZoomPercent}%`,
@@ -1104,6 +1140,7 @@ export default Vue.extend({
         this.syncManualImageRoisFromOptions()
         this.draftRoi = undefined
         this.drawingCrop = false
+        this.clearCropAdjustment()
         this.cropMode = false
         this.cropPageNumber = 0
         this.cropPageUrl = ''
@@ -1151,6 +1188,7 @@ export default Vue.extend({
     rotation() {
       this.draftRoi = undefined
       this.drawingCrop = false
+      this.clearCropAdjustment()
       this.cropWarning = ''
       this.revokeObjectUrl()
       if (this.cropMode || this.deferReflow) {
@@ -3001,22 +3039,41 @@ export default Vue.extend({
       return hasLongHorizontal && hasLongVertical
     },
     isUnderlinedTextRegion(pixels: Uint8ClampedArray, width: number, region: ImageRegion, threshold: number): boolean {
-      if (region.w < 120 || region.h < 40 || region.w < region.h * 2) return false
-      const backgroundLuma = this.estimateRegionBackgroundLuma(pixels, width, region)
+      const imageHeight = Math.floor(pixels.length / 4 / width)
+      const contextPaddingX = Math.max(48, Math.min(320, region.w))
+      const contextX = Math.max(0, region.x - contextPaddingX)
+      const contextRight = Math.min(width, region.x + region.w + contextPaddingX)
+      const contextBottom = Math.min(imageHeight, region.y + region.h + Math.max(12, Math.round(region.h * 0.35)))
+      const analysisRegion = {x: contextX, y: region.y, w: contextRight - contextX, h: contextBottom - region.y}
+      if (analysisRegion.w < 120 || analysisRegion.h < 40 || analysisRegion.w < analysisRegion.h * 2) return false
+      const backgroundLuma = this.estimateRegionBackgroundLuma(pixels, width, analysisRegion)
       if (backgroundLuma < 210) return false
       const inkThreshold = this.adaptiveInkThreshold(threshold, backgroundLuma)
-      const right = region.x + region.w
-      const bottom = region.y + region.h
-      const longRun = Math.max(96, Math.round(region.w * 0.50))
-      const ruleBands = this.detectIndexBands(region.y, bottom, y => {
-        let run = 0
-        for (let x = region.x; x < right; x++) {
+      const right = analysisRegion.x + analysisRegion.w
+      const bottom = analysisRegion.y + analysisRegion.h
+      const longRun = Math.max(96, Math.round(region.w * 0.40))
+      const maximumRunGap = Math.max(2, Math.min(6, Math.round(region.w * 0.004)))
+      const minimumRunInk = Math.max(72, Math.round(longRun * 0.70))
+      const ruleBands = this.detectIndexBands(analysisRegion.y, bottom, y => {
+        let runSpan = 0
+        let runInk = 0
+        let runGap = 0
+        for (let x = analysisRegion.x; x < right; x++) {
           if (this.pixelIsInk(pixels, width, x, y, inkThreshold)) {
-            run++
-            if (run >= longRun) return true
-          } else {
-            run = 0
+            runSpan++
+            runInk++
+            runGap = 0
+          } else if (runSpan > 0) {
+            runGap++
+            if (runGap <= maximumRunGap) {
+              runSpan++
+            } else {
+              runSpan = 0
+              runInk = 0
+              runGap = 0
+            }
           }
+          if (runSpan - runGap >= longRun && runInk >= minimumRunInk) return true
         }
         return false
       })
@@ -3025,17 +3082,17 @@ export default Vue.extend({
       const rule = ruleBands[0]
       const ruleThickness = rule.end - rule.start
       const ruleCenter = (rule.start + rule.end) / 2
-      if (ruleThickness > Math.max(8, Math.round(region.h * 0.10))) return false
-      if (ruleCenter < region.y + region.h * 0.25 || ruleCenter > region.y + region.h * 0.85) return false
+      if (ruleThickness > Math.max(8, Math.round(analysisRegion.h * 0.10))) return false
+      if (ruleCenter < analysisRegion.y + analysisRegion.h * 0.20 || ruleCenter > analysisRegion.y + analysisRegion.h * 0.96) return false
 
-      const textHeight = rule.start - region.y
-      if (textHeight < Math.max(16, region.h * 0.18)) return false
+      const textHeight = rule.start - analysisRegion.y
+      if (textHeight < Math.max(16, analysisRegion.h * 0.18)) return false
       let textInk = 0
       let longestVerticalRun = 0
-      const textColumnBands = this.detectIndexBands(region.x, right, x => {
+      const textColumnBands = this.detectIndexBands(analysisRegion.x, right, x => {
         let columnInk = 0
         let run = 0
-        for (let y = region.y; y < rule.start; y++) {
+        for (let y = analysisRegion.y; y < rule.start; y++) {
           if (this.pixelIsInk(pixels, width, x, y, inkThreshold)) {
             columnInk++
             textInk++
@@ -3046,11 +3103,11 @@ export default Vue.extend({
           }
         }
         return columnInk >= Math.max(2, Math.round(textHeight * 0.08))
-      }).filter(band => band.end - band.start >= 2 && band.end - band.start <= region.w * 0.35)
+      }).filter(band => band.end - band.start >= 2 && band.end - band.start <= analysisRegion.w * 0.35)
 
       if (textColumnBands.length < 3) return false
-      if (longestVerticalRun >= Math.max(64, Math.round(region.h * 0.55))) return false
-      const textCoverage = textInk / Math.max(1, region.w * textHeight)
+      if (longestVerticalRun >= Math.max(64, Math.round(analysisRegion.h * 0.75))) return false
+      const textCoverage = textInk / Math.max(1, analysisRegion.w * textHeight)
       return textCoverage >= 0.01 && textCoverage <= 0.58
     },
     tightenLineArtRegion(pixels: Uint8ClampedArray, width: number, region: ImageRegion, threshold: number): ImageRegion {
@@ -3532,6 +3589,12 @@ export default Vue.extend({
       }
 
       if (bandStart >= 0) rowBands.push({start: bandStart, end: lastInk + 1})
+
+      const singleLineRows = rowBands
+        .filter(band => band.end - band.start >= Math.max(8, region.h * 0.18) && band.end - band.start <= region.h * 0.78)
+        .map(band => this.alignedTextRowBounds(pixels, width, region, band, threshold))
+        .filter((row): row is {left: number, right: number} => !!row && row.right - row.left >= region.w * 0.55)
+      if (region.w >= region.h * 3 && singleLineRows.length === 1) return true
 
       const rows = rowBands
         .filter(band => band.end - band.start >= 2 && band.end - band.start <= maximumTextLineHeight)
@@ -5546,6 +5609,7 @@ export default Vue.extend({
       this.activeCropRegion = region
       this.draftRoi = undefined
       this.drawingCrop = false
+      this.clearCropAdjustment()
       this.cropWarning = ''
     },
     setManualImageRegionCount(event: Event) {
@@ -5561,6 +5625,7 @@ export default Vue.extend({
       this.activeManualImageRegion = region
       this.draftRoi = undefined
       this.drawingCrop = false
+      this.clearCropAdjustment()
       this.cropWarning = ''
     },
     async toggleCropMode() {
@@ -5576,6 +5641,7 @@ export default Vue.extend({
       this.controlsCollapsed = true
       this.draftRoi = undefined
       this.drawingCrop = false
+      this.clearCropAdjustment()
       this.cropZoom = this.initialCropZoom()
       this.cropPanMode = false
       this.cropWarning = ''
@@ -5614,6 +5680,7 @@ export default Vue.extend({
       this.cropMode = false
       this.draftRoi = undefined
       this.drawingCrop = false
+      this.clearCropAdjustment()
       this.cropPanMode = false
       this.clearCropSource()
       this.$emit('crop-mode-change', false)
@@ -5624,6 +5691,7 @@ export default Vue.extend({
       this.setCurrentCropRoi(undefined)
       this.draftRoi = undefined
       this.drawingCrop = false
+      this.clearCropAdjustment()
       this.cropWarning = ''
       this.cropMode = false
       this.clearCropSource()
@@ -5635,6 +5703,7 @@ export default Vue.extend({
       this.setCurrentManualImageRoi(undefined)
       this.draftRoi = undefined
       this.drawingCrop = false
+      this.clearCropAdjustment()
       this.cropWarning = ''
       this.cropMode = false
       this.clearCropSource()
@@ -5646,14 +5715,28 @@ export default Vue.extend({
       this.setCurrentDeskewAnalysisRoi(undefined)
       this.draftRoi = undefined
       this.drawingCrop = false
+      this.clearCropAdjustment()
       this.cropWarning = ''
       this.cropMode = false
       this.clearCropSource()
       this.$emit('crop-mode-change', false)
     },
     startCrop(event: PointerEvent) {
-      if (this.cropPanMode || !this.cropMode || !this.cropDisplayImageSize.w || !this.cropDisplayImageSize.h) return
+      if (!this.cropMode || !this.cropDisplayImageSize.w || !this.cropDisplayImageSize.h) return
       if (event.pointerType === 'mouse' && event.button !== 0) return
+      if (this.cropAdjustMode && this.cropAdjustStartRoi) {
+        this.draftRoi = this.adjustedCropRoi(
+          this.cropAdjustStartRoi,
+          this.cropAdjustStartPoint,
+          this.cropPoint(event),
+          this.cropAdjustMode,
+        )
+        this.clearCropAdjustment()
+        this.cropWarning = '选区已调整，确认后点击完成'
+        event.preventDefault()
+        return
+      }
+      if (this.cropPanMode) return
       const target = event.currentTarget as HTMLElement
       target.setPointerCapture(event.pointerId)
       this.drawingCrop = true
@@ -5661,12 +5744,60 @@ export default Vue.extend({
       this.draftRoi = {x: this.cropStart.x, y: this.cropStart.y, w: 1, h: 1}
       event.preventDefault()
     },
+    startCropAdjustment(event: PointerEvent, mode: CropAdjustMode) {
+      if (!this.cropMode || !this.activeRoi || !this.cropDisplayImageSize.w || !this.cropDisplayImageSize.h) return
+      if (event.pointerType === 'mouse' && event.button !== 0) return
+      const target = event.currentTarget as HTMLElement
+      target.setPointerCapture(event.pointerId)
+      this.drawingCrop = false
+      this.cropAdjustMode = mode
+      this.cropAdjustMoved = false
+      this.cropAdjustPointerActive = true
+      this.cropAdjustStartPoint = this.cropPoint(event)
+      this.cropAdjustStartRoi = {...this.activeRoi}
+      this.draftRoi = {...this.activeRoi}
+      this.cropWarning = ''
+      event.preventDefault()
+    },
     moveCrop(event: PointerEvent) {
+      if (this.cropAdjustMode && this.cropAdjustStartRoi && this.cropAdjustPointerActive) {
+        const point = this.cropPoint(event)
+        if (!this.cropAdjustMoved) {
+          const distance = Math.max(
+            Math.abs(point.x - this.cropAdjustStartPoint.x),
+            Math.abs(point.y - this.cropAdjustStartPoint.y),
+          )
+          if (distance < 3) {
+            event.preventDefault()
+            return
+          }
+          this.cropAdjustMoved = true
+        }
+        this.draftRoi = this.adjustedCropRoi(
+          this.cropAdjustStartRoi,
+          this.cropAdjustStartPoint,
+          point,
+          this.cropAdjustMode,
+        )
+        event.preventDefault()
+        return
+      }
       if (!this.drawingCrop) return
       this.draftRoi = this.normalizedRoi(this.cropStart, this.cropPoint(event))
       event.preventDefault()
     },
     finishCrop(event: PointerEvent) {
+      if (this.cropAdjustMode && this.cropAdjustPointerActive) {
+        this.cropAdjustPointerActive = false
+        if (this.cropAdjustMoved) {
+          this.clearCropAdjustment()
+          this.cropWarning = '选区已调整，确认后点击完成'
+        } else {
+          this.cropWarning = `${this.cropResizeEdgeLabel(this.cropAdjustMode)}已选中，请点击目标位置`
+        }
+        event.preventDefault()
+        return
+      }
       if (!this.drawingCrop) return
       this.drawingCrop = false
       const roi = this.normalizedRoi(this.cropStart, this.cropPoint(event))
@@ -5681,7 +5812,56 @@ export default Vue.extend({
     },
     cancelDraftCrop() {
       this.drawingCrop = false
-      this.draftRoi = undefined
+      if (this.cropAdjustMode && this.cropAdjustStartRoi) {
+        this.draftRoi = {...this.cropAdjustStartRoi}
+      } else {
+        this.draftRoi = undefined
+      }
+      this.clearCropAdjustment()
+    },
+    clearCropAdjustment() {
+      this.cropAdjustMode = undefined
+      this.cropAdjustMoved = false
+      this.cropAdjustPointerActive = false
+      this.cropAdjustStartRoi = undefined
+    },
+    adjustedCropRoi(startRoi: Roi, startPoint: {x: number, y: number}, point: {x: number, y: number}, mode: CropAdjustMode): Roi {
+      const imageSize = this.cropDisplayImageSize
+      const minimumSize = MIN_CROP_SIZE + 1
+      if (mode === 'move') {
+        return {
+          ...startRoi,
+          x: this.clampNumber(startRoi.x + point.x - startPoint.x, 0, Math.max(0, imageSize.w - startRoi.w), startRoi.x),
+          y: this.clampNumber(startRoi.y + point.y - startPoint.y, 0, Math.max(0, imageSize.h - startRoi.h), startRoi.y),
+        }
+      }
+
+      const right = startRoi.x + startRoi.w
+      const bottom = startRoi.y + startRoi.h
+      if (mode === 'left') {
+        const x = this.clampNumber(point.x, 0, right - minimumSize, startRoi.x)
+        return {...startRoi, x, w: right - x}
+      }
+      if (mode === 'right') {
+        const nextRight = this.clampNumber(point.x, startRoi.x + minimumSize, imageSize.w, right)
+        return {...startRoi, w: nextRight - startRoi.x}
+      }
+      if (mode === 'top') {
+        const y = this.clampNumber(point.y, 0, bottom - minimumSize, startRoi.y)
+        return {...startRoi, y, h: bottom - y}
+      }
+      const nextBottom = this.clampNumber(point.y, startRoi.y + minimumSize, imageSize.h, bottom)
+      return {...startRoi, h: nextBottom - startRoi.y}
+    },
+    cropResizeEdgeLabel(edge: CropAdjustMode): string {
+      const labels: Record<CropAdjustMode, string> = {
+        move: '移动选区',
+        top: '调整上边框',
+        right: '调整右边框',
+        bottom: '调整下边框',
+        left: '调整左边框',
+      }
+      return labels[edge]
     },
     initialCropZoom(): number {
       return typeof window !== 'undefined' && window.innerWidth <= 600 ? 1.5 : 1
@@ -5708,6 +5888,7 @@ export default Vue.extend({
     setCropPanMode(enabled: boolean) {
       this.cropPanMode = enabled
       this.drawingCrop = false
+      this.clearCropAdjustment()
     },
     focusCropViewport(roi?: Roi) {
       const viewport = this.$refs.cropViewport as HTMLElement | undefined
@@ -6433,6 +6614,100 @@ export default Vue.extend({
 .crop-rect-secondary {
   border: 2px dashed #2563eb;
   background: rgba(37, 99, 235, 0.10);
+}
+
+.crop-selection-controls {
+  position: absolute;
+  z-index: 3;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.crop-resize-handle,
+.crop-move-handle {
+  position: absolute;
+  appearance: none;
+  border: 0;
+  padding: 0;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.crop-resize-handle {
+  background: rgba(249, 115, 22, 0.08);
+}
+
+.crop-resize-handle::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 28px;
+  height: 5px;
+  border: 1px solid #fff;
+  border-radius: 2px;
+  background: #f97316;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+}
+
+.crop-resize-top,
+.crop-resize-bottom {
+  left: 12px;
+  width: calc(100% - 24px);
+  height: 24px;
+  cursor: ns-resize;
+}
+
+.crop-resize-top {
+  top: -12px;
+}
+
+.crop-resize-bottom {
+  bottom: -12px;
+}
+
+.crop-resize-left,
+.crop-resize-right {
+  top: 12px;
+  width: 24px;
+  height: calc(100% - 24px);
+  cursor: ew-resize;
+}
+
+.crop-resize-left {
+  left: -12px;
+}
+
+.crop-resize-right {
+  right: -12px;
+}
+
+.crop-resize-left::after,
+.crop-resize-right::after {
+  width: 5px;
+  height: 28px;
+}
+
+.crop-move-handle {
+  left: 50%;
+  top: 50%;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #f97316;
+  color: #fff;
+  cursor: move;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.45);
+}
+
+.crop-resize-handle-active::after,
+.crop-move-handle-active {
+  background: #2563eb;
 }
 
 @media (max-width: 600px) {
