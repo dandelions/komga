@@ -5864,7 +5864,7 @@ export default Vue.extend({
       return labels[edge]
     },
     initialCropZoom(): number {
-      return typeof window !== 'undefined' && window.innerWidth <= 600 ? 1.5 : 1
+      return 1
     },
     adjustCropZoom(delta: number) {
       this.setCropZoom(this.cropZoom + delta)
