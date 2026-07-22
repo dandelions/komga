@@ -3,9 +3,12 @@ name: Build Komga
 on:
   push:
     branches:
-      - main  # 触发条件，可以根据需要修改
+      - master
+      - main
+      - 'codex/**'
   pull_request:
     branches:
+      - master
       - main
 
 jobs:
