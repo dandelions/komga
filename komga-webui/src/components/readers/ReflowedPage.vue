@@ -2655,6 +2655,7 @@ export default Vue.extend({
       )
       const imageRegions = this.mergeImageRegions(tightenedRegions)
         .filter(region => !this.isUnderlinedTextRegion(pixels, width, region, threshold))
+        .filter(region => !this.isMergedHorizontalTextRegion(pixels, width, region, threshold))
       const expanded = this.expandImageRegions(imageRegions, Math.max(2, Math.round(tileSize * 0.6)), roi, width, height)
       return this.protectImageRegionEdges(pixels, width, height, expanded, threshold, roi)
     },
@@ -2940,27 +2941,28 @@ export default Vue.extend({
       const minHeight = Math.max(36, roi.h * 0.04)
       const spansTextColumn = region.w >= minWidth && region.h >= minHeight
       const colorImage = coloredRatio >= 0.22 && areaRatio >= 0.008 && fillRatio >= 0.16
+      const alignedText = this.hasAlignedTextRows(pixels, width, region, threshold)
       const denseImage =
         componentDenseTiles >= 4 &&
         denseRatio >= 0.18 &&
         fillRatio >= 0.12 &&
         areaRatio >= 0.006 &&
         this.hasNeutralImageBackground(pixels, width, region, threshold) &&
-        !this.hasAlignedTextRows(pixels, width, region, threshold)
+        !alignedText
       const texturedImage =
         componentTexturedTiles >= 4 &&
         texturedRatio >= 0.22 &&
         fillRatio >= 0.12 &&
         areaRatio >= 0.006 &&
         this.hasNeutralImageBackground(pixels, width, region, threshold) &&
-        !this.hasAlignedTextRows(pixels, width, region, threshold)
+        !alignedText
       const lineArtImage =
         componentLineArtTiles >= 3 &&
         lineArtRatio >= 0.18 &&
         fillRatio >= 0.08 &&
         areaRatio >= 0.006 &&
         this.hasStructuralLineArt(pixels, width, region, threshold) &&
-        !this.hasAlignedTextRows(pixels, width, region, threshold)
+        !alignedText
       return spansTextColumn && (colorImage || denseImage || texturedImage || lineArtImage)
     },
     hasNeutralImageBackground(pixels: Uint8ClampedArray, width: number, region: ImageRegion, threshold: number): boolean {
@@ -3552,8 +3554,13 @@ export default Vue.extend({
 
       return sampled === 0 ? 0 : colored / sampled
     },
+    isMergedHorizontalTextRegion(pixels: Uint8ClampedArray, width: number, region: ImageRegion, threshold: number): boolean {
+      if (region.w < region.h * 2.2) return false
+      const stepX = Math.max(1, Math.round(region.w / 700))
+      return this.colorCoverage(pixels, width, region, stepX) < 0.06 && this.hasAlignedTextRows(pixels, width, region, threshold)
+    },
     hasAlignedTextRows(pixels: Uint8ClampedArray, width: number, region: ImageRegion, threshold: number): boolean {
-      if (region.w < 120 || region.h < 80) return false
+      if (region.w < 120 || region.h < 40) return false
       const horizontalLimit = Math.max(96, Math.round(region.w * 0.22))
       const minimumRowInk = Math.max(2, Math.round(region.w * 0.015))
       const maximumTextLineHeight = Math.max(8, Math.round(region.h * 0.12))
@@ -3594,8 +3601,28 @@ export default Vue.extend({
       const singleLineRows = rowBands
         .filter(band => band.end - band.start >= Math.max(8, region.h * 0.18) && band.end - band.start <= region.h * 0.78)
         .map(band => this.alignedTextRowBounds(pixels, width, region, band, threshold))
-        .filter((row): row is {left: number, right: number} => !!row && row.right - row.left >= region.w * 0.55)
+        .filter((row): row is {left: number, right: number, height: number} => !!row && row.right - row.left >= region.w * 0.55)
       if (region.w >= region.h * 3 && singleLineRows.length === 1) return true
+
+      const relaxedMaximumTextLineHeight = Math.max(maximumTextLineHeight, Math.min(region.h * 0.45, Math.max(24, region.w * 0.08)))
+      const relaxedRows = rowBands
+        .filter(band => band.end - band.start >= Math.max(8, Math.round(region.h * 0.08)) && band.end - band.start <= relaxedMaximumTextLineHeight)
+        .map(band => this.alignedTextRowBounds(pixels, width, region, band, threshold))
+        .filter((row): row is {left: number, right: number, height: number} => !!row && row.right - row.left >= region.w * 0.35)
+      if (relaxedRows.length >= 2) {
+        const medianLeft = this.medianNumber(relaxedRows.map(row => row.left))
+        const medianRight = this.medianNumber(relaxedRows.map(row => row.right))
+        const medianHeight = this.medianNumber(relaxedRows.map(row => row.height))
+        const leftTolerance = Math.max(8, region.w * 0.06)
+        const rightTolerance = Math.max(12, region.w * 0.10)
+        const heightTolerance = Math.max(4, medianHeight * 0.45)
+        const alignedRows = relaxedRows.filter(row =>
+          Math.abs(row.left - medianLeft) <= leftTolerance &&
+          Math.abs(row.right - medianRight) <= rightTolerance &&
+          Math.abs(row.height - medianHeight) <= heightTolerance,
+        )
+        if (alignedRows.length >= Math.max(2, Math.ceil(relaxedRows.length * 0.65))) return true
+      }
 
       const rows = rowBands
         .filter(band => band.end - band.start >= 2 && band.end - band.start <= maximumTextLineHeight)
@@ -3621,7 +3648,7 @@ export default Vue.extend({
       region: ImageRegion,
       band: {start: number, end: number},
       threshold: number,
-    ): {left: number, right: number} | undefined {
+    ): {left: number, right: number, height: number} | undefined {
       let left = region.x + region.w
       let right = region.x - 1
 
@@ -3637,7 +3664,7 @@ export default Vue.extend({
       }
 
       if (right < left) return undefined
-      return {left, right: right + 1}
+      return {left, right: right + 1, height: band.end - band.start}
     },
     mergeImageRegions(regions: ImageRegion[]): ImageRegion[] {
       if (regions.length <= 1) return regions

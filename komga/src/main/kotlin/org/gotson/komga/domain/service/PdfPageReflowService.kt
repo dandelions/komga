@@ -711,7 +711,10 @@ class PdfPageReflowService(
           )
         }
       }
-    val imageRegions = mergeImageRegions(tightenedRegions).filterNot { isUnderlinedTextRegion(image, it, threshold) }
+    val imageRegions =
+      mergeImageRegions(tightenedRegions)
+        .filterNot { isUnderlinedTextRegion(image, it, threshold) }
+        .filterNot { isMergedHorizontalTextRegion(image, it, threshold) }
     val expanded = expandImageRegions(imageRegions, max(2, (tileSize * 0.6).roundToInt()), roi, image.width, image.height)
     return protectImageRegionEdges(image, expanded, threshold, roi)
   }
@@ -1034,27 +1037,28 @@ class PdfPageReflowService(
     val minHeight = max(36.0, roi.h * 0.04)
     val spansTextColumn = region.w >= minWidth && region.h >= minHeight
     val colorImage = coloredRatio >= 0.22 && areaRatio >= 0.008 && fillRatio >= 0.16
+    val alignedText = hasAlignedTextRows(image, region, threshold)
     val denseImage =
       componentDenseTiles >= 4 &&
         denseRatio >= 0.18 &&
         fillRatio >= 0.12 &&
         areaRatio >= 0.006 &&
         hasNeutralImageBackground(image, region, threshold) &&
-        !hasAlignedTextRows(image, region, threshold)
+        !alignedText
     val texturedImage =
       componentTexturedTiles >= 4 &&
         texturedRatio >= 0.22 &&
         fillRatio >= 0.12 &&
         areaRatio >= 0.006 &&
         hasNeutralImageBackground(image, region, threshold) &&
-        !hasAlignedTextRows(image, region, threshold)
+        !alignedText
     val lineArtImage =
       componentLineArtTiles >= 3 &&
         lineArtRatio >= 0.18 &&
         fillRatio >= 0.08 &&
         areaRatio >= 0.006 &&
         hasStructuralLineArt(image, region, threshold) &&
-        !hasAlignedTextRows(image, region, threshold)
+        !alignedText
     return spansTextColumn && (colorImage || denseImage || texturedImage || lineArtImage)
   }
 
@@ -1667,6 +1671,16 @@ class PdfPageReflowService(
     return if (sampled == 0) 0.0 else colored.toDouble() / sampled
   }
 
+  private fun isMergedHorizontalTextRegion(
+    image: BufferedImage,
+    region: Roi,
+    threshold: Int,
+  ): Boolean {
+    if (region.w < region.h * 2.2) return false
+    val stepX = max(1, (region.w / 700.0).roundToInt())
+    return colorCoverage(image, region, stepX) < 0.06 && hasAlignedTextRows(image, region, threshold)
+  }
+
   private data class AlignedTextRow(
     val left: Int,
     val right: Int,
@@ -1679,7 +1693,7 @@ class PdfPageReflowService(
     threshold: Int,
   ): Boolean {
     val block = clampRoi(region, image.width, image.height)
-    if (block.w < 120 || block.h < 80) return false
+    if (block.w < 120 || block.h < 40) return false
     val inkThreshold = adaptiveInkThreshold(threshold, estimateBackgroundLuma(image, block))
     val horizontalLimit = max(96, (block.w * 0.22).roundToInt())
     val minimumRowInk = max(2, (block.w * 0.015).roundToInt())
@@ -1708,6 +1722,29 @@ class PdfPageReflowService(
         .mapNotNull { band -> alignedTextRowBounds(image, block, band, inkThreshold) }
         .filter { it.right - it.left >= block.w * 0.55 }
     if (block.w >= block.h * 3.0 && singleLineRows.size == 1) return true
+
+    val relaxedMaximumTextLineHeight =
+      max(maximumTextLineHeight, min(block.h * 0.45, max(24.0, block.w * 0.08)).roundToInt())
+    val relaxedRows =
+      rowBands
+        .filter { it.end - it.start in max(8, (block.h * 0.08).roundToInt())..relaxedMaximumTextLineHeight }
+        .mapNotNull { band -> alignedTextRowBounds(image, block, band, inkThreshold) }
+        .filter { it.right - it.left >= block.w * 0.35 }
+    if (relaxedRows.size >= 2) {
+      val medianLeft = medianNumber(relaxedRows.map { it.left.toDouble() })
+      val medianRight = medianNumber(relaxedRows.map { it.right.toDouble() })
+      val medianHeight = medianNumber(relaxedRows.map { it.height.toDouble() })
+      val leftTolerance = max(8.0, block.w * 0.06)
+      val rightTolerance = max(12.0, block.w * 0.10)
+      val heightTolerance = max(4.0, medianHeight * 0.45)
+      val alignedRows =
+        relaxedRows.count { row ->
+          abs(row.left - medianLeft) <= leftTolerance &&
+            abs(row.right - medianRight) <= rightTolerance &&
+            abs(row.height - medianHeight) <= heightTolerance
+        }
+      if (alignedRows >= max(2, ceil(relaxedRows.size * 0.65).toInt())) return true
+    }
 
     val rows =
       rowBands

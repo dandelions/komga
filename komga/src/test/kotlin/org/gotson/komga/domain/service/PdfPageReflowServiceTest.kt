@@ -423,6 +423,24 @@ class PdfPageReflowServiceTest {
   }
 
   @Test
+  fun `given aligned text over faint grid when reflowing cropped page then text is not preserved as image`() {
+    val pageBytes = alignedTextOverFaintGridPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(targetWidth = 1080, textScale = 100),
+        cropRegions = listOf(PdfPageReflowRegion(x = 40, y = 35, w = 1320, h = 285)),
+      )
+
+    assertThat(response.items.filter { it.type == "image" }).isEmpty()
+    assertThat(response.items.filter { it.type == "word" }).hasSizeGreaterThanOrEqualTo(20)
+  }
+
+  @Test
   fun `given line art image between text when reflowing page then surrounding text is not preserved as image`() {
     val pageBytes = lineArtImageBetweenTextPage()
     val book = makeBook("book")
@@ -906,6 +924,38 @@ class PdfPageReflowServiceTest {
         graphics.fillRect(x, y, 13, 18)
       }
     }
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun alignedTextOverFaintGridPage(): ByteArray {
+    val image = BufferedImage(1400, 360, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color(218, 218, 218)
+    for (x in 45 until 1360 step 18) graphics.drawLine(x, 35, x, 205)
+    for (y in 35 until 206 step 18) graphics.drawLine(45, y, 1359, y)
+
+    graphics.color = Color.BLACK
+    repeat(2) { row ->
+      repeat(18) { column ->
+        val x = 65 + column * 72
+        val y = 55 + row * 80
+        graphics.fillRect(x, y, 7, 48)
+        graphics.fillRect(x + 7, y, 34, 7)
+        graphics.fillRect(x + 13, y + 20, 34, 7)
+        graphics.fillRect(x + 40, y + 7, 7, 41)
+      }
+    }
+    graphics.color = Color(205, 205, 205)
+    graphics.fillRect(350, 225, 700, 58)
+    graphics.color = Color(142, 142, 142)
+    for (x in 365 until 1040 step 22) graphics.drawLine(x, 225, x, 282)
+    for (y in 232 until 283 step 12) graphics.drawLine(350, y, 1049, y)
     graphics.dispose()
 
     val output = ByteArrayOutputStream()
