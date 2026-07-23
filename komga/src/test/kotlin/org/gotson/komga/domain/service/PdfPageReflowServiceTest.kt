@@ -626,6 +626,42 @@ class PdfPageReflowServiceTest {
   }
 
   @Test
+  fun `given heading bottom fragment when reflowing page then fragment is not repeated as a word`() {
+    val pageBytes = headingBottomFragmentPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+        cropRegions = listOf(PdfPageReflowRegion(x = 50, y = 30, w = 800, h = 180)),
+      )
+
+    val wordBlocks = response.items.filter { it.type == "word" }
+    assertThat(wordBlocks).isNotEmpty
+    assertThat(wordBlocks).noneMatch { (it.w ?: 0) >= 300 && (it.h ?: 0) <= 40 }
+  }
+
+  @Test
+  fun `given segmented heading underline when reflowing page then underline is not expanded into words`() {
+    val pageBytes = segmentedHeadingUnderlinePage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+        cropRegions = listOf(PdfPageReflowRegion(x = 50, y = 30, w = 800, h = 180)),
+      )
+
+    assertThat(response.items.filter { it.type == "word" }).hasSize(10)
+  }
+
+  @Test
   fun `given a wide text line when reflowing page then text is not repeated as image`() {
     val pageBytes = underlinedHeadingPage()
     val book = makeBook("book")
@@ -1115,6 +1151,37 @@ class PdfPageReflowServiceTest {
     listOf(90, 138, 186, 234, 282, 330, 378, 426, 474, 522, 570, 618, 666).forEach { x ->
       graphics.fillRect(x, 180, 24, 30)
     }
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun headingBottomFragmentPage(): ByteArray {
+    val image = BufferedImage(900, 260, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color.BLACK
+    repeat(10) { glyph -> graphics.fillRect(105 + glyph * 65, 55, 46, 58) }
+    graphics.fillRect(100, 124, 650, 8)
+    repeat(9) { glyph -> graphics.fillRect(118 + glyph * 70, 124, 28, 25) }
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun segmentedHeadingUnderlinePage(): ByteArray {
+    val image = BufferedImage(900, 260, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color.BLACK
+    repeat(10) { glyph -> graphics.fillRect(105 + glyph * 65, 55, 46, 58) }
+    repeat(13) { segment -> graphics.fillRect(100 + segment * 50, 128, 34, 5) }
     graphics.dispose()
 
     val output = ByteArrayOutputStream()

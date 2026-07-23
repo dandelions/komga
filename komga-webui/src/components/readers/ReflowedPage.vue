@@ -2655,7 +2655,8 @@ export default Vue.extend({
       )
       const imageRegions = this.mergeImageRegions(tightenedRegions)
         .filter(region => !this.isUnderlinedTextRegion(pixels, width, region, threshold))
-      return this.expandImageRegions(imageRegions, Math.max(2, Math.round(tileSize * 0.6)), roi, width, height)
+      const expanded = this.expandImageRegions(imageRegions, Math.max(2, Math.round(tileSize * 0.6)), roi, width, height)
+      return this.protectImageRegionEdges(pixels, width, height, expanded, threshold, roi)
     },
     imageTileMetrics(
       pixels: Uint8ClampedArray,
@@ -3704,6 +3705,70 @@ export default Vue.extend({
       })
       return this.mergeImageRegions(expanded)
     },
+    protectImageRegionEdges(pixels: Uint8ClampedArray, width: number, height: number, regions: ImageRegion[], threshold: number, roi: Roi): ImageRegion[] {
+      if (regions.length === 0) return regions
+      const bounds = this.clampRoi(roi, width, height)
+      const maxExtension = Math.max(8, Math.min(96, Math.floor(Math.min(bounds.w, bounds.h) / 40)))
+      const protectedRegions = regions.map(region => {
+        let current = this.clampRoi(region, width, height)
+        for (let pass = 0; pass < maxExtension; pass++) {
+          let changed = false
+          if (current.y > bounds.y && this.edgeBridgeCount(pixels, width, height, current, 0, threshold) >= this.edgeBridgeThreshold(current.w)) {
+            current = {...current, y: current.y - 1, h: current.h + 1}
+            changed = true
+          }
+          if (current.y + current.h < bounds.y + bounds.h && this.edgeBridgeCount(pixels, width, height, current, 1, threshold) >= this.edgeBridgeThreshold(current.w)) {
+            current = {...current, h: current.h + 1}
+            changed = true
+          }
+          if (current.x > bounds.x && this.edgeBridgeCount(pixels, width, height, current, 2, threshold) >= this.edgeBridgeThreshold(current.h)) {
+            current = {...current, x: current.x - 1, w: current.w + 1}
+            changed = true
+          }
+          if (current.x + current.w < bounds.x + bounds.w && this.edgeBridgeCount(pixels, width, height, current, 3, threshold) >= this.edgeBridgeThreshold(current.h)) {
+            current = {...current, w: current.w + 1}
+            changed = true
+          }
+          if (!changed) break
+        }
+        return current
+      })
+      return this.mergeImageRegions(protectedRegions)
+    },
+    edgeBridgeThreshold(span: number): number {
+      return Math.max(3, Math.min(24, Math.floor(span / 60)))
+    },
+    edgeBridgeCount(pixels: Uint8ClampedArray, width: number, height: number, region: ImageRegion, side: number, threshold: number): number {
+      let count = 0
+      if (side === 0 || side === 1) {
+        const y = side === 0 ? region.y : region.y + region.h - 1
+        const outsideY = side === 0 ? y - 1 : y + 1
+        if (outsideY < 0 || outsideY >= height) return 0
+        for (let x = region.x; x < region.x + region.w; x++) {
+          if (this.hasInkNear(pixels, width, height, x, y, true, threshold) && this.hasInkNear(pixels, width, height, x, outsideY, true, threshold)) count++
+        }
+      } else {
+        const x = side === 2 ? region.x : region.x + region.w - 1
+        const outsideX = side === 2 ? x - 1 : x + 1
+        if (outsideX < 0 || outsideX >= width) return 0
+        for (let y = region.y; y < region.y + region.h; y++) {
+          if (this.hasInkNear(pixels, width, height, x, y, false, threshold) && this.hasInkNear(pixels, width, height, outsideX, y, false, threshold)) count++
+        }
+      }
+      return count
+    },
+    hasInkNear(pixels: Uint8ClampedArray, width: number, height: number, x: number, y: number, horizontal: boolean, threshold: number): boolean {
+      for (let offset = -1; offset <= 1; offset++) {
+        const sampleX = horizontal ? x + offset : x
+        const sampleY = horizontal ? y : y + offset
+        if (sampleX < 0 || sampleX >= width || sampleY < 0 || sampleY >= height) continue
+        const index = (sampleY * width + sampleX) * 4
+        if (pixels[index + 3] === 0) continue
+        const luma = 0.299 * pixels[index] + 0.587 * pixels[index + 1] + 0.114 * pixels[index + 2]
+        if (luma < threshold) return true
+      }
+      return false
+    },
     isInsideImageRegion(x: number, y: number, regions: ImageRegion[]): boolean {
       return regions.some(region => x >= region.x && x < region.x + region.w && y >= region.y && y < region.y + region.h)
     },
@@ -4711,9 +4776,11 @@ export default Vue.extend({
       return lines
         .map(line => ({
           ...line,
-          words: this.filterNoiseBlocks(line.words, glyphSize, isInk, true),
+          words: this.filterNoiseBlocks(line.words, glyphSize, isInk, true)
+            .filter(word => !this.isHorizontalRuleFragment(word, glyphSize)),
         }))
         .filter(line => line.words.length > 0)
+        .filter(line => !this.isHorizontalRuleFragmentLine(line.words, glyphSize))
     },
     normalizeHorizontalTextColumns(lines: WordLine[]): WordLine[] {
       if (lines.length === 0) return lines
@@ -4895,6 +4962,21 @@ export default Vue.extend({
       const longHorizontalRule = block.h <= 3 && block.w >= Math.max(48, glyphHeight * 2.2)
       const longVerticalRule = block.w <= 3 && block.h >= Math.max(48, glyphHeight * 2.2)
       return longHorizontalRule || longVerticalRule
+    },
+    isHorizontalRuleFragment(block: WordBlock, glyphHeight: number): boolean {
+      if (block.w < Math.max(120, glyphHeight * 5)) return false
+      if (block.h < 4 || block.h > Math.max(36, glyphHeight * 0.75)) return false
+      return block.w >= block.h * 8
+    },
+    isHorizontalRuleFragmentLine(blocks: WordBlock[], glyphHeight: number): boolean {
+      if (blocks.length === 0) return false
+      const thinHeight = Math.max(6, glyphHeight * 0.18)
+      const thinBlocks = blocks.filter(block => block.h <= thinHeight)
+      if (thinBlocks.length < Math.ceil(blocks.length * 0.8)) return false
+      const left = Math.min(...thinBlocks.map(block => block.x))
+      const right = Math.max(...thinBlocks.map(block => block.x + block.w))
+      const coveredWidth = thinBlocks.reduce((sum, block) => sum + block.w, 0)
+      return right - left >= Math.max(120, glyphHeight * 4) && coveredWidth >= Math.max(48, glyphHeight * 2)
     },
     renderReflowItems(sourceCanvas: HTMLCanvasElement, lines: WordLine[], imageRegions: ImageRegion[]): ReflowItem[] {
       const sourceContext = this.canvasContext(sourceCanvas)

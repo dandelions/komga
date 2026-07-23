@@ -712,7 +712,8 @@ class PdfPageReflowService(
         }
       }
     val imageRegions = mergeImageRegions(tightenedRegions).filterNot { isUnderlinedTextRegion(image, it, threshold) }
-    return expandImageRegions(imageRegions, max(2, (tileSize * 0.6).roundToInt()), roi, image.width, image.height)
+    val expanded = expandImageRegions(imageRegions, max(2, (tileSize * 0.6).roundToInt()), roi, image.width, image.height)
+    return protectImageRegionEdges(image, expanded, threshold, roi)
   }
 
   private data class ImageTileMetrics(
@@ -1816,6 +1817,89 @@ class PdfPageReflowService(
     return mergeImageRegions(expanded)
   }
 
+  /** Keep a crop from cutting through a connected glyph or rule at its edge. */
+  private fun protectImageRegionEdges(
+    image: BufferedImage,
+    regions: List<Roi>,
+    threshold: Int,
+    roi: Roi,
+  ): List<Roi> {
+    if (regions.isEmpty()) return regions
+    val bounds = clampRoi(roi, image.width, image.height)
+    val maxExtension = max(8, min(96, min(bounds.w, bounds.h) / 40))
+    val protected =
+      regions.map { region ->
+        var current = clampRoi(region, image.width, image.height)
+        for (pass in 0 until maxExtension) {
+          var changed = false
+          if (current.y > bounds.y && edgeBridgeCount(image, current, 0, threshold) >= edgeBridgeThreshold(current.w)) {
+            current = current.copy(y = current.y - 1, h = current.h + 1)
+            changed = true
+          }
+          if (current.y + current.h < bounds.y + bounds.h && edgeBridgeCount(image, current, 1, threshold) >= edgeBridgeThreshold(current.w)) {
+            current = current.copy(h = current.h + 1)
+            changed = true
+          }
+          if (current.x > bounds.x && edgeBridgeCount(image, current, 2, threshold) >= edgeBridgeThreshold(current.h)) {
+            current = current.copy(x = current.x - 1, w = current.w + 1)
+            changed = true
+          }
+          if (current.x + current.w < bounds.x + bounds.w && edgeBridgeCount(image, current, 3, threshold) >= edgeBridgeThreshold(current.h)) {
+            current = current.copy(w = current.w + 1)
+            changed = true
+          }
+          if (!changed) break
+        }
+        current
+      }
+    return mergeImageRegions(protected)
+  }
+
+  private fun edgeBridgeThreshold(span: Int): Int = max(3, min(24, span / 60))
+
+  private fun edgeBridgeCount(
+    image: BufferedImage,
+    region: Roi,
+    side: Int,
+    threshold: Int,
+  ): Int {
+    var count = 0
+    when (side) {
+      0, 1 -> {
+        val y = if (side == 0) region.y else region.y + region.h - 1
+        val outsideY = if (side == 0) y - 1 else y + 1
+        if (outsideY !in 0 until image.height) return 0
+        for (x in region.x until region.x + region.w) {
+          if (hasInkNear(image, x, y, horizontal = true, threshold) && hasInkNear(image, x, outsideY, horizontal = true, threshold)) count++
+        }
+      }
+      else -> {
+        val x = if (side == 2) region.x else region.x + region.w - 1
+        val outsideX = if (side == 2) x - 1 else x + 1
+        if (outsideX !in 0 until image.width) return 0
+        for (y in region.y until region.y + region.h) {
+          if (hasInkNear(image, x, y, horizontal = false, threshold) && hasInkNear(image, outsideX, y, horizontal = false, threshold)) count++
+        }
+      }
+    }
+    return count
+  }
+
+  private fun hasInkNear(
+    image: BufferedImage,
+    x: Int,
+    y: Int,
+    horizontal: Boolean,
+    threshold: Int,
+  ): Boolean {
+    for (offset in -1..1) {
+      val sampleX = if (horizontal) x + offset else x
+      val sampleY = if (horizontal) y else y + offset
+      if (sampleX in 0 until image.width && sampleY in 0 until image.height && isInk(image.getRGB(sampleX, sampleY), threshold)) return true
+    }
+    return false
+  }
+
   private fun maskInkRegions(
     ink: ByteArray,
     width: Int,
@@ -2024,10 +2108,13 @@ class PdfPageReflowService(
       }
     val glyphHeight = horizontalCharacterSourceHeight(detectedLines.flatMap { it.blocks })
     val filteredLines =
-      detectedLines.mapNotNull { line ->
-        val blocks = filterNoiseBlocks(line.blocks, glyphHeight, image, textInk, options, horizontal = true)
-        if (blocks.isEmpty()) null else line.copy(blocks = blocks)
-      }
+      detectedLines
+        .mapNotNull { line ->
+          val blocks =
+            filterNoiseBlocks(line.blocks, glyphHeight, image, textInk, options, horizontal = true)
+              .filterNot { isHorizontalRuleFragment(it, glyphHeight) }
+          if (blocks.isEmpty()) null else line.copy(blocks = blocks)
+        }.filterNot { isHorizontalRuleFragmentLine(it.blocks, glyphHeight) }
     val lines = normalizeHorizontalTextColumns(filteredLines)
 
     val imageSlots = horizontalImageSlots(imageRegions, lines)
@@ -3881,6 +3968,28 @@ class PdfPageReflowService(
     val longHorizontalRule = block.h <= 3 && block.w >= 48
     val longVerticalRule = block.w <= 3 && block.h >= 48
     return longHorizontalRule || longVerticalRule
+  }
+
+  private fun isHorizontalRuleFragment(
+    block: Roi,
+    glyphSize: Double,
+  ): Boolean {
+    if (block.w < max(120.0, glyphSize * 5.0)) return false
+    if (block.h < 4 || block.h > max(36.0, glyphSize * 0.75)) return false
+    return block.w >= block.h * 8.0
+  }
+
+  private fun isHorizontalRuleFragmentLine(
+    blocks: List<Roi>,
+    glyphSize: Double,
+  ): Boolean {
+    if (blocks.isEmpty()) return false
+    val thinHeight = max(6.0, glyphSize * 0.18)
+    val thinBlocks = blocks.filter { it.h <= thinHeight }
+    if (thinBlocks.size < ceil(blocks.size * 0.8).toInt()) return false
+    val span = thinBlocks.maxOf { it.x + it.w } - thinBlocks.minOf { it.x }
+    val coveredWidth = thinBlocks.sumOf { it.w }
+    return span >= max(120.0, glyphSize * 4.0) && coveredWidth >= max(48.0, glyphSize * 2.0)
   }
 
   private fun unionRoi(
