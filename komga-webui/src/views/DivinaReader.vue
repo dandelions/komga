@@ -2924,6 +2924,7 @@ export default Vue.extend({
       this.clearReflowPrefetch()
       this.reflowPrefetchPages = []
       this.reflowRootPage = this.page
+      this.reflowStartAtEnd = false
       if (this.page) this.clearReflowCacheForPage(this.page)
       this.$nextTick(() => {
         const reflow = this.$refs.reflowedPage as any

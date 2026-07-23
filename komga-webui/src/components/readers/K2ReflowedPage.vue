@@ -120,6 +120,8 @@
       v-if="cropMode"
       class="k2-crop-panel"
       @click.stop
+      @contextmenu.prevent
+      @selectstart.prevent
     >
       <div
         class="k2-crop-stage"
@@ -2691,6 +2693,9 @@ export default Vue.extend({
   display: flex;
   justify-content: center;
   align-items: flex-start;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .k2-crop-stage {

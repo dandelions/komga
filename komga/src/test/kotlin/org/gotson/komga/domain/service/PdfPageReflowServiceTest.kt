@@ -313,6 +313,8 @@ class PdfPageReflowServiceTest {
     val wordBlocks = response.items.filter { it.type == "word" }
 
     assertThat(response.items.filter { it.type == "image" }).hasSize(1)
+    assertThat(response.items.indexOfFirst { it.type == "image" })
+      .isLessThan(response.items.indexOfFirst { it.type == "word" })
     assertThat(wordBlocks).hasSizeGreaterThanOrEqualTo(2)
     assertThat(wordBlocks.mapNotNull { it.h }.max()).isLessThan(40)
   }

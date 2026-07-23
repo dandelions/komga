@@ -359,6 +359,8 @@
         ref="cropViewport"
         class="crop-viewport"
         :class="{'crop-viewport-pan': cropPanMode}"
+        @contextmenu.prevent
+        @selectstart.prevent
       >
         <div
           class="crop-stage"
@@ -5020,7 +5022,7 @@ export default Vue.extend({
       lines.forEach((line, index) => {
         this.appendImageItems(rendered, sourceCanvas, sliceCanvas, sliceContext, imageSlots[index])
         const previousLine = lines[index - 1]
-        const previousBlankCue = previousLine ? this.hasHorizontalParagraphBlankCue(previousLine, glyphHeight) : false
+        const previousBlankCue = previousLine ? this.hasHorizontalParagraphBlankCue(previousLine, line, glyphHeight) : false
         const startParagraph = this.isParagraphStart(line, previousLine) || previousBlankCue
         let indent = 0
         if (startParagraph) {
@@ -5064,20 +5066,20 @@ export default Vue.extend({
     },
     horizontalImageSlot(region: ImageRegion, lines: WordLine[]): number {
       if (lines.length === 0) return 0
-      const centerY = region.y + region.h / 2
+      const topY = region.y
       let fallback = lines.length
 
       for (let index = 0; index < lines.length; index++) {
         const line = lines[index]
         if (!this.imageOverlapsLineColumn(region, line)) continue
         const lineCenterY = (line.line.start + line.line.end) / 2
-        if (centerY <= lineCenterY) return index
+        if (topY <= lineCenterY) return index
         fallback = index + 1
       }
 
       for (let index = 0; index < lines.length; index++) {
         const lineCenterY = (lines[index].line.start + lines[index].line.end) / 2
-        if (centerY <= lineCenterY) return index
+        if (topY <= lineCenterY) return index
       }
 
       return fallback
@@ -5521,14 +5523,11 @@ export default Vue.extend({
       if (!previousLine) return true
       if (line.column.start !== previousLine.column.start || line.column.end !== previousLine.column.end) return true
 
-      const gap = line.line.start - previousLine.line.end
       const currentHeight = line.words[0]?.h || line.line.end - line.line.start
-      const previousHeight = previousLine.words[0]?.h || previousLine.line.end - previousLine.line.start
-      if (gap > Math.max(currentHeight, previousHeight) * 1.2) return true
 
       const indent = this.rawLineIndent(line)
       const previousIndent = this.rawLineIndent(previousLine)
-      const indentThreshold = Math.max(MIN_INDENT, currentHeight * 0.6)
+      const indentThreshold = Math.max(12, currentHeight * 1.4)
       return indent > previousIndent + indentThreshold
     },
     rawLineIndent(line: WordLine): number {
@@ -5541,7 +5540,8 @@ export default Vue.extend({
       if (!firstWord) return 0
       const rawIndent = this.rawLineIndent(line)
       const indentThreshold = Math.max(MIN_INDENT, firstWord.h * 0.3)
-      if (rawIndent < indentThreshold) return 0
+      const maxParagraphIndent = Math.max(firstWord.h * 5, (line.column.end - line.column.start) * 0.18)
+      if (rawIndent < indentThreshold || rawIndent > maxParagraphIndent) return 0
       return rawIndent
     },
     horizontalParagraphIndentSourceWidth(line: WordLine, glyphHeight: number): number {
@@ -5555,7 +5555,7 @@ export default Vue.extend({
       if (widths.length === 0) return 0
       return Math.max(8, this.medianNumber(widths))
     },
-    hasHorizontalParagraphBlankCue(line: WordLine, glyphHeight: number): boolean {
+    hasHorizontalParagraphBlankCue(line: WordLine, nextLine: WordLine, glyphHeight: number): boolean {
       const words = line.words
         .filter(word => word.w >= 2 && word.h >= 2 && !this.isRuleLikeBlock(word))
         .slice()
@@ -5563,6 +5563,23 @@ export default Vue.extend({
       if (words.length === 0) return false
 
       const glyphWidth = Math.max(8, this.horizontalCharacterSourceWidth(words) || glyphHeight)
+      const firstWord = words[0]
+      const nextFirstWord = nextLine.words
+        .filter(word => word.w >= 2 && word.h >= 2 && !this.isRuleLikeBlock(word))
+        .slice()
+        .sort((a, b) => a.x - b.x)[0]
+      const lineIndent = Math.max(0, firstWord.x - line.column.start)
+      const nextIndent = nextFirstWord ? Math.max(0, nextFirstWord.x - nextLine.column.start) : 0
+      const sameNarrowColumn = Boolean(
+        nextFirstWord &&
+        line.column.start === nextLine.column.start &&
+        line.column.end === nextLine.column.end &&
+        lineIndent >= glyphWidth * 2 &&
+        nextIndent >= glyphWidth * 2 &&
+        Math.abs(firstWord.x - nextFirstWord.x) <= glyphWidth * 1.25,
+      )
+      if (sameNarrowColumn) return false
+
       const blankThreshold = Math.max(12, glyphWidth * 2)
       const lastWord = words[words.length - 1]
       const trailingBlank = line.column.end - (lastWord.x + lastWord.w)
@@ -5777,6 +5794,7 @@ export default Vue.extend({
       }
     },
     finishCropMode() {
+      let cropChanged = false
       if (this.draftRoi && this.draftRoi.w > MIN_CROP_SIZE && this.draftRoi.h > MIN_CROP_SIZE) {
         if (this.cropTarget === 'image') {
           this.setCurrentManualImageRoi(this.draftRoi)
@@ -5785,6 +5803,7 @@ export default Vue.extend({
         } else {
           this.setCurrentCropRoi(this.draftRoi)
         }
+        cropChanged = true
       }
       this.cropMode = false
       this.draftRoi = undefined
@@ -5793,6 +5812,7 @@ export default Vue.extend({
       this.cropPanMode = false
       this.clearCropSource()
       this.$emit('crop-mode-change', false)
+      if (cropChanged) this.$emit('force-reflow')
     },
     resetCrop() {
       this.controlsCollapsed = true
@@ -6671,6 +6691,9 @@ export default Vue.extend({
   border: 1px solid rgba(0, 0, 0, 0.14);
   background: #e5e7eb;
   touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .reflowed-page-dark .crop-viewport {

@@ -2158,7 +2158,7 @@ class PdfPageReflowService(
     lines.forEachIndexed { index, line ->
       appendImageItems(items, image, imageSlots[index], options, textScale)
       val previousLine = lines.getOrNull(index - 1)
-      val previousBlankCue = previousLine?.let { hasHorizontalParagraphBlankCue(it, glyphHeight) } ?: false
+      val previousBlankCue = previousLine?.let { hasHorizontalParagraphBlankCue(it, line, glyphHeight) } ?: false
       val startParagraph = isHorizontalParagraphStart(line, previousLine) || previousBlankCue
       val indent =
         if (startParagraph) {
@@ -2209,7 +2209,7 @@ class PdfPageReflowService(
     val currentHeight = line.blocks.firstOrNull()?.h ?: (line.line.end - line.line.start)
     val indent = rawHorizontalLineIndent(line)
     val previousIndent = rawHorizontalLineIndent(previousLine)
-    val indentThreshold = max(8.0, currentHeight * 0.6)
+    val indentThreshold = max(12.0, currentHeight * 1.4)
     return indent > previousIndent + indentThreshold
   }
 
@@ -2222,7 +2222,8 @@ class PdfPageReflowService(
     val first = line.blocks.minByOrNull { it.x } ?: return 0
     val rawIndent = rawHorizontalLineIndent(line)
     val indentThreshold = max(8.0, first.h * 0.3)
-    return if (rawIndent < indentThreshold) 0 else rawIndent
+    val maxParagraphIndent = max(first.h * 5.0, (line.column.end - line.column.start) * 0.18)
+    return if (rawIndent < indentThreshold || rawIndent > maxParagraphIndent) 0 else rawIndent
   }
 
   private fun normalizeHorizontalTextColumns(lines: List<HorizontalTextLine>): List<HorizontalTextLine> {
@@ -2272,12 +2273,25 @@ class PdfPageReflowService(
 
   private fun hasHorizontalParagraphBlankCue(
     line: HorizontalTextLine,
+    nextLine: HorizontalTextLine,
     glyphHeight: Double,
   ): Boolean {
     val blocks = line.blocks.filter { it.w >= 2 && it.h >= 2 && !isRuleLikeBlock(it) }.sortedBy { it.x }
     if (blocks.isEmpty()) return false
 
     val glyphWidth = max(8.0, horizontalCharacterSourceWidth(blocks).takeIf { it > 0 } ?: glyphHeight)
+    val nextFirst = nextLine.blocks.minByOrNull { it.x }
+    val first = blocks.first()
+    val lineIndent = max(0, first.x - line.column.start)
+    val nextIndent = nextFirst?.let { max(0, it.x - nextLine.column.start) } ?: 0
+    val sameNarrowColumn =
+      nextFirst != null &&
+        line.column == nextLine.column &&
+        lineIndent >= glyphWidth * 2.0 &&
+        nextIndent >= glyphWidth * 2.0 &&
+        abs(first.x - nextFirst.x) <= glyphWidth * 1.25
+    if (sameNarrowColumn) return false
+
     val blankThreshold = max(12.0, glyphWidth * 2.0)
     val last = blocks.last()
     val trailingBlank = line.column.end - (last.x + last.w)
@@ -2304,19 +2318,19 @@ class PdfPageReflowService(
     lines: List<HorizontalTextLine>,
   ): Int {
     if (lines.isEmpty()) return 0
-    val centerY = region.y + region.h / 2.0
+    val topY = region.y.toDouble()
     var fallback = lines.size
 
     lines.forEachIndexed { index, line ->
       if (!imageOverlapsLineColumn(region, line)) return@forEachIndexed
       val lineCenterY = (line.line.start + line.line.end) / 2.0
-      if (centerY <= lineCenterY) return index
+      if (topY <= lineCenterY) return index
       fallback = index + 1
     }
 
     lines.forEachIndexed { index, line ->
       val lineCenterY = (line.line.start + line.line.end) / 2.0
-      if (centerY <= lineCenterY) return index
+      if (topY <= lineCenterY) return index
     }
 
     return fallback
