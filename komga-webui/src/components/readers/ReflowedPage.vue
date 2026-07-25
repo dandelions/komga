@@ -645,6 +645,7 @@ type ReflowCachePayload = {
   items: ReflowItem[],
   pageBackground: string,
   transferStats?: ReflowTransferStats,
+  networkTransferBytes?: number,
 }
 
 type ReflowTransferStats = {
@@ -746,6 +747,10 @@ export default Vue.extend({
       type: Object as () => ReflowTransferStats | undefined,
       default: undefined,
     },
+    sessionTransferBytes: {
+      type: Number,
+      default: undefined,
+    },
     continuationPages: {
       type: Array as () => Array<ReflowContinuationPage<ReflowItem>>,
       default: () => [],
@@ -808,6 +813,7 @@ export default Vue.extend({
       displayedSourcePageUrl: '',
       cropImageSize: {w: 0, h: 0},
       cropImageRequestId: 0,
+      serverRequestController: undefined as AbortController | undefined,
       requestId: 0,
       reflowRunning: false,
       reflowPending: false,
@@ -1089,7 +1095,10 @@ export default Vue.extend({
       if (!this.transferStats) return ''
       const processing = this.transferStats.processingTimeMs !== undefined ? ` / ${Math.round(this.transferStats.processingTimeMs)}ms` : ''
       const encodedImages = this.transferStats.encodedImageBytes !== undefined ? ` / 字块 ${this.formatBytes(this.transferStats.encodedImageBytes)}` : ''
-      return `源页 ${this.formatBytes(this.transferStats.originalImageBytes)} / 交互 ${this.formatBytes(this.transferStats.transferBytes)}${encodedImages}${processing}`
+      const session = this.serverReflow && this.sessionTransferBytes !== undefined
+        ? ` / 本次重排 ${this.formatBytes(this.sessionTransferBytes)}`
+        : ''
+      return `源页 ${this.formatBytes(this.transferStats.originalImageBytes)} / 本页流量 ${this.formatBytes(this.transferStats.transferBytes)}${session}${encodedImages}${processing}`
     },
     activeRoi(): Roi | undefined {
       if (this.draftRoi) return this.draftRoi
@@ -1223,6 +1232,7 @@ export default Vue.extend({
         this.pages = []
         this.virtualPageIndex = 0
         this.requestId += 1
+        this.cancelServerReflowRequest()
         this.ensureCropImage(this.controlSkewCorrection)
         return
       }
@@ -1250,6 +1260,7 @@ export default Vue.extend({
     window.removeEventListener('resize', this.handleResize)
     window.visualViewport?.removeEventListener('resize', this.handleResize)
     this.requestId += 1
+    this.cancelServerReflowRequest()
     this.revokeObjectUrl()
   },
   methods: {
@@ -1300,6 +1311,7 @@ export default Vue.extend({
       if (this.reflowRunning) {
         this.reflowPending = true
         this.requestId += 1
+        this.cancelServerReflowRequest()
         return
       }
 
@@ -1347,7 +1359,7 @@ export default Vue.extend({
 
       try {
         if (this.serverReflow) {
-          await this.runServerReflow(requestId, detectionKey)
+          await this.runServerReflow(requestId, detectionKey, forceReflow)
           return
         }
 
@@ -1400,36 +1412,45 @@ export default Vue.extend({
         if (requestId === this.requestId) this.loading = false
       }
     },
-    async runServerReflow(requestId: number, detectionKey: string) {
+    async runServerReflow(requestId: number, detectionKey: string, forceReflow: boolean) {
       if (!this.serverReflowUrl) throw new Error('Server reflow URL is unavailable')
 
       const requestUrl = this.serverReflowRequestUrl()
+      const requestStartedAt = typeof performance !== 'undefined' ? performance.now() : 0
+      const controller = typeof AbortController !== 'undefined' ? new AbortController() : undefined
+      if (controller) this.serverRequestController = controller
+      const headers = {Accept: 'application/json'} as Record<string, string>
+      if (forceReflow) headers['X-Komga-Reflow-Refresh'] = 'true'
 
-      const response = await fetch(requestUrl, {
-        method: 'GET',
-        credentials: 'include',
-        headers: {
-          Accept: 'application/json',
-        },
-      })
-      if (!response.ok) throw new Error(`Unable to reflow page on server: ${response.status}`)
-      const text = await response.text()
-      const payload = JSON.parse(text) as ServerReflowResponse
-      if (requestId !== this.requestId) return
+      try {
+        const response = await fetch(requestUrl, {
+          method: 'GET',
+          credentials: 'include',
+          cache: forceReflow ? 'reload' : 'default',
+          signal: controller?.signal,
+          headers,
+        })
+        if (!response.ok) throw new Error(`Unable to reflow page on server: ${response.status}`)
+        const text = await response.text()
+        const payload = JSON.parse(text) as ServerReflowResponse
+        if (requestId !== this.requestId) return
 
-      this.imageSize = {w: payload.sourceWidth || 0, h: payload.sourceHeight || 0}
-      this.pageBackground = payload.pageBackground || '#fff'
-      this.reflowItems = Array.isArray(payload.items) ? payload.items : []
-      const responseBytes = Number(payload.transferBytes) || this.utf8ByteLength(text)
-      this.transferStats = {
-        originalImageBytes: Number(payload.originalImageBytes) || 0,
-        transferBytes: this.utf8ByteLength(requestUrl) + responseBytes,
-        encodedImageBytes: Number(payload.encodedImageBytes) || 0,
-        processingTimeMs: Number(payload.processingTimeMs) || 0,
+        this.imageSize = {w: payload.sourceWidth || 0, h: payload.sourceHeight || 0}
+        this.pageBackground = payload.pageBackground || '#fff'
+        this.reflowItems = Array.isArray(payload.items) ? payload.items : []
+        const responseBytes = this.serverResponseTransferBytes(requestUrl, response, payload, text, requestStartedAt)
+        this.transferStats = {
+          originalImageBytes: Number(payload.originalImageBytes) || 0,
+          transferBytes: responseBytes,
+          encodedImageBytes: Number(payload.encodedImageBytes) || 0,
+          processingTimeMs: Number(payload.processingTimeMs) || 0,
+        }
+        this.repaginate()
+        this.lastDetectionKey = detectionKey
+        this.emitReflowed(responseBytes)
+      } finally {
+        if (this.serverRequestController === controller) this.serverRequestController = undefined
       }
-      this.repaginate()
-      this.lastDetectionKey = detectionKey
-      this.emitReflowed()
     },
     serverReflowRequestUrl(): string {
       const params = new URLSearchParams()
@@ -1479,6 +1500,51 @@ export default Vue.extend({
     utf8ByteLength(value: string): number {
       if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(value).length
       return new Blob([value]).size
+    },
+    serverResponseTransferBytes(
+      requestUrl: string,
+      response: Response,
+      payload: ServerReflowResponse,
+      responseText: string,
+      requestStartedAt: number,
+    ): number {
+      const resourceUrl = typeof window !== 'undefined' ? new URL(requestUrl, window.location.href).href : requestUrl
+      const entries = typeof performance !== 'undefined' ? performance.getEntriesByName(resourceUrl) : []
+      const currentEntries = requestStartedAt > 0
+        ? entries.filter(entry => entry.startTime >= requestStartedAt - 1)
+        : entries
+      const candidates = currentEntries.length > 0 ? currentEntries : entries
+      const timing = candidates.length > 0 ? candidates[candidates.length - 1] as PerformanceResourceTiming : undefined
+      if (timing) {
+        const transferSize = Number(timing.transferSize) || 0
+        if (transferSize > 0) return Math.round(transferSize)
+
+        // A zero transfer size with a populated body means the response came from cache.
+        const encodedBodySize = Number(timing.encodedBodySize) || 0
+        const decodedBodySize = Number(timing.decodedBodySize) || 0
+        if (encodedBodySize > 0 || decodedBodySize > 0) return 0
+      }
+
+      const contentLength = Number(response.headers.get('content-length')) || 0
+      const contentEncoding = (response.headers.get('content-encoding') || '').toLowerCase()
+      if (contentLength > 0 && (!contentEncoding || contentLength < this.utf8ByteLength(responseText))) return Math.round(contentLength)
+
+      // transferBytes in older responses is the decoded JSON size. Estimate the gzip
+      // wire size from the already-compressed image bytes instead of reporting it as traffic.
+      const encodedImages = Number(payload.encodedImageBytes) || 0
+      if (encodedImages > 0) {
+        const decodedBytes = this.utf8ByteLength(responseText)
+        const base64Bytes = Math.ceil(encodedImages / 3) * 4
+        const metadataBytes = Math.max(0, decodedBytes - base64Bytes)
+        return Math.round(encodedImages * 1.03 + metadataBytes * 0.35 + 1024)
+      }
+      return Number(payload.transferBytes) || this.utf8ByteLength(responseText)
+    },
+    cancelServerReflowRequest() {
+      const controller = this.serverRequestController
+      if (!controller) return
+      this.serverRequestController = undefined
+      controller.abort()
     },
     formatBytes(bytes: number): string {
       const value = Number(bytes) || 0
@@ -1856,14 +1922,16 @@ export default Vue.extend({
         darkWordRenderVersion: 4,
       })
     },
-    emitReflowed() {
-      this.$emit('reflowed', {
+    emitReflowed(networkTransferBytes?: number) {
+      const payload = {
         pageNumber: this.page.number,
         cacheKey: this.cacheKey,
         items: this.reflowItems,
         pageBackground: this.pageBackground,
         transferStats: this.transferStats,
-      } as ReflowCachePayload)
+      } as ReflowCachePayload
+      if (networkTransferBytes !== undefined) payload.networkTransferBytes = Math.max(0, Math.round(networkTransferBytes))
+      this.$emit('reflowed', payload)
     },
     currentCachePayload(): ReflowCachePayload | undefined {
       if (this.reflowItems.length === 0) return undefined
@@ -5765,6 +5833,15 @@ export default Vue.extend({
     async toggleDeskewAnalysisRegionMode() {
       await this.toggleCropModeForTarget('deskew')
     },
+    emitCropSettingsChange(target: CropTarget) {
+      if (target === 'image') {
+        this.$emit('manual-image-rois-change', this.manualImageRoisPayload())
+      } else if (target === 'deskew') {
+        this.$emit('deskew-analysis-rois-change', this.deskewAnalysisRoisPayload())
+      } else {
+        this.$emit('crop-rois-change', this.cropRoisPayload())
+      }
+    },
     async toggleCropModeForTarget(target: CropTarget) {
       this.controlsCollapsed = true
       this.draftRoi = undefined
@@ -5796,11 +5873,13 @@ export default Vue.extend({
       }
     },
     finishCropMode() {
+      const sourcePageNumber = this.selectionPageNumber
+      const cropTarget = this.cropTarget
       let cropChanged = false
       if (this.draftRoi && this.draftRoi.w > MIN_CROP_SIZE && this.draftRoi.h > MIN_CROP_SIZE) {
-        if (this.cropTarget === 'image') {
+        if (cropTarget === 'image') {
           this.setCurrentManualImageRoi(this.draftRoi)
-        } else if (this.cropTarget === 'deskew') {
+        } else if (cropTarget === 'deskew') {
           this.setCurrentDeskewAnalysisRoi(this.draftRoi)
         } else {
           this.setCurrentCropRoi(this.draftRoi)
@@ -5814,12 +5893,17 @@ export default Vue.extend({
       this.cropPanMode = false
       this.clearCropSource()
       this.$emit('crop-mode-change', false)
-      if (cropChanged) this.$emit('force-reflow')
+      if (cropChanged) {
+        this.emitCropSettingsChange(cropTarget)
+        this.$emit('force-reflow', sourcePageNumber)
+      }
     },
     resetCrop() {
+      const sourcePageNumber = this.selectionPageNumber
       this.controlsCollapsed = true
       this.cropTarget = 'text'
       this.setCurrentCropRoi(undefined)
+      this.emitCropSettingsChange('text')
       this.draftRoi = undefined
       this.drawingCrop = false
       this.clearCropAdjustment()
@@ -5827,11 +5911,14 @@ export default Vue.extend({
       this.cropMode = false
       this.clearCropSource()
       this.$emit('crop-mode-change', false)
+      this.$emit('force-reflow', sourcePageNumber)
     },
     resetManualImageRegion() {
+      const sourcePageNumber = this.selectionPageNumber
       this.controlsCollapsed = true
       this.cropTarget = 'image'
       this.setCurrentManualImageRoi(undefined)
+      this.emitCropSettingsChange('image')
       this.draftRoi = undefined
       this.drawingCrop = false
       this.clearCropAdjustment()
@@ -5839,11 +5926,14 @@ export default Vue.extend({
       this.cropMode = false
       this.clearCropSource()
       this.$emit('crop-mode-change', false)
+      this.$emit('force-reflow', sourcePageNumber)
     },
     resetDeskewAnalysisRegion() {
+      const sourcePageNumber = this.selectionPageNumber
       this.controlsCollapsed = true
       this.cropTarget = 'deskew'
       this.setCurrentDeskewAnalysisRoi(undefined)
+      this.emitCropSettingsChange('deskew')
       this.draftRoi = undefined
       this.drawingCrop = false
       this.clearCropAdjustment()
@@ -5851,6 +5941,7 @@ export default Vue.extend({
       this.cropMode = false
       this.clearCropSource()
       this.$emit('crop-mode-change', false)
+      this.$emit('force-reflow', sourcePageNumber)
     },
     startCrop(event: PointerEvent) {
       if (!this.cropMode || !this.cropDisplayImageSize.w || !this.cropDisplayImageSize.h) return

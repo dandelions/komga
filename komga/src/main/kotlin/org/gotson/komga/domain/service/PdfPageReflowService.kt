@@ -179,6 +179,7 @@ class PdfPageReflowService(
     cropRegions: List<PdfPageReflowRegion> = emptyList(),
     manualImageRegions: List<PdfPageReflowRegion> = emptyList(),
     pageCount: Int? = null,
+    forceRefresh: Boolean = false,
   ): PdfPageReflowDto {
     pageCount?.let { pageImageCacheService.prefetchAround(book, pageNumber, it) }
     val key =
@@ -191,7 +192,11 @@ class PdfPageReflowService(
         cropRegions = cropRegions,
         manualImageRegions = manualImageRegions,
       )
-    reflowPageCache.getIfPresent(key)?.let { return it }
+    if (forceRefresh) {
+      reflowPageCache.invalidate(key)
+    } else {
+      reflowPageCache.getIfPresent(key)?.let { return it }
+    }
 
     val currentFuture = CompletableFuture<PdfPageReflowDto>()
     val existingFuture = inFlightReflows.putIfAbsent(key, currentFuture)

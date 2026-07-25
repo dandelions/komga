@@ -268,6 +268,7 @@
           :cached-items="cachedReflowItems(reflowRootPageDto)"
           :cached-page-background="cachedReflowBackground(reflowRootPageDto)"
           :cached-transfer-stats="cachedReflowTransferStats(reflowRootPageDto)"
+          :session-transfer-bytes="reflowSessionTransferBytes"
           :continuation-pages="reflowContinuationPages"
           :cache-key="reflowCacheKey"
           :night-display="nightDisplay"
@@ -1072,6 +1073,8 @@ export default Vue.extend({
       loadingReaderImageSettings: false,
       saveReaderImageSettingsServerDebounced: undefined as undefined | ((bookId?: string, settings?: Record<string, any>) => void),
       reflowCache: {} as Record<string, any>,
+      reflowSessionTransferBytes: 0,
+      reflowSessionTransferPages: {} as Record<string, boolean>,
       reflowPrefetchPages: [] as number[],
       reflowPrefetchTimer: undefined as number | undefined,
       reflowSettings: defaultReflowSettings(),
@@ -1261,6 +1264,7 @@ export default Vue.extend({
       immediate: true,
     },
     reflowCacheKey() {
+      this.resetReflowTransferSession()
       this.clearReflowPrefetch()
       if (this.reflowMode) {
         this.reflowRootPage = this.page
@@ -2669,6 +2673,7 @@ export default Vue.extend({
     startReflowMode() {
       if (!this.isPdf) return
 
+      this.resetReflowTransferSession()
       this.reflowRootPage = this.page
       this.reflowSetupMode = false
       this.reflowMode = true
@@ -2891,8 +2896,9 @@ export default Vue.extend({
       const entry = this.cachedReflowEntry(page)
       return Array.isArray(entry) ? undefined : entry?.transferStats
     },
-    cacheReflowPage(payload: {pageNumber: number, cacheKey: string, items: any[], pageBackground?: string, transferStats?: any}) {
+    cacheReflowPage(payload: {pageNumber: number, cacheKey: string, items: any[], pageBackground?: string, transferStats?: any, networkTransferBytes?: number}) {
       if (payload.cacheKey !== this.reflowCacheKey) return
+      this.recordReflowTransfer(payload.pageNumber, payload.cacheKey, payload.networkTransferBytes)
       const wasPrefetched = this.reflowPrefetchPages.includes(payload.pageNumber)
       if (wasPrefetched) this.reflowPrefetchPages = []
       this.$set(this.reflowCache, this.reflowCacheEntryKey(payload.pageNumber, payload.cacheKey), {
@@ -2922,12 +2928,27 @@ export default Vue.extend({
         if (cachedPageNumber === pageNumber) this.$delete(this.reflowCache, key)
       })
     },
-    forceCurrentReflow() {
+    resetReflowTransferSession() {
+      this.reflowSessionTransferBytes = 0
+      this.reflowSessionTransferPages = {}
+    },
+    recordReflowTransfer(pageNumber: number, cacheKey: string, transferBytes: number | undefined) {
+      if (transferBytes === undefined) return
+      const transferKey = this.reflowCacheEntryKey(pageNumber, cacheKey)
+      if (this.reflowSessionTransferPages[transferKey]) return
+      this.$set(this.reflowSessionTransferPages, transferKey, true)
+      const bytes = Number(transferBytes)
+      if (Number.isFinite(bytes) && bytes > 0) this.reflowSessionTransferBytes += Math.round(bytes)
+    },
+    forceCurrentReflow(pageNumber?: number) {
+      this.resetReflowTransferSession()
       this.clearReflowPrefetch()
       this.reflowPrefetchPages = []
-      this.reflowRootPage = this.page
+      const targetPage = Math.max(1, Math.min(this.pagesCount, Math.round(Number(pageNumber) || this.page)))
+      this.reflowRootPage = targetPage
+      if (this.page !== targetPage) this.page = targetPage
       this.reflowStartAtEnd = false
-      if (this.page) this.clearReflowCacheForPage(this.page)
+      if (targetPage) this.clearReflowCacheForPage(targetPage)
       this.$nextTick(() => {
         const reflow = this.$refs.reflowedPage as any
         reflow?.forceReflow?.()

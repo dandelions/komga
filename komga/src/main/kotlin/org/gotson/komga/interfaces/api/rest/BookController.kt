@@ -544,6 +544,8 @@ class BookController(
     @PathVariable pageNumber: Int,
     @RequestParam(value = "zero_based", defaultValue = "false")
     zeroBasedIndex: Boolean,
+    @RequestHeader(value = "X-Komga-Reflow-Refresh", defaultValue = "false")
+    refresh: Boolean,
     @RequestParam(value = "targetWidth", defaultValue = "0")
     targetWidth: Int,
     @RequestParam(value = "rotation", defaultValue = "0")
@@ -601,7 +603,7 @@ class BookController(
       val media = mediaRepository.findById(book.id)
       if (media.profile != MediaProfile.PDF) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Server reflow is only available for PDF books")
       contentRestrictionChecker.checkContentRestriction(principal.user, book)
-      if (request.checkNotModified(getBookLastModified(media))) {
+      if (!refresh && request.checkNotModified(getBookLastModified(media))) {
         return@let ResponseEntity
           .status(HttpStatus.NOT_MODIFIED)
           .setNotModified(media)
@@ -647,6 +649,7 @@ class BookController(
             cropRegions = parsedCropRegions,
             manualImageRegions = parsedManualImageRegions,
             pageCount = media.pageCount,
+            forceRefresh = refresh,
           )
         val body = serverReflowResponseBytes(response)
 
