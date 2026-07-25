@@ -539,6 +539,7 @@ class BookController(
   @PreAuthorize("hasRole('PAGE_STREAMING')")
   fun getBookPageReflowByNumber(
     @AuthenticationPrincipal principal: KomgaPrincipal,
+    request: ServletWebRequest,
     @PathVariable bookId: String,
     @PathVariable pageNumber: Int,
     @RequestParam(value = "zero_based", defaultValue = "false")
@@ -600,6 +601,12 @@ class BookController(
       val media = mediaRepository.findById(book.id)
       if (media.profile != MediaProfile.PDF) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Server reflow is only available for PDF books")
       contentRestrictionChecker.checkContentRestriction(principal.user, book)
+      if (request.checkNotModified(getBookLastModified(media))) {
+        return@let ResponseEntity
+          .status(HttpStatus.NOT_MODIFIED)
+          .setNotModified(media)
+          .body(ByteArray(0))
+      }
 
       try {
         val page = if (zeroBasedIndex) pageNumber + 1 else pageNumber

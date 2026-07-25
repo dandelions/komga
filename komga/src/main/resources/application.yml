@@ -66,6 +66,10 @@ server:
   servlet.session.timeout: 7d
   forward-headers-strategy: framework
   shutdown: graceful
+  compression:
+    enabled: true
+    mime-types: application/json,application/problem+json
+    min-response-size: 2KB
   error:
     include-message: always
   port: 25600

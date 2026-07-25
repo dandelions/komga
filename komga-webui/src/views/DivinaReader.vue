@@ -916,8 +916,8 @@ const REFLOW_SETTINGS_STORAGE_PREFIX = 'komga.pdfReflowSettings.'
 const READER_IMAGE_SETTINGS_STORAGE_PREFIX = 'komga.readerImageSettings.'
 const REFLOW_CACHE_BEHIND_COUNT = 2
 const REFLOW_CONTINUATION_COUNT = 4
-const REFLOW_PREFETCH_AHEAD_COUNT = REFLOW_CONTINUATION_COUNT + 1
-const REFLOW_PREFETCH_DELAY_MS = 120
+const REFLOW_PREFETCH_AHEAD_COUNT = 1
+const REFLOW_PREFETCH_DELAY_MS = 750
 const MAX_REFLOW_CROP_REGIONS = 8
 
 function defaultCropRegionsByParity(enabled: boolean = false): any {
@@ -1254,8 +1254,8 @@ export default Vue.extend({
           this.markProgress(val)
           this.goToPage = val
           this.updateRoute()
-          this.clearReflowPrefetch()
           if (this.reflowMode) this.scheduleNextReflowPrefetch()
+          else this.clearReflowPrefetch()
         }
       },
       immediate: true,
@@ -2893,13 +2893,15 @@ export default Vue.extend({
     },
     cacheReflowPage(payload: {pageNumber: number, cacheKey: string, items: any[], pageBackground?: string, transferStats?: any}) {
       if (payload.cacheKey !== this.reflowCacheKey) return
+      const wasPrefetched = this.reflowPrefetchPages.includes(payload.pageNumber)
+      if (wasPrefetched) this.reflowPrefetchPages = []
       this.$set(this.reflowCache, this.reflowCacheEntryKey(payload.pageNumber, payload.cacheKey), {
         items: payload.items,
         pageBackground: payload.pageBackground || '',
         transferStats: payload.transferStats,
       })
       this.pruneReflowCache()
-      if (payload.pageNumber === this.reflowRootPage) this.scheduleNextReflowPrefetch()
+      if (payload.pageNumber === this.reflowRootPage || wasPrefetched) this.scheduleNextReflowPrefetch()
     },
     reflowPageUrl(page: PageDtoWithUrl | undefined): string {
       if (!page) return ''
@@ -2972,7 +2974,7 @@ export default Vue.extend({
         reflowPrefetchPageNumbers(
           sourcePage,
           this.pagesCount,
-          REFLOW_CACHE_BEHIND_COUNT,
+          0,
           REFLOW_PREFETCH_AHEAD_COUNT,
         )
           .filter(pageNumber => !this.cachedReflowItems(this.pages[pageNumber - 1]))
@@ -2981,16 +2983,24 @@ export default Vue.extend({
         return
       }
 
-      const priorityPage = sourcePage < this.pagesCount && pageNumbers.includes(sourcePage + 1) ? sourcePage + 1 : undefined
-      this.reflowPrefetchPages = priorityPage === undefined ? [] : [priorityPage]
-      const backgroundPages = pageNumbers.filter(pageNumber => pageNumber !== priorityPage)
-      if (backgroundPages.length === 0) return
+      const nextPage = pageNumbers[0]
+      if (nextPage === undefined) {
+        this.reflowPrefetchPages = []
+        return
+      }
 
-      this.reflowPrefetchTimer = window.setTimeout(() => {
+      const startPrefetch = () => {
         this.reflowPrefetchTimer = undefined
         if (this.page !== sourcePage || this.reflowCropMode) return
-        this.reflowPrefetchPages = priorityPage === undefined ? backgroundPages : [priorityPage, ...backgroundPages]
-      }, REFLOW_PREFETCH_DELAY_MS)
+        if (this.cachedReflowItems(this.pages[nextPage - 1])) {
+          this.scheduleNextReflowPrefetch()
+          return
+        }
+        this.reflowPrefetchPages = [nextPage]
+      }
+
+      if (nextPage === sourcePage + 1) startPrefetch()
+      else this.reflowPrefetchTimer = window.setTimeout(startPrefetch, REFLOW_PREFETCH_DELAY_MS)
     },
     setReflowVisiblePage(pageNumber: number) {
       const normalized = Math.max(1, Math.min(this.pagesCount, Math.round(Number(pageNumber) || this.page)))

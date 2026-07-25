@@ -713,6 +713,7 @@ const DETECTION_FULL_RES_MAX_PIXELS = 6000000
 const DETECTION_MAX_SIDE = 2800
 const DETECTION_MAX_PIXELS = 5000000
 const DETECTION_MIN_SCALE = 0.4
+const REFLOW_RESPONSE_VERSION = 2
 
 export default Vue.extend({
   name: 'ReflowedPage',
@@ -1432,6 +1433,7 @@ export default Vue.extend({
     },
     serverReflowRequestUrl(): string {
       const params = new URLSearchParams()
+      params.set('reflowResponseVersion', String(REFLOW_RESPONSE_VERSION))
       params.set('targetWidth', String(Math.round(this.targetWidth || 0)))
       params.set('rotation', String(this.normalizedRotation(this.rotation)))
       params.set('autoCropBorder', String(this.options.autoCropBorder !== false))
