@@ -508,6 +508,12 @@ import Vue from 'vue'
 import {PageDtoWithUrl} from '@/types/komga-books'
 import {enhanceTextContrast} from '@/functions/image-enhancement'
 import {detectAutoDeskewAngle} from '@/functions/auto-deskew'
+import {
+  canonicalPageImageUrl,
+  loadCachedPageImageWithStats,
+  PageImageLoadResult,
+  PageImageLoadSource,
+} from '@/functions/page-image-cache'
 import {mergeVerticalColumnBands} from '@/functions/vertical-reflow'
 import {
   contiguousReflowPageCount,
@@ -651,6 +657,7 @@ type ReflowCachePayload = {
 type ReflowTransferStats = {
   originalImageBytes: number,
   transferBytes: number,
+  originalImageSource?: PageImageLoadSource,
   encodedImageBytes?: number,
   processingTimeMs?: number,
 }
@@ -751,6 +758,14 @@ export default Vue.extend({
       type: Number,
       default: undefined,
     },
+    sessionReflowTransferBytes: {
+      type: Number,
+      default: undefined,
+    },
+    sessionOriginalTransferBytes: {
+      type: Number,
+      default: undefined,
+    },
     continuationPages: {
       type: Array as () => Array<ReflowContinuationPage<ReflowItem>>,
       default: () => [],
@@ -803,16 +818,21 @@ export default Vue.extend({
       objectUrl: '',
       objectUrlSource: '',
       objectUrlBytes: 0,
+      objectUrlTransferBytes: 0,
+      objectUrlLoadSource: undefined as PageImageLoadSource | undefined,
       cropObjectUrl: '',
       cropObjectUrlSkewCorrection: 0,
       cropObjectUrlSource: '',
       cropObjectUrlPreparationKey: '',
+      cropSourceObjectUrl: '',
+      cropSourceObjectUrlSource: '',
       cropPageNumber: 0,
       cropPageUrl: '',
       displayedSourcePageNumber: 0,
       displayedSourcePageUrl: '',
       cropImageSize: {w: 0, h: 0},
       cropImageRequestId: 0,
+      cropImagePreparationTimer: undefined as number | undefined,
       serverRequestController: undefined as AbortController | undefined,
       requestId: 0,
       reflowRunning: false,
@@ -1081,11 +1101,16 @@ export default Vue.extend({
       return this.deskewAnalysisRoisByParity[this.selectionPageParity]
     },
     cropImageUrl(): string {
-      if (
-        this.cropMode &&
-        this.cropPageUrl &&
-        !this.cropImageNeedsPreparation(this.controlSkewCorrection)
-      ) return this.pageImageUrl(this.cropPageUrl)
+      if (this.cropMode && this.cropPageUrl) {
+        const sourceKey = this.pageImageSourceKey(this.cropPageUrl)
+        if (this.cropImageNeedsPreparation(this.controlSkewCorrection)) {
+          if (this.cropObjectUrl && this.cropObjectUrlSource === sourceKey) return this.cropObjectUrl
+        } else {
+          if (this.objectUrl && this.objectUrlSource === sourceKey) return this.objectUrl
+          if (this.cropSourceObjectUrl && this.cropSourceObjectUrlSource === sourceKey) return this.cropSourceObjectUrl
+        }
+        return ''
+      }
       return this.cropObjectUrl || this.objectUrl
     },
     cropDisplayImageSize(): {w: number, h: number} {
@@ -1095,10 +1120,16 @@ export default Vue.extend({
       if (!this.transferStats) return ''
       const processing = this.transferStats.processingTimeMs !== undefined ? ` / ${Math.round(this.transferStats.processingTimeMs)}ms` : ''
       const encodedImages = this.transferStats.encodedImageBytes !== undefined ? ` / 字块 ${this.formatBytes(this.transferStats.encodedImageBytes)}` : ''
-      const session = this.serverReflow && this.sessionTransferBytes !== undefined
-        ? ` / 本次重排 ${this.formatBytes(this.sessionTransferBytes)}`
+      const source = this.transferStats.originalImageSource
+        ? ` / 原图${this.pageImageLoadSourceLabel(this.transferStats.originalImageSource)}`
         : ''
-      return `源页 ${this.formatBytes(this.transferStats.originalImageBytes)} / 本页流量 ${this.formatBytes(this.transferStats.transferBytes)}${session}${encodedImages}${processing}`
+      const sessionDetails = this.sessionTransferBytes !== undefined
+        ? `（响应 ${this.formatBytes(this.sessionReflowTransferBytes || 0)} / 原图 ${this.formatBytes(this.sessionOriginalTransferBytes || 0)}）`
+        : ''
+      const session = this.sessionTransferBytes !== undefined
+        ? ` / 本次总流量 ${this.formatBytes(this.sessionTransferBytes)}${sessionDetails}`
+        : ''
+      return `源页 ${this.formatBytes(this.transferStats.originalImageBytes)} / 本页流量 ${this.formatBytes(this.transferStats.transferBytes)}${source}${session}${encodedImages}${processing}`
     },
     activeRoi(): Roi | undefined {
       if (this.draftRoi) return this.draftRoi
@@ -1261,6 +1292,7 @@ export default Vue.extend({
     window.visualViewport?.removeEventListener('resize', this.handleResize)
     this.requestId += 1
     this.cancelServerReflowRequest()
+    this.clearCropImagePreparationTimer()
     this.revokeObjectUrl()
   },
   methods: {
@@ -1494,7 +1526,8 @@ export default Vue.extend({
     localTransferStats(): ReflowTransferStats {
       return {
         originalImageBytes: this.objectUrlBytes || 0,
-        transferBytes: 0,
+        transferBytes: this.objectUrlTransferBytes || 0,
+        originalImageSource: this.objectUrlLoadSource,
       }
     },
     utf8ByteLength(value: string): number {
@@ -1551,6 +1584,11 @@ export default Vue.extend({
       if (value < 1024) return `${Math.round(value)}B`
       if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)}KB`
       return `${(value / 1024 / 1024).toFixed(2)}MB`
+    },
+    pageImageLoadSourceLabel(source: PageImageLoadSource): string {
+      if (source === 'memory') return '内存缓存'
+      if (source === 'browser-cache') return '浏览器缓存'
+      return '网络'
     },
     handleResize() {
       this.updateViewportMetrics()
@@ -1952,24 +1990,20 @@ export default Vue.extend({
       })
     },
     async ensureCropImage(skewCorrection: number = this.controlSkewCorrection) {
+      this.clearCropImagePreparationTimer()
       const normalizedSkewCorrection = this.normalizedSkewCorrection(skewCorrection)
       const pageUrl = this.cropPageUrl || this.displayedSourcePageUrl || this.page.url
       const pageNumber = this.cropPageNumber || this.displayedSourcePageNumber || this.page.number
       const pageParity: PageParity = pageNumber % 2 === 0 ? 'even' : 'odd'
       const preparationKey = this.cropImagePreparationKey(normalizedSkewCorrection, pageParity)
-      if (this.cropMode && this.cropPageUrl && !this.cropImageNeedsPreparation(normalizedSkewCorrection)) {
-        this.revokeCropObjectUrl(false)
-        this.detectedAutoSkewCorrection = 0
-        this.loading = false
-        return
-      }
+      const needsPreparation = this.cropImageNeedsPreparation(normalizedSkewCorrection)
       const sourceKey = this.pageImageSourceKey(pageUrl)
       const cropImageRequestId = this.cropImageRequestId + 1
       this.cropImageRequestId = cropImageRequestId
       if (this.objectUrl && this.objectUrlSource === sourceKey && this.imageSize.w && this.imageSize.h) {
         this.cropImageSize = {...this.imageSize}
-        if (!this.cropImageNeedsPreparation(normalizedSkewCorrection)) {
-          this.revokeCropObjectUrl()
+        if (!needsPreparation) {
+          this.revokePreparedCropObjectUrl()
           this.detectedAutoSkewCorrection = 0
           return
         }
@@ -1989,6 +2023,34 @@ export default Vue.extend({
         return
       }
       if (
+        this.cropSourceObjectUrl &&
+        this.cropSourceObjectUrlSource === sourceKey
+      ) {
+        if (
+          needsPreparation &&
+          this.cropObjectUrl &&
+          this.cropObjectUrlSource === sourceKey &&
+          this.cropObjectUrlPreparationKey === preparationKey &&
+          this.cropImageSize.w &&
+          this.cropImageSize.h
+        ) return
+        this.loading = true
+        try {
+          const image = await this.decodeImageUrl(this.cropSourceObjectUrl)
+          if (cropImageRequestId !== this.cropImageRequestId) return
+          this.cropImageSize = {w: image.naturalWidth, h: image.naturalHeight}
+          if (!needsPreparation) {
+            this.revokePreparedCropObjectUrl()
+            this.detectedAutoSkewCorrection = 0
+            return
+          }
+          await this.prepareCropObjectUrl(image, normalizedSkewCorrection, cropImageRequestId, sourceKey, false, pageParity, preparationKey)
+        } finally {
+          if (cropImageRequestId === this.cropImageRequestId) this.loading = false
+        }
+        return
+      }
+      if (
         this.cropObjectUrl &&
         this.cropObjectUrlSource === sourceKey &&
         this.cropObjectUrlPreparationKey === preparationKey &&
@@ -1997,33 +2059,42 @@ export default Vue.extend({
       ) return
       this.loading = true
       try {
-        const image = await this.loadPageImage(pageUrl)
+        const image = await this.loadPageImage(pageUrl, undefined, true, pageNumber)
         if (cropImageRequestId !== this.cropImageRequestId) return
         this.cropImageSize = {w: image.naturalWidth, h: image.naturalHeight}
         if (pageUrl === this.page.url) this.imageSize = {...this.cropImageSize}
-        await this.prepareCropObjectUrl(
-          image,
-          normalizedSkewCorrection,
-          cropImageRequestId,
-          sourceKey,
-          pageUrl !== this.page.url,
-          pageParity,
-          preparationKey,
-        )
+        if (needsPreparation) {
+          await this.prepareCropObjectUrl(
+            image,
+            normalizedSkewCorrection,
+            cropImageRequestId,
+            sourceKey,
+            false,
+            pageParity,
+            preparationKey,
+          )
+        } else {
+          this.revokePreparedCropObjectUrl()
+          this.detectedAutoSkewCorrection = 0
+        }
       } finally {
         if (cropImageRequestId === this.cropImageRequestId) this.loading = false
       }
     },
-    async loadPageImage(url: string, requestId?: number): Promise<HTMLImageElement> {
+    async loadPageImage(
+      url: string,
+      requestId?: number,
+      retainCropSource: boolean = false,
+      sourcePageNumber: number = this.page.number,
+    ): Promise<HTMLImageElement> {
       const sourceUrl = this.pageImageUrl(url)
       const rotation = this.normalizedRotation(this.rotation)
       const sourceKey = `${sourceUrl}#rotation=${rotation}`
       if (this.objectUrl && this.objectUrlSource === sourceKey) return this.decodeImageUrl(this.objectUrl)
 
-      const response = await fetch(sourceUrl, {credentials: 'include'})
-      if (!response.ok) throw new Error(`Unable to load page: ${response.status}`)
-      const blob = await response.blob()
-      if (blob.type && !blob.type.startsWith('image/')) throw new Error(`Page response is not an image: ${blob.type}`)
+      const pageImage = await loadCachedPageImageWithStats(sourceUrl)
+      const blob = pageImage.blob
+      this.emitPageImageTransfer(pageImage, sourcePageNumber)
       const rawObjectUrl = URL.createObjectURL(blob)
       let nextObjectUrl = rawObjectUrl
       try {
@@ -2036,7 +2107,8 @@ export default Vue.extend({
         }
         const sourceChanged = url !== this.page.url || rotation !== this.normalizedRotation(this.rotation)
         if (sourceChanged || (requestId !== undefined && requestId !== this.requestId)) {
-          URL.revokeObjectURL(nextObjectUrl)
+          if (sourceChanged && retainCropSource) this.setCropSourceObjectUrl(nextObjectUrl, sourceKey)
+          else URL.revokeObjectURL(nextObjectUrl)
           return image
         }
         const previousObjectUrl = this.objectUrl
@@ -2044,6 +2116,8 @@ export default Vue.extend({
         this.objectUrl = nextObjectUrl
         this.objectUrlSource = sourceKey
         this.objectUrlBytes = blob.size
+        this.objectUrlTransferBytes = pageImage.transferBytes
+        this.objectUrlLoadSource = pageImage.source
         if (previousObjectUrl && previousObjectUrl !== nextObjectUrl) URL.revokeObjectURL(previousObjectUrl)
         return image
       } catch (e) {
@@ -2066,8 +2140,16 @@ export default Vue.extend({
       })
     },
     pageImageUrl(url: string): string {
-      const separator = url.includes('?') ? '&' : '?'
-      return `${url}${separator}contentNegotiation=false`
+      return canonicalPageImageUrl(url)
+    },
+    emitPageImageTransfer(pageImage: PageImageLoadResult, pageNumber: number) {
+      if (!pageImage.requestId || pageImage.transferBytes <= 0) return
+      this.$emit('page-image-transfer', {
+        pageNumber,
+        requestId: pageImage.requestId,
+        requestUrl: pageImage.requestUrl,
+        transferBytes: pageImage.transferBytes,
+      })
     },
     pageImageSourceKey(url: string): string {
       return `${this.pageImageUrl(url)}#rotation=${this.normalizedRotation(this.rotation)}`
@@ -2506,15 +2588,44 @@ export default Vue.extend({
       this.objectUrl = ''
       this.objectUrlSource = ''
       this.objectUrlBytes = 0
+      this.objectUrlTransferBytes = 0
+      this.objectUrlLoadSource = undefined
       this.imageSize = {w: 0, h: 0}
     },
-    revokeCropObjectUrl(cancelCropRequests: boolean = true) {
-      if (cancelCropRequests) this.cropImageRequestId += 1
+    setCropSourceObjectUrl(url: string, sourceKey: string) {
+      const previousUrl = this.cropSourceObjectUrl
+      this.cropSourceObjectUrl = url
+      this.cropSourceObjectUrlSource = sourceKey
+      if (previousUrl && previousUrl !== url) URL.revokeObjectURL(previousUrl)
+    },
+    revokePreparedCropObjectUrl() {
       if (this.cropObjectUrl) URL.revokeObjectURL(this.cropObjectUrl)
       this.cropObjectUrl = ''
       this.cropObjectUrlSkewCorrection = 0
       this.cropObjectUrlSource = ''
       this.cropObjectUrlPreparationKey = ''
+    },
+    revokeCropSourceObjectUrl() {
+      if (this.cropSourceObjectUrl) URL.revokeObjectURL(this.cropSourceObjectUrl)
+      this.cropSourceObjectUrl = ''
+      this.cropSourceObjectUrlSource = ''
+    },
+    revokeCropObjectUrl(cancelCropRequests: boolean = true) {
+      if (cancelCropRequests) this.cropImageRequestId += 1
+      this.revokePreparedCropObjectUrl()
+      this.revokeCropSourceObjectUrl()
+    },
+    clearCropImagePreparationTimer() {
+      if (this.cropImagePreparationTimer === undefined) return
+      window.clearTimeout(this.cropImagePreparationTimer)
+      this.cropImagePreparationTimer = undefined
+    },
+    scheduleCropImagePreparation(skewCorrection: number) {
+      this.clearCropImagePreparationTimer()
+      this.cropImagePreparationTimer = window.setTimeout(() => {
+        this.cropImagePreparationTimer = undefined
+        this.ensureCropImage(skewCorrection)
+      }, 120)
     },
     detectWordLines(imageData: ImageData, width: number, height: number, cropRoi?: Roi): DetectedReflowContent {
       const pixels = imageData.data
@@ -5700,15 +5811,16 @@ export default Vue.extend({
     },
     setCropSkewCorrection(event: Event) {
       const target = event.target as HTMLInputElement
-      this.updateCropSkewCorrection(Number(target.value))
+      this.updateCropSkewCorrection(Number(target.value), true)
     },
     adjustCropSkewCorrection(delta: number) {
       this.updateCropSkewCorrection(this.controlSkewCorrection + delta)
     },
-    updateCropSkewCorrection(value: number) {
+    updateCropSkewCorrection(value: number, deferPreparation: boolean = false) {
       const skewCorrection = this.normalizedSkewCorrection(value)
       this.pendingSkewCorrection = skewCorrection
-      this.ensureCropImage(skewCorrection)
+      if (deferPreparation) this.scheduleCropImagePreparation(skewCorrection)
+      else this.ensureCropImage(skewCorrection)
     },
     setVerticalText(event: Event) {
       const target = event.target as HTMLSelectElement
@@ -6152,6 +6264,7 @@ export default Vue.extend({
       }
     },
     clearCropSource() {
+      this.clearCropImagePreparationTimer()
       this.revokeCropObjectUrl()
       this.cropPageNumber = 0
       this.cropPageUrl = ''

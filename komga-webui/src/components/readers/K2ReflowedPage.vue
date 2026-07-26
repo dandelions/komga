@@ -219,6 +219,7 @@
 import Vue from 'vue'
 import {PageDtoWithUrl} from '@/types/komga-books'
 import {enhanceTextContrast} from '@/functions/image-enhancement'
+import {canonicalPageImageUrl, loadCachedPageImageWithStats} from '@/functions/page-image-cache'
 
 type Roi = { x: number, y: number, w: number, h: number }
 type PageParity = 'odd' | 'even'
@@ -561,10 +562,16 @@ export default Vue.extend({
       const sourceKey = `${sourceUrl}#rotation=${rotation}`
       if (this.objectUrl && this.objectUrlSource === sourceKey) return this.decodeImageUrl(this.objectUrl)
 
-      const response = await fetch(sourceUrl, {credentials: 'include'})
-      if (!response.ok) throw new Error(`Unable to load page: ${response.status}`)
-      const blob = await response.blob()
-      if (blob.type && !blob.type.startsWith('image/')) throw new Error(`Page response is not an image: ${blob.type}`)
+      const pageImage = await loadCachedPageImageWithStats(sourceUrl)
+      const blob = pageImage.blob
+      if (pageImage.requestId && pageImage.transferBytes > 0) {
+        this.$emit('page-image-transfer', {
+          pageNumber: this.page.number,
+          requestId: pageImage.requestId,
+          requestUrl: pageImage.requestUrl,
+          transferBytes: pageImage.transferBytes,
+        })
+      }
       const rawObjectUrl = URL.createObjectURL(blob)
       let nextObjectUrl = rawObjectUrl
       try {
@@ -607,8 +614,7 @@ export default Vue.extend({
       })
     },
     pageImageUrl(url: string): string {
-      const separator = url.includes('?') ? '&' : '?'
-      return `${url}${separator}contentNegotiation=false`
+      return canonicalPageImageUrl(url)
     },
     rotatedImageCanvas(image: HTMLImageElement, degrees: number): HTMLCanvasElement {
       const rotation = this.normalizedRotation(degrees)

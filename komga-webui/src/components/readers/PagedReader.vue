@@ -99,6 +99,7 @@ import {shortcutsLTR, shortcutsRTL, shortcutsVertical} from '@/functions/shortcu
 import {PageDtoWithUrl} from '@/types/komga-books'
 import {buildSpreads} from '@/functions/book-spreads'
 import {enhanceTextContrast} from '@/functions/image-enhancement'
+import {markPageImageBrowserLoaded} from '@/functions/page-image-cache'
 
 type CropRegion = {
   x: number,
@@ -677,6 +678,7 @@ export default Vue.extend({
     },
     pageImageLoaded(page: PageDtoWithUrl, event: Event) {
       const image = event.target as HTMLImageElement
+      markPageImageBrowserLoaded(page.url, image.currentSrc || image.src)
       if (image?.naturalWidth > 0 && image.naturalHeight > 0) {
         const ratio = image.naturalWidth / image.naturalHeight
         if (this.pageAspectRatios[page.number] !== ratio) this.$set(this.pageAspectRatios, page.number, ratio)

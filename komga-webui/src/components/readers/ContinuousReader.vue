@@ -46,6 +46,7 @@ import {ContinuousScaleType} from '@/types/enum-reader'
 import {PageDtoWithUrl} from '@/types/komga-books'
 import {throttle} from 'lodash'
 import {enhanceTextContrast} from '@/functions/image-enhancement'
+import {markPageImageBrowserLoaded} from '@/functions/page-image-cache'
 
 type CropRegion = {
   x: number,
@@ -315,6 +316,8 @@ export default Vue.extend({
       return Math.max(0, Math.min(100, numberValue))
     },
     async ensureDeskewedPageUrl(page: PageDtoWithUrl, event: Event) {
+      const loadedImage = event.target as HTMLImageElement
+      markPageImageBrowserLoaded(page.url, loadedImage.currentSrc || loadedImage.src)
       const rotation = this.normalizedRotation(this.rotation)
       const angle = this.skewCorrection || 0
       const contrastEnhancement = this.contrastEnhancement
@@ -324,7 +327,7 @@ export default Vue.extend({
       if (this.pageDisplayUrls[page.number]) return
       if ((!rotation && !angle && !this.contrastEnhancement) || this.deskewedPageUrls[page.number] || this.deskewedPagePending[page.number]) return
 
-      const image = event.target as HTMLImageElement
+      const image = loadedImage
       if (!image?.complete || image.naturalWidth <= 0) return
 
       this.$set(this.deskewedPagePending, page.number, true)

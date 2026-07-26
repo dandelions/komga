@@ -229,6 +229,7 @@
           @crop-rois-change="setReflowCropRois"
           @settings-change="setK2ReflowSettings"
           @rotation-change="setReaderRotation"
+          @page-image-transfer="recordReflowAssetTransfer"
           @show-pdf-toc="openPdfToc"
           @toggle-night-display="toggleNightDisplay"
           @back-to-book="closeBook"
@@ -269,6 +270,8 @@
           :cached-page-background="cachedReflowBackground(reflowRootPageDto)"
           :cached-transfer-stats="cachedReflowTransferStats(reflowRootPageDto)"
           :session-transfer-bytes="reflowSessionTransferBytes"
+          :session-reflow-transfer-bytes="reflowSessionResponseTransferBytes"
+          :session-original-transfer-bytes="reflowSessionOriginalTransferBytes"
           :continuation-pages="reflowContinuationPages"
           :cache-key="reflowCacheKey"
           :night-display="nightDisplay"
@@ -299,6 +302,7 @@
           @force-reflow="forceCurrentReflow"
           @exit-reflow="exitReflowMode"
           @reflowed="cacheReflowPage"
+          @page-image-transfer="recordReflowAssetTransfer"
           @visible-source-page-change="setReflowVisiblePage"
           @source-previous="reflowSourcePreviousPage"
           @source-next="reflowSourceNextPage"
@@ -325,6 +329,7 @@
           :controls-top-offset="0"
           preload
           @reflowed="cacheReflowPage"
+          @page-image-transfer="recordReflowAssetTransfer"
         />
 
         <div
@@ -911,6 +916,7 @@ import {TocEntry} from '@/types/epub'
 import {flattenToc} from '@/functions/toc'
 import {CLIENT_SETTING, ClientSettingUserUpdateDto} from '@/types/komga-clientsettings'
 import {enhanceTextContrast} from '@/functions/image-enhancement'
+import {canonicalPageImageUrl, loadCachedPageImageWithStats} from '@/functions/page-image-cache'
 import {reflowPrefetchPageNumbers} from '@/functions/reflow-stream'
 
 const REFLOW_SETTINGS_STORAGE_PREFIX = 'komga.pdfReflowSettings.'
@@ -1074,6 +1080,8 @@ export default Vue.extend({
       saveReaderImageSettingsServerDebounced: undefined as undefined | ((bookId?: string, settings?: Record<string, any>) => void),
       reflowCache: {} as Record<string, any>,
       reflowSessionTransferBytes: 0,
+      reflowSessionResponseTransferBytes: 0,
+      reflowSessionOriginalTransferBytes: 0,
       reflowSessionTransferPages: {} as Record<string, boolean>,
       reflowPrefetchPages: [] as number[],
       reflowPrefetchTimer: undefined as number | undefined,
@@ -1104,6 +1112,7 @@ export default Vue.extend({
       readerCropDraft: undefined as undefined | {x: number, y: number, w: number, h: number},
       readerCropImageUrl: '',
       readerCropImageRequestId: 0,
+      readerCropImagePreparationTimer: undefined as number | undefined,
       readerDeskewedPageUrls: {} as Record<number, string>,
       readerViewKey: 0,
       shortcuts: {} as any,
@@ -1212,6 +1221,7 @@ export default Vue.extend({
   destroyed() {
     document.documentElement.classList.remove('html-reader')
     this.clearReflowPrefetch()
+    this.clearReaderCropImagePreparationTimer()
     this.revokeReaderCropImageUrl()
     this.revokeReaderDeskewedPageUrls()
 
@@ -1264,7 +1274,6 @@ export default Vue.extend({
       immediate: true,
     },
     reflowCacheKey() {
-      this.resetReflowTransferSession()
       this.clearReflowPrefetch()
       if (this.reflowMode) {
         this.reflowRootPage = this.page
@@ -1369,7 +1378,9 @@ export default Vue.extend({
       return this.readerCropPageParity === 'even' ? '偶数页' : '奇数页'
     },
     readerCropImageSrc(): string {
-      return this.readerCropImageUrl || this.currentPage?.url || ''
+      const pageNumber = this.currentPage?.number
+      const preparedPageUrl = pageNumber ? this.readerDeskewedPageUrls[pageNumber] : ''
+      return this.readerCropImageUrl || preparedPageUrl || (this.currentPage?.url ? canonicalPageImageUrl(this.currentPage.url) : '')
     },
     readerCropActiveRect(): object | undefined {
       const region = this.readerCropDraft || this.effectiveReaderCropRegion(this.readerCropPageParity, this.readerActiveCropRegion)
@@ -1790,7 +1801,7 @@ export default Vue.extend({
     setReaderCropSkewCorrection(event: Event) {
       const target = event.target as HTMLInputElement
       this.readerSkewCorrection = this.normalizedReaderSkewCorrection(Number(target.value))
-      this.prepareReaderCropImage()
+      this.scheduleReaderCropImagePreparation()
     },
     normalizedReaderSkewCorrection(value: any): number {
       const numberValue = Number(value)
@@ -1958,22 +1969,39 @@ export default Vue.extend({
       }
     },
     async prepareReaderCropImage() {
+      this.clearReaderCropImagePreparationTimer()
       const requestId = this.readerCropImageRequestId + 1
       this.readerCropImageRequestId = requestId
+      const pageNumber = this.currentPage?.number
+      const pageUrl = this.currentPage?.url
       const rotation = this.readerRotation
       const angle = this.readerSkewCorrection || 0
       const contrastEnhancement = this.readerContrastEnhancement
-      if ((!rotation && !angle && !contrastEnhancement) || !this.currentPage?.url) {
+      if (!pageNumber || !pageUrl) {
         this.revokeReaderCropImageUrl()
+        return
+      }
+      if (this.readerDeskewedPageUrls[pageNumber]) {
+        if (this.readerCropImageUrl) {
+          URL.revokeObjectURL(this.readerCropImageUrl)
+          this.readerCropImageUrl = ''
+        }
         return
       }
 
       try {
-        const image = await this.loadReaderCropImage(this.currentPage.url)
+        const blob = (await loadCachedPageImageWithStats(pageUrl)).blob
         if (requestId !== this.readerCropImageRequestId) return
-        const canvas = this.processedReaderCropCanvas(image, rotation, angle, contrastEnhancement)
-        const url = await this.readerCropCanvasObjectUrl(canvas)
-        if (requestId === this.readerCropImageRequestId && this.readerRotation === rotation && this.readerSkewCorrection === angle && this.readerContrastEnhancement === contrastEnhancement) {
+        const url = rotation || angle || contrastEnhancement
+          ? await this.processedReaderCropObjectUrl(blob, rotation, angle, contrastEnhancement)
+          : URL.createObjectURL(blob)
+        if (
+          requestId === this.readerCropImageRequestId &&
+          this.currentPage?.number === pageNumber &&
+          this.readerRotation === rotation &&
+          this.readerSkewCorrection === angle &&
+          this.readerContrastEnhancement === contrastEnhancement
+        ) {
           const previousUrl = this.readerCropImageUrl
           this.readerCropImageUrl = url
           if (previousUrl && previousUrl !== url) URL.revokeObjectURL(previousUrl)
@@ -1984,16 +2012,25 @@ export default Vue.extend({
         if (requestId === this.readerCropImageRequestId) this.revokeReaderCropImageUrl()
       }
     },
-    loadReaderCropImage(url: string): Promise<HTMLImageElement> {
-      return new Promise((resolve, reject) => {
-        const image = new Image()
-        image.onload = () => {
-          if (image.naturalWidth > 0 && image.naturalHeight > 0) resolve(image)
-          else reject(new Error('Decoded image is empty'))
-        }
-        image.onerror = () => reject(new Error('Unable to decode page image'))
-        image.src = url
-      })
+    async processedReaderCropObjectUrl(blob: Blob, rotation: number, angle: number, contrastEnhancement: boolean): Promise<string> {
+      const image = await this.loadReaderCropImage(blob)
+      return this.readerCropCanvasObjectUrl(this.processedReaderCropCanvas(image, rotation, angle, contrastEnhancement))
+    },
+    async loadReaderCropImage(blob: Blob): Promise<HTMLImageElement> {
+      const objectUrl = URL.createObjectURL(blob)
+      try {
+        return await new Promise<HTMLImageElement>((resolve, reject) => {
+          const image = new Image()
+          image.onload = () => {
+            if (image.naturalWidth > 0 && image.naturalHeight > 0) resolve(image)
+            else reject(new Error('Decoded image is empty'))
+          }
+          image.onerror = () => reject(new Error('Unable to decode page image'))
+          image.src = objectUrl
+        })
+      } finally {
+        URL.revokeObjectURL(objectUrl)
+      }
     },
     processedReaderCropCanvas(image: HTMLImageElement, rotation: number, skewCorrection: number, contrastEnhancement: boolean = this.readerContrastEnhancement): HTMLCanvasElement {
       const rotatedCanvas = rotation ? this.rotatedReaderImageCanvas(image, rotation) : this.sourceReaderImageCanvas(image)
@@ -2052,11 +2089,13 @@ export default Vue.extend({
       })
     },
     revokeReaderCropImageUrl() {
+      this.clearReaderCropImagePreparationTimer()
       this.readerCropImageRequestId += 1
       if (this.readerCropImageUrl) URL.revokeObjectURL(this.readerCropImageUrl)
       this.readerCropImageUrl = ''
     },
     promoteReaderCropImageUrl(): boolean {
+      this.clearReaderCropImagePreparationTimer()
       if (!this.readerCropImageUrl || !this.currentPage?.number) return false
       this.readerCropImageRequestId += 1
       this.setReaderDeskewedPageUrl(this.currentPage.number, this.readerCropImageUrl)
@@ -2071,6 +2110,18 @@ export default Vue.extend({
     revokeReaderDeskewedPageUrls() {
       Object.values(this.readerDeskewedPageUrls).forEach(url => URL.revokeObjectURL(url))
       this.readerDeskewedPageUrls = {}
+    },
+    clearReaderCropImagePreparationTimer() {
+      if (this.readerCropImagePreparationTimer === undefined) return
+      window.clearTimeout(this.readerCropImagePreparationTimer)
+      this.readerCropImagePreparationTimer = undefined
+    },
+    scheduleReaderCropImagePreparation() {
+      this.clearReaderCropImagePreparationTimer()
+      this.readerCropImagePreparationTimer = window.setTimeout(() => {
+        this.readerCropImagePreparationTimer = undefined
+        this.prepareReaderCropImage()
+      }, 120)
     },
     normalizedReaderCropRect(start: {x: number, y: number}, end: {x: number, y: number}): any {
       const left = Math.min(start.x, end.x)
@@ -2248,6 +2299,12 @@ export default Vue.extend({
       }
     },
     getPageUrl(page: PageDto): string {
+      if (this.isPdf) {
+        const url = new URL(bookPageUrl(this.bookId, page.number))
+        const version = this.book.media?.lastModified || this.book.lastModified
+        if (version) url.searchParams.set('v', String(version))
+        return canonicalPageImageUrl(url.href)
+      }
       if (!this.supportedMediaTypes.includes(page.mediaType)) {
         return bookPageUrl(this.bookId, page.number, this.convertTo)
       } else {
@@ -2660,6 +2717,7 @@ export default Vue.extend({
     openReflowSetupMode() {
       if (!this.isPdf) return
 
+      this.resetReflowTransferSession()
       this.reflowRootPage = this.page
       this.reflowSetupMode = true
       this.reflowMode = false
@@ -2673,7 +2731,7 @@ export default Vue.extend({
     startReflowMode() {
       if (!this.isPdf) return
 
-      this.resetReflowTransferSession()
+      if (!this.reflowSetupMode) this.resetReflowTransferSession()
       this.reflowRootPage = this.page
       this.reflowSetupMode = false
       this.reflowMode = true
@@ -2710,6 +2768,7 @@ export default Vue.extend({
         return
       }
 
+      this.resetReflowTransferSession()
       this.k2ReflowMode = true
       this.reflowSetupMode = false
       this.reflowMode = false
@@ -2897,8 +2956,8 @@ export default Vue.extend({
       return Array.isArray(entry) ? undefined : entry?.transferStats
     },
     cacheReflowPage(payload: {pageNumber: number, cacheKey: string, items: any[], pageBackground?: string, transferStats?: any, networkTransferBytes?: number}) {
+      this.recordReflowTransfer(payload.networkTransferBytes)
       if (payload.cacheKey !== this.reflowCacheKey) return
-      this.recordReflowTransfer(payload.pageNumber, payload.cacheKey, payload.networkTransferBytes)
       const wasPrefetched = this.reflowPrefetchPages.includes(payload.pageNumber)
       if (wasPrefetched) this.reflowPrefetchPages = []
       this.$set(this.reflowCache, this.reflowCacheEntryKey(payload.pageNumber, payload.cacheKey), {
@@ -2930,18 +2989,31 @@ export default Vue.extend({
     },
     resetReflowTransferSession() {
       this.reflowSessionTransferBytes = 0
+      this.reflowSessionResponseTransferBytes = 0
+      this.reflowSessionOriginalTransferBytes = 0
       this.reflowSessionTransferPages = {}
     },
-    recordReflowTransfer(pageNumber: number, cacheKey: string, transferBytes: number | undefined) {
+    recordReflowTransfer(transferBytes: number | undefined) {
       if (transferBytes === undefined) return
-      const transferKey = this.reflowCacheEntryKey(pageNumber, cacheKey)
+      const bytes = Number(transferBytes)
+      if (Number.isFinite(bytes) && bytes > 0) {
+        const roundedBytes = Math.round(bytes)
+        this.reflowSessionResponseTransferBytes += roundedBytes
+        this.reflowSessionTransferBytes += roundedBytes
+      }
+    },
+    recordReflowAssetTransfer(payload: {requestId?: string, transferBytes?: number}) {
+      const requestId = String(payload?.requestId || '')
+      const bytes = Number(payload?.transferBytes)
+      if (!requestId || !Number.isFinite(bytes) || bytes <= 0) return
+      const transferKey = `asset|${requestId}`
       if (this.reflowSessionTransferPages[transferKey]) return
       this.$set(this.reflowSessionTransferPages, transferKey, true)
-      const bytes = Number(transferBytes)
-      if (Number.isFinite(bytes) && bytes > 0) this.reflowSessionTransferBytes += Math.round(bytes)
+      const roundedBytes = Math.round(bytes)
+      this.reflowSessionOriginalTransferBytes += roundedBytes
+      this.reflowSessionTransferBytes += roundedBytes
     },
     forceCurrentReflow(pageNumber?: number) {
-      this.resetReflowTransferSession()
       this.clearReflowPrefetch()
       this.reflowPrefetchPages = []
       const targetPage = Math.max(1, Math.min(this.pagesCount, Math.round(Number(pageNumber) || this.page)))
@@ -3130,14 +3202,14 @@ export default Vue.extend({
     }, 50),
     downloadCurrentPage() {
       new jsFileDownloader({
-        url: `${this.currentPage.url}?contentNegotiation=false`,
+        url: canonicalPageImageUrl(this.currentPage.url),
         filename: `${this.book.name}-${this.currentPage.number}.${this.currentPage.fileName.split('.').pop()}`,
         withCredentials: true,
         forceDesktopMode: true,
       })
     },
     async setCurrentPageAsPoster(type: ItemTypes) {
-      const imageFile = await getFileFromUrl(`${this.currentPage.url}?contentNegotiation=false`, 'poster', 'image/jpeg', {credentials: 'include'})
+      const imageFile = await getFileFromUrl(canonicalPageImageUrl(this.currentPage.url), 'poster', 'image/jpeg', {credentials: 'include'})
       const newImageFile = await resizeImageFile(imageFile)
       switch (type) {
         case ItemTypes.BOOK:
