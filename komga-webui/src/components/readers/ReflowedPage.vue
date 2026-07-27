@@ -1430,9 +1430,11 @@ export default Vue.extend({
             ? this.scaleRoi(regionSource.detectionRoi, detectionSource.scale, detectionSource.canvas.width, detectionSource.canvas.height)
             : undefined
           const detectedContent = this.detectWordLines(imageData, detectionSource.canvas.width, detectionSource.canvas.height, detectionRoi)
-          const lines = this.scaleWordLines(detectedContent.lines, detectionSource.scale, sourceCanvas.width, sourceCanvas.height)
+          const detectedLines = this.scaleWordLines(detectedContent.lines, detectionSource.scale, sourceCanvas.width, sourceCanvas.height)
           const detectedImageRegions = this.scaleImageRegions(detectedContent.imageRegions, detectionSource.scale, sourceCanvas.width, sourceCanvas.height)
-          const imageRegions = this.applyManualImageRegions(detectedImageRegions, this.manualImageRoisForSource(sourceCanvas, regionSource.sourceOffset))
+          const manualImageRegions = this.manualImageRoisForSource(sourceCanvas, regionSource.sourceOffset)
+          const lines = this.excludeManualImageWordBlocks(detectedLines, manualImageRegions)
+          const imageRegions = this.applyManualImageRegions(detectedImageRegions, manualImageRegions)
           regionItems.push(this.renderReflowItems(sourceCanvas, lines, imageRegions))
         }
         if (requestId !== this.requestId) return
@@ -4273,6 +4275,22 @@ export default Vue.extend({
         ...detectedRegions.filter(region => !manualRegions.some(manual => this.cropRegionsOverlap(region, manual))),
         ...manualRegions,
       ]
+    },
+    excludeManualImageWordBlocks(lines: WordLine[], manualRegions: ImageRegion[]): WordLine[] {
+      if (manualRegions.length === 0) return lines
+      return lines
+        .map(line => ({
+          ...line,
+          words: line.words.filter(word => !manualRegions.some(region => this.manualImageContainsWordBlock(region, word))),
+        }))
+        .filter(line => line.words.length > 0)
+    },
+    manualImageContainsWordBlock(region: ImageRegion, block: WordBlock): boolean {
+      const overlapWidth = Math.max(0, Math.min(region.x + region.w, block.x + block.w) - Math.max(region.x, block.x))
+      const overlapHeight = Math.max(0, Math.min(region.y + region.h, block.y + block.h) - Math.max(region.y, block.y))
+      if (overlapWidth <= 0 || overlapHeight <= 0) return false
+      const blockArea = Math.max(1, block.w * block.h)
+      return overlapWidth * overlapHeight / blockArea >= 0.82
     },
     adjustOverlappingCropRois(rois: Array<Roi | undefined>): Array<Roi | undefined> {
       const adjusted = rois.slice(0, MAX_CROP_REGIONS).map(roi => roi ? {...roi} : undefined)

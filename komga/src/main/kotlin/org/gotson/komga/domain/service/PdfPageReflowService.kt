@@ -495,14 +495,21 @@ class PdfPageReflowService(
     val pageBackground = detectPageBackground(image)
     val ink = buildInkMap(image, options)
     val roi = if (useWholeImage) Roi(0, 0, image.width, image.height) else detectRoi(ink, image.width, image.height, options)
-    val imageRegions = applyManualImageRegions(detectImageRegions(image, roi, options), manualImageRegions, image.width, image.height)
-    val textInk = maskInkRegions(ink, image.width, image.height, imageRegions)
+    val detectedImageRegions = detectImageRegions(image, roi, options)
+    val normalizedManualImageRegions =
+      manualImageRegions
+        .map { clampRoi(it, image.width, image.height) }
+        .filter { it.w > 1 && it.h > 1 }
+    val imageRegions = applyManualImageRegions(detectedImageRegions, normalizedManualImageRegions, image.width, image.height)
+    // Detect complete text blocks before applying manual image rectangles. A
+    // rectangle can touch a glyph or create a false full-page column gutter.
+    val textInk = maskInkRegions(ink, image.width, image.height, detectedImageRegions)
     val textScale = clamp(options.textScale.toDouble() / 100.0, 0.1, 1.4)
     val items =
       if (options.verticalText) {
-        renderVerticalItems(image, textInk, roi, options, textScale, imageRegions)
+        renderVerticalItems(image, textInk, roi, options, textScale, imageRegions, normalizedManualImageRegions)
       } else {
-        renderHorizontalItems(image, textInk, roi, options, textScale, imageRegions)
+        renderHorizontalItems(image, textInk, roi, options, textScale, imageRegions, normalizedManualImageRegions)
       }.ifEmpty {
         listOf(renderFallbackImage(image, roi, options, textScale))
       }
@@ -2114,6 +2121,7 @@ class PdfPageReflowService(
     options: PdfPageReflowOptions,
     textScale: Double,
     imageRegions: List<Roi>,
+    manualImageRegions: List<Roi>,
   ): List<PdfPageReflowItemDto> {
     val items = mutableListOf<PdfPageReflowItemDto>()
     val textInk = suppressHorizontalGuideRules(ink, image.width, image.height, roi)
@@ -2145,6 +2153,7 @@ class PdfPageReflowService(
                 horizontalWordBlock(image, textInk, wordBand, line, lineBounds)
               }.filter { it.w >= 2 && it.h >= 2 }
               .let { mergeHorizontalGlyphFragments(it, line, image, textInk, options) }
+              .let { excludeManualImageWordBlocks(it, manualImageRegions) }
 
           if (blocks.isEmpty()) null else HorizontalTextLine(column, line, blocks)
         }
@@ -2624,6 +2633,7 @@ class PdfPageReflowService(
     options: PdfPageReflowOptions,
     textScale: Double,
     imageRegions: List<Roi>,
+    manualImageRegions: List<Roi>,
   ): List<PdfPageReflowItemDto> {
     val columns =
       detectBands(roi.x, roi.x + roi.w) { x ->
@@ -2644,7 +2654,8 @@ class PdfPageReflowService(
           line = LineBand(roi.y, roi.y + roi.h),
           blocks =
             verticalWordBlocks(image, ink, column, roi, options)
-              .filter { it.w >= 2 && it.h >= 2 && !isRuleLikeBlock(it) },
+              .filter { it.w >= 2 && it.h >= 2 && !isRuleLikeBlock(it) }
+              .let { excludeManualImageWordBlocks(it, manualImageRegions) },
         )
       }
     val glyphHeight = verticalCharacterSourceHeight(detectedLines.flatMap { it.blocks })
@@ -2678,6 +2689,26 @@ class PdfPageReflowService(
     appendImageItems(items, image, imageSlots[lines.size], options, textScale)
 
     return trimTrailingBreak(items)
+  }
+
+  private fun excludeManualImageWordBlocks(
+    blocks: List<Roi>,
+    manualImageRegions: List<Roi>,
+  ): List<Roi> {
+    if (manualImageRegions.isEmpty()) return blocks
+    return blocks.filterNot { block -> manualImageRegions.any { region -> manualImageContainsWordBlock(region, block) } }
+  }
+
+  private fun manualImageContainsWordBlock(
+    region: Roi,
+    block: Roi,
+  ): Boolean {
+    val overlapWidth = max(0, min(region.x + region.w, block.x + block.w) - max(region.x, block.x))
+    val overlapHeight = max(0, min(region.y + region.h, block.y + block.h) - max(region.y, block.y))
+    if (overlapWidth <= 0 || overlapHeight <= 0) return false
+    val blockArea = max(1L, block.w.toLong() * block.h)
+    val overlapArea = overlapWidth.toLong() * overlapHeight
+    return overlapArea.toDouble() / blockArea >= 0.82
   }
 
   private fun verticalIndentItem(
