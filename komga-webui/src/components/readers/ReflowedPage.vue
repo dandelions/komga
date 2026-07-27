@@ -161,6 +161,7 @@
         <label class="reflow-column-control">
           <span>文字显示</span>
           <select :value="controlMatchBackgroundMode" @change="setMatchBackgroundMode">
+            <option value="original">原图</option>
             <option value="grayscale">灰阶</option>
             <option value="monochrome">黑白</option>
           </select>
@@ -568,7 +569,7 @@ type Roi = {
 }
 
 type PageParity = 'odd' | 'even'
-type MatchBackgroundMode = 'monochrome' | 'grayscale'
+type MatchBackgroundMode = 'original' | 'monochrome' | 'grayscale'
 type VerticalDirection = 'ltr' | 'rtl'
 type CropRegionIndex = number
 type CropTarget = 'text' | 'image' | 'deskew'
@@ -934,6 +935,7 @@ export default Vue.extend({
       return this.options.matchBackground === true
     },
     matchBackgroundMode(): MatchBackgroundMode {
+      if (this.options.matchBackgroundMode === 'original') return 'original'
       return this.options.matchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale'
     },
     blockSpacing(): number {
@@ -975,6 +977,7 @@ export default Vue.extend({
       return this.pendingMatchBackground === true
     },
     controlMatchBackgroundMode(): MatchBackgroundMode {
+      if (this.pendingMatchBackgroundMode === 'original') return 'original'
       return this.pendingMatchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale'
     },
     controlImageQuality(): number {
@@ -1331,7 +1334,9 @@ export default Vue.extend({
         strokeStrength: this.roundStrokeStrength(this.options.strokeStrength),
         contrastEnhancement: this.options.contrastEnhancement === true,
         matchBackground: this.options.matchBackground === true,
-        matchBackgroundMode: this.options.matchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale',
+        matchBackgroundMode: this.options.matchBackgroundMode === 'original'
+          ? 'original'
+          : this.options.matchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale',
         imageQuality: this.normalizedImageQuality(this.options.imageQuality),
         blockSpacing: this.clampNumber(this.options.blockSpacing, 0, 24, 6),
         cropRoisKey: JSON.stringify(this.options.cropRoisByParity || {}),
@@ -2191,7 +2196,7 @@ export default Vue.extend({
       return canvas.toDataURL('image/jpeg', this.imageQuality / 100)
     },
     enhanceSourceCanvas(context: CanvasRenderingContext2D, width: number, height: number) {
-      if (!this.contrastEnhancement || this.darkDisplay) return
+      if (!this.contrastEnhancement || this.darkDisplay || this.matchBackgroundMode === 'original') return
       enhanceTextContrast(context, width, height, {
         enabled: this.contrastEnhancement,
         nightDisplay: false,
@@ -2200,8 +2205,9 @@ export default Vue.extend({
       this.pageBackground = '#fff'
     },
     finishWordSlice(context: CanvasRenderingContext2D, width: number, height: number) {
-      const textModeEnabled = this.matchBackgroundMode === 'grayscale' || this.matchBackgroundMode === 'monochrome'
-      if (this.contrastEnhancement || this.matchBackground || textModeEnabled) {
+      const textModeEnabled = this.matchBackgroundMode !== 'original'
+      const originalDarkMode = this.matchBackgroundMode === 'original' && this.darkDisplay
+      if (this.contrastEnhancement || this.matchBackground || textModeEnabled || originalDarkMode) {
         enhanceTextContrast(context, width, height, {
           enabled: this.contrastEnhancement,
           nightDisplay: this.darkDisplay,
@@ -5302,7 +5308,7 @@ export default Vue.extend({
       sliceContext.imageSmoothingQuality = 'high'
       this.fillWordSliceBackground(sliceContext, source.w, source.h)
       sliceContext.drawImage(sourceCanvas, source.x, source.y, source.w, source.h, 0, 0, source.w, source.h)
-      if (this.darkDisplay) {
+      if (this.darkDisplay && this.matchBackgroundMode !== 'original') {
         this.normalizeImageSliceForDarkDisplay(sliceContext, source.w, source.h)
       } else if (this.shouldNormalizeImageSliceForDisplay(sliceContext, source.w, source.h)) {
         this.finishWordSlice(sliceContext, source.w, source.h)
@@ -5851,7 +5857,9 @@ export default Vue.extend({
     },
     setMatchBackgroundMode(event: Event) {
       const target = event.target as HTMLSelectElement
-      this.pendingMatchBackgroundMode = target.value === 'monochrome' ? 'monochrome' : 'grayscale'
+      this.pendingMatchBackgroundMode = target.value === 'original'
+        ? 'original'
+        : target.value === 'monochrome' ? 'monochrome' : 'grayscale'
     },
     setBlockSpacing(event: Event) {
       const target = event.target as HTMLInputElement

@@ -627,7 +627,7 @@ class BookController(
             strokeStrength = strokeStrength,
             contrastEnhancement = contrastEnhancement,
             matchBackground = matchBackground,
-            matchBackgroundMode = if (matchBackgroundMode == "monochrome") "monochrome" else "grayscale",
+            matchBackgroundMode = normalizePdfReflowTextMode(matchBackgroundMode),
             imageQuality = normalizePdfReflowImageQuality(imageQuality),
             blockSpacing = blockSpacing,
             verticalText = verticalText,
@@ -773,7 +773,7 @@ class BookController(
                 strokeStrength = strokeStrength,
                 contrastEnhancement = contrastEnhancement,
                 matchBackground = matchBackground,
-                matchBackgroundMode = if (matchBackgroundMode == "monochrome") "monochrome" else "grayscale",
+                matchBackgroundMode = normalizePdfReflowTextMode(matchBackgroundMode),
                 imageQuality = normalizePdfReflowImageQuality(imageQuality),
                 blockSpacing = blockSpacing,
                 verticalText = verticalText,
@@ -1124,5 +1124,12 @@ internal fun normalizePdfReflowRotation(rotation: Int): Int {
 }
 
 internal fun normalizePdfReflowImageQuality(imageQuality: Int): Int = (imageQuality.coerceIn(40, 90) / 10.0).roundToInt() * 10
+
+internal fun normalizePdfReflowTextMode(mode: String): String =
+  when (mode) {
+    "original" -> "original"
+    "monochrome" -> "monochrome"
+    else -> "grayscale"
+  }
 
 private fun Int.floorMod(modulus: Int): Int = ((this % modulus) + modulus) % modulus

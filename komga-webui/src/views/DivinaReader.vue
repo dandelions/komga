@@ -1156,6 +1156,7 @@ export default Vue.extend({
         {text: '服务端重排', value: 'server'},
       ],
       reflowMatchBackgroundModes: [
+        {text: '原图', value: 'original'},
         {text: '灰阶', value: 'grayscale'},
         {text: '黑白', value: 'monochrome'},
       ],
@@ -2583,7 +2584,9 @@ export default Vue.extend({
         strokeStrength: Math.round(this.clampReflowNumber(settings.strokeStrength, 0.1, 3, this.reflowSettings.strokeStrength) * 10) / 10,
         contrastEnhancement: settings.contrastEnhancement === true,
         matchBackground: settings.matchBackground === true,
-        matchBackgroundMode: settings.matchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale',
+        matchBackgroundMode: settings.matchBackgroundMode === 'original'
+          ? 'original'
+          : settings.matchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale',
         imageQuality: this.normalizedReflowImageQuality(settings.imageQuality),
         blockSpacing: Math.round(this.clampReflowNumber(settings.blockSpacing, 0, 24, this.reflowSettings.blockSpacing)),
         verticalText: typeof settings.verticalText === 'boolean' ? settings.verticalText : this.reflowSettings.verticalText,
@@ -2607,7 +2610,9 @@ export default Vue.extend({
         strokeStrength: Math.round(this.clampReflowNumber(settings.strokeStrength, 0, 3, this.reflowSettings.k2Settings.strokeStrength) * 10) / 10,
         contrastEnhancement: settings.contrastEnhancement === true,
         matchBackground: settings.matchBackground === true,
-        matchBackgroundMode: settings.matchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale',
+        matchBackgroundMode: settings.matchBackgroundMode === 'original'
+          ? 'original'
+          : settings.matchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale',
         wordGap: Math.round(this.clampReflowNumber(settings.wordGap, 1, 30, this.reflowSettings.k2Settings.wordGap)),
         outputPadding: Math.round(this.clampReflowNumber(settings.outputPadding, 0, 48, this.reflowSettings.k2Settings.outputPadding)),
       }
@@ -2903,7 +2908,9 @@ export default Vue.extend({
       this.reflowSettings.matchBackground = matchBackground === true
     },
     setReflowMatchBackgroundMode(matchBackgroundMode: string) {
-      this.reflowSettings.matchBackgroundMode = matchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale'
+      this.reflowSettings.matchBackgroundMode = matchBackgroundMode === 'original'
+        ? 'original'
+        : matchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale'
     },
     setReflowBlockSpacing(blockSpacing: number) {
       this.reflowSettings.blockSpacing = Math.max(0, Math.min(24, Math.round(blockSpacing)))

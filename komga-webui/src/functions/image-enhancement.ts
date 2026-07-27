@@ -7,7 +7,7 @@ type TextContrastOptions = {
   enabled?: boolean,
   nightDisplay?: boolean,
   matchBackground?: boolean,
-  matchBackgroundMode?: 'monochrome' | 'grayscale',
+  matchBackgroundMode?: 'original' | 'monochrome' | 'grayscale',
   backgroundLuma?: number,
 }
 
@@ -37,8 +37,11 @@ export function enhanceTextContrastData(
   const targetDark = options.nightDisplay === true
   const backgroundValue = targetDark ? 0 : 255
   const foregroundValue = targetDark ? 255 : 0
-  const outputMode = options.matchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale'
-  const matchedForeground = options.matchBackground ? matchedForegroundMask(data, width, height, stats) : undefined
+  const outputMode = options.matchBackgroundMode === 'monochrome'
+    ? 'monochrome'
+    : options.matchBackgroundMode === 'original' ? 'original' : 'grayscale'
+  const needsForegroundMask = options.matchBackground || (outputMode === 'original' && (targetDark || options.enabled === true))
+  const matchedForeground = needsForegroundMask ? matchedForegroundMask(data, width, height, stats) : undefined
   const baseMinDelta = options.enabled ? 10 : 0
   const maxDelta = stats.sourceDark ? 255 - stats.background : stats.background
   const binaryMinDelta = Math.min(12, Math.max(3, maxDelta * 0.025))
@@ -59,6 +62,33 @@ export function enhanceTextContrastData(
 
     const luma = pixelLuma(data, offset)
     const delta = stats.sourceDark ? luma - stats.background : stats.background - luma
+
+    if (outputMode === 'original') {
+      // Background following replaces only the block background. Preserve
+      // source RGB values unless contrast processing was explicitly enabled.
+      if (options.matchBackground && !options.enabled) {
+        setOpaquePixel(data, offset)
+        continue
+      }
+
+      let outputLuma = luma
+      if (options.enabled) {
+        if (delta <= baseMinDelta) {
+          if (matchedForeground?.[i]) setOpaquePixel(data, offset)
+          else setGrayPixel(data, offset, backgroundValue)
+          continue
+        }
+        const normalized = clamp((delta - baseMinDelta) / contrastRange, 0, 1)
+        const foreground = Math.pow(normalized, 0.55)
+        outputLuma = targetDark
+          ? 255 * foreground
+          : 255 * (1 - foreground)
+      } else if (targetDark !== stats.sourceDark) {
+        outputLuma = 255 - luma
+      }
+      setColorPixelWithLuma(data, offset, outputLuma)
+      continue
+    }
 
     if (outputMode === 'monochrome') {
       const foreground = matchedForeground ? true : delta > binaryMinDelta
@@ -99,7 +129,8 @@ function matchedForegroundMask(data: Uint8ClampedArray, width: number, height: n
     const luma = pixelLuma(data, offset)
     const delta = stats.sourceDark ? luma - stats.background : stats.background - luma
     deltas[i] = delta
-    if (delta > strongDelta) strong[i] = 1
+    const colored = isColoredPixel(data, offset)
+    if (delta > strongDelta || (colored && delta > Math.max(2, weakDelta * 0.5))) strong[i] = 1
   }
 
   for (let y = 0; y < height; y++) {
@@ -168,6 +199,38 @@ function setGrayPixel(data: Uint8ClampedArray, offset: number, value: number) {
   data[offset + 1] = clamped
   data[offset + 2] = clamped
   data[offset + 3] = 255
+}
+
+function setOpaquePixel(data: Uint8ClampedArray, offset: number) {
+  data[offset + 3] = 255
+}
+
+function setColorPixelWithLuma(data: Uint8ClampedArray, offset: number, value: number) {
+  const target = clamp(value, 0, 255)
+  const current = pixelLuma(data, offset)
+  if (current <= 0 || current >= 255) {
+    setGrayPixel(data, offset, target)
+    return
+  }
+
+  if (target >= current) {
+    const amount = (target - current) / (255 - current)
+    data[offset] = Math.round(data[offset] + (255 - data[offset]) * amount)
+    data[offset + 1] = Math.round(data[offset + 1] + (255 - data[offset + 1]) * amount)
+    data[offset + 2] = Math.round(data[offset + 2] + (255 - data[offset + 2]) * amount)
+  } else {
+    const amount = target / current
+    data[offset] = Math.round(data[offset] * amount)
+    data[offset + 1] = Math.round(data[offset + 1] * amount)
+    data[offset + 2] = Math.round(data[offset + 2] * amount)
+  }
+  data[offset + 3] = 255
+}
+
+function isColoredPixel(data: Uint8ClampedArray, offset: number): boolean {
+  const maxChannel = Math.max(data[offset], data[offset + 1], data[offset + 2])
+  const minChannel = Math.min(data[offset], data[offset + 1], data[offset + 2])
+  return maxChannel - minChannel >= 24 && maxChannel > 36
 }
 
 function clamp(value: number, min: number, max: number): number {

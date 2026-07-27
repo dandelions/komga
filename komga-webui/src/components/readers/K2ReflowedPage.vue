@@ -73,6 +73,7 @@
         <label class="k2-control k2-compact">
           <span>文字显示</span>
           <select :value="matchBackgroundMode" @change="setMatchBackgroundMode">
+            <option value="original">原图</option>
             <option value="grayscale">灰阶</option>
             <option value="monochrome">黑白</option>
           </select>
@@ -244,7 +245,7 @@ type K2Settings = {
   wordGap: number,
   outputPadding: number,
 }
-type MatchBackgroundMode = 'monochrome' | 'grayscale'
+type MatchBackgroundMode = 'original' | 'monochrome' | 'grayscale'
 type DetectionCanvasSource = { canvas: HTMLCanvasElement, scale: number }
 
 const DEFAULT_THRESHOLD = 185
@@ -449,7 +450,9 @@ export default Vue.extend({
       this.strokeStrength = Math.round(this.clampNumber(Number(this.settings.strokeStrength), 0, 3, 0.8) * 10) / 10
       this.contrastEnhancement = this.settings.contrastEnhancement === true
       this.matchBackground = this.settings.matchBackground === true
-      this.matchBackgroundMode = this.settings.matchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale'
+      this.matchBackgroundMode = this.settings.matchBackgroundMode === 'original'
+        ? 'original'
+        : this.settings.matchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale'
       this.wordGap = Math.round(this.clampNumber(Number(this.settings.wordGap), 1, 30, DEFAULT_WORD_GAP))
       this.outputPadding = Math.round(this.clampNumber(Number(this.settings.outputPadding), 0, 48, DEFAULT_OUTPUT_PADDING))
     },
@@ -653,7 +656,7 @@ export default Vue.extend({
       context.fillRect(0, 0, width, height)
     },
     enhanceSourceCanvas(context: CanvasRenderingContext2D, width: number, height: number) {
-      if (!this.contrastEnhancement || this.darkDisplay) return
+      if (!this.contrastEnhancement || this.darkDisplay || this.matchBackgroundMode === 'original') return
       enhanceTextContrast(context, width, height, {
         enabled: this.contrastEnhancement,
         nightDisplay: false,
@@ -662,8 +665,9 @@ export default Vue.extend({
       this.pageBackground = '#fff'
     },
     finishWordSlice(context: CanvasRenderingContext2D, width: number, height: number) {
-      const textModeEnabled = this.matchBackgroundMode === 'grayscale' || this.matchBackgroundMode === 'monochrome'
-      if (this.contrastEnhancement || this.matchBackground || textModeEnabled) {
+      const textModeEnabled = this.matchBackgroundMode !== 'original'
+      const originalDarkMode = this.matchBackgroundMode === 'original' && this.darkDisplay
+      if (this.contrastEnhancement || this.matchBackground || textModeEnabled || originalDarkMode) {
         enhanceTextContrast(context, width, height, {
           enabled: this.contrastEnhancement,
           nightDisplay: this.darkDisplay,
@@ -1881,7 +1885,7 @@ export default Vue.extend({
       sliceContext.imageSmoothingQuality = 'high'
       this.fillWordSliceBackground(sliceContext, source.w, source.h)
       sliceContext.drawImage(sourceCanvas, source.x, source.y, source.w, source.h, 0, 0, source.w, source.h)
-      if (this.darkDisplay) this.normalizeImageSliceForDarkDisplay(sliceContext, source.w, source.h)
+      if (this.darkDisplay && this.matchBackgroundMode !== 'original') this.normalizeImageSliceForDarkDisplay(sliceContext, source.w, source.h)
       return {
         type: 'image',
         src: sliceCanvas.toDataURL('image/png'),
@@ -2305,7 +2309,9 @@ export default Vue.extend({
     },
     setMatchBackgroundMode(event: Event) {
       const target = event.target as HTMLSelectElement
-      this.matchBackgroundMode = target.value === 'monochrome' ? 'monochrome' : 'grayscale'
+      this.matchBackgroundMode = target.value === 'original'
+        ? 'original'
+        : target.value === 'monochrome' ? 'monochrome' : 'grayscale'
       this.emitSettingsChange()
     },
     setWordGap(event: Event) {

@@ -26,6 +26,7 @@ import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.system.measureTimeMillis
 
@@ -3244,7 +3245,7 @@ class PdfPageReflowService(
     options: PdfPageReflowOptions,
     textScale: Double,
   ): PdfPageReflowItemDto {
-    val slice = copySlice(image, roi, options)
+    val slice = if (options.matchBackgroundMode == "original") copyOriginalSlice(image, roi) else copySlice(image, roi, options)
     val maxWidth = max(1, options.targetWidth - 32).toDouble()
     val scale = min(textScale, maxWidth / roi.w)
     return PdfPageReflowItemDto(
@@ -3286,6 +3287,7 @@ class PdfPageReflowService(
     if (block.w < 2 || block.h < 2) return null
     val slice =
       when {
+        options.matchBackgroundMode == "original" -> copyOriginalSlice(image, block)
         options.darkDisplay -> copyDarkDisplayImageSlice(image, block, options)
         shouldNormalizeImageRegionForDisplay(image, block, options) -> copySlice(image, block, options)
         else -> copyOriginalSlice(image, block)
@@ -3454,14 +3456,14 @@ class PdfPageReflowService(
       options.darkDisplay ||
         options.contrastEnhancement ||
         options.matchBackground ||
-        options.matchBackgroundMode.isNotBlank()
+        options.matchBackgroundMode != "original"
     val output = BufferedImage(block.w, block.h, BufferedImage.TYPE_INT_ARGB)
     val background = if (options.darkDisplay) Color.BLACK else Color.WHITE
     val threshold = clamp(options.threshold, 50, 230)
     val backgroundLuma = estimateBackgroundLuma(image, block)
     val inkThreshold = adaptiveInkThreshold(threshold, backgroundLuma)
     val matchedForeground =
-      if (options.matchBackground) matchBackgroundMask(image, block, backgroundLuma) else null
+      if (options.matchBackground || options.matchBackgroundMode == "original") matchBackgroundMask(image, block, backgroundLuma) else null
 
     if (!normalizeColors) {
       val graphics = output.createGraphics()
@@ -3478,6 +3480,8 @@ class PdfPageReflowService(
         val color =
           if (matched == false) {
             background
+          } else if (options.matchBackgroundMode == "original") {
+            originalTextColor(rgb, backgroundLuma, options)
           } else if (options.matchBackgroundMode == "monochrome" || options.contrastEnhancement) {
             if (matched == true || isInk(rgb, inkThreshold)) {
               if (options.darkDisplay) Color.WHITE else Color.BLACK
@@ -3510,7 +3514,7 @@ class PdfPageReflowService(
       options.darkDisplay ||
         options.contrastEnhancement ||
         options.matchBackground ||
-        options.matchBackgroundMode.isNotBlank()
+        options.matchBackgroundMode != "original"
     val graphics = output.createGraphics()
     graphics.color = background
     graphics.fillRect(0, 0, outputWidth, outputHeight)
@@ -3538,7 +3542,7 @@ class PdfPageReflowService(
     val backgroundLuma = estimateBackgroundLuma(image, source)
     val inkThreshold = adaptiveInkThreshold(threshold, backgroundLuma)
     val matchedForeground =
-      if (options.matchBackground) matchBackgroundMask(image, source, backgroundLuma) else null
+      if (options.matchBackground || options.matchBackgroundMode == "original") matchBackgroundMask(image, source, backgroundLuma) else null
     for (y in 0 until source.h) {
       val targetY = offsetY + y
       if (targetY !in 0 until outputHeight) continue
@@ -3550,6 +3554,8 @@ class PdfPageReflowService(
         val color =
           if (matched == false) {
             background
+          } else if (options.matchBackgroundMode == "original") {
+            originalTextColor(rgb, backgroundLuma, options)
           } else if (options.matchBackgroundMode == "monochrome" || options.contrastEnhancement) {
             if (matched == true || isInk(rgb, inkThreshold)) {
               if (options.darkDisplay) Color.WHITE else Color.BLACK
@@ -3941,10 +3947,11 @@ class PdfPageReflowService(
     for (y in 0 until block.h) {
       for (x in 0 until block.w) {
         val index = y * block.w + x
-        val luma = pixelLuma(image.getRGB(block.x + x, block.y + y))
+        val rgb = image.getRGB(block.x + x, block.y + y)
+        val luma = pixelLuma(rgb)
         val delta = if (sourceDark) luma - backgroundLuma else backgroundLuma - luma
         deltas[index] = delta
-        if (delta > strongDelta) strong[index] = true
+        if (delta > strongDelta || (isColoredPixel(rgb) && delta > max(2.0, weakDelta * 0.5))) strong[index] = true
       }
     }
 
@@ -3966,6 +3973,66 @@ class PdfPageReflowService(
     val sourceLuma = clamp(pixelLuma(rgb).roundToInt(), 0, 255)
     val outputLuma = if (darkDisplay != sourceDark) 255 - sourceLuma else sourceLuma
     return Color(outputLuma, outputLuma, outputLuma)
+  }
+
+  private fun originalTextColor(
+    rgb: Int,
+    backgroundLuma: Double,
+    options: PdfPageReflowOptions,
+  ): Color {
+    if (options.matchBackground && !options.contrastEnhancement) return Color(rgb, true)
+
+    val sourceDark = backgroundLuma < 128.0
+    val sourceLuma = clamp(pixelLuma(rgb), 0.0, 255.0)
+    val outputLuma =
+      if (options.contrastEnhancement) {
+        val delta = if (sourceDark) sourceLuma - backgroundLuma else backgroundLuma - sourceLuma
+        val baseMinDelta = 10.0
+        if (delta <= baseMinDelta) return Color(rgb, true)
+        val maxDelta = if (sourceDark) 255.0 - backgroundLuma else backgroundLuma
+        val contrastRange = max(24.0, maxDelta * 0.32)
+        val foreground = clamp((delta - baseMinDelta) / contrastRange, 0.0, 1.0).pow(0.55)
+        if (options.darkDisplay) 255.0 * foreground else 255.0 * (1.0 - foreground)
+      } else if (options.darkDisplay != sourceDark) {
+        255.0 - sourceLuma
+      } else {
+        sourceLuma
+      }
+    return colorWithLuma(rgb, outputLuma)
+  }
+
+  private fun colorWithLuma(
+    rgb: Int,
+    targetLuma: Double,
+  ): Color {
+    val alpha = rgb ushr 24 and 0xff
+    val red = rgb ushr 16 and 0xff
+    val green = rgb ushr 8 and 0xff
+    val blue = rgb and 0xff
+    val currentLuma = pixelLuma(rgb)
+    val target = clamp(targetLuma, 0.0, 255.0)
+    if (currentLuma <= 0.0 || currentLuma >= 255.0) {
+      val value = target.roundToInt()
+      return Color(value, value, value, alpha)
+    }
+
+    return if (target >= currentLuma) {
+      val amount = (target - currentLuma) / (255.0 - currentLuma)
+      Color(
+        (red + (255 - red) * amount).roundToInt().coerceIn(0, 255),
+        (green + (255 - green) * amount).roundToInt().coerceIn(0, 255),
+        (blue + (255 - blue) * amount).roundToInt().coerceIn(0, 255),
+        alpha,
+      )
+    } else {
+      val amount = target / currentLuma
+      Color(
+        (red * amount).roundToInt().coerceIn(0, 255),
+        (green * amount).roundToInt().coerceIn(0, 255),
+        (blue * amount).roundToInt().coerceIn(0, 255),
+        alpha,
+      )
+    }
   }
 
   private fun isInk(
