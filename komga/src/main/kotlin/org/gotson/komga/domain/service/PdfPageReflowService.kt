@@ -896,8 +896,11 @@ class PdfPageReflowService(
     val block = clampRoi(roi, image.width, image.height)
     if (block.w < 120 || block.h < 80) return emptyList()
     val inkThreshold = adaptiveInkThreshold(threshold, estimateBackgroundLuma(image, block))
-    val horizontalLimit = max(96, (block.w * 0.12).roundToInt())
-    val verticalLimit = max(48, (block.h * 0.08).roundToInt())
+    // Compact diagrams beside body text use much shorter box edges than
+    // full-width tables. The cluster checks below still reject isolated text
+    // strokes and underlines.
+    val horizontalLimit = max(48, (block.w * 0.045).roundToInt())
+    val verticalLimit = max(32, (block.h * 0.03).roundToInt())
     val segments = mutableListOf<StructuralLineSegment>()
 
     for (y in block.y until block.y + block.h) {
@@ -990,8 +993,8 @@ class PdfPageReflowService(
     val bounds = cluster.bounds
     return cluster.horizontalCount >= 3 &&
       cluster.verticalCount >= 2 &&
-      bounds.w >= 120 &&
-      bounds.h >= 80
+      bounds.w >= 96 &&
+      bounds.h >= 64
   }
 
   private fun neighborImageTiles(

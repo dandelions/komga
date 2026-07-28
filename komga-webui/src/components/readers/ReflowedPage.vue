@@ -2986,8 +2986,11 @@ export default Vue.extend({
     },
     detectStructuralLineArtRegions(pixels: Uint8ClampedArray, width: number, roi: Roi, threshold: number): ImageRegion[] {
       if (roi.w < 120 || roi.h < 80) return []
-      const horizontalLimit = Math.max(96, Math.round(roi.w * 0.12))
-      const verticalLimit = Math.max(48, Math.round(roi.h * 0.08))
+      // Compact diagrams beside body text use much shorter box edges than
+      // full-width tables. Keep the multi-line cluster requirement below to
+      // distinguish them from ordinary glyph strokes and underlines.
+      const horizontalLimit = Math.max(48, Math.round(roi.w * 0.045))
+      const verticalLimit = Math.max(32, Math.round(roi.h * 0.03))
       const right = roi.x + roi.w
       const bottom = roi.y + roi.h
       const segments = [] as Array<ImageRegion & {horizontal: boolean}>
@@ -3074,8 +3077,8 @@ export default Vue.extend({
     isStructuralLineArtCluster(cluster: {bounds: ImageRegion, horizontalCount: number, verticalCount: number}): boolean {
       return cluster.horizontalCount >= 3 &&
         cluster.verticalCount >= 2 &&
-        cluster.bounds.w >= 120 &&
-        cluster.bounds.h >= 80
+        cluster.bounds.w >= 96 &&
+        cluster.bounds.h >= 64
     },
     pixelIsInk(pixels: Uint8ClampedArray, width: number, x: number, y: number, threshold: number): boolean {
       const offset = (y * width + x) * 4
