@@ -699,6 +699,25 @@ class PdfPageReflowServiceTest {
     assertThat(response.items.filter { it.type == "word" }).isNotEmpty
   }
 
+  @Test
+  fun `given manual side image when reflowing split columns then text fragments keep source row order`() {
+    val pageBytes = horizontalTextBesideManualImagePage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(columnCount = 3),
+        manualImageRegions = listOf(PdfPageReflowRegion(x = 390, y = 70, w = 170, h = 220)),
+      )
+
+    val sourceRows = response.items.filter { it.type == "word" }.mapNotNull { it.y }
+    assertThat(sourceRows).hasSizeGreaterThanOrEqualTo(6)
+    assertThat(sourceRows.zipWithNext()).allMatch { (current, next) -> current <= next }
+  }
+
   private fun defaultOptions() =
     PdfPageReflowOptions(
       targetWidth = 900,
@@ -722,6 +741,24 @@ class PdfPageReflowServiceTest {
       marginLeft = 0.0,
       darkDisplay = false,
     )
+
+  private fun horizontalTextBesideManualImagePage(): ByteArray {
+    val image = BufferedImage(600, 360, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color.BLACK
+    repeat(6) { row ->
+      repeat(20) { glyph ->
+        graphics.fillRect(40 + glyph * 24, 30 + row * 50, 14, 24)
+      }
+    }
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
 
   private fun horizontalShortGlyphPage(): ByteArray {
     val image = BufferedImage(220, 120, BufferedImage.TYPE_INT_RGB)
