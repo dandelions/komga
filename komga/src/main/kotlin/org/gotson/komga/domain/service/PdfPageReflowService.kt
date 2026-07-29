@@ -2170,7 +2170,9 @@ class PdfPageReflowService(
               .filterNot { isHorizontalRuleFragment(it, glyphHeight) }
           if (blocks.isEmpty()) null else line.copy(blocks = blocks)
         }.filterNot { isHorizontalRuleFragmentLine(it.blocks, glyphHeight) }
-    val lines = normalizeHorizontalTextColumns(filteredLines)
+    val lines =
+      normalizeHorizontalTextColumns(filteredLines)
+        .let { mergeManualImageHorizontalLineFragments(it, manualImageRegions, glyphHeight) }
 
     val imageSlots = horizontalImageSlots(imageRegions, lines)
     lines.forEachIndexed { index, line ->
@@ -2255,6 +2257,75 @@ class PdfPageReflowService(
       boundsByColumn[line.column]?.let { bounds -> line.copy(column = bounds) } ?: line
     }
   }
+
+  private fun mergeManualImageHorizontalLineFragments(
+    lines: List<HorizontalTextLine>,
+    manualImageRegions: List<Roi>,
+    glyphHeight: Double,
+  ): List<HorizontalTextLine> {
+    if (manualImageRegions.isEmpty() || lines.size < 2) return lines
+    val parents = IntArray(lines.size) { it }
+
+    fun find(index: Int): Int {
+      var current = index
+      while (parents[current] != current) current = parents[current]
+      var compressed = index
+      while (parents[compressed] != compressed) {
+        val parent = parents[compressed]
+        parents[compressed] = current
+        compressed = parent
+      }
+      return current
+    }
+
+    fun union(
+      left: Int,
+      right: Int,
+    ) {
+      val leftRoot = find(left)
+      val rightRoot = find(right)
+      if (leftRoot != rightRoot) parents[rightRoot] = leftRoot
+    }
+
+    for (left in lines.indices) {
+      for (right in left + 1 until lines.size) {
+        if (horizontalLineFragmentsCanMerge(lines[left], lines[right], glyphHeight)) union(left, right)
+      }
+    }
+
+    return lines.indices
+      .groupBy { find(it) }
+      .values
+      .map { indexes ->
+        val fragments = indexes.map(lines::get)
+        indexes.min() to if (fragments.size == 1) fragments.first() else mergeHorizontalLineFragmentGroup(fragments)
+      }.sortedBy { it.first }
+      .map { it.second }
+  }
+
+  private fun horizontalLineFragmentsCanMerge(
+    left: HorizontalTextLine,
+    right: HorizontalTextLine,
+    glyphHeight: Double,
+  ): Boolean {
+    if (left.column == right.column) return false
+    val overlap = max(0, min(left.line.end, right.line.end) - max(left.line.start, right.line.start))
+    val minHeight = max(1, min(left.line.end - left.line.start, right.line.end - right.line.start))
+    if (overlap.toDouble() / minHeight < 0.55) return false
+
+    val leftBounds = horizontalTextBounds(listOf(left)) ?: return false
+    val rightBounds = horizontalTextBounds(listOf(right)) ?: return false
+    val (first, second) = if (leftBounds.start <= rightBounds.start) leftBounds to rightBounds else rightBounds to leftBounds
+    val gap = second.start - first.end
+    return gap >= 0 && gap <= max(8.0, glyphHeight * 0.85)
+  }
+
+  private fun mergeHorizontalLineFragmentGroup(lines: List<HorizontalTextLine>): HorizontalTextLine =
+    HorizontalTextLine(
+      column = LineBand(lines.minOf { it.column.start }, lines.maxOf { it.column.end }),
+      line = LineBand(lines.minOf { it.line.start }, lines.maxOf { it.line.end }),
+      blocks = lines.flatMap { it.blocks }.sortedBy { it.x },
+    )
 
   private fun horizontalTextBounds(lines: List<HorizontalTextLine>): LineBand? {
     var left = Int.MAX_VALUE

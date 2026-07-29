@@ -1433,7 +1433,10 @@ export default Vue.extend({
           const detectedLines = this.scaleWordLines(detectedContent.lines, detectionSource.scale, sourceCanvas.width, sourceCanvas.height)
           const detectedImageRegions = this.scaleImageRegions(detectedContent.imageRegions, detectionSource.scale, sourceCanvas.width, sourceCanvas.height)
           const manualImageRegions = this.manualImageRoisForSource(sourceCanvas, regionSource.sourceOffset)
-          const lines = this.excludeManualImageWordBlocks(detectedLines, manualImageRegions)
+          const lines = this.mergeManualImageHorizontalLineFragments(
+            this.excludeManualImageWordBlocks(detectedLines, manualImageRegions),
+            manualImageRegions,
+          )
           const imageRegions = this.applyManualImageRegions(detectedImageRegions, manualImageRegions)
           regionItems.push(this.renderReflowItems(sourceCanvas, lines, imageRegions))
         }
@@ -4287,6 +4290,82 @@ export default Vue.extend({
           words: line.words.filter(word => !manualRegions.some(region => this.manualImageContainsWordBlock(region, word))),
         }))
         .filter(line => line.words.length > 0)
+    },
+    mergeManualImageHorizontalLineFragments(lines: WordLine[], manualRegions: ImageRegion[]): WordLine[] {
+      if (this.verticalText || manualRegions.length === 0 || lines.length < 2) return lines
+      const glyphHeight = this.horizontalGlyphSourceHeight(lines)
+      const parents = lines.map((_, index) => index)
+      const find = (index: number): number => {
+        let root = index
+        while (parents[root] !== root) root = parents[root]
+        while (parents[index] !== index) {
+          const parent = parents[index]
+          parents[index] = root
+          index = parent
+        }
+        return root
+      }
+      const union = (left: number, right: number) => {
+        const leftRoot = find(left)
+        const rightRoot = find(right)
+        if (leftRoot !== rightRoot) parents[rightRoot] = leftRoot
+      }
+
+      for (let left = 0; left < lines.length; left++) {
+        for (let right = left + 1; right < lines.length; right++) {
+          if (this.horizontalLineFragmentsCanMerge(lines[left], lines[right], glyphHeight)) union(left, right)
+        }
+      }
+
+      const groups = new Map<number, Array<{index: number, line: WordLine}>>()
+      lines.forEach((line, index) => {
+        const root = find(index)
+        const group = groups.get(root) || []
+        group.push({index, line})
+        groups.set(root, group)
+      })
+
+      return Array.from(groups.values())
+        .map(group => ({
+          index: Math.min(...group.map(item => item.index)),
+          line: group.length === 1 ? group[0].line : this.mergeHorizontalLineFragmentGroup(group.map(item => item.line)),
+        }))
+        .sort((a, b) => a.index - b.index)
+        .map(item => item.line)
+    },
+    horizontalLineFragmentsCanMerge(left: WordLine, right: WordLine, glyphHeight: number): boolean {
+      if (left.column.start === right.column.start && left.column.end === right.column.end) return false
+      const overlap = Math.max(0, Math.min(left.line.end, right.line.end) - Math.max(left.line.start, right.line.start))
+      const minHeight = Math.max(1, Math.min(left.line.end - left.line.start, right.line.end - right.line.start))
+      if (overlap / minHeight < 0.55) return false
+
+      const leftBounds = this.horizontalLineBlockBounds(left)
+      const rightBounds = this.horizontalLineBlockBounds(right)
+      if (!leftBounds || !rightBounds) return false
+      const first = leftBounds.start <= rightBounds.start ? leftBounds : rightBounds
+      const second = first === leftBounds ? rightBounds : leftBounds
+      const gap = second.start - first.end
+      return gap >= 0 && gap <= Math.max(8, glyphHeight * 0.85)
+    },
+    horizontalLineBlockBounds(line: WordLine): Column | undefined {
+      if (line.words.length === 0) return undefined
+      return {
+        start: Math.min(...line.words.map(word => word.x)),
+        end: Math.max(...line.words.map(word => word.x + word.w)),
+      }
+    },
+    mergeHorizontalLineFragmentGroup(lines: WordLine[]): WordLine {
+      return {
+        column: {
+          start: Math.min(...lines.map(line => line.column.start)),
+          end: Math.max(...lines.map(line => line.column.end)),
+        },
+        line: {
+          start: Math.min(...lines.map(line => line.line.start)),
+          end: Math.max(...lines.map(line => line.line.end)),
+        },
+        words: lines.flatMap(line => line.words).sort((a, b) => a.x - b.x),
+      }
     },
     manualImageContainsWordBlock(region: ImageRegion, block: WordBlock): boolean {
       const overlapWidth = Math.max(0, Math.min(region.x + region.w, block.x + block.w) - Math.max(region.x, block.x))
