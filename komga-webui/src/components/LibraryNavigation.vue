@@ -92,7 +92,7 @@
 import Vue from 'vue'
 import {COLLECTION_ADDED, COLLECTION_DELETED, READLIST_ADDED, READLIST_DELETED} from '@/types/events'
 import {LIBRARIES_ALL} from '@/types/library'
-import {LibraryDto} from '@/types/komga-libraries'
+import {getEffectiveLibraryIds} from '@/functions/libraries'
 
 export default Vue.extend({
   name: 'LibraryNavigation',
@@ -160,14 +160,21 @@ export default Vue.extend({
       if(this.collectionsCount === 1) this.loadCollectionCounts(this.libraryId)
     },
     async loadCollectionCounts(libraryId: string) {
-      const lib = libraryId !== LIBRARIES_ALL ? [libraryId] : this.$store.getters.getLibrariesPinned.map((it: LibraryDto) => it.id)
+      const lib = this.getRequestLibraryIds(libraryId)
       this.$komgaCollections.getCollections(lib, {size: 0})
       .then(v => this.collectionsCount = v.totalElements)
     },
     async loadReadListCounts(libraryId: string) {
-      const lib = libraryId !== LIBRARIES_ALL ? [libraryId] : this.$store.getters.getLibrariesPinned.map((it: LibraryDto) => it.id)
+      const lib = this.getRequestLibraryIds(libraryId)
       await this.$komgaReadLists.getReadLists(lib, {size: 0})
         .then(v => this.readListsCount = v.totalElements)
+    },
+    getRequestLibraryIds(libraryId: string): string[] {
+      return getEffectiveLibraryIds(
+        libraryId,
+        this.$store.getters.getLibraries,
+        this.$store.getters.getLibrariesPinned,
+      )
     },
   },
 })

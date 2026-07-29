@@ -38,6 +38,8 @@ data class MediaDto(
   val mediaType: String,
   val pagesCount: Int,
   val comment: String,
+  @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss'Z'")
+  val lastModified: LocalDateTime,
   val epubDivinaCompatible: Boolean,
   val epubIsKepub: Boolean,
 ) {

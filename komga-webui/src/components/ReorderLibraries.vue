@@ -6,6 +6,11 @@
           <v-list-item-title class="text-uppercase">{{ $t('common.reorder') }}</v-list-item-title>
         </v-list-item-content>
         <v-list-item-action class="ma-0">
+          <v-btn icon :disabled="selectedLibraries.length === 0" @click="moveDialog = true">
+            <v-icon>mdi-folder-move</v-icon>
+          </v-btn>
+        </v-list-item-action>
+        <v-list-item-action class="ma-0">
           <v-btn icon @click.stop.capture.prevent="dismiss">
             <v-icon>mdi-close</v-icon>
           </v-btn>
@@ -27,6 +32,9 @@
         handle=".handle"
       >
         <v-list-item v-for="l in localItems" :key="l.id">
+          <v-list-item-action class="ma-0 me-2">
+            <v-checkbox v-model="selectedLibraries" :value="l" hide-details/>
+          </v-list-item-action>
           <v-list-item-icon>
             <v-icon class="handle">mdi-drag-horizontal-variant</v-icon>
           </v-list-item-icon>
@@ -44,6 +52,12 @@
         </v-list-item>
       </draggable>
     </v-list>
+
+    <move-libraries-dialog
+      v-model="moveDialog"
+      :libraries="selectedLibraries"
+      @moved="librariesMoved"
+    />
   </div>
 </template>
 
@@ -52,13 +66,16 @@ import Vue from 'vue'
 import draggable from 'vuedraggable'
 import {LibraryDto} from '@/types/komga-libraries'
 import {ClientSettingLibraryUpdate} from '@/types/komga-clientsettings'
+import MoveLibrariesDialog from '@/components/dialogs/MoveLibrariesDialog.vue'
 
 export default Vue.extend({
   name: 'ReorderLibraries',
-  components: {draggable},
+  components: {MoveLibrariesDialog, draggable},
   data: () => {
     return {
       localItems: [] as LibraryDto[],
+      selectedLibraries: [] as LibraryDto[],
+      moveDialog: false,
       unwatch: false,
     }
   },
@@ -109,6 +126,10 @@ export default Vue.extend({
         },
       } as ClientSettingLibraryUpdate)
       this.localItems.find(it => it.id == libraryId).unpinned = false
+    },
+    librariesMoved() {
+      this.selectedLibraries = []
+      this.localItems = this.$store.getters.getLibraries
     },
   },
 })

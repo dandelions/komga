@@ -8,6 +8,7 @@ import org.gotson.komga.domain.model.DirectoryNotFoundException
 import org.gotson.komga.domain.model.DomainEvent
 import org.gotson.komga.domain.model.Library
 import org.gotson.komga.domain.model.Media
+import org.gotson.komga.domain.model.ScanResult
 import org.gotson.komga.domain.model.SearchCondition
 import org.gotson.komga.domain.model.SearchContext
 import org.gotson.komga.domain.model.SearchOperator
@@ -35,11 +36,21 @@ import org.springframework.context.ApplicationEventPublisher
 import org.springframework.data.domain.Pageable
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
+import java.net.URL
 import java.nio.file.Paths
 import java.time.LocalDateTime
+import java.time.temporal.ChronoUnit
 import kotlin.time.measureTime
 
 private val logger = KotlinLogging.logger {}
+
+data class LibraryScanSummary(
+  val limited: Boolean,
+  val scannedBookCount: Int,
+  val countedBookCount: Int,
+  val bookIdsToAnalyze: Set<String> = emptySet(),
+  val recoveredFromUnavailable: Boolean = false,
+)
 
 @Service
 class LibraryContentLifecycle(
@@ -69,20 +80,81 @@ class LibraryContentLifecycle(
   fun scanRootFolder(
     library: Library,
     scanDeep: Boolean = false,
-  ) {
+  ): LibraryScanSummary {
     logger.info { "Scan root folder for library: $library" }
+    val scanLimitUsage =
+      if (library.scanBypassDailyFileLimit) {
+        null
+      } else {
+        komgaSettingsProvider.libraryScanDailyFileLimitUsage()
+      }
+    if (scanLimitUsage?.exhausted == true) {
+      logger.info { "Daily scan file limit exhausted, postponing scan for library: ${library.name}" }
+      return LibraryScanSummary(limited = true, scannedBookCount = 0, countedBookCount = 0)
+    }
+
+    var fileScanResult: ScanResult? = null
+    val recoveredFromUnavailable = library.unavailableDate != null
+    val bookIdsToAnalyze = mutableSetOf<String>()
+
     measureTime {
-      val scanResult =
+      val root = library.root ?: throw DirectoryNotFoundException("Library root folder is not configured: ${library.name}")
+      val rootPath = Paths.get(root.toURI()).toAbsolutePath().normalize()
+      val descendantLibraries = findDescendantLibraries(library.id)
+      val descendantSeriesIds = descendantLibraries.flatMap { seriesRepository.findAllIdsByLibraryId(it.id) }
+      val excludedPaths =
+        (descendantLibraries.mapNotNull { it.path } + bookRepository.findAllBySeriesIds(descendantSeriesIds).map { it.path })
+          .map { it.toAbsolutePath().normalize() }
+          .filter { it != rootPath && it.startsWith(rootPath) }
+          .toSet()
+      val existingBooksByUrl =
+        if (scanLimitUsage != null) {
+          bookRepository
+            .findAll(
+              SearchCondition.AllOfBook(
+                SearchCondition.LibraryId(SearchOperator.Is(library.id)),
+                SearchCondition.Deleted(SearchOperator.IsFalse),
+              ),
+              SearchContext.empty(),
+              Pageable.unpaged(),
+            ).content
+            .associateBy { it.url }
+        } else {
+          emptyMap()
+        }
+
+      val rawScanResult =
         try {
-          fileSystemScanner.scanRootFolder(
-            Paths.get(library.root.toURI()),
-            library.scanForceModifiedTime,
-            library.oneshotsDirectory,
-            library.scanCbx,
-            library.scanPdf,
-            library.scanEpub,
-            library.scanDirectoryExclusions,
-          )
+          if (scanLimitUsage == null) {
+            fileSystemScanner.scanRootFolder(
+              rootPath,
+              library.scanForceModifiedTime,
+              library.oneshotsDirectory,
+              library.scanCbx,
+              library.scanPdf,
+              library.scanEpub,
+              library.scanDirectoryExclusions,
+              excludedPaths = excludedPaths,
+            )
+          } else {
+            fileSystemScanner.scanRootFolder(
+              rootPath,
+              library.scanForceModifiedTime,
+              library.oneshotsDirectory,
+              library.scanCbx,
+              library.scanPdf,
+              library.scanEpub,
+              library.scanDirectoryExclusions,
+              scanLimitUsage.remaining,
+              countBook = { book ->
+                existingBooksByUrl[book.url] == null
+              },
+              consumeCountedBook = {
+                komgaSettingsProvider.tryConsumeLibraryScanFile()
+              },
+              excludedPaths = excludedPaths,
+            )
+          }
         } catch (e: DirectoryNotFoundException) {
           library.copy(unavailableDate = LocalDateTime.now()).let {
             libraryRepository.update(it)
@@ -90,6 +162,13 @@ class LibraryContentLifecycle(
           }
           throw e
         }
+      val scanResult =
+        if (scanLimitUsage == null) {
+          rawScanResult
+        } else {
+          applyScanLimitPriority(rawScanResult, existingBooksByUrl, scanLimitUsage.remaining, includeModifiedBooks = !library.scanOnlyNewBooks)
+        }
+      fileScanResult = scanResult
 
       if (library.unavailableDate != null) {
         library.copy(unavailableDate = null).let {
@@ -104,9 +183,21 @@ class LibraryContentLifecycle(
           .map { (series, books) ->
             series.copy(libraryId = library.id) to books.map { it.copy(libraryId = library.id) }
           }.toMap()
+      val scannedBookUrls = scannedSeries.values.flatten().map { it.url }
+      val skipDestructiveCleanup = shouldSkipDestructiveCleanup(library, scanResult, scannedBookUrls)
+
+      if (!skipDestructiveCleanup && !scanResult.limited && !library.scanOnlyNewBooks && library.emptyTrashAfterScan) {
+        deleteDeletedBooksStillMissing(library, scannedBookUrls)
+      }
 
       // delete series that don't exist anymore
-      if (scannedSeries.isEmpty()) {
+      if (skipDestructiveCleanup) {
+        logger.warn { "Skipping missing series and book cleanup because scan result looks incomplete for library: ${library.name}" }
+      } else if (scanResult.limited) {
+        logger.info { "Scan reached the daily file limit, skipping missing series and book cleanup for library: ${library.name}" }
+      } else if (library.scanOnlyNewBooks) {
+        logger.info { "Library is configured to scan only new books, skipping missing series cleanup for library: ${library.name}" }
+      } else if (scannedSeries.isEmpty()) {
         logger.info { "Scan returned no series, soft deleting all existing series" }
         val series = seriesRepository.findAllByLibraryId(library.id)
         seriesLifecycle.softDeleteMany(series)
@@ -122,23 +213,34 @@ class LibraryContentLifecycle(
 
       // delete books that don't exist anymore. We need to do this now, so trash bin can work
       val seriesToSortAndRefresh =
-        scannedSeries.values.flatten().map { it.url }.let { urls ->
-          val books = bookRepository.findAllNotDeletedByLibraryIdAndUrlNotIn(library.id, urls)
-          if (books.isNotEmpty()) {
-            logger.info { "Soft deleting books not on disk anymore: $books" }
-            bookLifecycle.softDeleteMany(books)
-            books
-              .map { it.seriesId }
-              .distinct()
-              .mapNotNull { seriesRepository.findByIdOrNull(it) }
-              .toMutableList()
-          } else {
-            mutableListOf()
+        if (skipDestructiveCleanup) {
+          mutableListOf()
+        } else if (scanResult.limited) {
+          mutableListOf()
+        } else if (library.scanOnlyNewBooks) {
+          logger.info { "Library is configured to scan only new books, skipping missing book cleanup for library: ${library.name}" }
+          mutableListOf()
+        } else {
+          scannedBookUrls.let { urls ->
+            val books = bookRepository.findAllNotDeletedByLibraryIdAndUrlNotIn(library.id, urls)
+            if (books.isNotEmpty()) {
+              logger.info { "Soft deleting books not on disk anymore: $books" }
+              bookLifecycle.softDeleteMany(books)
+              books
+                .map { it.seriesId }
+                .distinct()
+                .mapNotNull { seriesRepository.findByIdOrNull(it) }
+                .toMutableList()
+            } else {
+              mutableListOf()
+            }
           }
         }
       // we store the url of all the series that had deleted books
       // this can be used to detect changed series even if their file modified date did not change, for example because of NFS/SMB cache
       val seriesUrlWithDeletedBooks = seriesToSortAndRefresh.map { it.url }
+      val addedSeriesUrls = mutableSetOf<URL>()
+      val addedBookUrls = mutableSetOf<URL>()
 
       scannedSeries.forEach { (newSeries, newBooks) ->
         val existingSeries = seriesRepository.findNotDeletedByLibraryIdAndUrlOrNull(library.id, newSeries.url)
@@ -148,6 +250,9 @@ class LibraryContentLifecycle(
           logger.info { "Adding new series: $newSeries" }
           val createdSeries = seriesLifecycle.createSeries(newSeries)
           seriesLifecycle.addBooks(createdSeries, newBooks)
+          bookIdsToAnalyze += newBooks.map { it.id }
+          addedSeriesUrls += newSeries.url
+          addedBookUrls += newBooks.map { it.url }
           tryRestoreSeries(createdSeries, newBooks)
           tryRestoreBooks(newBooks)
           seriesToSortAndRefresh.add(createdSeries)
@@ -155,49 +260,64 @@ class LibraryContentLifecycle(
           // if series already exists, update it
           logger.debug { "Scanned series already exists. Scanned: $newSeries, Existing: $existingSeries" }
           val seriesChanged = newSeries.fileLastModified.notEquals(existingSeries.fileLastModified) || existingSeries.deletedDate != null || seriesUrlWithDeletedBooks.contains(newSeries.url)
+          val hasCountedBooks =
+            scanLimitUsage != null &&
+              newBooks.any { book ->
+                existingBooksByUrl[book.url]?.let { existingBook ->
+                  isBookModifiedForQuota(book, existingBook)
+                } ?: true
+              }
           if (seriesChanged) {
             logger.info { "Series changed on disk, updating: $existingSeries" }
-            seriesRepository.update(existingSeries.copy(fileLastModified = newSeries.fileLastModified, deletedDate = null))
+            if (library.scanOnlyNewBooks)
+              logger.info { "Library is configured to scan only new books, skipping existing series update: $existingSeries" }
+            else
+              seriesRepository.update(existingSeries.copy(fileLastModified = newSeries.fileLastModified, deletedDate = null))
           }
-          if (scanDeep || seriesChanged) {
+          if (library.scanOnlyNewBooks || scanDeep || seriesChanged || hasCountedBooks) {
             // update list of books with existing entities if they exist
             val existingBooks = bookRepository.findAllBySeriesId(existingSeries.id)
             logger.debug { "Existing books: $existingBooks" }
 
             // update existing books
-            newBooks.forEach { newBook ->
-              logger.debug { "Trying to match scanned book by url: $newBook" }
-              existingBooks.find { it.url == newBook.url && it.deletedDate == null }?.let { existingBook ->
-                logger.debug { "Matched existing book: $existingBook" }
-                if (newBook.fileLastModified.notEquals(existingBook.fileLastModified)) {
-                  val hash =
-                    if (existingBook.fileSize == newBook.fileSize && existingBook.fileHash.isNotBlank()) {
-                      hasher.computeHash(newBook.path)
-                    } else {
-                      null
-                    }
-                  if (hash == existingBook.fileHash) {
-                    logger.info { "Book changed on disk, but still has the same hash, no need to reset media status: $existingBook" }
-                    val updatedBook =
-                      existingBook.copy(
-                        fileLastModified = newBook.fileLastModified,
-                        fileSize = newBook.fileSize,
-                        fileHash = hash,
-                      )
-                    bookRepository.update(updatedBook)
-                  } else {
-                    logger.info { "Book changed on disk, update and reset media status: $existingBook" }
-                    val updatedBook =
-                      existingBook.copy(
-                        fileLastModified = newBook.fileLastModified,
-                        fileSize = newBook.fileSize,
-                        fileHash = hash ?: "",
-                      )
-                    transactionTemplate.executeWithoutResult {
-                      mediaRepository.findById(existingBook.id).let {
-                        mediaRepository.update(it.copy(status = Media.Status.OUTDATED))
+            if (library.scanOnlyNewBooks) {
+              logger.debug { "Library is configured to scan only new books, skipping existing book updates for series: $existingSeries" }
+            } else {
+              newBooks.forEach { newBook ->
+                logger.debug { "Trying to match scanned book by url: $newBook" }
+                existingBooks.find { it.url == newBook.url && it.deletedDate == null }?.let { existingBook ->
+                  logger.debug { "Matched existing book: $existingBook" }
+                  if (isBookModifiedForQuota(newBook, existingBook)) {
+                    val hash =
+                      if (existingBook.fileSize == newBook.fileSize && existingBook.fileHash.isNotBlank()) {
+                        hasher.computeHash(newBook.path)
+                      } else {
+                        null
                       }
+                    if (hash == existingBook.fileHash) {
+                      logger.info { "Book changed on disk, but still has the same hash, no need to reset media status: $existingBook" }
+                      val updatedBook =
+                        existingBook.copy(
+                          fileLastModified = newBook.fileLastModified,
+                          fileSize = newBook.fileSize,
+                          fileHash = hash,
+                        )
                       bookRepository.update(updatedBook)
+                    } else {
+                      logger.info { "Book changed on disk, update and reset media status: $existingBook" }
+                      val updatedBook =
+                        existingBook.copy(
+                          fileLastModified = newBook.fileLastModified,
+                          fileSize = newBook.fileSize,
+                          fileHash = hash ?: "",
+                        )
+                      transactionTemplate.executeWithoutResult {
+                        mediaRepository.findById(existingBook.id).let {
+                          mediaRepository.update(it.copy(status = Media.Status.OUTDATED))
+                        }
+                        bookRepository.update(updatedBook)
+                      }
+                      bookIdsToAnalyze += existingBook.id
                     }
                   }
                 }
@@ -205,12 +325,24 @@ class LibraryContentLifecycle(
             }
 
             // add new books
-            val existingBooksUrls = existingBooks.filterNot { it.deletedDate != null }.map { it.url }
+            val restoredBookUrls =
+              if (library.scanOnlyNewBooks) {
+                emptySet()
+              } else {
+                val restoredBooks = restoreDeletedBooksByUrl(existingSeries, existingBooks, newBooks)
+                bookIdsToAnalyze += restoredBooks.map { it.id }
+                if (restoredBooks.isNotEmpty()) seriesToSortAndRefresh.add(existingSeries)
+                restoredBooks.map { it.url }.toSet()
+              }
+            val existingBooksUrls = existingBooks.filterNot { it.deletedDate != null }.map { it.url } + restoredBookUrls
             val booksToAdd = newBooks.filterNot { newBook -> existingBooksUrls.contains(newBook.url) }
             logger.info { "Adding new books: $booksToAdd" }
             seriesLifecycle.addBooks(existingSeries, booksToAdd)
+            bookIdsToAnalyze += booksToAdd.map { it.id }
+            addedBookUrls += booksToAdd.map { it.url }
             tryRestoreBooks(booksToAdd)
-            seriesToSortAndRefresh.add(existingSeries)
+            if (booksToAdd.isNotEmpty() || !library.scanOnlyNewBooks)
+              seriesToSortAndRefresh.add(existingSeries)
           }
         }
       }
@@ -222,7 +354,18 @@ class LibraryContentLifecycle(
       }
 
       val existingSidecars = sidecarRepository.findAll()
-      scanResult.sidecars.forEach { newSidecar ->
+      val sidecarsToProcess =
+        if (library.scanOnlyNewBooks)
+          scanResult.sidecars.filter { sidecar ->
+            when (sidecar.source) {
+              Sidecar.Source.SERIES -> addedSeriesUrls.contains(sidecar.parentUrl)
+              Sidecar.Source.BOOK -> addedBookUrls.contains(sidecar.parentUrl)
+            }
+          }
+        else
+          scanResult.sidecars
+
+      sidecarsToProcess.forEach { newSidecar ->
         val existingSidecar = existingSidecars.firstOrNull { it.url == newSidecar.url }
         if (existingSidecar == null || existingSidecar.lastModifiedTime.notEquals(newSidecar.lastModifiedTime)) {
           when (newSidecar.source) {
@@ -249,22 +392,182 @@ class LibraryContentLifecycle(
       }
 
       // cleanup sidecars that don't exist anymore
-      scanResult.sidecars.map { it.url }.let { newSidecarsUrls ->
-        existingSidecars
-          .filterNot { existing -> newSidecarsUrls.contains(existing.url) }
-          .let { sidecars ->
-            sidecarRepository.deleteByLibraryIdAndUrls(library.id, sidecars.map { it.url })
-          }
+      if (skipDestructiveCleanup) {
+        logger.warn { "Skipping sidecar cleanup because scan result looks incomplete for library: ${library.name}" }
+      } else if (scanResult.limited) {
+        logger.info { "Scan reached the daily file limit, skipping sidecar cleanup for library: ${library.name}" }
+      } else if (library.scanOnlyNewBooks) {
+        logger.info { "Library is configured to scan only new books, skipping sidecar cleanup for library: ${library.name}" }
+      } else {
+        scanResult.sidecars.map { it.url }.let { newSidecarsUrls ->
+          existingSidecars
+            .filterNot { existing -> newSidecarsUrls.contains(existing.url) }
+            .let { sidecars ->
+              sidecarRepository.deleteByLibraryIdAndUrls(library.id, sidecars.map { it.url })
+            }
+        }
       }
 
-      if (library.emptyTrashAfterScan)
+      if (skipDestructiveCleanup) {
+        logger.warn { "Skipping full-scan cleanup because scan result looks incomplete for library: ${library.name}" }
+      } else if (scanResult.limited) {
+        logger.info { "Scan reached the daily file limit, skipping full-scan cleanup for library: ${library.name}" }
+      } else if (library.scanOnlyNewBooks) {
+        logger.info { "Library is configured to scan only new books, skipping full-scan cleanup for library: ${library.name}" }
+      } else if (library.emptyTrashAfterScan) {
         emptyTrash(library)
-      else
+      } else {
         cleanupEmptySets()
+      }
     }.also { logger.info { "Library updated in $it" } }
 
     eventPublisher.publishEvent(DomainEvent.LibraryScanned(library))
+    val scanResult = checkNotNull(fileScanResult)
+    return LibraryScanSummary(scanResult.limited, scanResult.scannedBookCount, scanResult.countedBookCount, bookIdsToAnalyze, recoveredFromUnavailable)
   }
+
+  private fun findDescendantLibraries(libraryId: String): Collection<Library> =
+    libraryRepository.findAllByParentId(libraryId).flatMap { child ->
+      listOf(child) + findDescendantLibraries(child.id)
+    }
+
+  private fun applyScanLimitPriority(
+    scanResult: ScanResult,
+    existingBooksByUrl: Map<URL, Book>,
+    initialRemaining: Int,
+    includeModifiedBooks: Boolean,
+  ): ScanResult {
+    val countedNewBooks = scanResult.countedBookCount
+    if (scanResult.limited) {
+      val series = scanResult.series.filterBooks { existingBooksByUrl[it.url] == null }
+      return scanResult.copy(
+        series = series,
+        scannedBookCount = series.scannedBookCount(),
+        countedBookCount = countedNewBooks,
+        limited = true,
+      )
+    }
+    if (!includeModifiedBooks) {
+      return scanResult.copy(countedBookCount = countedNewBooks)
+    }
+
+    val modifiedBooks =
+      scanResult.series.values.flatten().filter { scannedBook ->
+        existingBooksByUrl[scannedBook.url]?.let { existingBook ->
+          isBookModifiedForQuota(scannedBook, existingBook)
+        } ?: false
+      }
+
+    var countedBookCount = countedNewBooks
+    var remaining = (initialRemaining - countedNewBooks).coerceAtLeast(0)
+    var limited = false
+    val countedModifiedBookUrls = mutableSetOf<String>()
+
+    for (book in modifiedBooks) {
+      if (remaining <= 0 || !komgaSettingsProvider.tryConsumeLibraryScanFile()) {
+        limited = true
+        break
+      }
+
+      countedModifiedBookUrls += book.url.toString()
+      countedBookCount++
+      remaining--
+    }
+
+    if (!limited) {
+      return scanResult.copy(countedBookCount = countedBookCount)
+    }
+
+    val series =
+      scanResult.series.filterBooks { book ->
+        existingBooksByUrl[book.url] == null || countedModifiedBookUrls.contains(book.url.toString())
+      }
+    return scanResult.copy(
+      series = series,
+      scannedBookCount = series.scannedBookCount(),
+      countedBookCount = countedBookCount,
+      limited = true,
+    )
+  }
+
+  private fun restoreDeletedBooksByUrl(
+    series: Series,
+    existingBooks: Collection<Book>,
+    scannedBooks: Collection<Book>,
+  ): List<Book> {
+    val deletedBooksByUrl = existingBooks.filter { it.deletedDate != null && it.fileHash.isBlank() }.associateBy { it.url }
+    if (deletedBooksByUrl.isEmpty()) return emptyList()
+
+    return scannedBooks.mapNotNull { scannedBook ->
+      val deletedBook = deletedBooksByUrl[scannedBook.url] ?: return@mapNotNull null
+      logger.info { "Restoring soft-deleted book with same URL instead of adding duplicate. Deleted: $deletedBook, Scanned: $scannedBook" }
+      val restoredBook =
+        deletedBook.copy(
+          name = scannedBook.name,
+          url = scannedBook.url,
+          fileLastModified = scannedBook.fileLastModified,
+          fileSize = scannedBook.fileSize,
+          fileHash = "",
+          fileHashKoreader = "",
+          number = scannedBook.number,
+          seriesId = series.id,
+          libraryId = series.libraryId,
+          deletedDate = null,
+          oneshot = scannedBook.oneshot,
+        )
+
+      transactionTemplate.executeWithoutResult {
+        mediaRepository.findById(deletedBook.id).let { media ->
+          mediaRepository.update(media.copy(status = Media.Status.OUTDATED))
+        }
+        bookRepository.update(restoredBook)
+      }
+
+      restoredBook
+    }
+  }
+
+  private fun deleteDeletedBooksStillMissing(
+    library: Library,
+    scannedBookUrls: Collection<URL>,
+  ) {
+    val booksToDelete = bookRepository.findAllDeletedByLibraryIdAndUrlNotIn(library.id, scannedBookUrls)
+    if (booksToDelete.isNotEmpty()) {
+      logger.info { "Deleting books already marked unavailable and still missing on disk: $booksToDelete" }
+      bookLifecycle.deleteMany(booksToDelete)
+    }
+  }
+
+  private fun shouldSkipDestructiveCleanup(
+    library: Library,
+    scanResult: ScanResult,
+    scannedBookUrls: Collection<URL>,
+  ): Boolean {
+    if (scanResult.limited || library.scanOnlyNewBooks || scannedBookUrls.isNotEmpty()) return false
+
+    val hasExistingAvailableSeries =
+      seriesRepository
+        .findAllNotDeletedByLibraryIdAndUrlNotIn(library.id, emptyList())
+        .isNotEmpty()
+    if (!hasExistingAvailableSeries) return false
+
+    val unavailableLibrary = library.copy(unavailableDate = LocalDateTime.now())
+    libraryRepository.update(unavailableLibrary)
+    eventPublisher.publishEvent(DomainEvent.LibraryUpdated(unavailableLibrary))
+    logger.warn { "Scan returned no books while library has existing content, marking library unavailable and skipping destructive cleanup: ${library.name}" }
+    return true
+  }
+
+  private fun Map<Series, List<Book>>.filterBooks(predicate: (Book) -> Boolean): Map<Series, List<Book>> =
+    mapValues { (_, books) -> books.filter(predicate) }
+      .filterValues { it.isNotEmpty() }
+
+  private fun Map<Series, List<Book>>.scannedBookCount(): Int = values.sumOf { it.size }
+
+  private fun isBookModifiedForQuota(
+    scannedBook: Book,
+    existingBook: Book,
+  ): Boolean = scannedBook.fileLastModified.notEquals(existingBook.fileLastModified, ChronoUnit.HOURS)
 
   /**
    * This will try to match newSeries with a deleted series.

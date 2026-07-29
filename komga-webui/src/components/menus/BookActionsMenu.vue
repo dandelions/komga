@@ -34,6 +34,7 @@ import {getReadProgress} from '@/functions/book-progress'
 import {ReadStatus} from '@/types/enum-books'
 import Vue from 'vue'
 import {BookDto, ReadProgressUpdateDto} from '@/types/komga-books'
+import {ERROR, ErrorEvent, NOTIFICATION, NotificationEvent} from '@/types/events'
 
 export default Vue.extend({
   name: 'BookActionsMenu',
@@ -69,8 +70,14 @@ export default Vue.extend({
     },
   },
   methods: {
-    analyze () {
-      this.$komgaBooks.analyzeBook(this.book)
+    async analyze () {
+      try {
+        await this.$komgaBooks.analyzeBook(this.book)
+        this.$eventHub.$emit(NOTIFICATION, {message: this.$t('notification.analysis_task_submitted').toString()} as NotificationEvent)
+        this.$emit('analyzed')
+      } catch (e) {
+        this.$eventHub.$emit(ERROR, {message: e.message} as ErrorEvent)
+      }
     },
     refreshMetadata () {
       this.$komgaBooks.refreshMetadata(this.book)

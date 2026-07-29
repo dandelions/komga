@@ -8,7 +8,7 @@ import kotlin.io.path.toPath
 
 data class Library(
   val name: String,
-  val root: URL,
+  val root: URL?,
   val importComicInfoBook: Boolean = true,
   val importComicInfoSeries: Boolean = true,
   val importComicInfoCollection: Boolean = true,
@@ -25,6 +25,8 @@ data class Library(
   val scanCbx: Boolean = true,
   val scanPdf: Boolean = true,
   val scanEpub: Boolean = true,
+  val scanBypassDailyFileLimit: Boolean = false,
+  val scanOnlyNewBooks: Boolean = false,
   val scanDirectoryExclusions: Set<String> = emptySet(),
   val repairExtensions: Boolean = false,
   val convertToCbz: Boolean = false,
@@ -35,6 +37,7 @@ data class Library(
   val hashKoreader: Boolean = false,
   val analyzeDimensions: Boolean = true,
   val oneshotsDirectory: String? = null,
+  val parentId: String? = null,
   val unavailableDate: LocalDateTime? = null,
   val id: String = TsidCreator.getTsid256().toString(),
   override val createdDate: LocalDateTime = LocalDateTime.now(),
@@ -57,5 +60,5 @@ data class Library(
   }
 
   @delegate:Transient
-  val path: Path by lazy { this.root.toURI().toPath() }
+  val path: Path? by lazy { this.root?.toURI()?.toPath() }
 }

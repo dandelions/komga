@@ -22,6 +22,7 @@ import org.gotson.komga.domain.persistence.ReadProgressRepository
 import org.gotson.komga.domain.persistence.SeriesMetadataRepository
 import org.gotson.komga.domain.service.BookAnalyzer
 import org.gotson.komga.domain.service.BookLifecycle
+import org.gotson.komga.domain.service.PdfPageImageCacheService
 import org.gotson.komga.infrastructure.image.ImageType
 import org.gotson.komga.infrastructure.mediacontainer.ContentDetector
 import org.gotson.komga.infrastructure.openapi.OpenApiConfiguration
@@ -65,6 +66,7 @@ class CommonBookController(
   private val bookDtoRepository: BookDtoRepository,
   private val seriesMetadataRepository: SeriesMetadataRepository,
   private val bookLifecycle: BookLifecycle,
+  private val pdfPageImageCacheService: PdfPageImageCacheService,
   private val bookAnalyzer: BookAnalyzer,
   private val contentRestrictionChecker: ContentRestrictionChecker,
   private val contentDetector: ContentDetector,
@@ -137,6 +139,7 @@ class CommonBookController(
     request: ServletWebRequest,
     principal: KomgaPrincipal,
     acceptHeaders: MutableList<MediaType>?,
+    usePdfPageCache: Boolean = false,
   ) = bookRepository.findByIdOrNull((bookId))?.let { book ->
     val media = mediaRepository.findById(bookId)
     if (request.checkNotModified(getBookLastModified(media))) {
@@ -148,7 +151,7 @@ class CommonBookController(
 
     contentRestrictionChecker.checkContentRestriction(principal.user, book)
 
-    if (media.profile == MediaProfile.PDF && acceptHeaders != null && acceptHeaders.any { it.isCompatibleWith(MediaType.APPLICATION_PDF) }) {
+    if (media.mediaType == org.gotson.komga.domain.model.MediaType.PDF.type && acceptHeaders != null && acceptHeaders.any { it.isCompatibleWith(MediaType.APPLICATION_PDF) }) {
       // keep only pdf and image
       acceptHeaders.removeIf { !it.isCompatibleWith(MediaType.APPLICATION_PDF) && !it.isCompatibleWith(MediaType("image")) }
       MimeTypeUtils.sortBySpecificity(acceptHeaders)
@@ -165,7 +168,12 @@ class CommonBookController(
           else -> throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid conversion format: $convertTo")
         }
 
-      val pageContent = bookLifecycle.getBookPage(book, pageNumber, convertFormat)
+      val pageContent =
+        if (usePdfPageCache && media.profile == MediaProfile.PDF && convertFormat == null) {
+          pdfPageImageCacheService.getOriginalPageAndPrefetch(book, pageNumber, media.pageCount)
+        } else {
+          bookLifecycle.getBookPage(book, pageNumber, convertFormat)
+        }
 
       ResponseEntity
         .ok()
@@ -359,7 +367,7 @@ class CommonBookController(
                     .filename(book.path.name, StandardCharsets.UTF_8)
                     .build()
               },
-            ).contentType(getMediaTypeOrDefault(media.mediaType))
+            ).contentType(getBookDownloadMediaType(book, media))
             .contentLength(this.contentLength())
             .body(stream)
         }
@@ -368,6 +376,20 @@ class CommonBookController(
         throw ResponseStatusException(HttpStatus.NOT_FOUND, "File not found, it may have moved")
       }
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+
+  private fun getBookDownloadMediaType(
+    book: Book,
+    media: Media,
+  ): MediaType {
+    val extension = FilenameUtils.getExtension(book.path.name).lowercase()
+    val mediaType =
+      org.gotson.komga.domain.model.MediaType.entries
+        .firstOrNull { it.fileExtension == extension }
+        ?.type
+        ?: media.mediaType
+
+    return getMediaTypeOrDefault(mediaType)
+  }
 
   @Operation(summary = "Get book progression", description = "The Progression API is a proposed standard for OPDS 2 and Readium. It is used by the Epub Reader.", tags = [OpenApiConfiguration.TagNames.BOOK_WEBPUB])
   @GetMapping(

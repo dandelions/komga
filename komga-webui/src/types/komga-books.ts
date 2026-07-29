@@ -29,6 +29,7 @@ export interface MediaDto {
   mediaType: string,
   pagesCount: number,
   comment: string,
+  lastModified: string,
   mediaProfile: string,
   epubDivinaCompatible: boolean,
   epubIsKepub: boolean,

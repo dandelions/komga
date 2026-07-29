@@ -39,6 +39,7 @@ import Vue from 'vue'
 import {BookDto} from '@/types/komga-books'
 import {SeriesDto} from '@/types/komga-series'
 import {BookSearch, SearchConditionSeriesId, SearchOperatorIs} from '@/types/komga-search'
+import {ERROR, ErrorEvent, NOTIFICATION, NotificationEvent} from '@/types/events'
 
 export default Vue.extend({
   name: 'OneShotActionsMenu',
@@ -82,9 +83,15 @@ export default Vue.extend({
     },
   },
   methods: {
-    analyze() {
-      if (this.book) this.$komgaBooks.analyzeBook(this.book)
-      else this.$komgaSeries.analyzeSeries(this.series)
+    async analyze() {
+      try {
+        if (this.book) await this.$komgaBooks.analyzeBook(this.book)
+        else await this.$komgaSeries.analyzeSeries(this.series)
+        this.$eventHub.$emit(NOTIFICATION, {message: this.$t('notification.analysis_task_submitted').toString()} as NotificationEvent)
+        this.$emit('analyzed')
+      } catch (e) {
+        this.$eventHub.$emit(ERROR, {message: e.message} as ErrorEvent)
+      }
     },
     refreshMetadata() {
       if (this.book) this.$komgaBooks.refreshMetadata(this.book)

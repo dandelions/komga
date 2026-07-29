@@ -23,6 +23,8 @@ data class LibraryDto(
   val scanCbx: Boolean,
   val scanPdf: Boolean,
   val scanEpub: Boolean,
+  val scanBypassDailyFileLimit: Boolean,
+  val scanOnlyNewBooks: Boolean,
   val scanDirectoryExclusions: Set<String>,
   val repairExtensions: Boolean,
   val convertToCbz: Boolean,
@@ -33,6 +35,7 @@ data class LibraryDto(
   val hashKoreader: Boolean,
   val analyzeDimensions: Boolean,
   val oneshotsDirectory: String?,
+  val parentId: String?,
   val unavailable: Boolean,
 )
 
@@ -40,7 +43,7 @@ fun Library.toDto(includeRoot: Boolean) =
   LibraryDto(
     id = id,
     name = name,
-    root = if (includeRoot) this.root.toFilePath() else "",
+    root = if (includeRoot) this.root?.toFilePath() ?: "" else "",
     importComicInfoBook = importComicInfoBook,
     importComicInfoSeries = importComicInfoSeries,
     importComicInfoCollection = importComicInfoCollection,
@@ -57,6 +60,8 @@ fun Library.toDto(includeRoot: Boolean) =
     scanCbx = scanCbx,
     scanPdf = scanPdf,
     scanEpub = scanEpub,
+    scanBypassDailyFileLimit = scanBypassDailyFileLimit,
+    scanOnlyNewBooks = scanOnlyNewBooks,
     scanDirectoryExclusions = scanDirectoryExclusions,
     repairExtensions = repairExtensions,
     convertToCbz = convertToCbz,
@@ -67,5 +72,6 @@ fun Library.toDto(includeRoot: Boolean) =
     hashKoreader = hashKoreader,
     analyzeDimensions = analyzeDimensions,
     oneshotsDirectory = oneshotsDirectory,
+    parentId = this.parentId,
     unavailable = unavailableDate != null,
   )

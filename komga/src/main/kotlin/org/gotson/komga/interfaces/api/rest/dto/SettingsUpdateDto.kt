@@ -25,6 +25,12 @@ class SettingsUpdateDto {
   var taskPoolSize: Int? = null
 
   @get:Positive
+  var libraryScanDailyFileLimit: Int?
+    by Delegates.observable(null) { prop, _, _ ->
+      isSet[prop.name] = true
+    }
+
+  @get:Positive
   @get:Max(65535)
   var serverPort: Int?
     by Delegates.observable(null) { prop, _, _ ->

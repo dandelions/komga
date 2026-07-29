@@ -4,6 +4,8 @@ import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
+import org.gotson.komga.application.tasks.TaskAddedEvent
+import org.gotson.komga.application.tasks.TasksRepository
 import org.gotson.komga.infrastructure.configuration.KomgaSettingsProvider
 import org.gotson.komga.infrastructure.kobo.KepubConverter
 import org.gotson.komga.infrastructure.openapi.OpenApiConfiguration
@@ -14,11 +16,13 @@ import org.gotson.komga.interfaces.api.rest.dto.SettingsUpdateDto
 import org.gotson.komga.interfaces.api.rest.dto.toDomain
 import org.gotson.komga.interfaces.api.rest.dto.toDto
 import org.springframework.beans.factory.annotation.Value
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PatchMapping
+import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.ResponseStatus
@@ -31,6 +35,8 @@ import kotlin.time.Duration.Companion.days
 @Tag(name = OpenApiConfiguration.TagNames.SERVER_SETTINGS)
 class SettingsController(
   private val komgaSettingsProvider: KomgaSettingsProvider,
+  private val tasksRepository: TasksRepository,
+  private val eventPublisher: ApplicationEventPublisher,
   @param:Value($$"${server.port:#{null}}") private val configServerPort: Int?,
   @param:Value($$"${server.servlet.context-path:#{null}}") private val configServerContextPath: String?,
   private val serverSettings: WebServerEffectiveSettings,
@@ -45,6 +51,7 @@ class SettingsController(
       komgaSettingsProvider.rememberMeDuration.inWholeDays,
       komgaSettingsProvider.thumbnailSize.toDto(),
       komgaSettingsProvider.taskPoolSize,
+      komgaSettingsProvider.libraryScanDailyFileLimit,
       SettingMultiSource(configServerPort, komgaSettingsProvider.serverPort, serverSettings.effectiveServerPort),
       SettingMultiSource(configServerContextPath, komgaSettingsProvider.serverContextPath, serverSettings.effectiveServletContextPath),
       komgaSettingsProvider.koboProxy,
@@ -66,6 +73,7 @@ class SettingsController(
     if (newSettings.renewRememberMeKey == true) komgaSettingsProvider.renewRememberMeKey()
     newSettings.thumbnailSize?.let { komgaSettingsProvider.thumbnailSize = it.toDomain() }
     newSettings.taskPoolSize?.let { komgaSettingsProvider.taskPoolSize = it }
+    if (newSettings.isSet("libraryScanDailyFileLimit")) komgaSettingsProvider.libraryScanDailyFileLimit = newSettings.libraryScanDailyFileLimit
 
     if (newSettings.isSet("serverPort")) komgaSettingsProvider.serverPort = newSettings.serverPort
     if (newSettings.isSet("serverContextPath")) komgaSettingsProvider.serverContextPath = newSettings.serverContextPath
@@ -73,5 +81,15 @@ class SettingsController(
     newSettings.koboProxy?.let { komgaSettingsProvider.koboProxy = it }
     if (newSettings.isSet("koboPort")) komgaSettingsProvider.koboPort = newSettings.koboPort
     if (newSettings.isSet("kepubifyPath")) komgaSettingsProvider.kepubifyPath = newSettings.kepubifyPath
+  }
+
+  @PostMapping("library-scan-daily-file-limit/reset")
+  @ResponseStatus(HttpStatus.NO_CONTENT)
+  @Operation(summary = "Reset today's library scan file limit usage")
+  fun resetLibraryScanDailyFileLimitUsage() {
+    komgaSettingsProvider.resetLibraryScanDailyFileLimitUsageForToday()
+    if (tasksRepository.makeFutureScanLibraryTasksAvailable() > 0) {
+      eventPublisher.publishEvent(TaskAddedEvent)
+    }
   }
 }

@@ -21,6 +21,39 @@ export enum CLIENT_SETTING {
   WEBUI_SERIES_GROUPS = 'webui.series_groups',
   WEBUI_RECOMMENDED = 'webui.recommended',
   WEBUI_PDF_REFLOW_SETTINGS = 'webui.pdf_reflow_settings',
+  WEBUI_READER_IMAGE_SETTINGS = 'webui.reader_image_settings',
+  WEBUI_EPUB_CUSTOM_STYLES = 'webui.epub_custom_styles',
+  WEBUI_EPUB_BACKGROUND_IMAGES = 'webui.epub_background_images',
+}
+
+export interface ClientSettingsEpubCustomStyle {
+  enabled: boolean,
+  css: string,
+  disableOriginalStyle?: boolean,
+  chineseConversion?: ClientSettingsEpubChineseConversion,
+}
+
+export type ClientSettingsEpubChineseConversion = 'none' | 'simplified' | 'traditional'
+
+export interface ClientSettingsEpubBackgroundImages {
+  enabled?: boolean,
+  selectedLightId?: string,
+  selectedDarkId?: string,
+  light: ClientSettingsEpubBackgroundImage[],
+  dark: ClientSettingsEpubBackgroundImage[],
+  books?: Record<string, ClientSettingsEpubBackgroundImageSelection>,
+}
+
+export interface ClientSettingsEpubBackgroundImageSelection {
+  enabled: boolean,
+  selectedLightId?: string,
+  selectedDarkId?: string,
+}
+
+export interface ClientSettingsEpubBackgroundImage {
+  id: string,
+  name: string,
+  dataUrl: string,
 }
 
 export interface ClientSettingLibrary {

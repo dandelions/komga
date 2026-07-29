@@ -6,11 +6,16 @@
       <img v-for="(page, i) in pages"
            :key="`page${i}`"
            :alt="`Page ${page.number}`"
-           :src="shouldLoad(i) ? page.url : undefined"
+           :src="shouldLoad(i) ? pageDisplayUrl(page) : undefined"
+           :loading="imageLoading(i)"
+           :fetchpriority="imageFetchPriority(i)"
+           :decoding="imageDecoding(i)"
            :height="calcHeight(page)"
            :width="calcWidth(page)"
            :id="`page${page.number}`"
-           :style="`margin: ${i === 0 ? 0 : pageMargin}px auto;`"
+           :data-page-number="page.number"
+           :style="pageStyle(page, i)"
+           @load="ensureDeskewedPageUrl(page, $event)"
            v-intersect="onIntersect"
       />
     </div>
@@ -40,6 +45,24 @@ import Vue from 'vue'
 import {ContinuousScaleType} from '@/types/enum-reader'
 import {PageDtoWithUrl} from '@/types/komga-books'
 import {throttle} from 'lodash'
+import {enhanceTextContrast} from '@/functions/image-enhancement'
+import {markPageImageBrowserLoaded} from '@/functions/page-image-cache'
+
+type CropRegion = {
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+}
+
+type PageParity = 'odd' | 'even'
+
+type CropRegionsByParity = {
+  enabled: boolean,
+  odd?: CropRegion | null,
+  even?: CropRegion | null,
+  regions?: Partial<Record<PageParity, Array<CropRegion | null | undefined>>>,
+}
 
 export default Vue.extend({
   name: 'ContinuousReader',
@@ -49,6 +72,8 @@ export default Vue.extend({
       totalHeight: 1000,
       currentPage: 1,
       seen: [] as boolean[],
+      deskewedPageUrls: {} as Record<number, string>,
+      deskewedPagePending: {} as Record<number, boolean>,
     }
   },
   props: {
@@ -76,14 +101,62 @@ export default Vue.extend({
       type: Number,
       required: true,
     },
+    imageFilter: {
+      type: String,
+      default: 'none',
+    },
+    rotation: {
+      type: Number,
+      default: 0,
+    },
+    skewCorrection: {
+      type: Number,
+      default: 0,
+    },
+    contrastEnhancement: {
+      type: Boolean,
+      default: false,
+    },
+    cropRegionsByParity: {
+      type: Object as () => CropRegionsByParity,
+      default: () => ({enabled: false}),
+    },
+    pageDisplayUrls: {
+      type: Object as () => Record<number, string>,
+      default: () => ({}),
+    },
+    activeCropRegion: {
+      type: Number,
+      default: 0,
+    },
   },
   watch: {
     pages: {
       handler(val) {
         this.seen = new Array(val.length).fill(false)
+        this.revokeDeskewedPageUrls()
         if (this.page === 1) window.scrollTo(0, 0)
       },
       immediate: true,
+    },
+    skewCorrection() {
+      this.revokeDeskewedPageUrls()
+      this.$nextTick(this.ensureLoadedDeskewedPageUrls)
+    },
+    rotation() {
+      this.revokeDeskewedPageUrls()
+      this.$nextTick(this.ensureLoadedDeskewedPageUrls)
+    },
+    contrastEnhancement() {
+      this.revokeDeskewedPageUrls()
+      this.$nextTick(this.ensureLoadedDeskewedPageUrls)
+    },
+    pageDisplayUrls: {
+      handler() {
+        this.revokeDeskewedPageUrls()
+        this.$nextTick(this.ensureLoadedDeskewedPageUrls)
+      },
+      deep: true,
     },
     page: {
       handler(val) {
@@ -101,6 +174,7 @@ export default Vue.extend({
   },
   destroyed() {
     window.removeEventListener('keydown', this.keyPressed)
+    this.revokeDeskewedPageUrls()
   },
   mounted() {
     if (this.page != this.currentPage) {
@@ -148,19 +222,22 @@ export default Vue.extend({
         this.seen.splice(page - 1, 1, true)
         this.currentPage = page
         this.$emit('update:page', page)
+        this.$nextTick(this.ensureLoadedDeskewedPageUrls)
       }
     },
     shouldLoad(page: number): boolean {
-      return page == 0 || this.seen[page] || Math.abs((this.currentPage - 1) - page) <= 2
+      return page == 0 || this.seen[page] || Math.abs((this.currentPage - 1) - page) <= 1
     },
     calcHeight(page: PageDtoWithUrl): number | undefined {
+      const width = this.displayPageWidth(page)
+      const height = this.displayPageHeight(page)
       switch (this.scale) {
         case ContinuousScaleType.WIDTH:
-          if (page.height && page.width)
-            return page.height / (page.width / (this.$vuetify.breakpoint.width - (this.$vuetify.breakpoint.width * this.totalSidePadding) / 100))
+          if (height && width)
+            return height / (width / (this.$vuetify.breakpoint.width - (this.$vuetify.breakpoint.width * this.totalSidePadding) / 100))
           return undefined
         case ContinuousScaleType.ORIGINAL:
-          return page.height || undefined
+          return height || undefined
         default:
           return undefined
       }
@@ -170,10 +247,201 @@ export default Vue.extend({
         case ContinuousScaleType.WIDTH:
           return this.$vuetify.breakpoint.width - (this.$vuetify.breakpoint.width * this.totalSidePadding) / 100
         case ContinuousScaleType.ORIGINAL:
-          return page.width || undefined
+          return this.displayPageWidth(page) || undefined
         default:
           return undefined
       }
+    },
+    displayPageWidth(page: PageDtoWithUrl): number {
+      return Math.abs(this.normalizedRotation(this.rotation)) === 90 ? Number(page.height) : Number(page.width)
+    },
+    displayPageHeight(page: PageDtoWithUrl): number {
+      return Math.abs(this.normalizedRotation(this.rotation)) === 90 ? Number(page.width) : Number(page.height)
+    },
+    pageDisplayUrl(page: PageDtoWithUrl): string {
+      return this.deskewedPageUrls[page.number] || this.pageDisplayUrls[page.number] || page.url
+    },
+    pageStyle(page: PageDtoWithUrl, index: number): object {
+      const crop = this.effectiveCropRegion(page.number)
+      return {
+        margin: `${index === 0 ? 0 : this.pageMargin}px auto`,
+        filter: this.imageFilter,
+        clipPath: this.cropClipPath(crop),
+        transform: this.imageTransform(crop),
+        transformOrigin: 'center center',
+      }
+    },
+    imageTransform(crop: CropRegion | undefined): string | undefined {
+      const transforms = [] as string[]
+      if (crop) {
+        const scale = this.cropTransformScale(crop)
+        const translateX = (50 - crop.x - crop.w / 2) * scale
+        const translateY = (50 - crop.y - crop.h / 2) * scale
+        transforms.push(`translate(${translateX.toFixed(2)}%, ${translateY.toFixed(2)}%)`)
+        transforms.push(`scale(${scale.toFixed(3)})`)
+      }
+      return transforms.join(' ') || undefined
+    },
+    cropTransformScale(crop: CropRegion): number {
+      const scaleX = 100 / crop.w
+      const scaleY = 100 / crop.h
+      const scale = this.scale === ContinuousScaleType.WIDTH ? scaleX : Math.max(scaleX, scaleY)
+      return Math.min(2.5, scale)
+    },
+    cropClipPath(crop: CropRegion | undefined): string | undefined {
+      if (!crop) return undefined
+      const right = Math.max(0, 100 - crop.x - crop.w)
+      const bottom = Math.max(0, 100 - crop.y - crop.h)
+      return `inset(${crop.y}% ${right}% ${bottom}% ${crop.x}%)`
+    },
+    effectiveCropRegion(pageNumber: number): CropRegion | undefined {
+      const crops = this.cropRegionsByParity
+      if (!crops?.enabled) return undefined
+      const parity = pageNumber % 2 === 0 ? 'even' : 'odd'
+      const index = this.activeCropRegion === 1 ? 1 : 0
+      return this.normalizedCropRegion(crops.regions?.[parity]?.[index] || (index === 0 ? crops[parity] : undefined)) ||
+        this.normalizedCropRegion(crops.regions?.[parity === 'odd' ? 'even' : 'odd']?.[index])
+    },
+    normalizedCropRegion(crop: CropRegion | null | undefined): CropRegion | undefined {
+      if (!crop) return undefined
+      const x = this.clampCropNumber(crop.x, 0)
+      const y = this.clampCropNumber(crop.y, 0)
+      const w = Math.max(5, Math.min(100 - x, this.clampCropNumber(crop.w, 100)))
+      const h = Math.max(5, Math.min(100 - y, this.clampCropNumber(crop.h, 100)))
+      return {x, y, w, h}
+    },
+    clampCropNumber(value: number, fallback: number): number {
+      const numberValue = Number(value)
+      if (!Number.isFinite(numberValue)) return fallback
+      return Math.max(0, Math.min(100, numberValue))
+    },
+    async ensureDeskewedPageUrl(page: PageDtoWithUrl, event: Event) {
+      const loadedImage = event.target as HTMLImageElement
+      markPageImageBrowserLoaded(page.url, loadedImage.currentSrc || loadedImage.src)
+      const rotation = this.normalizedRotation(this.rotation)
+      const angle = this.skewCorrection || 0
+      const contrastEnhancement = this.contrastEnhancement
+      // A parent-provided display URL is already rotated/corrected. Reusing it
+      // directly keeps subsequent crop coordinates and the reading image in
+      // the same coordinate system.
+      if (this.pageDisplayUrls[page.number]) return
+      if ((!rotation && !angle && !this.contrastEnhancement) || this.deskewedPageUrls[page.number] || this.deskewedPagePending[page.number]) return
+
+      const image = loadedImage
+      if (!image?.complete || image.naturalWidth <= 0) return
+
+      this.$set(this.deskewedPagePending, page.number, true)
+      try {
+        const pageIsCurrent = page.number === this.currentPage
+        if (!pageIsCurrent) await this.waitForReaderIdle()
+        if (this.normalizedRotation(this.rotation) !== rotation || this.skewCorrection !== angle || this.contrastEnhancement !== contrastEnhancement || this.deskewedPageUrls[page.number]) return
+        const canvas = this.processedPageCanvas(image, rotation, angle)
+        const url = await this.canvasObjectUrl(canvas)
+        if (this.normalizedRotation(this.rotation) === rotation && this.skewCorrection === angle && this.contrastEnhancement === contrastEnhancement) this.$set(this.deskewedPageUrls, page.number, url)
+        else URL.revokeObjectURL(url)
+      } catch (e) {
+      } finally {
+        this.$delete(this.deskewedPagePending, page.number)
+      }
+    },
+    processedPageCanvas(image: HTMLImageElement, rotation: number, skewCorrection: number): HTMLCanvasElement {
+      const rotatedCanvas = rotation ? this.rotatedImageCanvas(image, rotation) : this.sourceImageCanvas(image)
+      const canvas = skewCorrection ? this.skewCorrectedCanvas(rotatedCanvas, skewCorrection) : rotatedCanvas
+      if (this.contrastEnhancement) {
+        const context = canvas.getContext('2d')
+        if (context) enhanceTextContrast(context, canvas.width, canvas.height, {enabled: true})
+      }
+      return canvas
+    },
+    sourceImageCanvas(image: HTMLImageElement): HTMLCanvasElement {
+      const canvas = document.createElement('canvas')
+      canvas.width = image.naturalWidth
+      canvas.height = image.naturalHeight
+      const context = canvas.getContext('2d')
+      if (!context) return canvas
+      context.fillStyle = '#fff'
+      context.fillRect(0, 0, canvas.width, canvas.height)
+      context.drawImage(image, 0, 0)
+      return canvas
+    },
+    rotatedImageCanvas(image: HTMLImageElement, degrees: number): HTMLCanvasElement {
+      const rotation = this.normalizedRotation(degrees)
+      const quarterTurn = Math.abs(rotation) === 90
+      const canvas = document.createElement('canvas')
+      canvas.width = quarterTurn ? image.naturalHeight : image.naturalWidth
+      canvas.height = quarterTurn ? image.naturalWidth : image.naturalHeight
+      const context = canvas.getContext('2d')
+      if (!context) return canvas
+      context.fillStyle = '#fff'
+      context.fillRect(0, 0, canvas.width, canvas.height)
+      context.translate(canvas.width / 2, canvas.height / 2)
+      context.rotate(rotation * Math.PI / 180)
+      context.drawImage(image, -image.naturalWidth / 2, -image.naturalHeight / 2)
+      return canvas
+    },
+    skewCorrectedCanvas(sourceCanvas: HTMLCanvasElement, degrees: number): HTMLCanvasElement {
+      const canvas = document.createElement('canvas')
+      canvas.width = sourceCanvas.width
+      canvas.height = sourceCanvas.height
+      const context = canvas.getContext('2d')
+      if (!context) return canvas
+      context.fillStyle = '#fff'
+      context.fillRect(0, 0, canvas.width, canvas.height)
+      context.translate(canvas.width / 2, canvas.height / 2)
+      context.rotate(degrees * Math.PI / 180)
+      context.drawImage(sourceCanvas, -sourceCanvas.width / 2, -sourceCanvas.height / 2)
+      return canvas
+    },
+    normalizedRotation(value: number): number {
+      const numberValue = Number(value)
+      if (!Number.isFinite(numberValue)) return 0
+      const rounded = Math.round(numberValue / 90) * 90
+      const normalized = ((rounded % 360) + 360) % 360
+      if (normalized === 90) return 90
+      if (normalized === 180) return 180
+      if (normalized === 270) return -90
+      return 0
+    },
+    canvasObjectUrl(canvas: HTMLCanvasElement): Promise<string> {
+      return new Promise((resolve, reject) => {
+        canvas.toBlob(blob => {
+          if (blob) resolve(URL.createObjectURL(blob))
+          else reject(new Error('Unable to encode deskewed page'))
+        }, 'image/jpeg', 0.95)
+      })
+    },
+    revokeDeskewedPageUrls() {
+      Object.values(this.deskewedPageUrls).forEach(url => URL.revokeObjectURL(url))
+      this.deskewedPageUrls = {}
+      this.deskewedPagePending = {}
+    },
+    ensureLoadedDeskewedPageUrls() {
+      if (!this.normalizedRotation(this.rotation) && !this.skewCorrection && !this.contrastEnhancement) return
+      const images = Array.from(this.$el.querySelectorAll('img[data-page-number]')) as HTMLImageElement[]
+      images.forEach(image => {
+        const pageNumber = Number(image.dataset.pageNumber)
+        const page = this.pages.find(x => x.number === pageNumber)
+        if (page && image.complete && image.naturalWidth > 0) this.ensureDeskewedPageUrl(page, {target: image} as unknown as Event)
+      })
+    },
+    waitForReaderIdle(): Promise<void> {
+      return new Promise(resolve => {
+        const requestIdleCallback = (window as any).requestIdleCallback
+        if (requestIdleCallback) {
+          requestIdleCallback(() => resolve(), {timeout: 500})
+        } else {
+          window.setTimeout(resolve, 160)
+        }
+      })
+    },
+    imageLoading(index: number): string {
+      return Math.abs((this.currentPage - 1) - index) <= 1 ? 'eager' : 'lazy'
+    },
+    imageFetchPriority(index: number): string {
+      return index === this.currentPage - 1 ? 'high' : 'low'
+    },
+    imageDecoding(index: number): string {
+      return index === this.currentPage - 1 ? 'sync' : 'async'
     },
     centerClick() {
       this.$emit('menu')

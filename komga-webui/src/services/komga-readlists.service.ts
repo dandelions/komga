@@ -106,13 +106,16 @@ export default class KomgaReadListsService {
 
   async getBooks(readListId: string, pageRequest?: PageRequest,
                  libraryId?: string[], readStatus?: string[],
-                 tag?: string[], authors?: AuthorDto[]): Promise<Page<BookDto>> {
+                 tag?: string[], authors?: AuthorDto[], mediaStatus?: string[],
+                 deleted?: boolean): Promise<Page<BookDto>> {
     try {
       const params = {...pageRequest} as any
       if (libraryId) params.library_id = libraryId
       if (readStatus) params.read_status = readStatus
       if (tag) params.tag = tag
       if (authors) params.author = authors.map(a => `${a.name},${a.role}`)
+      if (mediaStatus) params.media_status = mediaStatus
+      if (deleted !== undefined) params.deleted = deleted
 
       return (await this.http.get(`${API_READLISTS}/${readListId}/books`, {
         params: params,

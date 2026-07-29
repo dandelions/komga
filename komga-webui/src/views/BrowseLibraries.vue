@@ -5,12 +5,12 @@
       <library-actions-menu v-if="isAdmin && library"
                             :library="library"/>
 
-      <v-toolbar-title>
+      <v-toolbar-title class="toolbar-count-title" :title="toolbarTitle">
         <span>{{ toolbarTitle }}</span>
-        <v-chip label class="mx-4" v-if="totalElements">
-          <span style="font-size: 1.1rem">{{ totalElements }}</span>
-        </v-chip>
       </v-toolbar-title>
+      <v-chip v-if="totalElements !== null" label class="toolbar-count-value">
+        <span>{{ totalElements }}</span>
+      </v-chip>
 
       <v-spacer/>
 
@@ -19,6 +19,20 @@
       <v-spacer/>
 
       <page-size-select v-model="pageSize"/>
+
+      <v-btn-toggle
+        v-model="displayMode"
+        mandatory
+        dense
+        class="mx-2"
+      >
+        <v-btn small value="card" title="卡片显示">
+          <v-icon small>mdi-view-grid</v-icon>
+        </v-btn>
+        <v-btn small value="list" title="列表显示">
+          <v-icon small>mdi-format-list-bulleted</v-icon>
+        </v-btn>
+      </v-btn-toggle>
 
       <v-btn icon @click="drawer = !drawer">
         <v-icon :color="sortOrFilterActive ? 'secondary' : ''">mdi-filter-variant</v-icon>
@@ -98,26 +112,74 @@
       />
 
       <template v-if="totalPages > 0">
-        <v-pagination
-          v-if="totalPages > 1"
-          v-model="page"
-          :total-visible="paginationVisible"
-          :length="totalPages"
-        />
+        <div v-if="totalPages > 1" class="pagination-row">
+          <v-pagination
+            v-model="page"
+            :total-visible="paginationVisible"
+            :length="totalPages"
+          />
+          <page-jump v-model="page" :length="totalPages"/>
+        </div>
 
         <item-browser
+          v-if="displayMode === 'card'"
           :items="series"
           :item-context="itemContext"
           :selected.sync="selectedSeries"
           :edit-function="isAdmin ? editSingleSeries : undefined"
         />
+        <v-list v-else two-line class="series-list-view">
+          <v-list-item
+            v-for="item in series"
+            :key="item.id"
+            class="series-list-row"
+            :class="{'series-list-row-selected': selectedSeries.includes(item)}"
+            @click="openSeries(item)"
+          >
+            <v-list-item-action class="series-list-checkbox">
+              <v-checkbox
+                :input-value="selectedSeries.includes(item)"
+                @click.stop="toggleSeriesSelection(item)"
+              />
+            </v-list-item-action>
 
-        <v-pagination
-          v-if="totalPages > 1"
-          v-model="page"
-          :total-visible="paginationVisible"
-          :length="totalPages"
-        />
+            <v-list-item-avatar tile class="series-list-thumbnail">
+              <v-img
+                :src="seriesThumbnailUrl(item.id)"
+                :lazy-src="coverBase64"
+                contain
+              />
+            </v-list-item-avatar>
+
+            <v-list-item-content>
+              <v-list-item-title class="series-list-title">
+                {{ item.metadata.title }}
+              </v-list-item-title>
+              <v-list-item-subtitle class="series-list-subtitle">
+                <span>{{ item.name }}</span>
+                <span>{{ $tc('common.books_n', item.booksCount) }}</span>
+                <span>{{ $t(`enums.series_status.${item.metadata.status}`) }}</span>
+                <span v-if="item.booksMetadata.releaseDate">{{ item.booksMetadata.releaseDate }}</span>
+              </v-list-item-subtitle>
+            </v-list-item-content>
+
+            <v-list-item-action class="series-list-actions">
+              <series-actions-menu
+                :series="item"
+                @click.native.stop
+              />
+            </v-list-item-action>
+          </v-list-item>
+        </v-list>
+
+        <div v-if="totalPages > 1" class="pagination-row">
+          <v-pagination
+            v-model="page"
+            :total-visible="paginationVisible"
+            :length="totalPages"
+          />
+          <page-jump v-model="page" :length="totalPages"/>
+        </div>
       </template>
     </v-container>
 
@@ -131,8 +193,11 @@ import EmptyState from '@/components/EmptyState.vue'
 import ItemBrowser from '@/components/ItemBrowser.vue'
 import LibraryNavigation from '@/components/LibraryNavigation.vue'
 import LibraryActionsMenu from '@/components/menus/LibraryActionsMenu.vue'
+import SeriesActionsMenu from '@/components/menus/SeriesActionsMenu.vue'
+import PageJump from '@/components/PageJump.vue'
 import PageSizeSelect from '@/components/PageSizeSelect.vue'
 import {parseQuerySort} from '@/functions/query-params'
+import {seriesThumbnailUrl} from '@/functions/urls'
 import {ReadStatus} from '@/types/enum-books'
 import {SeriesStatus} from '@/types/enum-series'
 import {
@@ -200,6 +265,7 @@ import {
 } from '@/types/komga-search'
 import i18n from '@/i18n'
 import {objIsEqual} from '@/functions/object'
+import {getEffectiveLibraryIds} from '@/functions/libraries'
 import {
   FILTER_ANY,
   FILTER_NONE,
@@ -210,15 +276,20 @@ import {
   NameValue,
 } from '@/types/filter'
 import {CLIENT_SETTING, ClientSettingsSeriesGroup, SERIES_GROUP_ALPHA} from '@/types/komga-clientsettings'
+import {coverBase64} from '@/types/image'
+
+type LibraryDisplayMode = 'card' | 'list'
 
 export default Vue.extend({
   name: 'BrowseLibraries',
   components: {
     AlphabeticalNavigation,
     LibraryActionsMenu,
+    SeriesActionsMenu,
     EmptyState,
     ToolbarSticky,
     ItemBrowser,
+    PageJump,
     PageSizeSelect,
     LibraryNavigation,
     MultiSelectBar,
@@ -238,7 +309,8 @@ export default Vue.extend({
       totalPages: 1,
       totalElements: null as number | null,
       sortActive: {} as SortActive,
-      sortDefault: {key: 'metadata.titleSort', order: 'asc'} as SortActive,
+      sortDefault: {key: 'createdDate', order: 'desc'} as SortActive,
+      displayMode: 'card' as LibraryDisplayMode,
       filters: {} as FiltersActive,
       filtersMode: {} as FiltersActiveMode,
       sortUnwatch: null as any,
@@ -246,6 +318,7 @@ export default Vue.extend({
       filterModeUnwatch: null as any,
       pageUnwatch: null as any,
       pageSizeUnwatch: null as any,
+      displayModeUnwatch: null as any,
       drawer: false,
       filterOptions: {
         genre: [] as NameValue[],
@@ -293,6 +366,7 @@ export default Vue.extend({
   async mounted() {
     this.$store.commit('setLibraryRoute', {id: this.libraryId, route: LIBRARY_ROUTE.BROWSE})
     this.pageSize = this.$store.state.persistedState.browsingPageSize || this.pageSize
+    this.displayMode = this.normalizedDisplayMode(this.$store.getters.getLibraryDisplayMode(this.libraryId))
 
     // restore from query param
     await this.resetParams(this.$route, this.libraryId)
@@ -316,6 +390,7 @@ export default Vue.extend({
       this.series = []
       this.seriesGroups = []
       this.selectedSymbol = 'ALL'
+      this.displayMode = this.normalizedDisplayMode(this.$store.getters.getLibraryDisplayMode(to.params.libraryId))
 
       this.loadLibrary(to.params.libraryId)
 
@@ -325,6 +400,12 @@ export default Vue.extend({
     next()
   },
   computed: {
+    seriesThumbnailUrl() {
+      return seriesThumbnailUrl
+    },
+    coverBase64(): string {
+      return coverBase64
+    },
     seriesGrouping(): Record<string, string[]> {
       let s: Record<string, string[]>
       try {
@@ -344,7 +425,7 @@ export default Vue.extend({
       return this.getLibraryLazy(this.libraryId)
     },
     requestLibraryIds(): string[] {
-      return this.libraryId !== LIBRARIES_ALL ? [this.libraryId] : this.$store.getters.getLibrariesPinned.map((it: LibraryDto) => it.id)
+      return this.getRequestLibraryIds(this.libraryId)
     },
     toolbarTitle(): string {
       if (this.library) return this.library.name
@@ -555,6 +636,9 @@ export default Vue.extend({
     },
   },
   methods: {
+    normalizedDisplayMode(value: any): LibraryDisplayMode {
+      return value === 'list' ? 'list' : 'card'
+    },
     filterByStarting(symbol: string) {
       this.selectedSymbol = symbol
       this.page = 1
@@ -576,7 +660,7 @@ export default Vue.extend({
         this.$store.getters.getLibrarySort(route.params.libraryId) ||
         this.$_.clone(this.sortDefault)
 
-      const requestLibraryIds = libraryId !== LIBRARIES_ALL ? [libraryId] : this.$store.getters.getLibrariesPinned.map((it: LibraryDto) => it.id)
+      const requestLibraryIds = this.getRequestLibraryIds(libraryId)
 
       // load dynamic filters
       const [genres, tags, publishers, languages, ageRatings, releaseDates, sharingLabels] = await Promise.all([
@@ -682,7 +766,7 @@ export default Vue.extend({
     libraryDeleted(event: LibrarySseDto) {
       if (event.libraryId === this.libraryId) {
         this.$router.push({name: 'home'})
-      } else if (this.libraryId === LIBRARIES_ALL) {
+      } else if (this.libraryId === LIBRARIES_ALL || this.requestLibraryIds.includes(event.libraryId)) {
         this.loadLibrary(this.libraryId)
       }
     },
@@ -703,6 +787,9 @@ export default Vue.extend({
         this.$store.commit('setBrowsingPageSize', val)
         this.updateRouteAndReload()
       })
+      this.displayModeUnwatch = this.$watch('displayMode', (val) => {
+        this.$store.commit('setLibraryDisplayMode', {id: this.libraryId, displayMode: this.normalizedDisplayMode(val)})
+      })
 
       this.pageUnwatch = this.$watch('page', (val) => {
         this.updateRoute()
@@ -715,6 +802,7 @@ export default Vue.extend({
       this.filterModeUnwatch()
       this.pageUnwatch()
       this.pageSizeUnwatch()
+      this.displayModeUnwatch()
     },
     updateRouteAndReload() {
       this.unsetWatches()
@@ -727,12 +815,12 @@ export default Vue.extend({
       this.setWatches()
     },
     seriesChanged(event: SeriesSseDto) {
-      if (this.libraryId === LIBRARIES_ALL || event.libraryId === this.libraryId) {
+      if (event.libraryId === this.libraryId || this.requestLibraryIds.includes(event.libraryId)) {
         this.reloadPage()
       }
     },
     libraryChanged(event: LibrarySseDto) {
-      if (this.libraryId === LIBRARIES_ALL || event.libraryId === this.libraryId) {
+      if (event.libraryId === this.libraryId || this.requestLibraryIds.includes(event.libraryId)) {
         this.loadLibrary(this.libraryId)
       }
     },
@@ -776,12 +864,10 @@ export default Vue.extend({
       }
 
       const conditions = [] as SearchConditionSeries[]
-      if (libraryId !== LIBRARIES_ALL) conditions.push(new SearchConditionLibraryId(new SearchOperatorIs(libraryId)))
-      else {
-        conditions.push(new SearchConditionAnyOfSeries(
-          this.$store.getters.getLibrariesPinned.map((it: LibraryDto) => new SearchConditionLibraryId(new SearchOperatorIs(it.id))),
-        ))
-      }
+      const requestLibraryIds = this.getRequestLibraryIds(libraryId)
+      conditions.push(new SearchConditionAnyOfSeries(
+        requestLibraryIds.map((it: string) => new SearchConditionLibraryId(new SearchOperatorIs(it))),
+      ))
       if (this.filters.status && this.filters.status.length > 0) this.filtersMode?.status?.allOf ? conditions.push(new SearchConditionAllOfSeries(this.filters.status)) : conditions.push(new SearchConditionAnyOfSeries(this.filters.status))
       if (this.filters.readStatus && this.filters.readStatus.length > 0) conditions.push(new SearchConditionAnyOfSeries(this.filters.readStatus))
       if (this.filters.genre && this.filters.genre.length > 0) this.filtersMode?.genre?.allOf ? conditions.push(new SearchConditionAllOfSeries(this.filters.genre)) : conditions.push(new SearchConditionAnyOfSeries(this.filters.genre))
@@ -846,6 +932,13 @@ export default Vue.extend({
         return undefined
       }
     },
+    getRequestLibraryIds(libraryId: string): string[] {
+      return getEffectiveLibraryIds(
+        libraryId,
+        this.$store.getters.getLibraries,
+        this.$store.getters.getLibrariesPinned,
+      )
+    },
     async markSelectedRead() {
       await Promise.all(this.selectedSeries.map(s =>
         this.$komgaSeries.markAsRead(s.id),
@@ -857,6 +950,18 @@ export default Vue.extend({
         this.$komgaSeries.markAsUnread(s.id),
       ))
       this.selectedSeries = []
+    },
+    toggleSeriesSelection(series: SeriesDto) {
+      const index = this.selectedSeries.indexOf(series)
+      if (index >= 0) this.selectedSeries.splice(index, 1)
+      else this.selectedSeries.push(series)
+    },
+    openSeries(series: SeriesDto) {
+      if (this.selectedSeries.length > 0) {
+        this.toggleSeriesSelection(series)
+        return
+      }
+      this.$router.push({name: series.oneshot ? 'browse-oneshot' : 'browse-series', params: {seriesId: series.id}})
     },
     addToCollection() {
       this.$store.dispatch('dialogAddSeriesToCollection', this.selectedSeries.map(s => s.id))
@@ -894,4 +999,57 @@ export default Vue.extend({
 })
 </script>
 <style scoped>
+.pagination-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.series-list-view {
+  background: transparent;
+}
+
+.series-list-row {
+  min-height: 76px;
+  border-bottom: 1px solid rgba(128, 128, 128, .18);
+}
+
+.series-list-row-selected {
+  background-color: rgba(255, 152, 0, .10);
+}
+
+.series-list-checkbox {
+  margin-right: 8px;
+}
+
+.series-list-thumbnail {
+  width: 44px !important;
+  min-width: 44px !important;
+  height: 62px !important;
+  margin-right: 14px;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.series-list-actions {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 2px;
+}
+
+.series-list-title {
+  font-size: .95rem;
+  line-height: 1.35;
+}
+
+.series-list-subtitle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 3px;
+  font-size: .78rem;
+}
 </style>

@@ -34,6 +34,7 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import java.nio.file.Files
 import java.nio.file.Paths
+import java.time.LocalDateTime
 
 @SpringBootTest
 class SeriesLifecycleTest(
@@ -104,6 +105,26 @@ class SeriesLifecycleTest(
     val savedBooks = bookRepository.findAllBySeriesId(createdSeries.id).sortedBy { it.number }
     assertThat(savedBooks.map { it.name }).containsExactly("book 1", "book  002", "  book 3", "book   4   ", "boôk 05", "book  6")
     assertThat(savedBooks.map { it.number }).containsExactly(1, 2, 3, 4, 5, 6)
+  }
+
+  @Test
+  fun `given selected books when moving to another library then ids and associated data are preserved`() {
+    val targetLibrary = makeLibrary(name = "target")
+    libraryRepository.insert(targetLibrary.copy(root = null))
+    val sourceSeries = seriesLifecycle.createSeries(makeSeries(name = "series", libraryId = library.id))
+    val books = listOf(makeBook("book 1", libraryId = library.id), makeBook("book 2", libraryId = library.id))
+    seriesLifecycle.addBooks(sourceSeries, books)
+
+    seriesLifecycle.moveBooksToLibrary(books.map { it.id }, targetLibrary.id)
+
+    val movedBooks = books.map { bookRepository.findByIdOrNull(it.id)!! }
+    assertThat(movedBooks).allMatch { it.libraryId == targetLibrary.id }
+    assertThat(movedBooks.map { it.id }).containsExactlyInAnyOrderElementsOf(books.map { it.id })
+    assertThat(movedBooks.map { it.seriesId }.distinct()).hasSize(1)
+    assertThat(seriesRepository.findByIdOrNull(sourceSeries.id)).isNull()
+    assertThat(seriesRepository.findByIdOrNull(movedBooks.first().seriesId)?.libraryId).isEqualTo(targetLibrary.id)
+    assertThat(movedBooks).allMatch { mediaRepository.findByIdOrNull(it.id) != null }
+    assertThat(movedBooks).allMatch { bookMetadataRepository.findByIdOrNull(it.id) != null }
   }
 
   @Test
@@ -389,6 +410,61 @@ class SeriesLifecycleTest(
 
     // then
     verify(exactly = 0) { bookLifecycle.softDeleteMany(any()) }
+  }
+
+  @Test
+  fun `given an unavailable series with a non-existent directory when deleting series then it is deleted from database`() {
+    // given
+    val seriesPath = Paths.get("/non-existent")
+    val series = makeSeries(name = "series", libraryId = library.id, url = seriesPath.toUri().toURL()).copy(deletedDate = LocalDateTime.now())
+    val books =
+      listOf(
+        makeBook("1", libraryId = library.id, seriesId = series.id),
+        makeBook("2", libraryId = library.id, seriesId = series.id),
+      )
+
+    seriesLifecycle.createSeries(series)
+    seriesLifecycle.addBooks(series, books)
+
+    // when
+    seriesLifecycle.deleteSeriesFiles(series)
+
+    // then
+    assertThat(seriesRepository.findByIdOrNull(series.id)).isNull()
+    assertThat(books.mapNotNull { bookRepository.findByIdOrNull(it.id) }).isEmpty()
+  }
+
+  @Test
+  fun `given an unavailable series with an existing directory when deleting series then it is deleted from database`() {
+    Jimfs.newFileSystem(Configuration.unix()).use { fs ->
+      // given
+      val root = fs.getPath("/root")
+      Files.createDirectory(root)
+      val seriesPath = root.resolve("series")
+      Files.createDirectory(seriesPath)
+      val book1Path = seriesPath.resolve("book1.cbz")
+      Files.createFile(book1Path)
+      val book2Path = seriesPath.resolve("book2.cbz")
+      Files.createFile(book2Path)
+
+      val series = makeSeries(name = "series", libraryId = library.id, url = seriesPath.toUri().toURL()).copy(deletedDate = LocalDateTime.now())
+      val books =
+        listOf(
+          makeBook("1", libraryId = library.id, seriesId = series.id, url = book1Path.toUri().toURL()),
+          makeBook("2", libraryId = library.id, seriesId = series.id, url = book2Path.toUri().toURL()),
+        )
+
+      seriesLifecycle.createSeries(series)
+      seriesLifecycle.addBooks(series, books)
+
+      // when
+      seriesLifecycle.deleteSeriesFiles(series)
+
+      // then
+      assertThat(seriesRepository.findByIdOrNull(series.id)).isNull()
+      assertThat(books.mapNotNull { bookRepository.findByIdOrNull(it.id) }).isEmpty()
+      assertThat(Files.notExists(seriesPath))
+    }
   }
 
   @Test

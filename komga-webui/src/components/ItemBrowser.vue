@@ -20,11 +20,11 @@
           <v-item
             v-for="item in localItems"
             :key="item.id"
-            class="my-2 mx-2"
             v-slot:default="{ toggle, active }" :value="item"
           >
             <slot name="item">
-              <div style="position: relative"
+              <div class="my-2 mx-2"
+                   :style="{ position: 'relative', width: `${itemWidth}px` }"
                    :class="draggable ? 'draggable-item' : undefined"
               >
                 <item-card

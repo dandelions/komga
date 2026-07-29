@@ -17,6 +17,7 @@ import org.gotson.komga.domain.model.KomgaUser
 import org.gotson.komga.domain.model.MarkSelectedPreference
 import org.gotson.komga.domain.model.Media
 import org.gotson.komga.domain.model.ReadList
+import org.gotson.komga.domain.model.ScanResult
 import org.gotson.komga.domain.model.Series
 import org.gotson.komga.domain.model.SeriesCollection
 import org.gotson.komga.domain.model.ThumbnailBook
@@ -36,6 +37,7 @@ import org.gotson.komga.domain.persistence.SeriesCollectionRepository
 import org.gotson.komga.domain.persistence.SeriesMetadataRepository
 import org.gotson.komga.domain.persistence.SeriesRepository
 import org.gotson.komga.domain.persistence.ThumbnailBookRepository
+import org.gotson.komga.infrastructure.configuration.KomgaSettingsProvider
 import org.gotson.komga.infrastructure.hash.Hasher
 import org.gotson.komga.interfaces.api.persistence.SeriesDtoRepository
 import org.gotson.komga.language.toIndexedMap
@@ -52,6 +54,7 @@ import org.springframework.data.domain.Pageable
 import java.net.URL
 import java.nio.file.Path
 import java.nio.file.Paths
+import java.time.LocalDateTime
 import kotlin.io.path.nameWithoutExtension
 
 @SpringBootTest
@@ -75,6 +78,7 @@ class LibraryContentLifecycleTest(
   @Autowired private val userLifecycle: KomgaUserLifecycle,
   @Autowired private val seriesDtoRepository: SeriesDtoRepository,
   @Autowired private val thumbnailBookRepository: ThumbnailBookRepository,
+  @Autowired private val komgaSettingsProvider: KomgaSettingsProvider,
 ) {
   @MockkBean
   private lateinit var mockScanner: FileSystemScanner
@@ -172,15 +176,265 @@ class LibraryContentLifecycleTest(
     }
 
     @Test
-    fun `given existing series when updating files and scanning then books are updated`() {
+    fun `given scan reaches daily file limit when not all files are visited then missing books are not deleted`() {
       // given
       val library = makeLibrary()
       libraryRepository.insert(library)
 
       every { mockScanner.scanRootFolder(any()) }
         .returnsMany(
-          mapOf(makeSeries(name = "series") to listOf(makeBook("book1"))).toScanResult(),
-          mapOf(makeSeries(name = "series") to listOf(makeBook("book1"))).toScanResult(),
+          mapOf(makeSeries(name = "series") to listOf(makeBook("book1"), makeBook("book2"))).toScanResult(),
+          ScanResult(
+            mapOf(makeSeries(name = "series") to listOf(makeBook("book1"))),
+            emptyList(),
+            limited = true,
+          ),
+        )
+      libraryContentLifecycle.scanRootFolder(library)
+
+      // when
+      val scanSummary = libraryContentLifecycle.scanRootFolder(library)
+
+      // then
+      val allBooks = bookRepository.findAll().sortedBy { it.number }
+
+      assertThat(scanSummary.limited).isTrue
+      assertThat(allBooks).hasSize(2)
+      assertThat(allBooks.filter { it.deletedDate == null }.map { it.name }).containsExactly("book1", "book2")
+    }
+
+    @Test
+    fun `given scan reaches daily file limit when files are visited then scanned books are persisted`() {
+      // given
+      val library = makeLibrary()
+      libraryRepository.insert(library)
+
+      every { mockScanner.scanRootFolder(any()) } returns
+        ScanResult(
+          mapOf(makeSeries(name = "series") to listOf(makeBook("book1"))),
+          emptyList(),
+          countedBookCount = 1,
+          limited = true,
+        )
+
+      // when
+      val scanSummary = libraryContentLifecycle.scanRootFolder(library)
+
+      // then
+      val allBooks = bookRepository.findAll()
+
+      assertThat(scanSummary.limited).isTrue
+      assertThat(scanSummary.countedBookCount).isEqualTo(1)
+      assertThat(allBooks.map { it.name }).containsExactly("book1")
+    }
+
+    @Test
+    fun `given limited shallow scan finds new book when series timestamp is unchanged then new book is persisted`() {
+      // given
+      val library = makeLibrary()
+      libraryRepository.insert(library)
+      komgaSettingsProvider.libraryScanDailyFileLimit = 10
+
+      val series = makeSeries(name = "series")
+      every { mockScanner.scanRootFolder(any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) }
+        .returnsMany(
+          ScanResult(
+            mapOf(series to listOf(makeBook("book1"))),
+            emptyList(),
+            countedBookCount = 1,
+          ),
+          ScanResult(
+            mapOf(
+              series.copy(fileLastModified = series.fileLastModified) to
+                listOf(makeBook("book1"), makeBook("book2")),
+            ),
+            emptyList(),
+            countedBookCount = 1,
+            limited = true,
+          ),
+        )
+
+      try {
+        libraryContentLifecycle.scanRootFolder(library)
+
+        // when
+        val scanSummary = libraryContentLifecycle.scanRootFolder(library)
+
+        // then
+        val allBooks = bookRepository.findAll().sortedBy { it.name }
+
+        assertThat(scanSummary.limited).isTrue
+        assertThat(scanSummary.countedBookCount).isEqualTo(1)
+        assertThat(allBooks.map { it.name }).containsExactly("book1", "book2")
+      } finally {
+        komgaSettingsProvider.libraryScanDailyFileLimit = null
+      }
+    }
+
+    @Test
+    fun `given limited scan finds new and modified books when quota is consumed by new books then modified books are not updated`() {
+      // given
+      val library = makeLibrary()
+      libraryRepository.insert(library)
+      val baseTime = LocalDateTime.of(2026, 1, 1, 10, 15)
+      val series = makeSeries(name = "series")
+
+      every { mockScanner.scanRootFolder(any()) } returns
+        ScanResult(
+          mapOf(series to listOf(makeBook("book1", fileLastModified = baseTime))),
+          emptyList(),
+        )
+      libraryContentLifecycle.scanRootFolder(library)
+
+      val existingBook = bookRepository.findAll().first()
+      bookRepository.update(existingBook.copy(fileHash = "hashed"))
+      mediaRepository.update(mediaRepository.findById(existingBook.id).copy(status = Media.Status.READY))
+
+      komgaSettingsProvider.libraryScanDailyFileLimit = 1
+      komgaSettingsProvider.resetLibraryScanDailyFileLimitUsageForToday()
+
+      every { mockScanner.scanRootFolder(any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns
+        ScanResult(
+          mapOf(
+            series to
+              listOf(
+                makeBook("book1", fileLastModified = baseTime.plusHours(1)),
+                makeBook("book2", fileLastModified = baseTime),
+              ),
+          ),
+          emptyList(),
+          countedBookCount = 1,
+        )
+
+      try {
+        // when
+        val scanSummary = libraryContentLifecycle.scanRootFolder(library)
+
+        // then
+        val allBooks = bookRepository.findAll().sortedBy { it.name }
+
+        assertThat(scanSummary.limited).isTrue
+        assertThat(scanSummary.countedBookCount).isEqualTo(1)
+        assertThat(allBooks.map { it.name }).containsExactly("book1", "book2")
+        assertThat(allBooks.first { it.name == "book1" }.fileLastModified).isEqualTo(baseTime)
+        assertThat(mediaRepository.findById(existingBook.id).status).isEqualTo(Media.Status.READY)
+      } finally {
+        komgaSettingsProvider.libraryScanDailyFileLimit = null
+      }
+    }
+
+    @Test
+    fun `given limited scan finds same-hour modified book then quota is not consumed and book is not updated`() {
+      // given
+      val library = makeLibrary()
+      libraryRepository.insert(library)
+      val baseTime = LocalDateTime.of(2026, 1, 1, 10, 15)
+      val series = makeSeries(name = "series")
+
+      every { mockScanner.scanRootFolder(any()) } returns
+        ScanResult(
+          mapOf(series to listOf(makeBook("book1", fileLastModified = baseTime))),
+          emptyList(),
+        )
+      libraryContentLifecycle.scanRootFolder(library)
+
+      val existingBook = bookRepository.findAll().first()
+      mediaRepository.update(mediaRepository.findById(existingBook.id).copy(status = Media.Status.READY))
+
+      komgaSettingsProvider.libraryScanDailyFileLimit = 1
+      komgaSettingsProvider.resetLibraryScanDailyFileLimitUsageForToday()
+
+      every { mockScanner.scanRootFolder(any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns
+        ScanResult(
+          mapOf(series to listOf(makeBook("book1", fileLastModified = baseTime.plusMinutes(30)))),
+          emptyList(),
+          countedBookCount = 0,
+        )
+
+      try {
+        // when
+        val scanSummary = libraryContentLifecycle.scanRootFolder(library)
+
+        // then
+        val book = bookRepository.findAll().first()
+
+        assertThat(scanSummary.limited).isFalse
+        assertThat(scanSummary.countedBookCount).isEqualTo(0)
+        assertThat(book.fileLastModified).isEqualTo(baseTime)
+        assertThat(mediaRepository.findById(existingBook.id).status).isEqualTo(Media.Status.READY)
+      } finally {
+        komgaSettingsProvider.libraryScanDailyFileLimit = null
+      }
+    }
+
+    @Test
+    fun `given library bypasses daily file limit when limit is exhausted then library is scanned`() {
+      // given
+      val library = makeLibrary().copy(scanBypassDailyFileLimit = true)
+      libraryRepository.insert(library)
+      komgaSettingsProvider.libraryScanDailyFileLimit = 0
+
+      every { mockScanner.scanRootFolder(any()) } returns
+        mapOf(makeSeries(name = "series") to listOf(makeBook("book1"))).toScanResult()
+
+      try {
+        // when
+        val scanSummary = libraryContentLifecycle.scanRootFolder(library)
+
+        // then
+        assertThat(scanSummary.limited).isFalse
+        verify(exactly = 1) { mockScanner.scanRootFolder(any()) }
+      } finally {
+        komgaSettingsProvider.libraryScanDailyFileLimit = null
+      }
+    }
+
+    @Test
+    fun `given library scans only new books when existing book changes then only new books are persisted and analyzed`() {
+      // given
+      val library = makeLibrary().copy(scanOnlyNewBooks = true)
+      libraryRepository.insert(library)
+      val baseTime = LocalDateTime.of(2026, 1, 1, 10, 15)
+      val series = makeSeries(name = "series")
+      val book1 = makeBook("book1", fileLastModified = baseTime)
+      val book2 = makeBook("book2", fileLastModified = baseTime.plusHours(1))
+
+      every { mockScanner.scanRootFolder(any()) }
+        .returnsMany(
+          mapOf(series to listOf(book1)).toScanResult(),
+          mapOf(series.copy(fileLastModified = series.fileLastModified) to listOf(makeBook("book1", fileLastModified = baseTime.plusHours(1)), book2)).toScanResult(),
+        )
+      libraryContentLifecycle.scanRootFolder(library)
+
+      val existingBook = bookRepository.findAll().first()
+      mediaRepository.update(mediaRepository.findById(existingBook.id).copy(status = Media.Status.READY))
+
+      // when
+      val scanSummary = libraryContentLifecycle.scanRootFolder(library)
+
+      // then
+      val allBooks = bookRepository.findAll().sortedBy { it.name }
+
+      verify(exactly = 2) { mockScanner.scanRootFolder(any()) }
+      verify(exactly = 0) { mockHasher.computeHash(any<Path>()) }
+
+      assertThat(allBooks.map { it.name }).containsExactly("book1", "book2")
+      assertThat(allBooks.first { it.name == "book1" }.fileLastModified).isEqualTo(baseTime)
+      assertThat(mediaRepository.findById(existingBook.id).status).isEqualTo(Media.Status.READY)
+      assertThat(scanSummary.bookIdsToAnalyze).containsExactly(book2.id)
+    }
+
+    @Test
+    fun `given existing series when updating files and scanning then books are updated`() {
+      // given
+      val library = makeLibrary()
+      libraryRepository.insert(library)
+      val baseTime = LocalDateTime.of(2026, 1, 1, 10, 15)
+
+      every { mockScanner.scanRootFolder(any()) }
+        .returnsMany(
+          mapOf(makeSeries(name = "series") to listOf(makeBook("book1", fileLastModified = baseTime))).toScanResult(),
+          mapOf(makeSeries(name = "series") to listOf(makeBook("book1", fileLastModified = baseTime.plusHours(1)))).toScanResult(),
         )
       libraryContentLifecycle.scanRootFolder(library)
 
@@ -208,11 +462,12 @@ class LibraryContentLifecycleTest(
       // given
       val library = makeLibrary()
       libraryRepository.insert(library)
+      val baseTime = LocalDateTime.of(2026, 1, 1, 10, 15)
 
       every { mockScanner.scanRootFolder(any()) }
         .returnsMany(
-          mapOf(makeSeries(name = "series") to listOf(makeBook("book1").copy(fileSize = 1))).toScanResult(),
-          mapOf(makeSeries(name = "series") to listOf(makeBook("book1").copy(fileSize = 2))).toScanResult(),
+          mapOf(makeSeries(name = "series") to listOf(makeBook("book1", fileLastModified = baseTime).copy(fileSize = 1))).toScanResult(),
+          mapOf(makeSeries(name = "series") to listOf(makeBook("book1", fileLastModified = baseTime.plusHours(1)).copy(fileSize = 2))).toScanResult(),
         )
       libraryContentLifecycle.scanRootFolder(library)
 
@@ -246,11 +501,12 @@ class LibraryContentLifecycleTest(
       // given
       val library = makeLibrary()
       libraryRepository.insert(library)
+      val baseTime = LocalDateTime.of(2026, 1, 1, 10, 15)
 
       every { mockScanner.scanRootFolder(any()) }
         .returnsMany(
-          mapOf(makeSeries(name = "series") to listOf(makeBook("book1"))).toScanResult(),
-          mapOf(makeSeries(name = "series") to listOf(makeBook("book1"))).toScanResult(),
+          mapOf(makeSeries(name = "series") to listOf(makeBook("book1", fileLastModified = baseTime))).toScanResult(),
+          mapOf(makeSeries(name = "series") to listOf(makeBook("book1", fileLastModified = baseTime.plusHours(1)))).toScanResult(),
         )
       libraryContentLifecycle.scanRootFolder(library)
 
@@ -284,7 +540,7 @@ class LibraryContentLifecycleTest(
     }
 
     @Test
-    fun `given existing series when deleting all books and scanning then Series and Books are marked as deleted`() {
+    fun `given existing series when scan returns no books then cleanup is skipped and library is marked unavailable`() {
       // given
       val library = makeLibrary()
       libraryRepository.insert(library)
@@ -305,10 +561,38 @@ class LibraryContentLifecycleTest(
       val allSeries = seriesRepository.findAll()
       val allBooks = bookRepository.findAll()
 
-      assertThat(allSeries.map { it.deletedDate }).doesNotContainNull()
+      assertThat(allSeries.map { it.deletedDate }).containsOnlyNulls()
       assertThat(allSeries).hasSize(1)
-      assertThat(allBooks.map { it.deletedDate }).doesNotContainNull()
+      assertThat(allBooks.map { it.deletedDate }).containsOnlyNulls()
       assertThat(allBooks).hasSize(1)
+      assertThat(libraryRepository.findById(library.id).unavailableDate).isNotNull()
+    }
+
+    @Test
+    fun `given library with auto empty trash when scan returns no books then cleanup is skipped and library is marked unavailable`() {
+      // given
+      val library = makeLibrary().copy(emptyTrashAfterScan = true)
+      libraryRepository.insert(library)
+
+      every { mockScanner.scanRootFolder(any()) }
+        .returnsMany(
+          mapOf(makeSeries(name = "series") to listOf(makeBook("book1"))).toScanResult(),
+          emptyMap<Series, List<Book>>().toScanResult(),
+        )
+      libraryContentLifecycle.scanRootFolder(library)
+
+      // when
+      libraryContentLifecycle.scanRootFolder(library)
+
+      // then
+      val allSeries = seriesRepository.findAll()
+      val allBooks = bookRepository.findAll()
+
+      assertThat(allSeries.map { it.deletedDate }).containsOnlyNulls()
+      assertThat(allSeries).hasSize(1)
+      assertThat(allBooks.map { it.deletedDate }).containsOnlyNulls()
+      assertThat(allBooks).hasSize(1)
+      assertThat(libraryRepository.findById(library.id).unavailableDate).isNotNull()
     }
 
     @Test
@@ -391,11 +675,12 @@ class LibraryContentLifecycleTest(
       val library = makeLibrary()
       libraryRepository.insert(library)
 
-      val book1 = makeBook("book1")
+      val baseTime = LocalDateTime.of(2026, 1, 1, 10, 15)
+      val book1 = makeBook("book1", fileLastModified = baseTime)
       every { mockScanner.scanRootFolder(any()) }
         .returnsMany(
           mapOf(makeSeries(name = "series") to listOf(book1)).toScanResult(),
-          mapOf(makeSeries(name = "series") to listOf(makeBook(name = "book1"))).toScanResult(),
+          mapOf(makeSeries(name = "series") to listOf(makeBook(name = "book1", fileLastModified = baseTime.plusHours(1)))).toScanResult(),
         )
       libraryContentLifecycle.scanRootFolder(library)
 
@@ -436,10 +721,10 @@ class LibraryContentLifecycleTest(
       val library2 = makeLibrary(name = "library2")
       libraryRepository.insert(library2)
 
-      every { mockScanner.scanRootFolder(Paths.get(library1.root.toURI())) } returns
+      every { mockScanner.scanRootFolder(Paths.get(library1.root!!.toURI())) } returns
         mapOf(makeSeries(name = "series1") to listOf(makeBook("book1"))).toScanResult()
 
-      every { mockScanner.scanRootFolder(Paths.get(library2.root.toURI())) }.returnsMany(
+      every { mockScanner.scanRootFolder(Paths.get(library2.root!!.toURI())) }.returnsMany(
         mapOf(makeSeries(name = "series2") to listOf(makeBook("book2"))).toScanResult(),
         emptyMap<Series, List<Book>>().toScanResult(),
       )
@@ -454,8 +739,8 @@ class LibraryContentLifecycleTest(
       libraryContentLifecycle.scanRootFolder(library2)
 
       // then
-      verify(exactly = 1) { mockScanner.scanRootFolder(Paths.get(library1.root.toURI())) }
-      verify(exactly = 2) { mockScanner.scanRootFolder(Paths.get(library2.root.toURI())) }
+      verify(exactly = 1) { mockScanner.scanRootFolder(Paths.get(library1.root!!.toURI())) }
+      verify(exactly = 2) { mockScanner.scanRootFolder(Paths.get(library2.root!!.toURI())) }
 
       val (seriesLib1, seriesLib2) = seriesRepository.findAll().partition { it.libraryId == library1.id }
       val (booksLib1, booksLib2) = bookRepository.findAll().partition { it.libraryId == library1.id }
@@ -463,14 +748,15 @@ class LibraryContentLifecycleTest(
       assertThat(seriesLib1.map { it.deletedDate }).containsOnlyNulls()
       assertThat(seriesLib1.map { it.name }).containsExactlyInAnyOrder("series1")
 
-      assertThat(seriesLib2.map { it.deletedDate }).doesNotContainNull()
+      assertThat(seriesLib2.map { it.deletedDate }).containsOnlyNulls()
       assertThat(seriesLib2.map { it.name }).containsExactlyInAnyOrder("series2")
 
       assertThat(booksLib1.map { it.deletedDate }).containsOnlyNulls()
       assertThat(booksLib1.map { it.name }).containsExactlyInAnyOrder("book1")
 
-      assertThat(booksLib2.map { it.deletedDate }).doesNotContainNull()
+      assertThat(booksLib2.map { it.deletedDate }).containsOnlyNulls()
       assertThat(booksLib2.map { it.name }).containsExactlyInAnyOrder("book2")
+      assertThat(libraryRepository.findById(library2.id).unavailableDate).isNotNull()
     }
 
     @Test
@@ -544,10 +830,118 @@ class LibraryContentLifecycleTest(
 
       assertThat(thrown).isExactlyInstanceOf(DirectoryNotFoundException::class.java)
     }
+
+    @Test
+    fun `given unavailable library when scanning succeeds then summary reports recovered from unavailable`() {
+      // given
+      val library = makeLibrary().copy(unavailableDate = LocalDateTime.now())
+      libraryRepository.insert(library)
+
+      every { mockScanner.scanRootFolder(any()) } returns emptyMap<Series, List<Book>>().toScanResult()
+
+      // when
+      val scanSummary = libraryContentLifecycle.scanRootFolder(library)
+
+      // then
+      assertThat(scanSummary.recoveredFromUnavailable).isTrue
+      assertThat(libraryRepository.findById(library.id).unavailableDate).isNull()
+    }
+
+    @Test
+    fun `given deleted book is still missing when scanning again without trash cleanup then book stays unavailable`() {
+      // given
+      val library = makeLibrary()
+      libraryRepository.insert(library)
+
+      every { mockScanner.scanRootFolder(any()) }
+        .returnsMany(
+          mapOf(makeSeries(name = "series") to listOf(makeBook("book1"), makeBook("book2"))).toScanResult(),
+          mapOf(makeSeries(name = "series") to listOf(makeBook("book1"))).toScanResult(),
+          mapOf(makeSeries(name = "series") to listOf(makeBook("book1"))).toScanResult(),
+        )
+
+      libraryContentLifecycle.scanRootFolder(library)
+      libraryContentLifecycle.scanRootFolder(library)
+
+      val deletedBook = bookRepository.findAll().single { it.name == "book2" }
+      assertThat(deletedBook.deletedDate).isNotNull()
+
+      // when
+      libraryContentLifecycle.scanRootFolder(library)
+
+      // then
+      val allBooks = bookRepository.findAll().sortedBy { it.name }
+      assertThat(allBooks.map { it.name }).containsExactly("book1", "book2")
+      assertThat(allBooks.first { it.name == "book2" }.deletedDate).isNotNull()
+    }
+
+    @Test
+    fun `given deleted book is still missing when scanning again with trash cleanup then book is deleted from database`() {
+      // given
+      val library = makeLibrary()
+      libraryRepository.insert(library)
+
+      every { mockScanner.scanRootFolder(any()) }
+        .returnsMany(
+          mapOf(makeSeries(name = "series") to listOf(makeBook("book1"), makeBook("book2"))).toScanResult(),
+          mapOf(makeSeries(name = "series") to listOf(makeBook("book1"))).toScanResult(),
+          mapOf(makeSeries(name = "series") to listOf(makeBook("book1"))).toScanResult(),
+        )
+
+      libraryContentLifecycle.scanRootFolder(library)
+      libraryContentLifecycle.scanRootFolder(library)
+
+      val deletedBook = bookRepository.findAll().single { it.name == "book2" }
+      assertThat(deletedBook.deletedDate).isNotNull()
+
+      val cleanupLibrary = library.copy(emptyTrashAfterScan = true)
+      libraryRepository.update(cleanupLibrary)
+
+      // when
+      libraryContentLifecycle.scanRootFolder(cleanupLibrary)
+
+      // then
+      assertThat(bookRepository.findAll().map { it.name }).containsExactly("book1")
+    }
   }
 
   @Nested
   inner class Restore {
+    @Test
+    fun `given deleted unavailable book without hash when scanning same file then book is restored instead of duplicated`() {
+      // given
+      val library = makeLibrary()
+      libraryRepository.insert(library)
+
+      every { mockScanner.scanRootFolder(any()) }
+        .returnsMany(
+          mapOf(makeSeries(name = "series") to listOf(makeBook("book1"))).toScanResult(),
+          mapOf(makeSeries(name = "series") to listOf(makeBook("book1"))).toScanResult(),
+        )
+      libraryContentLifecycle.scanRootFolder(library)
+
+      val existingBook = bookRepository.findAll().single()
+      bookRepository.update(existingBook.copy(fileHash = "", deletedDate = LocalDateTime.now()))
+      mediaRepository.update(mediaRepository.findById(existingBook.id).copy(status = Media.Status.ERROR))
+
+      // when
+      val scanSummary = libraryContentLifecycle.scanRootFolder(library, scanDeep = true)
+
+      // then
+      val allBooks = bookRepository.findAll()
+
+      verify(exactly = 2) { mockScanner.scanRootFolder(any()) }
+
+      assertThat(allBooks).hasSize(1)
+      with(allBooks.single()) {
+        assertThat(id).isEqualTo(existingBook.id)
+        assertThat(deletedDate).isNull()
+        assertThat(fileHash).isEmpty()
+      }
+      assertThat(mediaRepository.findById(existingBook.id).status).isEqualTo(Media.Status.OUTDATED)
+      assertThat(scanSummary.bookIdsToAnalyze).containsExactly(existingBook.id)
+    }
+
     @Test
     fun `given existing series when removing files and scanning, restoring files and scanning then restored books are available and media status is not set to outdated`() {
       // given
@@ -1632,14 +2026,14 @@ class LibraryContentLifecycleTest(
       libraryRepository.insert(library)
 
       every { mockScanner.scanRootFolder(any()) }
-        .returnsMany(
+        .returns(
           mapOf(makeSeries(name = "series") to listOf(makeBook("book1"), makeBook("book2"), makeBook("book3"))).toScanResult(),
-          emptyMap<Series, List<Book>>().toScanResult(),
         )
-      repeat(2) { libraryContentLifecycle.scanRootFolder(library) }
+      libraryContentLifecycle.scanRootFolder(library)
 
       collectionRepository.insert(SeriesCollection("collection", seriesIds = seriesRepository.findAllIdsByLibraryId(library.id).toList()))
       readListRepository.insert(ReadList("readlist", bookIds = bookRepository.findAllIdsByLibraryId(library.id).toList().toIndexedMap()))
+      seriesLifecycle.softDeleteMany(seriesRepository.findAllByLibraryId(library.id))
 
       // when
       libraryContentLifecycle.emptyTrash(library)

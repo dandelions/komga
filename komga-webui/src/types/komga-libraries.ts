@@ -20,6 +20,8 @@ export interface LibraryDto {
   scanCbx: boolean,
   scanPdf: boolean,
   scanEpub: boolean,
+  scanBypassDailyFileLimit: boolean,
+  scanOnlyNewBooks: boolean,
   scanDirectoryExclusions: string[],
   repairExtensions: boolean,
   convertToCbz: boolean,
@@ -30,6 +32,7 @@ export interface LibraryDto {
   hashKoreader: boolean,
   analyzeDimensions: boolean,
   oneshotsDirectory: string,
+  parentId: string | null,
   unavailable: boolean,
 
   // custom fields
@@ -39,7 +42,7 @@ export interface LibraryDto {
 
 export interface LibraryCreationDto {
   name: string,
-  root: string,
+  root: string | null,
   importComicInfoBook: boolean,
   importComicInfoSeries: boolean,
   importComicInfoCollection: boolean,
@@ -56,6 +59,8 @@ export interface LibraryCreationDto {
   scanCbx: boolean,
   scanPdf: boolean,
   scanEpub: boolean,
+  scanBypassDailyFileLimit: boolean,
+  scanOnlyNewBooks: boolean,
   scanDirectoryExclusions: string[],
   repairExtensions: boolean,
   convertToCbz: boolean,
@@ -66,35 +71,7 @@ export interface LibraryCreationDto {
   hashKoreader: boolean,
   analyzeDimensions: boolean,
   oneshotsDirectory: string,
+  parentId: string | null,
 }
 
-export interface LibraryUpdateDto {
-  name: string,
-  root: string,
-  importComicInfoBook: boolean,
-  importComicInfoSeries: boolean,
-  importComicInfoCollection: boolean,
-  importComicInfoReadList: boolean,
-  importComicInfoSeriesAppendVolume: boolean,
-  importEpubBook: boolean,
-  importEpubSeries: boolean,
-  importMylarSeries: boolean,
-  importLocalArtwork: boolean,
-  importBarcodeIsbn: boolean,
-  scanForceModifiedTime: boolean,
-  scanInterval: ScanIntervalDto,
-  scanOnStartup: boolean,
-  scanCbx: boolean,
-  scanPdf: boolean,
-  scanEpub: boolean,
-  scanDirectoryExclusions: string[],
-  repairExtensions: boolean,
-  convertToCbz: boolean,
-  emptyTrashAfterScan: boolean,
-  seriesCover: SeriesCoverDto,
-  hashFiles: boolean,
-  hashPages: boolean,
-  hashKoreader: boolean,
-  analyzeDimensions: boolean,
-  oneshotsDirectory: string,
-}
+export type LibraryUpdateDto = Partial<LibraryCreationDto>

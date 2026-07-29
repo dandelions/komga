@@ -9,6 +9,7 @@ export const persistedModule: Module<any, any> = {
       paged: {
         scale: '',
         pageLayout: '',
+        leftNavigationAction: '',
       },
       continuous: {
         scale: '',
@@ -16,10 +17,29 @@ export const persistedModule: Module<any, any> = {
         margin: '',
       },
       readingDirection: '',
-      swipe: false,
+      swipe: true,
       alwaysFullscreen: false,
       animations: true,
       background: '',
+      strokeStrength: 0,
+      skewCorrection: 0,
+      cropRegionsByParity: {
+        enabled: false,
+        odd: null,
+        even: null,
+        regions: {
+          odd: [null, null],
+          even: [null, null],
+        },
+        explicit: {
+          odd: false,
+          even: false,
+        },
+        explicitRegions: {
+          odd: [false, false],
+          even: [false, false],
+        },
+      },
     },
     epubreader: {},
     browsingPageSize: undefined as unknown as number,
@@ -37,14 +57,16 @@ export const persistedModule: Module<any, any> = {
       filterDsl: {},
       filterMode: {},
       sort: {},
+      displayMode: {},
       filterDslBooks: {},
       filterModeBooks: {},
       sortBooks: {},
+      displayModeBooks: {},
       route: {},
     },
     importPath: '',
     duplicatesNewPageSize: 10,
-    rememberMe: false,
+    rememberMe: true,
   },
   getters: {
     getLocaleFirstDay: (state) => () => {
@@ -86,8 +108,16 @@ export const persistedModule: Module<any, any> = {
     getLibrarySort: (state) => (id: string) => {
       return state.library.sort[id]
     },
+    getLibraryDisplayMode: (state) => (id: string) => {
+      if (!state.library.displayMode) state.library.displayMode = {}
+      return state.library.displayMode[id]
+    },
     getLibrarySortBooks: (state) => (id: string) => {
       return state.library.sortBooks[id]
+    },
+    getLibraryDisplayModeBooks: (state) => (id: string) => {
+      if (!state.library.displayModeBooks) state.library.displayModeBooks = {}
+      return state.library.displayModeBooks[id]
     },
     getLibraryRoute: (state) => (id: string) => {
       return state.library.route[id]
@@ -105,6 +135,9 @@ export const persistedModule: Module<any, any> = {
     },
     setWebreaderPagedPageLayout(state, val) {
       state.webreader.paged.pageLayout = val
+    },
+    setWebreaderPagedLeftNavigationAction(state, val) {
+      state.webreader.paged.leftNavigationAction = val
     },
     setWebreaderContinuousScale(state, val) {
       state.webreader.continuous.scale = val
@@ -129,6 +162,15 @@ export const persistedModule: Module<any, any> = {
     },
     setWebreaderBackground(state, val) {
       state.webreader.background = val
+    },
+    setWebreaderStrokeStrength(state, val) {
+      state.webreader.strokeStrength = val
+    },
+    setWebreaderSkewCorrection(state, val) {
+      state.webreader.skewCorrection = val
+    },
+    setWebreaderCropRegionsByParity(state, val) {
+      state.webreader.cropRegionsByParity = val
     },
     setEpubreaderSettings(state, val) {
       state.epubreader = val
@@ -160,8 +202,16 @@ export const persistedModule: Module<any, any> = {
     setLibrarySort(state, {id, sort}) {
       state.library.sort[id] = sort
     },
+    setLibraryDisplayMode(state, {id, displayMode}) {
+      if (!state.library.displayMode) state.library.displayMode = {}
+      state.library.displayMode[id] = displayMode
+    },
     setLibrarySortBooks(state, {id, sort}) {
       state.library.sortBooks[id] = sort
+    },
+    setLibraryDisplayModeBooks(state, {id, displayMode}) {
+      if (!state.library.displayModeBooks) state.library.displayModeBooks = {}
+      state.library.displayModeBooks[id] = displayMode
     },
     setLibraryRoute(state, {id, route}) {
       state.library.route[id] = route

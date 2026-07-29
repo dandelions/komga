@@ -3,6 +3,7 @@ package org.gotson.komga.interfaces.api.rest
 import com.ninjasquad.springmockk.MockkBean
 import com.ninjasquad.springmockk.SpykBean
 import io.mockk.every
+import io.mockk.verify
 import org.gotson.komga.domain.model.BookPage
 import org.gotson.komga.domain.model.Media
 import org.gotson.komga.domain.model.TypedBytes
@@ -22,6 +23,7 @@ import org.gotson.komga.domain.service.SeriesLifecycle
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeAll
+import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
@@ -110,6 +112,41 @@ class BookControllerPageTest(
         if (resultType != null)
           header { string(HttpHeaders.CONTENT_TYPE, resultType) }
       }
+  }
+
+  @Test
+  @WithMockCustomUser
+  fun `given PDF crop source request when loading the page repeatedly then cached original image is reused`() {
+    makeSeries(name = "series", libraryId = library.id).let { series ->
+      seriesLifecycle.createSeries(series).let { created ->
+        seriesLifecycle.addBooks(created, listOf(makeBook("crop-cache", libraryId = library.id)))
+      }
+    }
+
+    val book = bookRepository.findAll().first()
+    mediaRepository.findById(book.id).let {
+      mediaRepository.update(
+        it.copy(
+          status = Media.Status.READY,
+          mediaType = "application/pdf",
+          pages = listOf(BookPage("file", "image/jpeg")),
+          pageCount = 1,
+        ),
+      )
+    }
+    every { bookLifecycle.getBookPage(book, 1, null, null) } returns TypedBytes(byteArrayOf(1, 2, 3), "image/jpeg")
+
+    repeat(2) {
+      mockMvc
+        .get("/api/v1/books/${book.id}/pages/1") {
+          param("contentNegotiation", "false")
+        }.andExpect {
+          status { isOk() }
+          header { string(HttpHeaders.CONTENT_TYPE, "image/jpeg") }
+        }
+    }
+
+    verify(exactly = 1) { bookLifecycle.getBookPage(book, 1, null, null) }
   }
 
   fun arguments(): Stream<Arguments> =

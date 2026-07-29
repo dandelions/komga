@@ -29,6 +29,7 @@ private val logger = KotlinLogging.logger {}
 @Service
 class TaskHandler(
   private val taskEmitter: TaskEmitter,
+  private val tasksRepository: TasksRepository,
   private val libraryRepository: LibraryRepository,
   private val bookRepository: BookRepository,
   private val seriesRepository: SeriesRepository,
@@ -46,20 +47,45 @@ class TaskHandler(
   private val meterRegistry: MeterRegistry,
 ) {
   fun handleTask(task: Task) {
+    val owner = Thread.currentThread().name
     logger.info { "Executing task: $task" }
     try {
       measureTime {
         when (task) {
           is Task.ScanLibrary ->
             libraryRepository.findByIdOrNull(task.libraryId)?.let { library ->
-              libraryContentLifecycle.scanRootFolder(library, task.scanDeep)
-              taskEmitter.analyzeUnknownAndOutdatedBooks(library)
-              taskEmitter.repairExtensions(library, LOW_PRIORITY)
-              taskEmitter.findBooksToConvert(library, LOWEST_PRIORITY)
-              taskEmitter.findBooksWithMissingPageHash(library, LOWEST_PRIORITY)
-              taskEmitter.findDuplicatePagesToDelete(library, LOWEST_PRIORITY)
-              taskEmitter.hashBooksWithoutHash(library)
-              taskEmitter.hashBooksWithoutHashKoreader(library)
+              listOfNotNull(library.takeIf { it.root != null }).forEach {
+                val scanSummary = libraryContentLifecycle.scanRootFolder(it, task.scanDeep)
+                if (taskCancelled(task, owner)) return@measureTime
+                if (scanSummary.limited) {
+                  logger.info { "Daily scan file limit reached for library '${it.name}', scheduling continuation tomorrow" }
+                  taskEmitter.scanLibraryTomorrow(task.libraryId, task.scanDeep, task.priority)
+                }
+                if (scanSummary.recoveredFromUnavailable) {
+                  if (scanSummary.bookIdsToAnalyze.isEmpty())
+                    taskEmitter.analyzeUnknownOutdatedAndErrorBooks(it)
+                  else
+                    taskEmitter.analyzeUnknownOutdatedAndErrorBooks(scanSummary.bookIdsToAnalyze)
+                } else if (it.scanOnlyNewBooks) {
+                  if (scanSummary.bookIdsToAnalyze.isEmpty())
+                    taskEmitter.analyzeUnknownOutdatedAndErrorBooks(it)
+                  else
+                    taskEmitter.analyzeUnknownOutdatedAndErrorBooks(scanSummary.bookIdsToAnalyze)
+                } else {
+                  if (scanSummary.bookIdsToAnalyze.isEmpty())
+                    taskEmitter.analyzeUnknownAndOutdatedBooks(it)
+                  else
+                    taskEmitter.analyzeUnknownAndOutdatedBooks(scanSummary.bookIdsToAnalyze)
+                }
+                if (!it.scanOnlyNewBooks && (!scanSummary.limited || scanSummary.scannedBookCount > 0)) {
+                  taskEmitter.repairExtensions(it, LOW_PRIORITY)
+                  taskEmitter.findBooksToConvert(it, LOWEST_PRIORITY)
+                  taskEmitter.findBooksWithMissingPageHash(it, LOWEST_PRIORITY)
+                  taskEmitter.findDuplicatePagesToDelete(it, LOWEST_PRIORITY)
+                  taskEmitter.hashBooksWithoutHash(it)
+                  taskEmitter.hashBooksWithoutHashKoreader(it)
+                }
+              }
             } ?: logger.warn { "Cannot execute task $task: Library does not exist" }
 
           is Task.FindBooksToConvert ->
@@ -84,14 +110,23 @@ class TaskHandler(
 
           is Task.AnalyzeBook ->
             bookRepository.findByIdOrNull(task.bookId)?.let { book ->
-              val actions = bookLifecycle.analyzeAndPersist(book)
-              if (actions.contains(BookAction.GENERATE_THUMBNAIL)) taskEmitter.generateBookThumbnail(book.id, priority = task.priority + 1)
-              if (actions.contains(BookAction.REFRESH_METADATA)) taskEmitter.refreshBookMetadata(book, priority = task.priority + 1)
+              if (book.deletedDate != null) {
+                logger.info { "Skipping task $task: Book is deleted" }
+              } else {
+                val actions = bookLifecycle.analyzeAndPersist(book)
+                if (taskCancelled(task, owner)) return@measureTime
+                if (actions.contains(BookAction.GENERATE_THUMBNAIL)) taskEmitter.generateBookThumbnail(book.id, priority = task.priority + 1)
+                if (actions.contains(BookAction.REFRESH_METADATA)) taskEmitter.refreshBookMetadata(book, priority = task.priority + 1)
+              }
             } ?: logger.warn { "Cannot execute task $task: Book does not exist" }
 
           is Task.GenerateBookThumbnail ->
             bookRepository.findByIdOrNull(task.bookId)?.let { book ->
-              bookLifecycle.generateThumbnailAndPersist(book)
+              if (book.deletedDate != null) {
+                logger.info { "Skipping task $task: Book is deleted" }
+              } else {
+                bookLifecycle.generateThumbnailAndPersist(book)
+              }
             } ?: logger.warn { "Cannot execute task $task: Book does not exist" }
 
           is Task.RefreshBookMetadata ->
@@ -190,5 +225,14 @@ class TaskHandler(
       logger.error(e) { "Task $task execution failed" }
       meterRegistry.counter(METER_TASKS_FAILURE, "type", task.javaClass.simpleName).increment()
     }
+  }
+
+  private fun taskCancelled(
+    task: Task,
+    owner: String,
+  ): Boolean {
+    val cancelled = !tasksRepository.exists(task.uniqueId, owner)
+    if (cancelled) logger.info { "Task $task was cancelled, skipping follow-up tasks" }
+    return cancelled
   }
 }

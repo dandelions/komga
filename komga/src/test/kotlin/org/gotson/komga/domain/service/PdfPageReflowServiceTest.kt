@@ -1,0 +1,1272 @@
+package org.gotson.komga.domain.service
+
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
+import org.assertj.core.api.Assertions.assertThat
+import org.gotson.komga.domain.model.TypedBytes
+import org.gotson.komga.domain.model.makeBook
+import org.junit.jupiter.api.Test
+import java.awt.Color
+import java.awt.RenderingHints
+import java.awt.geom.AffineTransform
+import java.awt.image.BufferedImage
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.util.Base64
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import javax.imageio.ImageIO
+
+class PdfPageReflowServiceTest {
+  private val bookLifecycle = mockk<BookLifecycle>()
+  private val pageImageCacheService = PdfPageImageCacheService(bookLifecycle)
+  private val pdfPageReflowService = PdfPageReflowService(pageImageCacheService)
+
+  @Test
+  fun `given horizontal short glyphs when reflowing page then word blocks preserve line height`() {
+    val pageBytes = horizontalShortGlyphPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+        cropRegions = listOf(PdfPageReflowRegion(x = 40, y = 30, w = 120, h = 70)),
+      )
+
+    val wordBlocks = response.items.filter { it.type == "word" }
+    val heights = wordBlocks.mapNotNull { it.h }
+
+    assertThat(response.sourceWidth).isEqualTo(220)
+    assertThat(response.sourceHeight).isEqualTo(120)
+    assertThat(response.originalImageBytes).isEqualTo(pageBytes.size.toLong())
+    assertThat(wordBlocks).hasSizeGreaterThanOrEqualTo(3)
+    assertThat(heights.toSet()).hasSize(1)
+    assertThat(heights.min()).isGreaterThanOrEqualTo(20)
+  }
+
+  @Test
+  fun `given match background when reflowing page then word pixels remain visible`() {
+    val pageBytes = horizontalShortGlyphPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(matchBackground = true, strokeStrength = 0.0),
+        cropRegions = listOf(PdfPageReflowRegion(x = 40, y = 30, w = 120, h = 70)),
+      )
+
+    assertThat(darkPixelCount(firstWordImage(response))).isGreaterThan(0)
+  }
+
+  @Test
+  fun `given high resolution horizontal glyph split by internal blank when reflowing page then fragments are merged`() {
+    val pageBytes = highResolutionHorizontalFragmentGlyphPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+        cropRegions = listOf(PdfPageReflowRegion(x = 30, y = 20, w = 130, h = 110)),
+      )
+
+    assertThat(response.items.filter { it.type == "word" }).hasSize(1)
+  }
+
+  @Test
+  fun `given horizontal code block with left guide when reflowing page then guide does not merge rows`() {
+    val pageBytes = horizontalCodeBlockWithLeftGuidePage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+        cropRegions = listOf(PdfPageReflowRegion(x = 15, y = 15, w = 250, h = 150)),
+      )
+
+    val wordBlocks = response.items.filter { it.type == "word" }
+
+    assertThat(wordBlocks).hasSizeGreaterThanOrEqualTo(5)
+    assertThat(wordBlocks.mapNotNull { it.h }.max()).isLessThan(32)
+  }
+
+  @Test
+  fun `given high resolution vertical glyph split by internal blank when reflowing page then fragments are merged`() {
+    val pageBytes = highResolutionVerticalFragmentGlyphPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(verticalText = true),
+        cropRegions = listOf(PdfPageReflowRegion(x = 35, y = 20, w = 120, h = 130)),
+      )
+
+    assertThat(response.items.filter { it.type == "word" }).hasSize(1)
+  }
+
+  @Test
+  fun `given same page and options when reflowing from cache then page is rendered once`() {
+    val pageBytes = horizontalShortGlyphPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val first =
+      pdfPageReflowService.reflowPageCached(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+        cropRegions = listOf(PdfPageReflowRegion(x = 40, y = 30, w = 120, h = 70)),
+      )
+    val second =
+      pdfPageReflowService.reflowPageCached(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+        cropRegions = listOf(PdfPageReflowRegion(x = 40, y = 30, w = 120, h = 70)),
+      )
+
+    assertThat(second.items).isEqualTo(first.items)
+    verify(exactly = 1) { bookLifecycle.getBookPage(book, 1) }
+  }
+
+  @Test
+  fun `given current PDF page when server reflow starts then original pages five before and after are cached`() {
+    val pageBytes = horizontalShortGlyphPage()
+    val book = makeBook("book")
+    val loadedPages = CountDownLatch(11)
+    every { bookLifecycle.getBookPage(book, any()) } answers {
+      loadedPages.countDown()
+      TypedBytes(pageBytes, "image/jpeg")
+    }
+
+    pdfPageReflowService.reflowPageCached(
+      book = book,
+      pageNumber = 6,
+      options = defaultOptions(),
+      cropRegions = listOf(PdfPageReflowRegion(x = 40, y = 30, w = 120, h = 70)),
+      pageCount = 11,
+    )
+
+    assertThat(loadedPages.await(5, TimeUnit.SECONDS)).isTrue()
+    (1..11).forEach { pageNumber ->
+      verify(exactly = 1) { bookLifecycle.getBookPage(book, pageNumber) }
+    }
+  }
+
+  @Test
+  fun `given stronger stroke when reflowing page then returned word image is bolder`() {
+    val pageBytes = horizontalShortGlyphPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val plain =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(strokeStrength = 0.0),
+        cropRegions = listOf(PdfPageReflowRegion(x = 40, y = 30, w = 120, h = 70)),
+      )
+    val bold =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(strokeStrength = 2.0),
+        cropRegions = listOf(PdfPageReflowRegion(x = 40, y = 30, w = 120, h = 70)),
+      )
+
+    assertThat(darkPixelCount(firstWordImage(bold))).isGreaterThan(darkPixelCount(firstWordImage(plain)))
+  }
+
+  @Test
+  fun `given matched background when changing stroke then returned word image gets bolder`() {
+    val pageBytes = horizontalShortGlyphPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val plain =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(matchBackground = true, strokeStrength = 0.0),
+        cropRegions = listOf(PdfPageReflowRegion(x = 40, y = 30, w = 120, h = 70)),
+      )
+    val bold =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(matchBackground = true, strokeStrength = 2.0),
+        cropRegions = listOf(PdfPageReflowRegion(x = 40, y = 30, w = 120, h = 70)),
+      )
+
+    assertThat(darkPixelCount(firstWordImage(bold))).isGreaterThan(darkPixelCount(firstWordImage(plain)))
+  }
+
+  @Test
+  fun `given rotation when reflowing page then source dimensions are rotated`() {
+    val pageBytes = horizontalShortGlyphPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(rotation = 90),
+      )
+
+    assertThat(response.sourceWidth).isEqualTo(120)
+    assertThat(response.sourceHeight).isEqualTo(220)
+    assertThat(response.originalImageBytes).isEqualTo(pageBytes.size.toLong())
+  }
+
+  @Test
+  fun `given automatic deskew when reflowing cropped page then correction is applied before crop`() {
+    val pageBytes = skewedHorizontalTextPage(2.4)
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+    val cropRegion = PdfPageReflowRegion(x = 40, y = 40, w = 340, h = 440)
+    val analysisRegion = PdfAutoDeskewRegion(x = 45, y = 45, w = 330, h = 430)
+    val detectedAngle =
+      PdfAutoDeskew.detectAngle(
+        image = ImageIO.read(ByteArrayInputStream(pageBytes)),
+        threshold = 185,
+        verticalText = false,
+        analysisRegion = analysisRegion,
+      )
+
+    val automatic =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options =
+          defaultOptions().copy(
+            autoSkewCorrection = true,
+            deskewAnalysisRegion = PdfPageReflowRegion(analysisRegion.x, analysisRegion.y, analysisRegion.w, analysisRegion.h),
+          ),
+        cropRegions = listOf(cropRegion),
+      )
+    val manual =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(skewCorrection = detectedAngle),
+        cropRegions = listOf(cropRegion),
+      )
+
+    assertThat(detectedAngle).isNotZero()
+    assertThat(automatic.items).isNotEmpty
+    assertThat(automatic.items).isEqualTo(manual.items)
+  }
+
+  @Test
+  fun `given gray crop background when reflowing page then background is not treated as content`() {
+    val pageBytes = grayBackgroundPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+        cropRegions = listOf(PdfPageReflowRegion(x = 20, y = 20, w = 180, h = 100)),
+      )
+
+    val contentItems = response.items.filter { it.type == "word" || it.type == "image" }
+
+    assertThat(contentItems).isNotEmpty
+    assertThat(contentItems).allSatisfy {
+      assertThat(it.w).isLessThan(180)
+      assertThat(it.h).isLessThan(100)
+    }
+  }
+
+  @Test
+  fun `given image with side text when reflowing page then side text remains small word blocks`() {
+    val pageBytes = imageWithSideTextPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+        cropRegions = listOf(PdfPageReflowRegion(x = 20, y = 20, w = 220, h = 120)),
+      )
+
+    val wordBlocks = response.items.filter { it.type == "word" }
+
+    assertThat(response.items.filter { it.type == "image" }).hasSize(1)
+    assertThat(response.items.indexOfFirst { it.type == "image" })
+      .isLessThan(response.items.indexOfFirst { it.type == "word" })
+    assertThat(wordBlocks).hasSizeGreaterThanOrEqualTo(2)
+    assertThat(wordBlocks.mapNotNull { it.h }.max()).isLessThan(40)
+  }
+
+  @Test
+  fun `given dense gray image above text when reflowing page then image does not swallow lower text`() {
+    val pageBytes = denseGrayImageAboveTextPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+        cropRegions = listOf(PdfPageReflowRegion(x = 10, y = 10, w = 320, h = 220)),
+      )
+
+    val imageBlocks = response.items.filter { it.type == "image" }
+    val wordBlocks = response.items.filter { it.type == "word" }
+
+    assertThat(imageBlocks).hasSize(1)
+    assertThat(imageBlocks.first().h).isLessThan(150)
+    assertThat(wordBlocks).hasSizeGreaterThanOrEqualTo(4)
+  }
+
+  @Test
+  fun `given dark display color image when reflowing page then edge white background becomes dark`() {
+    val pageBytes = colorImageWithCaptionPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(darkDisplay = true),
+        cropRegions = listOf(PdfPageReflowRegion(x = 0, y = 0, w = 260, h = 210)),
+      )
+
+    val image = firstImageBlock(response)
+
+    assertThat(response.items.filter { it.type == "word" }).isNotEmpty
+    assertThat(darkPixelCount(image)).isGreaterThan(image.width * image.height / 3)
+    assertThat(image.getRGB(1, 1) and 0x00ffffff).isEqualTo(0)
+  }
+
+  @Test
+  fun `given two color images separated by text when reflowing page then middle text is not preserved as image`() {
+    val pageBytes = twoColorImagesWithMiddleTextPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+        cropRegions = listOf(PdfPageReflowRegion(x = 0, y = 0, w = 320, h = 420)),
+      )
+
+    val images = response.items.filter { it.type == "image" }
+    val wordBlocks = response.items.filter { it.type == "word" }
+
+    assertThat(images).hasSize(2)
+    assertThat(images.maxOf { it.h ?: 0 }).isLessThan(135)
+    assertThat(wordBlocks).hasSizeGreaterThanOrEqualTo(12)
+  }
+
+  @Test
+  fun `given dense image beside text when reflowing page then side text is not preserved as image`() {
+    val pageBytes = denseSideImageWithTextPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+        cropRegions = listOf(PdfPageReflowRegion(x = 0, y = 0, w = 320, h = 220)),
+      )
+
+    val images = response.items.filter { it.type == "image" }
+    val wordBlocks = response.items.filter { it.type == "word" }
+
+    assertThat(images).hasSize(1)
+    assertThat(images.first().w).isLessThan(150)
+    assertThat(wordBlocks).hasSizeGreaterThanOrEqualTo(10)
+  }
+
+  @Test
+  fun `given colored decorated text page when reflowing page then page is not preserved as image`() {
+    val pageBytes = coloredDecoratedTextPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+        cropRegions = listOf(PdfPageReflowRegion(x = 0, y = 0, w = 320, h = 420)),
+      )
+
+    assertThat(response.items.filter { it.type == "image" }).isEmpty()
+    assertThat(response.items.filter { it.type == "word" }).hasSizeGreaterThanOrEqualTo(18)
+  }
+
+  @Test
+  fun `given aligned text over faint grid when reflowing cropped page then text is not preserved as image`() {
+    val pageBytes = alignedTextOverFaintGridPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(targetWidth = 1080, textScale = 100),
+        cropRegions = listOf(PdfPageReflowRegion(x = 40, y = 35, w = 1320, h = 285)),
+      )
+
+    assertThat(response.items.filter { it.type == "image" }).isEmpty()
+    assertThat(response.items.filter { it.type == "word" }).hasSizeGreaterThanOrEqualTo(20)
+  }
+
+  @Test
+  fun `given line art image between text when reflowing page then surrounding text is not preserved as image`() {
+    val pageBytes = lineArtImageBetweenTextPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+        cropRegions = listOf(PdfPageReflowRegion(x = 20, y = 20, w = 460, h = 500)),
+      )
+
+    val images = response.items.filter { it.type == "image" }
+    val wordBlocks = response.items.filter { it.type == "word" }
+
+    assertThat(images).hasSize(1)
+    assertThat(images.first().h).isLessThan(260)
+    assertThat(wordBlocks).hasSizeGreaterThanOrEqualTo(8)
+  }
+
+  @Test
+  fun `given image quality when reflowing page then word block uses jpeg encoding`() {
+    val pageBytes = horizontalShortGlyphPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(imageQuality = 60),
+        cropRegions = listOf(PdfPageReflowRegion(x = 40, y = 30, w = 120, h = 70)),
+      )
+
+    assertThat(response.items.first { it.type == "word" }.src).startsWith("data:image/jpeg;base64,")
+  }
+
+  @Test
+  fun `given lower image quality when reflowing page then encoded image bytes are smaller`() {
+    val pageBytes = highDetailWordPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val highQuality =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(imageQuality = 90),
+        cropRegions = listOf(PdfPageReflowRegion(x = 20, y = 20, w = 180, h = 110)),
+      )
+    val lowQuality =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(imageQuality = 50),
+        cropRegions = listOf(PdfPageReflowRegion(x = 20, y = 20, w = 180, h = 110)),
+      )
+
+    assertThat(lowQuality.encodedImageBytes).isLessThan(highQuality.encodedImageBytes)
+  }
+
+  @Test
+  fun `given horizontal lines without indent when reflowing page then lines stay in same paragraph`() {
+    val pageBytes = horizontalParagraphPage(secondLineIndent = 0)
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+      )
+
+    assertThat(response.items.count { it.type == "break" }).isEqualTo(0)
+    assertThat(response.items.filter { it.type == "word" }).hasSizeGreaterThanOrEqualTo(4)
+  }
+
+  @Test
+  fun `given horizontal indented line when reflowing page then new paragraph starts before it`() {
+    val pageBytes = horizontalParagraphPage(secondLineIndent = 30)
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+      )
+
+    assertThat(response.items.map { it.type }).containsSubsequence("break", "indent", "word")
+  }
+
+  @Test
+  fun `given short heading line when reflowing page then next line keeps default paragraph indent`() {
+    val pageBytes = horizontalShortHeadingParagraphPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+      )
+
+    val indent = response.items.first { it.type == "indent" }
+    assertThat(response.items.map { it.type }).containsSubsequence("break", "indent", "word")
+    assertThat(indent.sourceWidth).isGreaterThanOrEqualTo(16)
+  }
+
+  @Test
+  fun `given wide crop around short lines when reflowing page then crop edge does not create paragraph`() {
+    val pageBytes = horizontalShortLinesPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+        cropRegions = listOf(PdfPageReflowRegion(x = 0, y = 0, w = 180, h = 150)),
+      )
+
+    assertThat(response.items.count { it.type == "break" }).isEqualTo(0)
+    assertThat(response.items.filter { it.type == "indent" }).isEmpty()
+  }
+
+  @Test
+  fun `given vertical line with long tail blank when reflowing page then next line starts a paragraph`() {
+    val pageBytes = verticalParagraphPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(verticalText = true),
+      )
+
+    assertThat(response.items.map { it.type }).containsSubsequence("break", "indent", "word")
+  }
+
+  @Test
+  fun `given continuous vertical lines with different top margins when reflowing page then crop whitespace is removed`() {
+    val pageBytes = verticalContinuousLinesPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(verticalText = true),
+        cropRegions = listOf(PdfPageReflowRegion(x = 0, y = 0, w = 140, h = 150)),
+      )
+
+    assertThat(response.items.filter { it.type == "word" }).hasSizeGreaterThanOrEqualTo(6)
+    assertThat(response.items.filter { it.type == "indent" }).isEmpty()
+  }
+
+  @Test
+  fun `given close vertical text columns when reflowing page then columns stay separate`() {
+    val pageBytes = closeVerticalTextColumnsPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(verticalText = true),
+        cropRegions = listOf(PdfPageReflowRegion(x = 20, y = 10, w = 90, h = 120)),
+      )
+
+    val wordBlocks = response.items.filter { it.type == "word" }
+    assertThat(wordBlocks).hasSizeGreaterThanOrEqualTo(6)
+    assertThat(wordBlocks.mapNotNull { it.w }.max()).isLessThan(28)
+  }
+
+  @Test
+  fun `given underlined heading when reflowing page then heading is not repeated as image`() {
+    val pageBytes = underlinedHeadingPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+        cropRegions = listOf(PdfPageReflowRegion(x = 20, y = 20, w = 860, h = 250)),
+      )
+
+    assertThat(response.items.filter { it.type == "image" }).isEmpty()
+    assertThat(response.items.filter { it.type == "word" }).isNotEmpty
+  }
+
+  @Test
+  fun `given heading bottom fragment when reflowing page then fragment is not repeated as a word`() {
+    val pageBytes = headingBottomFragmentPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+        cropRegions = listOf(PdfPageReflowRegion(x = 50, y = 30, w = 800, h = 180)),
+      )
+
+    val wordBlocks = response.items.filter { it.type == "word" }
+    assertThat(wordBlocks).isNotEmpty
+    assertThat(wordBlocks).noneMatch { (it.w ?: 0) >= 300 && (it.h ?: 0) <= 40 }
+  }
+
+  @Test
+  fun `given segmented heading underline when reflowing page then underline is not expanded into words`() {
+    val pageBytes = segmentedHeadingUnderlinePage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+        cropRegions = listOf(PdfPageReflowRegion(x = 50, y = 30, w = 800, h = 180)),
+      )
+
+    assertThat(response.items.filter { it.type == "word" }).hasSize(10)
+  }
+
+  @Test
+  fun `given a wide text line when reflowing page then text is not repeated as image`() {
+    val pageBytes = underlinedHeadingPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+        cropRegions = listOf(PdfPageReflowRegion(x = 20, y = 150, w = 860, h = 100)),
+      )
+
+    assertThat(response.items.filter { it.type == "image" }).isEmpty()
+    assertThat(response.items.filter { it.type == "word" }).isNotEmpty
+  }
+
+  private fun defaultOptions() =
+    PdfPageReflowOptions(
+      targetWidth = 900,
+      autoCropBorder = true,
+      textScale = 40,
+      columnCount = 1,
+      skewCorrection = 0.0,
+      threshold = 185,
+      columnGap = 15,
+      wordGap = 3,
+      strokeStrength = 0.1,
+      contrastEnhancement = false,
+      matchBackground = false,
+      matchBackgroundMode = "grayscale",
+      blockSpacing = 6,
+      verticalText = false,
+      verticalDirection = "rtl",
+      marginTop = 0.0,
+      marginRight = 0.0,
+      marginBottom = 0.0,
+      marginLeft = 0.0,
+      darkDisplay = false,
+    )
+
+  private fun horizontalShortGlyphPage(): ByteArray {
+    val image = BufferedImage(220, 120, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color.BLACK
+    graphics.fillRect(50, 45, 10, 26)
+    graphics.fillRect(75, 58, 25, 3)
+    graphics.fillRect(115, 45, 10, 26)
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun skewedHorizontalTextPage(angle: Double): ByteArray {
+    val source = BufferedImage(420, 520, BufferedImage.TYPE_INT_RGB)
+    val sourceGraphics = source.createGraphics()
+    sourceGraphics.color = Color.WHITE
+    sourceGraphics.fillRect(0, 0, source.width, source.height)
+    sourceGraphics.color = Color.BLACK
+    repeat(16) { line ->
+      repeat(13) { glyph -> sourceGraphics.fillRect(65 + glyph * 23, 65 + line * 25, 13, 14) }
+    }
+    sourceGraphics.dispose()
+    val rotated = BufferedImage(source.width, source.height, BufferedImage.TYPE_INT_RGB)
+    val rotatedGraphics = rotated.createGraphics()
+    rotatedGraphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
+    rotatedGraphics.color = Color.WHITE
+    rotatedGraphics.fillRect(0, 0, rotated.width, rotated.height)
+    val transform = AffineTransform.getRotateInstance(Math.toRadians(angle), rotated.width / 2.0, rotated.height / 2.0)
+    rotatedGraphics.drawImage(source, transform, null)
+    rotatedGraphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(rotated, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun grayBackgroundPage(): ByteArray {
+    val image = BufferedImage(220, 140, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color(180, 180, 180)
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color.BLACK
+    graphics.fillRect(95, 60, 10, 26)
+    graphics.fillRect(120, 73, 25, 3)
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun imageWithSideTextPage(): ByteArray {
+    val image = BufferedImage(260, 160, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color.BLACK
+    graphics.fillRect(35, 68, 12, 22)
+    graphics.fillRect(58, 68, 12, 22)
+    graphics.fillRect(188, 68, 12, 22)
+    graphics.fillRect(211, 68, 12, 22)
+    graphics.dispose()
+
+    for (y in 35 until 125) {
+      for (x in 85 until 175) {
+        val color =
+          when {
+            (x + y) % 7 == 0 -> Color(190, 42, 54)
+            (x / 4 + y / 3) % 2 == 0 -> Color(58, 116, 190)
+            else -> Color(230, 185, 58)
+          }
+        image.setRGB(x, y, color.rgb)
+      }
+    }
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun colorImageWithCaptionPage(): ByteArray {
+    val image = BufferedImage(260, 210, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color(86, 28, 62)
+    graphics.fillRect(45, 35, 170, 90)
+    graphics.color = Color(92, 92, 92)
+    graphics.fillRect(45, 28, 170, 14)
+    graphics.color = Color(230, 230, 230)
+    listOf(56, 74, 92, 110, 128, 146).forEach { x -> graphics.fillRect(x, 55, 10, 5) }
+    graphics.color = Color(104, 170, 220)
+    graphics.fillRect(56, 72, 62, 7)
+    graphics.color = Color(224, 184, 72)
+    graphics.fillRect(56, 91, 82, 7)
+    graphics.color = Color.BLACK
+    listOf(78, 104, 130, 156).forEach { x -> graphics.fillRect(x, 150, 12, 18) }
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun denseGrayImageAboveTextPage(): ByteArray {
+    val image = BufferedImage(350, 260, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color(218, 218, 218)
+    graphics.fillRect(35, 35, 170, 120)
+    graphics.color = Color.BLACK
+    listOf(64 to 58, 136 to 58, 64 to 96).forEach { (x, y) ->
+      graphics.drawRect(x, y, 34, 34)
+      graphics.drawRect(x + 6, y + 6, 22, 22)
+      graphics.fillRect(x + 13, y + 13, 8, 8)
+    }
+    for (y in 50 until 132 step 6) {
+      for (x in 52 until 188 step 6) {
+        if ((x * 13 + y * 7) % 5 != 0) graphics.fillRect(x, y, 4, 4)
+      }
+    }
+    graphics.fillRect(92, 136, 56, 8)
+    listOf(36, 62, 88, 114, 140, 166, 192, 218, 244).forEach { x -> graphics.fillRect(x, 180, 14, 18) }
+    listOf(36, 62, 88, 114, 140, 166, 192, 218, 244).forEach { x -> graphics.fillRect(x, 214, 14, 18) }
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun twoColorImagesWithMiddleTextPage(): ByteArray {
+    val image = BufferedImage(320, 420, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    drawTerminalScreenshot(graphics, 55, 35, 210, 95)
+    graphics.color = Color.BLACK
+    listOf(152, 178, 204, 230).forEach { y ->
+      listOf(35, 62, 89, 116, 143, 170, 197, 224, 251).forEach { x ->
+        graphics.fillRect(x, y, 14, 18)
+      }
+    }
+    drawTerminalScreenshot(graphics, 55, 285, 210, 95)
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun denseSideImageWithTextPage(): ByteArray {
+    val image = BufferedImage(320, 220, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    for (y in 54 until 178) {
+      for (x in 28 until 140) {
+        val value =
+          when ((x * 17 + y * 31 + x * y) % 9) {
+            0, 1, 2 -> 18
+            3, 4 -> 92
+            5, 6 -> 176
+            else -> 232
+          }
+        image.setRGB(x, y, Color(value, value, value).rgb)
+      }
+    }
+    graphics.color = Color.BLACK
+    graphics.fillRect(58, 164, 52, 8)
+    listOf(62, 88, 114, 140, 166).forEach { y ->
+      listOf(152, 178, 204, 230, 256, 282).forEach { x ->
+        if (x + 12 < image.width) {
+          graphics.fillRect(x, y, 12, 18)
+        }
+      }
+    }
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun coloredDecoratedTextPage(): ByteArray {
+    val image = BufferedImage(320, 420, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color(224, 154, 28)
+    graphics.fillRect(78, 70, 32, 54)
+    graphics.fillRect(20, 95, 12, 120)
+    graphics.color = Color.BLACK
+    listOf(72, 98, 124, 150, 176, 202, 228, 254, 280, 306, 332).forEach { y ->
+      listOf(122, 149, 176, 203, 230, 257).forEach { x ->
+        graphics.fillRect(x, y, 13, 18)
+      }
+    }
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun alignedTextOverFaintGridPage(): ByteArray {
+    val image = BufferedImage(1400, 360, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color(218, 218, 218)
+    for (x in 45 until 1360 step 18) graphics.drawLine(x, 35, x, 205)
+    for (y in 35 until 206 step 18) graphics.drawLine(45, y, 1359, y)
+
+    graphics.color = Color.BLACK
+    repeat(2) { row ->
+      repeat(18) { column ->
+        val x = 65 + column * 72
+        val y = 55 + row * 80
+        graphics.fillRect(x, y, 7, 48)
+        graphics.fillRect(x + 7, y, 34, 7)
+        graphics.fillRect(x + 13, y + 20, 34, 7)
+        graphics.fillRect(x + 40, y + 7, 7, 41)
+      }
+    }
+    graphics.color = Color(205, 205, 205)
+    graphics.fillRect(350, 225, 700, 58)
+    graphics.color = Color(142, 142, 142)
+    for (x in 365 until 1040 step 22) graphics.drawLine(x, 225, x, 282)
+    for (y in 232 until 283 step 12) graphics.drawLine(350, y, 1049, y)
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun drawTerminalScreenshot(
+    graphics: java.awt.Graphics2D,
+    x: Int,
+    y: Int,
+    width: Int,
+    height: Int,
+  ) {
+    graphics.color = Color(90, 90, 90)
+    graphics.fillRect(x, y, width, 14)
+    graphics.color = Color(92, 24, 62)
+    graphics.fillRect(x, y + 14, width, height - 14)
+    graphics.color = Color(230, 230, 230)
+    listOf(12, 30, 48, 66, 84, 102, 120, 138, 156).forEach { offset ->
+      graphics.fillRect(x + offset, y + 28, 10, 5)
+      graphics.fillRect(x + offset, y + 56, 10, 5)
+    }
+    graphics.color = Color(96, 178, 220)
+    graphics.fillRect(x + 12, y + 42, 86, 6)
+    graphics.color = Color(224, 182, 78)
+    graphics.fillRect(x + 12, y + 72, 114, 6)
+  }
+
+  private fun lineArtImageBetweenTextPage(): ByteArray {
+    val image = BufferedImage(520, 560, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color.BLACK
+
+    listOf(45, 82, 390, 427, 464).forEach { y ->
+      listOf(55, 105, 155, 205, 255, 305, 355, 405).forEach { x ->
+        graphics.fillRect(x, y, 18, 22)
+      }
+    }
+
+    graphics.drawRect(105, 170, 280, 145)
+    graphics.drawRect(125, 195, 70, 48)
+    graphics.drawRect(235, 195, 70, 48)
+    graphics.drawLine(195, 219, 235, 219)
+    graphics.drawLine(305, 219, 370, 219)
+    graphics.drawLine(160, 243, 160, 295)
+    graphics.drawLine(270, 243, 270, 295)
+    graphics.drawLine(100, 295, 390, 295)
+    graphics.fillRect(143, 205, 12, 20)
+    graphics.fillRect(253, 205, 12, 20)
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun highResolutionHorizontalFragmentGlyphPage(): ByteArray {
+    val image = BufferedImage(190, 150, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color.BLACK
+    graphics.fillRect(55, 38, 6, 74)
+    graphics.fillRect(65, 44, 12, 5)
+    graphics.fillRect(65, 70, 12, 5)
+    graphics.fillRect(65, 96, 12, 5)
+    graphics.fillRect(97, 38, 6, 74)
+    graphics.fillRect(82, 44, 15, 5)
+    graphics.fillRect(82, 70, 15, 5)
+    graphics.fillRect(82, 96, 15, 5)
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun horizontalCodeBlockWithLeftGuidePage(): ByteArray {
+    val image = BufferedImage(280, 180, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color.BLACK
+    graphics.fillRect(34, 30, 3, 118)
+    listOf(34, 58, 82, 106, 130).forEach { y ->
+      listOf(52, 66, 80).forEach { x -> graphics.fillRect(x, y, 8, 14) }
+      listOf(108, 122, 136, 150, 164, 178, 192, 206).forEach { x -> graphics.fillRect(x, y, 9, 14) }
+    }
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun highResolutionVerticalFragmentGlyphPage(): ByteArray {
+    val image = BufferedImage(190, 170, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color.BLACK
+    graphics.fillRect(70, 38, 52, 6)
+    graphics.fillRect(78, 50, 36, 10)
+    graphics.fillRect(70, 80, 52, 6)
+    graphics.fillRect(78, 92, 36, 10)
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun highDetailWordPage(): ByteArray {
+    val image = BufferedImage(220, 150, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.dispose()
+
+    for (y in 42 until 104) {
+      for (x in 48 until 172) {
+        val value = if (((x / 3) + (y / 2)) % 2 == 0) 24 else 146
+        image.setRGB(x, y, Color(value, value, value).rgb)
+      }
+    }
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun horizontalParagraphPage(secondLineIndent: Int): ByteArray {
+    val image = BufferedImage(180, 150, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color.BLACK
+    listOf(30, 56, 82).forEach { x ->
+      graphics.fillRect(x, 30, 12, 18)
+      graphics.fillRect(x + secondLineIndent, 86, 12, 18)
+    }
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun horizontalShortHeadingParagraphPage(): ByteArray {
+    val image = BufferedImage(180, 150, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color.BLACK
+    listOf(30, 56).forEach { x -> graphics.fillRect(x, 30, 12, 18) }
+    listOf(30, 56, 82, 108).forEach { x -> graphics.fillRect(x, 86, 12, 18) }
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun horizontalShortLinesPage(): ByteArray {
+    val image = BufferedImage(180, 150, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color.BLACK
+    listOf(30, 56).forEach { x ->
+      graphics.fillRect(x, 30, 12, 18)
+      graphics.fillRect(x, 86, 12, 18)
+    }
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun verticalParagraphPage(): ByteArray {
+    val image = BufferedImage(140, 150, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color.BLACK
+    listOf(20, 42).forEach { y -> graphics.fillRect(90, y, 10, 12) }
+    listOf(20, 42, 64, 86, 108).forEach { y -> graphics.fillRect(50, y, 10, 12) }
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun verticalContinuousLinesPage(): ByteArray {
+    val image = BufferedImage(140, 150, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color.BLACK
+    listOf(20, 42, 64, 86, 108).forEach { y -> graphics.fillRect(90, y, 10, 12) }
+    listOf(50, 72, 94, 116).forEach { y -> graphics.fillRect(50, y, 10, 12) }
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun closeVerticalTextColumnsPage(): ByteArray {
+    val image = BufferedImage(130, 140, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color.BLACK
+    listOf(26, 58, 90).forEach { y ->
+      graphics.fillRect(49, y, 16, 18)
+      graphics.fillRect(70, y, 16, 18)
+    }
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun underlinedHeadingPage(): ByteArray {
+    val image = BufferedImage(900, 290, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color.BLACK
+    listOf(90, 150, 210, 270, 330, 390, 450, 510, 570, 630).forEachIndexed { index, x ->
+      graphics.fillRect(x, 40 + index % 2 * 2, 34, 72)
+    }
+    for (x in 70 until 720 step 42) {
+      graphics.fillRect(x, 114, minOf(38, 720 - x), 4)
+    }
+    listOf(90, 138, 186, 234, 282, 330, 378, 426, 474, 522, 570, 618, 666).forEach { x ->
+      graphics.fillRect(x, 180, 24, 30)
+    }
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun headingBottomFragmentPage(): ByteArray {
+    val image = BufferedImage(900, 260, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color.BLACK
+    repeat(10) { glyph -> graphics.fillRect(105 + glyph * 65, 55, 46, 58) }
+    graphics.fillRect(100, 124, 650, 8)
+    repeat(9) { glyph -> graphics.fillRect(118 + glyph * 70, 124, 28, 25) }
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun segmentedHeadingUnderlinePage(): ByteArray {
+    val image = BufferedImage(900, 260, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color.BLACK
+    repeat(10) { glyph -> graphics.fillRect(105 + glyph * 65, 55, 46, 58) }
+    repeat(13) { segment -> graphics.fillRect(100 + segment * 50, 128, 34, 5) }
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun firstWordImage(response: PdfPageReflowDto): BufferedImage {
+    val dataUrl = response.items.first { it.type == "word" }.src!!
+    val bytes = Base64.getDecoder().decode(dataUrl.substringAfter(","))
+    return ImageIO.read(ByteArrayInputStream(bytes))
+  }
+
+  private fun firstImageBlock(response: PdfPageReflowDto): BufferedImage {
+    val dataUrl = response.items.first { it.type == "image" }.src!!
+    val bytes = Base64.getDecoder().decode(dataUrl.substringAfter(","))
+    return ImageIO.read(ByteArrayInputStream(bytes))
+  }
+
+  private fun darkPixelCount(image: BufferedImage): Int {
+    var count = 0
+    for (y in 0 until image.height) {
+      for (x in 0 until image.width) {
+        val rgb = image.getRGB(x, y)
+        val alpha = rgb ushr 24 and 0xff
+        if (alpha == 0) continue
+        val red = rgb ushr 16 and 0xff
+        val green = rgb ushr 8 and 0xff
+        val blue = rgb and 0xff
+        val luma = 0.299 * red + 0.587 * green + 0.114 * blue
+        if (luma < 120) count++
+      }
+    }
+    return count
+  }
+}

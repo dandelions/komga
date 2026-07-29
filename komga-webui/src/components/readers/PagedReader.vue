@@ -2,8 +2,8 @@
   <div
     class="paged-reader full-height"
     v-touch="{
-               left: () => {if(swipe) {turnRight()}},
-               right: () => {if(swipe) {turnLeft()}},
+               left: () => {if(swipe) {navigateRightSide()}},
+               right: () => {if(swipe) {navigateLeftSide()}},
                up: () => {if(swipe) {verticalNext()}},
                down: () => {if(swipe) {verticalPrev()}}
              }"
@@ -31,25 +31,40 @@
             <img v-for="(page, j) in spread"
                  :alt="`Page ${page.number}`"
                  :key="`spread${i}-${j}`"
-                 :src="page.url"
+                 :src="pageDisplayUrl(page)"
+                 :loading="imageLoading(i)"
+                 :fetchpriority="imageFetchPriority(i)"
+                 :decoding="imageDecoding(i)"
+                 :data-page-number="page.number"
                  :class="imgClass(spread)"
                  class="img-fit-all"
+                 :style="imageStyle(page)"
+                 @load="pageImageLoaded(page, $event)"
             />
           </div>
         </div>
       </v-carousel-item>
     </v-carousel>
 
+    <!--  crop segment overlap markers  -->
+    <div
+      v-for="overlay in cropSegmentOverlapOverlays"
+      :key="overlay.key"
+      class="crop-segment-overlap"
+      :class="overlay.className"
+      :style="overlay.style"
+    />
+
     <!--  clickable zone: left  -->
     <div v-if="!vertical"
-         @click="turnLeft()"
+         @click="navigateLeftSide()"
          class="left-quarter"
          style="z-index: 1;"
     />
 
     <!--  clickable zone: right  -->
     <div v-if="!vertical"
-         @click="turnRight()"
+         @click="navigateRightSide()"
          class="right-quarter"
          style="z-index: 1;"
     />
@@ -79,10 +94,42 @@
 <script lang="ts">
 import Vue from 'vue'
 import {ReadingDirection} from '@/types/enum-books'
-import {PagedReaderLayout, ScaleType} from '@/types/enum-reader'
+import {PagedNavigationAction, PagedReaderLayout, ScaleType} from '@/types/enum-reader'
 import {shortcutsLTR, shortcutsRTL, shortcutsVertical} from '@/functions/shortcuts/paged-reader'
 import {PageDtoWithUrl} from '@/types/komga-books'
 import {buildSpreads} from '@/functions/book-spreads'
+import {enhanceTextContrast} from '@/functions/image-enhancement'
+import {markPageImageBrowserLoaded} from '@/functions/page-image-cache'
+
+type CropRegion = {
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+}
+
+type PageParity = 'odd' | 'even'
+
+type CropSegmentAxis = 'vertical' | 'horizontal'
+type CropSegmentEdge = 'top' | 'right' | 'bottom' | 'left'
+
+type CropRegionsByParity = {
+  enabled: boolean,
+  odd?: CropRegion | null,
+  even?: CropRegion | null,
+  regions?: Partial<Record<PageParity, Array<CropRegion | null | undefined>>>,
+}
+
+type CropSegment = {
+  crop: CropRegion,
+  axis?: CropSegmentAxis,
+  index: number,
+  count: number,
+  previousOverlapPercent: number,
+  nextOverlapPercent: number,
+  previousOverlapEdge?: CropSegmentEdge,
+  nextOverlapEdge?: CropSegmentEdge,
+}
 
 export default Vue.extend({
   name: 'PagedReader',
@@ -92,6 +139,10 @@ export default Vue.extend({
       carouselPage: 0,
       spreads: [] as PageDtoWithUrl[][],
       pendingScrollPosition: 'top' as 'top' | 'bottom',
+      activeCropSegment: 0,
+      pageAspectRatios: {} as Record<number, number>,
+      deskewedPageUrls: {} as Record<number, string>,
+      deskewedPagePending: {} as Record<number, boolean>,
     }
   },
   props: {
@@ -123,13 +174,65 @@ export default Vue.extend({
       type: String as () => ScaleType,
       required: true,
     },
+    imageFilter: {
+      type: String,
+      default: 'none',
+    },
+    rotation: {
+      type: Number,
+      default: 0,
+    },
+    skewCorrection: {
+      type: Number,
+      default: 0,
+    },
+    contrastEnhancement: {
+      type: Boolean,
+      default: false,
+    },
+    cropRegionsByParity: {
+      type: Object as () => CropRegionsByParity,
+      default: () => ({enabled: false}),
+    },
+    pageDisplayUrls: {
+      type: Object as () => Record<number, string>,
+      default: () => ({}),
+    },
+    activeCropRegion: {
+      type: Number,
+      default: 0,
+    },
+    leftNavigationAction: {
+      type: String as () => PagedNavigationAction,
+      default: PagedNavigationAction.PREVIOUS,
+    },
   },
   watch: {
     pages: {
-      handler(val) {
-        this.spreads = buildSpreads(val, this.pageLayout)
+      handler() {
+        this.rebuildSpreads(this.page)
+        this.revokeDeskewedPageUrls()
       },
       immediate: true,
+    },
+    skewCorrection() {
+      this.revokeDeskewedPageUrls()
+      this.$nextTick(this.ensureLoadedDeskewedPageUrls)
+    },
+    rotation() {
+      this.revokeDeskewedPageUrls()
+      this.$nextTick(this.ensureLoadedDeskewedPageUrls)
+    },
+    contrastEnhancement() {
+      this.revokeDeskewedPageUrls()
+      this.$nextTick(this.ensureLoadedDeskewedPageUrls)
+    },
+    pageDisplayUrls: {
+      handler() {
+        this.revokeDeskewedPageUrls()
+        this.$nextTick(this.ensureLoadedDeskewedPageUrls)
+      },
+      deep: true,
     },
     carouselPage(val, old) {
       this.$debug('[watch:carouselPage', `old:${old}`, `new:${val}`)
@@ -146,16 +249,26 @@ export default Vue.extend({
       const spreadIndex = this.toSpreadIndex(val)
       this.$debug('[watch:page]', `toSpreadIndex:${spreadIndex}`)
       this.carouselPage = spreadIndex
+      this.ensureActiveCropRegionForPage(val)
+      this.ensureActiveCropSegmentForPage(val)
       this.scrollToPageEdge(this.pendingScrollPosition)
       this.pendingScrollPosition = 'top'
+      this.$nextTick(this.ensureLoadedDeskewedPageUrls)
     },
-    pageLayout: {
-      handler(val) {
-        const current = this.page
-        this.spreads = buildSpreads(this.pages, val)
-        this.carouselPage = this.toSpreadIndex(current)
+    scale() {
+      this.activeCropSegment = 0
+    },
+    effectivePageLayout: {
+      handler() {
+        this.rebuildSpreads(this.page)
       },
       immediate: true,
+    },
+    cropRegionsByParity: {
+      handler() {
+        this.refreshCropNavigation(this.currentSpreadPageNumber() || this.page)
+      },
+      deep: true,
     },
   },
   created() {
@@ -163,6 +276,7 @@ export default Vue.extend({
   },
   destroyed() {
     window.removeEventListener('keydown', this.keyPressed)
+    this.revokeDeskewedPageUrls()
   },
   computed: {
     shortcuts(): any {
@@ -198,8 +312,30 @@ export default Vue.extend({
     canNext(): boolean {
       return this.currentSlide < this.slidesCount
     },
+    cropNavigationEnabled(): boolean {
+      const crops = this.cropRegionsByParity
+      if (!crops?.enabled) return false
+      return (['odd', 'even'] as PageParity[]).some(parity =>
+        [0, 1].some(index =>
+          !!this.normalizedCropRegion(crops.regions?.[parity]?.[index] || (index === 0 ? crops[parity] : undefined)),
+        ),
+      )
+    },
+    heightPageNavigationEnabled(): boolean {
+      if (this.scale !== ScaleType.HEIGHT || this.cropNavigationEnabled) return false
+      const viewportWidth = Math.max(1, this.$vuetify.breakpoint.width)
+      const viewportHeight = Math.max(1, this.$vuetify.breakpoint.height)
+      const viewportRatio = viewportWidth / viewportHeight
+      return this.pages.some(page => {
+        const ratio = this.pageRatio(page)
+        return ratio !== undefined && ratio > viewportRatio + 0.001
+      })
+    },
+    effectivePageLayout(): PagedReaderLayout {
+      return this.cropNavigationEnabled || this.heightPageNavigationEnabled ? PagedReaderLayout.SINGLE_PAGE : this.pageLayout
+    },
     isDoublePages(): boolean {
-      return this.pageLayout === PagedReaderLayout.DOUBLE_PAGES || this.pageLayout === PagedReaderLayout.DOUBLE_NO_COVER
+      return this.effectivePageLayout === PagedReaderLayout.DOUBLE_PAGES || this.effectivePageLayout === PagedReaderLayout.DOUBLE_NO_COVER
     },
     pageContainerClass(): string {
       return this.topAlignedPage ? 'justify-start' : 'justify-center'
@@ -207,10 +343,477 @@ export default Vue.extend({
     topAlignedPage(): boolean {
       return [ScaleType.ORIGINAL, ScaleType.WIDTH, ScaleType.WIDTH_SHRINK_ONLY].includes(this.scale)
     },
+    cropSegmentOverlapOverlays(): Array<{key: string, className: string, style: Record<string, string>}> {
+      const pageNumber = this.currentSpreadPageNumber()
+      const page = pageNumber ? this.pageByNumber(pageNumber) : undefined
+      if (!page) return []
+
+      const segment = this.effectiveCropSegment(page)
+      if (!segment || segment.count <= 1) return []
+
+      const overlays = [] as Array<{key: string, className: string, style: Record<string, string>}>
+      if (segment.previousOverlapEdge && segment.previousOverlapPercent > 0) {
+        overlays.push({
+          key: 'previous-overlap',
+          className: `crop-segment-overlap-${segment.previousOverlapEdge}`,
+          style: this.cropSegmentOverlapStyle(segment.previousOverlapEdge, segment.previousOverlapPercent),
+        })
+      }
+      if (segment.nextOverlapEdge && segment.nextOverlapPercent > 0) {
+        overlays.push({
+          key: 'next-overlap',
+          className: `crop-segment-overlap-${segment.nextOverlapEdge}`,
+          style: this.cropSegmentOverlapStyle(segment.nextOverlapEdge, segment.nextOverlapPercent),
+        })
+      }
+      return overlays
+    },
   },
   methods: {
     keyPressed(e: KeyboardEvent) {
       this.shortcuts[e.key]?.execute(this)
+    },
+    rebuildSpreads(currentPage: number | undefined) {
+      this.spreads = buildSpreads(this.pages, this.effectivePageLayout)
+      if (currentPage) this.carouselPage = this.toSpreadIndex(currentPage)
+      else this.carouselPage = 0
+    },
+    refreshCropNavigation(currentPage: number | undefined = this.page) {
+      this.rebuildSpreads(currentPage)
+      this.ensureActiveCropRegionForPage(currentPage)
+    },
+    pageDisplayUrl(page: PageDtoWithUrl): string {
+      return this.deskewedPageUrls[page.number] || this.pageDisplayUrls[page.number] || page.url
+    },
+    imageStyle(page: PageDtoWithUrl): object {
+      const crop = this.effectiveCropSegment(page)?.crop
+      return {
+        filter: this.imageFilter,
+        clipPath: this.cropClipPath(crop),
+        transform: this.imageTransform(crop),
+        transformOrigin: 'center center',
+      }
+    },
+    imageTransform(crop: CropRegion | undefined): string | undefined {
+      const transforms = [] as string[]
+      if (crop) {
+        const scale = this.cropTransformScale(crop)
+        const translateX = (50 - crop.x - crop.w / 2) * scale
+        const translateY = (50 - crop.y - crop.h / 2) * scale
+        transforms.push(`translate(${translateX.toFixed(2)}%, ${translateY.toFixed(2)}%)`)
+        transforms.push(`scale(${scale.toFixed(3)})`)
+      }
+      return transforms.join(' ') || undefined
+    },
+    cropTransformScale(crop: CropRegion): number {
+      const scaleX = 100 / crop.w
+      const scaleY = 100 / crop.h
+
+      switch (this.scale) {
+        case ScaleType.WIDTH:
+        case ScaleType.WIDTH_SHRINK_ONLY:
+          return Math.min(2.5, scaleX)
+        case ScaleType.HEIGHT:
+          return Math.min(2.5, scaleY)
+        default:
+          return Math.min(2.5, Math.max(scaleX, scaleY))
+      }
+    },
+    cropClipPath(crop: CropRegion | undefined): string | undefined {
+      if (!crop) return undefined
+      const right = Math.max(0, 100 - crop.x - crop.w)
+      const bottom = Math.max(0, 100 - crop.y - crop.h)
+      return `inset(${crop.y}% ${right}% ${bottom}% ${crop.x}%)`
+    },
+    effectiveCropRegion(pageNumber: number, regionIndex: number = this.activeCropRegion): CropRegion | undefined {
+      const crops = this.cropRegionsByParity
+      if (!crops?.enabled) return undefined
+      const parity = pageNumber % 2 === 0 ? 'even' : 'odd'
+      const index = regionIndex === 1 ? 1 : 0
+      return this.normalizedCropRegion(crops.regions?.[parity]?.[index] || (index === 0 ? crops[parity] : undefined)) ||
+        this.normalizedCropRegion(crops.regions?.[parity === 'odd' ? 'even' : 'odd']?.[index])
+    },
+    cropRegionIndexes(pageNumber: number): number[] {
+      if (!this.cropRegionsByParity?.enabled) return []
+      return [0, 1].filter(index => !!this.effectiveCropRegion(pageNumber, index))
+    },
+    pageByNumber(pageNumber: number): PageDtoWithUrl | undefined {
+      return this.pages.find(x => x.number === pageNumber)
+    },
+    effectiveCropSegment(page: PageDtoWithUrl, regionIndex: number = this.activeCropRegion): CropSegment | undefined {
+      const segments = this.cropSegments(page, regionIndex)
+      if (segments.length === 0) return undefined
+      return segments[this.normalizedActiveCropSegmentIndex(segments.length)]
+    },
+    cropSegments(page: PageDtoWithUrl, regionIndex: number = this.activeCropRegion): CropSegment[] {
+      const crop = this.effectiveCropRegion(page.number, regionIndex) || this.implicitHeightCropRegion()
+      if (!crop) return []
+
+      const pageRatio = this.pageRatio(page)
+      if (!pageRatio) return [this.singleCropSegment(crop)]
+
+      const axis = this.cropSegmentAxis(crop, pageRatio)
+
+      const span = this.cropSegmentViewportSpan(crop, pageRatio, axis)
+      const cropSpan = axis === 'vertical' ? crop.h : crop.w
+      if (cropSpan <= span + 0.1) return [this.singleCropSegment(crop, axis)]
+
+      const overlap = this.cropSegmentOverlap(span, cropSpan)
+      const step = Math.max(0.1, span - overlap)
+      const count = Math.max(1, Math.ceil((cropSpan - span) / step) + 1)
+      const forwardLeftToRight = this.horizontalCropSegmentLeftToRight()
+
+      const segments = Array.from({length: count}, (_, index) => {
+        const offset = Math.min(index * step, cropSpan - span)
+        if (axis === 'vertical') {
+          return {
+            crop: this.cropSegmentRegion(crop.x, crop.y + offset, crop.w, span),
+            start: crop.y + offset,
+            end: crop.y + offset + span,
+          }
+        }
+
+        const leftOffset = forwardLeftToRight ? offset : cropSpan - span - offset
+        return {
+          crop: this.cropSegmentRegion(crop.x + leftOffset, crop.y, span, crop.h),
+          start: crop.x + leftOffset,
+          end: crop.x + leftOffset + span,
+        }
+      })
+
+      return segments.map((segment, index) => {
+        const previousOverlap = index > 0 ? this.segmentOverlapPercent(segment, segments[index - 1], span) : 0
+        const nextOverlap = index < segments.length - 1 ? this.segmentOverlapPercent(segment, segments[index + 1], span) : 0
+        return {
+          crop: segment.crop,
+          axis,
+          index,
+          count,
+          previousOverlapPercent: previousOverlap,
+          nextOverlapPercent: nextOverlap,
+          previousOverlapEdge: previousOverlap > 0 ? this.previousCropSegmentOverlapEdge(axis, forwardLeftToRight) : undefined,
+          nextOverlapEdge: nextOverlap > 0 ? this.nextCropSegmentOverlapEdge(axis, forwardLeftToRight) : undefined,
+        }
+      })
+    },
+    implicitHeightCropRegion(): CropRegion | undefined {
+      if (this.scale !== ScaleType.HEIGHT || this.cropNavigationEnabled) return undefined
+      return {x: 0, y: 0, w: 100, h: 100}
+    },
+    singleCropSegment(crop: CropRegion, axis?: CropSegmentAxis): CropSegment {
+      return {
+        crop,
+        axis,
+        index: 0,
+        count: 1,
+        previousOverlapPercent: 0,
+        nextOverlapPercent: 0,
+      }
+    },
+    cropSegmentAxis(crop: CropRegion, pageRatio: number): CropSegmentAxis {
+      switch (this.scale) {
+        case ScaleType.WIDTH:
+        case ScaleType.WIDTH_SHRINK_ONLY:
+          return 'vertical'
+        case ScaleType.HEIGHT:
+          return 'horizontal'
+      }
+
+      // SCREEN and ORIGINAL can overflow in either direction after the crop is
+      // enlarged. Split along the overflowing axis so a single crop region is
+      // fully readable before navigation advances to the next source page.
+      const viewportWidth = Math.max(1, this.$vuetify.breakpoint.width)
+      const viewportHeight = Math.max(1, this.$vuetify.breakpoint.height)
+      const viewportRatio = viewportWidth / viewportHeight
+      const cropRatio = crop.w * pageRatio / crop.h
+      return cropRatio <= viewportRatio ? 'vertical' : 'horizontal'
+    },
+    pageRatio(page: PageDtoWithUrl): number | undefined {
+      const width = Number(page.width)
+      const height = Number(page.height)
+      if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
+        const sourceRatio = width / height
+        return Math.abs(this.normalizedRotation(this.rotation)) === 90 ? 1 / sourceRatio : sourceRatio
+      }
+
+      // The loaded image may already contain the reader rotation, so its
+      // measured ratio is the final display ratio and must not be rotated again.
+      const displayedRatio = this.pageAspectRatios[page.number]
+      return Number.isFinite(displayedRatio) && displayedRatio > 0 ? displayedRatio : undefined
+    },
+    displayPageWidth(page: PageDtoWithUrl): number {
+      return Math.abs(this.normalizedRotation(this.rotation)) === 90 ? Number(page.height) : Number(page.width)
+    },
+    displayPageHeight(page: PageDtoWithUrl): number {
+      return Math.abs(this.normalizedRotation(this.rotation)) === 90 ? Number(page.width) : Number(page.height)
+    },
+    cropSegmentViewportSpan(crop: CropRegion, pageRatio: number, axis: CropSegmentAxis): number {
+      const viewportWidth = Math.max(1, this.$vuetify.breakpoint.width)
+      const viewportHeight = Math.max(1, this.$vuetify.breakpoint.height)
+      const viewportRatio = viewportWidth / viewportHeight
+      if (axis === 'vertical') return Math.max(5, Math.min(crop.h, crop.w * pageRatio / viewportRatio))
+      return Math.max(5, Math.min(crop.w, crop.h * viewportRatio / pageRatio))
+    },
+    cropSegmentOverlap(span: number, cropSpan: number): number {
+      if (cropSpan <= span) return 0
+      return Math.min(span * 0.12, cropSpan * 0.08)
+    },
+    cropSegmentRegion(x: number, y: number, w: number, h: number): CropRegion {
+      const rounded = {
+        x: Math.round(x * 10) / 10,
+        y: Math.round(y * 10) / 10,
+        w: Math.round(w * 10) / 10,
+        h: Math.round(h * 10) / 10,
+      }
+      return this.normalizedCropRegion(rounded) || rounded
+    },
+    segmentOverlapPercent(current: {start: number, end: number}, adjacent: {start: number, end: number}, span: number): number {
+      const overlap = Math.max(0, Math.min(current.end, adjacent.end) - Math.max(current.start, adjacent.start))
+      if (overlap <= 0 || span <= 0) return 0
+      return Math.max(0, Math.min(100, overlap * 100 / span))
+    },
+    horizontalCropSegmentLeftToRight(): boolean {
+      return this.readingDirection !== ReadingDirection.RIGHT_TO_LEFT
+    },
+    previousCropSegmentOverlapEdge(axis: CropSegmentAxis, forwardLeftToRight: boolean): CropSegmentEdge {
+      if (axis === 'vertical') return 'top'
+      return forwardLeftToRight ? 'left' : 'right'
+    },
+    nextCropSegmentOverlapEdge(axis: CropSegmentAxis, forwardLeftToRight: boolean): CropSegmentEdge {
+      if (axis === 'vertical') return 'bottom'
+      return forwardLeftToRight ? 'right' : 'left'
+    },
+    cropSegmentOverlapStyle(edge: CropSegmentEdge, percent: number): Record<string, string> {
+      const size = `${Math.max(3, Math.min(18, percent)).toFixed(2)}%`
+      switch (edge) {
+        case 'top':
+          return {top: '0', left: '0', right: '0', height: size}
+        case 'right':
+          return {top: '0', right: '0', bottom: '0', width: size}
+        case 'bottom':
+          return {left: '0', right: '0', bottom: '0', height: size}
+        case 'left':
+          return {top: '0', left: '0', bottom: '0', width: size}
+      }
+    },
+    cropSegmentCount(pageNumber: number | undefined, regionIndex: number = this.activeCropRegion): number {
+      if (!pageNumber) return 0
+      const page = this.pageByNumber(pageNumber)
+      if (!page) return 0
+      return this.cropSegments(page, regionIndex).length
+    },
+    normalizedActiveCropSegmentIndex(count: number): number {
+      if (count <= 1) return 0
+      return Math.max(0, Math.min(this.activeCropSegment, count - 1))
+    },
+    lastCropSegmentIndex(pageNumber: number | undefined, regionIndex: number): number {
+      return Math.max(0, this.cropSegmentCount(pageNumber, regionIndex) - 1)
+    },
+    nextCropSegmentIndex(pageNumber: number | undefined, regionIndex: number = this.activeCropRegion): number | undefined {
+      const count = this.cropSegmentCount(pageNumber, regionIndex)
+      if (count <= 1) return undefined
+      const current = this.normalizedActiveCropSegmentIndex(count)
+      return current < count - 1 ? current + 1 : undefined
+    },
+    previousCropSegmentIndex(pageNumber: number | undefined, regionIndex: number = this.activeCropRegion): number | undefined {
+      const count = this.cropSegmentCount(pageNumber, regionIndex)
+      if (count <= 1) return undefined
+      const current = this.normalizedActiveCropSegmentIndex(count)
+      return current > 0 ? current - 1 : undefined
+    },
+    spreadPageNumber(spread: PageDtoWithUrl[] | undefined): number | undefined {
+      if (!spread || spread.length === 0) return undefined
+      const currentPage = spread.length == 2 && spread[1].mediaType ? spread[1] : spread[0]
+      return currentPage?.number
+    },
+    currentSpreadPageNumber(): number | undefined {
+      return this.spreadPageNumber(this.spreads[this.carouselPage])
+    },
+    firstCropRegionIndex(pageNumber: number | undefined): number {
+      if (!pageNumber) return 0
+      return this.cropRegionIndexes(pageNumber)[0] ?? 0
+    },
+    lastCropRegionIndex(pageNumber: number | undefined): number {
+      if (!pageNumber) return 0
+      const indexes = this.cropRegionIndexes(pageNumber)
+      return indexes[indexes.length - 1] ?? 0
+    },
+    nextCropRegionIndex(pageNumber: number | undefined): number | undefined {
+      if (!pageNumber) return undefined
+      return this.cropRegionIndexes(pageNumber).find(index => index > this.activeCropRegion)
+    },
+    previousCropRegionIndex(pageNumber: number | undefined): number | undefined {
+      if (!pageNumber) return undefined
+      return this.cropRegionIndexes(pageNumber).reverse().find(index => index < this.activeCropRegion)
+    },
+    setActiveCropRegion(regionIndex: number, segmentIndex: number = 0) {
+      const normalized = regionIndex === 1 ? 1 : 0
+      this.activeCropSegment = Math.max(0, segmentIndex)
+      if (normalized !== this.activeCropRegion) this.$emit('update:active-crop-region', normalized)
+    },
+    setActiveCropSegment(segmentIndex: number) {
+      this.activeCropSegment = Math.max(0, segmentIndex)
+    },
+    ensureActiveCropRegionForPage(pageNumber: number | undefined) {
+      if (!pageNumber || this.effectiveCropRegion(pageNumber, this.activeCropRegion)) return
+      this.setActiveCropRegion(this.firstCropRegionIndex(pageNumber))
+    },
+    ensureActiveCropSegmentForPage(pageNumber: number | undefined) {
+      const count = this.cropSegmentCount(pageNumber)
+      const normalized = this.normalizedActiveCropSegmentIndex(count)
+      if (normalized !== this.activeCropSegment) this.activeCropSegment = normalized
+    },
+    normalizedCropRegion(crop: CropRegion | null | undefined): CropRegion | undefined {
+      if (!crop) return undefined
+      const x = this.clampCropNumber(crop.x, 0)
+      const y = this.clampCropNumber(crop.y, 0)
+      const w = Math.max(5, Math.min(100 - x, this.clampCropNumber(crop.w, 100)))
+      const h = Math.max(5, Math.min(100 - y, this.clampCropNumber(crop.h, 100)))
+      return {x, y, w, h}
+    },
+    clampCropNumber(value: number, fallback: number): number {
+      const numberValue = Number(value)
+      if (!Number.isFinite(numberValue)) return fallback
+      return Math.max(0, Math.min(100, numberValue))
+    },
+    pageImageLoaded(page: PageDtoWithUrl, event: Event) {
+      const image = event.target as HTMLImageElement
+      markPageImageBrowserLoaded(page.url, image.currentSrc || image.src)
+      if (image?.naturalWidth > 0 && image.naturalHeight > 0) {
+        const ratio = image.naturalWidth / image.naturalHeight
+        if (this.pageAspectRatios[page.number] !== ratio) this.$set(this.pageAspectRatios, page.number, ratio)
+      }
+      this.ensureDeskewedPageUrl(page, event)
+    },
+    async ensureDeskewedPageUrl(page: PageDtoWithUrl, event: Event) {
+      const rotation = this.normalizedRotation(this.rotation)
+      const angle = this.skewCorrection || 0
+      const contrastEnhancement = this.contrastEnhancement
+      // pageDisplayUrls are produced by DivinaReader's rotation/correction
+      // pipeline (for example after finishing a crop). Processing them again
+      // would rotate an already rotated page and make the crop coordinates no
+      // longer match the displayed image.
+      if (this.pageDisplayUrls[page.number]) return
+      if ((!rotation && !angle && !this.contrastEnhancement) || this.deskewedPageUrls[page.number] || this.deskewedPagePending[page.number]) return
+
+      const image = event.target as HTMLImageElement
+      if (!image?.complete || image.naturalWidth <= 0) return
+
+      this.$set(this.deskewedPagePending, page.number, true)
+      try {
+        const pageIsCurrent = this.isCurrentSpreadPage(page.number)
+        if (!pageIsCurrent) await this.waitForReaderIdle()
+        if (this.normalizedRotation(this.rotation) !== rotation || this.skewCorrection !== angle || this.contrastEnhancement !== contrastEnhancement || this.deskewedPageUrls[page.number]) return
+        const canvas = this.processedPageCanvas(image, rotation, angle)
+        const url = await this.canvasObjectUrl(canvas)
+        if (this.normalizedRotation(this.rotation) === rotation && this.skewCorrection === angle && this.contrastEnhancement === contrastEnhancement) this.$set(this.deskewedPageUrls, page.number, url)
+        else URL.revokeObjectURL(url)
+      } catch (e) {
+      } finally {
+        this.$delete(this.deskewedPagePending, page.number)
+      }
+    },
+    processedPageCanvas(image: HTMLImageElement, rotation: number, skewCorrection: number): HTMLCanvasElement {
+      const rotatedCanvas = rotation ? this.rotatedImageCanvas(image, rotation) : this.sourceImageCanvas(image)
+      const canvas = skewCorrection ? this.skewCorrectedCanvas(rotatedCanvas, skewCorrection) : rotatedCanvas
+      if (this.contrastEnhancement) {
+        const context = canvas.getContext('2d')
+        if (context) enhanceTextContrast(context, canvas.width, canvas.height, {enabled: true})
+      }
+      return canvas
+    },
+    sourceImageCanvas(image: HTMLImageElement): HTMLCanvasElement {
+      const canvas = document.createElement('canvas')
+      canvas.width = image.naturalWidth
+      canvas.height = image.naturalHeight
+      const context = canvas.getContext('2d')
+      if (!context) return canvas
+      context.fillStyle = '#fff'
+      context.fillRect(0, 0, canvas.width, canvas.height)
+      context.drawImage(image, 0, 0)
+      return canvas
+    },
+    rotatedImageCanvas(image: HTMLImageElement, degrees: number): HTMLCanvasElement {
+      const rotation = this.normalizedRotation(degrees)
+      const quarterTurn = Math.abs(rotation) === 90
+      const canvas = document.createElement('canvas')
+      canvas.width = quarterTurn ? image.naturalHeight : image.naturalWidth
+      canvas.height = quarterTurn ? image.naturalWidth : image.naturalHeight
+      const context = canvas.getContext('2d')
+      if (!context) return canvas
+      context.fillStyle = '#fff'
+      context.fillRect(0, 0, canvas.width, canvas.height)
+      context.translate(canvas.width / 2, canvas.height / 2)
+      context.rotate(rotation * Math.PI / 180)
+      context.drawImage(image, -image.naturalWidth / 2, -image.naturalHeight / 2)
+      return canvas
+    },
+    skewCorrectedCanvas(sourceCanvas: HTMLCanvasElement, degrees: number): HTMLCanvasElement {
+      const canvas = document.createElement('canvas')
+      canvas.width = sourceCanvas.width
+      canvas.height = sourceCanvas.height
+      const context = canvas.getContext('2d')
+      if (!context) return canvas
+      context.fillStyle = '#fff'
+      context.fillRect(0, 0, canvas.width, canvas.height)
+      context.translate(canvas.width / 2, canvas.height / 2)
+      context.rotate(degrees * Math.PI / 180)
+      context.drawImage(sourceCanvas, -sourceCanvas.width / 2, -sourceCanvas.height / 2)
+      return canvas
+    },
+    normalizedRotation(value: number): number {
+      const numberValue = Number(value)
+      if (!Number.isFinite(numberValue)) return 0
+      const rounded = Math.round(numberValue / 90) * 90
+      const normalized = ((rounded % 360) + 360) % 360
+      if (normalized === 90) return 90
+      if (normalized === 180) return 180
+      if (normalized === 270) return -90
+      return 0
+    },
+    canvasObjectUrl(canvas: HTMLCanvasElement): Promise<string> {
+      return new Promise((resolve, reject) => {
+        canvas.toBlob(blob => {
+          if (blob) resolve(URL.createObjectURL(blob))
+          else reject(new Error('Unable to encode deskewed page'))
+        }, 'image/jpeg', 0.95)
+      })
+    },
+    revokeDeskewedPageUrls() {
+      Object.values(this.deskewedPageUrls).forEach(url => URL.revokeObjectURL(url))
+      this.deskewedPageUrls = {}
+      this.deskewedPagePending = {}
+    },
+    ensureLoadedDeskewedPageUrls() {
+      if (!this.normalizedRotation(this.rotation) && !this.skewCorrection && !this.contrastEnhancement) return
+      const images = Array.from(this.$el.querySelectorAll('img[data-page-number]')) as HTMLImageElement[]
+      images.forEach(image => {
+        const pageNumber = Number(image.dataset.pageNumber)
+        const page = this.pages.find(x => x.number === pageNumber)
+        if (page && image.complete && image.naturalWidth > 0) this.ensureDeskewedPageUrl(page, {target: image} as unknown as Event)
+      })
+    },
+    waitForReaderIdle(): Promise<void> {
+      return new Promise(resolve => {
+        const requestIdleCallback = (window as any).requestIdleCallback
+        if (requestIdleCallback) {
+          requestIdleCallback(() => resolve(), {timeout: 500})
+        } else {
+          window.setTimeout(resolve, 160)
+        }
+      })
+    },
+    isCurrentSpreadPage(pageNumber: number): boolean {
+      return this.spreads[this.carouselPage]?.some(page => page.number === pageNumber) === true
+    },
+    imageLoading(spreadIndex: number): string {
+      return Math.abs(this.carouselPage - spreadIndex) <= 1 ? 'eager' : 'lazy'
+    },
+    imageFetchPriority(spreadIndex: number): string {
+      return spreadIndex === this.carouselPage ? 'high' : 'low'
+    },
+    imageDecoding(spreadIndex: number): string {
+      return spreadIndex === this.carouselPage ? 'sync' : 'async'
     },
     imgClass(spread: PageDtoWithUrl[]): string {
       const double = spread.length > 1
@@ -228,7 +831,7 @@ export default Vue.extend({
       }
     },
     eagerLoad(spreadIndex: number): boolean {
-      return Math.abs(this.carouselPage - spreadIndex) <= 2
+      return Math.abs(this.carouselPage - spreadIndex) <= 1
     },
     preRender(spreadIndex: number): boolean {
       return Math.abs(this.carouselPage - spreadIndex) > (this.animations ? 1 : 0)
@@ -244,6 +847,14 @@ export default Vue.extend({
       if (!this.vertical)
         this.flipDirection ? this.next() : this.prev()
     },
+    navigateLeftSide() {
+      if (this.vertical) return
+      this.leftNavigationAction === PagedNavigationAction.NEXT ? this.next() : this.prev()
+    },
+    navigateRightSide() {
+      if (this.vertical) return
+      this.leftNavigationAction === PagedNavigationAction.NEXT ? this.prev() : this.next()
+    },
     verticalPrev() {
       if (this.vertical) this.prev()
     },
@@ -251,16 +862,54 @@ export default Vue.extend({
       if (this.vertical) this.next()
     },
     prev() {
+      const pageNumber = this.currentSpreadPageNumber()
+      const previousSegment = this.previousCropSegmentIndex(pageNumber)
+      if (previousSegment !== undefined) {
+        this.pendingScrollPosition = 'top'
+        this.setActiveCropSegment(previousSegment)
+        this.scrollToPageEdge('top')
+        return
+      }
+
+      const previousRegion = this.previousCropRegionIndex(pageNumber)
+      if (previousRegion !== undefined) {
+        this.pendingScrollPosition = 'top'
+        this.setActiveCropRegion(previousRegion, this.lastCropSegmentIndex(pageNumber, previousRegion))
+        this.scrollToPageEdge('top')
+        return
+      }
       if (this.canPrev) {
-        this.pendingScrollPosition = 'bottom'
+        const previousPageNumber = this.spreadPageNumber(this.spreads[this.carouselPage - 1])
+        const previousPageRegion = this.lastCropRegionIndex(previousPageNumber)
+        this.pendingScrollPosition = 'top'
+        this.setActiveCropRegion(previousPageRegion, this.lastCropSegmentIndex(previousPageNumber, previousPageRegion))
         this.carouselPage--
       } else {
         this.$emit('jump-previous')
       }
     },
     next() {
-      if (this.canNext) {
+      const pageNumber = this.currentSpreadPageNumber()
+      const nextSegment = this.nextCropSegmentIndex(pageNumber)
+      if (nextSegment !== undefined) {
         this.pendingScrollPosition = 'top'
+        this.setActiveCropSegment(nextSegment)
+        this.scrollToPageEdge('top')
+        return
+      }
+
+      const nextRegion = this.nextCropRegionIndex(pageNumber)
+      if (nextRegion !== undefined) {
+        this.pendingScrollPosition = 'top'
+        this.setActiveCropRegion(nextRegion)
+        this.scrollToPageEdge('top')
+        return
+      }
+      if (this.canNext) {
+        const nextPageNumber = this.spreadPageNumber(this.spreads[this.carouselPage + 1])
+        const nextPageRegion = this.firstCropRegionIndex(nextPageNumber)
+        this.pendingScrollPosition = 'top'
+        this.setActiveCropRegion(nextPageRegion, 0)
         this.carouselPage++
       } else {
         this.$emit('jump-next')
@@ -299,6 +948,7 @@ export default Vue.extend({
     },
     toSpreadIndex(i: number): number {
       this.$debug('[toSpreadIndex]', `i:${i}`, `isDoublePages:${this.isDoublePages}`)
+      if (!Number.isFinite(i)) return 0
       if (this.spreads.length > 0) {
         if (this.isDoublePages) {
           for (let j = 0; j < this.spreads.length; j++) {
@@ -370,6 +1020,36 @@ export default Vue.extend({
   height: 50%;
   width: 100%;
   position: absolute;
+}
+
+.crop-segment-overlap {
+  position: fixed;
+  z-index: 2;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    45deg,
+    rgba(144, 202, 249, 0.28) 0,
+    rgba(144, 202, 249, 0.28) 6px,
+    rgba(144, 202, 249, 0.08) 6px,
+    rgba(144, 202, 249, 0.08) 12px
+  );
+  box-shadow: inset 0 0 0 1px rgba(144, 202, 249, 0.42);
+}
+
+.crop-segment-overlap-top {
+  border-top: 2px solid rgba(33, 150, 243, 0.9);
+}
+
+.crop-segment-overlap-right {
+  border-right: 2px solid rgba(33, 150, 243, 0.9);
+}
+
+.crop-segment-overlap-bottom {
+  border-bottom: 2px solid rgba(33, 150, 243, 0.9);
+}
+
+.crop-segment-overlap-left {
+  border-left: 2px solid rgba(33, 150, 243, 0.9);
 }
 
 .img-fit-all {

@@ -163,6 +163,7 @@ import {
   RecommendedViewSection,
 } from '@/types/komga-clientsettings'
 import EditRecommendedDialog from '@/components/dialogs/EditRecommendedDialog.vue'
+import {getEffectiveLibraryIds} from '@/functions/libraries'
 
 interface SectionConfig {
   loader: PageLoader<any> | undefined,
@@ -175,6 +176,10 @@ enum SectionType {
   SERIES,
   BOOK,
 }
+
+const DASHBOARD_PAGE_SIZE = 12
+const DASHBOARD_PAGE_REQUEST = {size: DASHBOARD_PAGE_SIZE, include_total: false}
+const DASHBOARD_RELOAD_THROTTLE_MS = 30000
 
 export default Vue.extend({
   name: 'DashboardView',
@@ -295,7 +300,7 @@ export default Vue.extend({
       return this.getLibraryLazy(this.libraryId)
     },
     libraryIds(): string[] {
-      return this.libraryId !== LIBRARIES_ALL ? [this.libraryId] : this.$store.getters.getLibrariesPinned.map((it: LibraryDto) => it.id)
+      return this.getRequestLibraryId(this.libraryId)
     },
     isAdmin(): boolean {
       return this.$store.getters.meAdmin
@@ -386,15 +391,19 @@ export default Vue.extend({
       if (percent > 0.95) await loader.loadNext()
     },
     getRequestLibraryId(libraryId: string): string[] {
-      return libraryId !== LIBRARIES_ALL ? [libraryId] : this.$store.getters.getLibrariesPinned.map((it: LibraryDto) => it.id)
+      return getEffectiveLibraryIds(
+        libraryId,
+        this.$store.getters.getLibraries,
+        this.$store.getters.getLibrariesPinned,
+      )
     },
     seriesChanged(event: SeriesSseDto) {
-      if (this.libraryId === LIBRARIES_ALL || event.libraryId === this.libraryId) {
+      if (event.libraryId === this.libraryId || this.libraryIds.includes(event.libraryId)) {
         this.reload()
       }
     },
     bookChanged(event: BookSseDto) {
-      if (this.libraryId === LIBRARIES_ALL || event.libraryId === this.libraryId) {
+      if (event.libraryId === this.libraryId || this.libraryIds.includes(event.libraryId)) {
         this.reload()
       }
     },
@@ -410,8 +419,9 @@ export default Vue.extend({
       else if (this.loaderRecentlyAddedSeries?.items.some(s => s.id === event.seriesId)) this.reload()
     },
     reload: throttle(function (this: any) {
+      if (this.loading) return
       this.loadAll(true)
-    }, 5000),
+    }, DASHBOARD_RELOAD_THROTTLE_MS),
     setupLoaders(libraryId: string) {
       const requestLibraries = this.getRequestLibraryId(libraryId)
       const baseBookConditions = [] as SearchConditionBook[]
@@ -421,73 +431,66 @@ export default Vue.extend({
         ))
 
       this.loaderKeepReadingBooks = this.hasSection(RecommendedViewSection.KEEP_READING) ? new PageLoader<BookDto>(
-        {sort: ['readProgress.readDate,desc']},
+        {...DASHBOARD_PAGE_REQUEST, sort: ['readProgress.readDate,desc']},
         (pageable: PageRequest) => this.$komgaBooks.getBooksList({
           condition: new SearchConditionAllOfBook([...baseBookConditions, new SearchConditionReadStatus(new SearchOperatorIs(ReadStatus.IN_PROGRESS))]),
         } as BookSearch, pageable),
       ) : undefined
       this.loaderOnDeckBooks = this.hasSection(RecommendedViewSection.ON_DECK) ? new PageLoader<BookDto>(
-        {},
+        DASHBOARD_PAGE_REQUEST,
         (pageable: PageRequest) => this.$komgaBooks.getBooksOnDeck(requestLibraries, pageable),
       ) : undefined
       this.loaderRecentlyAddedBooks = this.hasSection(RecommendedViewSection.RECENTLY_ADDED_BOOKS) ? new PageLoader<BookDto>(
-        {sort: ['createdDate,desc']},
+        {...DASHBOARD_PAGE_REQUEST, sort: ['createdDate,desc']},
         (pageable: PageRequest) => this.$komgaBooks.getBooksList({
           condition: new SearchConditionAllOfBook(baseBookConditions),
         } as BookSearch, pageable),
       ) : undefined
       this.loaderRecentlyReleasedBooks = this.hasSection(RecommendedViewSection.RECENTLY_RELEASED_BOOKS) ? new PageLoader<BookDto>(
-        {sort: ['metadata.releaseDate,desc']},
+        {...DASHBOARD_PAGE_REQUEST, sort: ['metadata.releaseDate,desc']},
         (pageable: PageRequest) => this.$komgaBooks.getBooksList({
           condition: new SearchConditionAllOfBook([...baseBookConditions, new SearchConditionReleaseDate(new SearchOperatorAfter(subMonths(new Date(), 1)))]),
         } as BookSearch, pageable),
       ) : undefined
       this.loaderRecentlyReadBooks = this.hasSection(RecommendedViewSection.RECENTLY_READ_BOOKS) ? new PageLoader<BookDto>(
-        {sort: ['readProgress.readDate,desc']},
+        {...DASHBOARD_PAGE_REQUEST, sort: ['readProgress.readDate,desc']},
         (pageable: PageRequest) => this.$komgaBooks.getBooksList({
           condition: new SearchConditionAllOfBook([...baseBookConditions, new SearchConditionReadStatus(new SearchOperatorIs(ReadStatus.READ))]),
         } as BookSearch, pageable),
       ) : undefined
 
       this.loaderRecentlyAddedSeries = this.hasSection(RecommendedViewSection.RECENTLY_ADDED_SERIES) ? new PageLoader<SeriesDto>(
-        {},
+        DASHBOARD_PAGE_REQUEST,
         (pageable: PageRequest) => this.$komgaSeries.getNewSeries(requestLibraries, false, pageable),
       ) : undefined
       this.loaderRecentlyUpdatedSeries = this.hasSection(RecommendedViewSection.RECENTLY_UPDATED_SERIES) ? new PageLoader<SeriesDto>(
-        {},
+        DASHBOARD_PAGE_REQUEST,
         (pageable: PageRequest) => this.$komgaSeries.getUpdatedSeries(requestLibraries, false, pageable),
       ) : undefined
     },
-    loadAll(reload: boolean = false) {
+    async loadAll(reload: boolean = false) {
       this.loading = true
       if (this.library != undefined) document.title = `Komga - ${this.library.name}`
       this.selectedSeries = []
       this.selectedBooks = []
 
-      if (reload) {
-        Promise.all([
-          this.loaderKeepReadingBooks?.reload(),
-          this.loaderOnDeckBooks?.reload(),
-          this.loaderRecentlyReleasedBooks?.reload(),
-          this.loaderRecentlyAddedBooks?.reload(),
-          this.loaderRecentlyAddedSeries?.reload(),
-          this.loaderRecentlyUpdatedSeries?.reload(),
-          this.loaderRecentlyReadBooks?.reload(),
-        ]).then(() => {
-          this.loading = false
-        })
-      } else {
-        Promise.all([
-          this.loaderKeepReadingBooks?.loadNext(),
-          this.loaderOnDeckBooks?.loadNext(),
-          this.loaderRecentlyReleasedBooks?.loadNext(),
-          this.loaderRecentlyAddedBooks?.loadNext(),
-          this.loaderRecentlyAddedSeries?.loadNext(),
-          this.loaderRecentlyUpdatedSeries?.loadNext(),
-          this.loaderRecentlyReadBooks?.loadNext(),
-        ]).then(() => {
-          this.loading = false
-        })
+      try {
+        const loaders = this.getDashboardLoaders()
+        await Promise.all(loaders.map(loader => this.loadDashboardSection(loader, reload)))
+      } finally {
+        this.loading = false
+      }
+    },
+    getDashboardLoaders(): PageLoader<any>[] {
+      return this.sections
+        .map(section => section.loader)
+        .filter((loader): loader is PageLoader<any> => loader !== undefined)
+    },
+    async loadDashboardSection(loader: PageLoader<any>, reload: boolean) {
+      try {
+        if (reload) await loader.reload()
+        else await loader.loadNext()
+      } catch (_) {
       }
     },
     async singleEditSeries(series: SeriesDto) {

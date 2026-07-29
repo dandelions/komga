@@ -7,6 +7,7 @@ import jakarta.validation.Valid
 import org.gotson.komga.application.tasks.HIGHEST_PRIORITY
 import org.gotson.komga.application.tasks.HIGH_PRIORITY
 import org.gotson.komga.application.tasks.TaskEmitter
+import org.gotson.komga.domain.model.BookSearch
 import org.gotson.komga.domain.model.DirectoryNotFoundException
 import org.gotson.komga.domain.model.DuplicateNameException
 import org.gotson.komga.domain.model.Library
@@ -93,7 +94,7 @@ class LibraryController(
         .addLibrary(
           Library(
             name = library.name,
-            root = filePathToUrl(library.root),
+            root = library.root?.ifBlank { null }?.let { filePathToUrl(it) },
             importComicInfoBook = library.importComicInfoBook,
             importComicInfoSeries = library.importComicInfoSeries,
             importComicInfoCollection = library.importComicInfoCollection,
@@ -110,6 +111,8 @@ class LibraryController(
             scanCbx = library.scanCbx,
             scanPdf = library.scanPdf,
             scanEpub = library.scanEpub,
+            scanBypassDailyFileLimit = library.scanBypassDailyFileLimit,
+            scanOnlyNewBooks = library.scanOnlyNewBooks,
             scanDirectoryExclusions = library.scanDirectoryExclusions,
             repairExtensions = library.repairExtensions,
             convertToCbz = library.convertToCbz,
@@ -120,6 +123,7 @@ class LibraryController(
             hashKoreader = library.hashKoreader,
             analyzeDimensions = library.analyzeDimensions,
             oneshotsDirectory = library.oneshotsDirectory?.ifBlank { null },
+            parentId = library.parentId?.ifBlank { null },
           ),
         ).toDto(includeRoot = principal.user.isAdmin)
     } catch (e: Exception) {
@@ -128,6 +132,7 @@ class LibraryController(
         is DirectoryNotFoundException,
         is DuplicateNameException,
         is PathContainedInPath,
+        is IllegalArgumentException,
         ->
           throw ResponseStatusException(HttpStatus.BAD_REQUEST, e.message)
 
@@ -165,7 +170,7 @@ class LibraryController(
           existing.copy(
             id = libraryId,
             name = name ?: existing.name,
-            root = root?.let { filePathToUrl(root!!) } ?: existing.root,
+            root = if (isSet("root")) root?.ifBlank { null }?.let { filePathToUrl(it) } else existing.root,
             importComicInfoBook = importComicInfoBook ?: existing.importComicInfoBook,
             importComicInfoSeries = importComicInfoSeries ?: existing.importComicInfoSeries,
             importComicInfoCollection = importComicInfoCollection ?: existing.importComicInfoCollection,
@@ -182,6 +187,8 @@ class LibraryController(
             scanCbx = scanCbx ?: existing.scanCbx,
             scanPdf = scanPdf ?: existing.scanPdf,
             scanEpub = scanEpub ?: existing.scanEpub,
+            scanBypassDailyFileLimit = scanBypassDailyFileLimit ?: existing.scanBypassDailyFileLimit,
+            scanOnlyNewBooks = scanOnlyNewBooks ?: existing.scanOnlyNewBooks,
             scanDirectoryExclusions = if (isSet("scanDirectoryExclusions")) scanDirectoryExclusions ?: emptySet() else existing.scanDirectoryExclusions,
             repairExtensions = repairExtensions ?: existing.repairExtensions,
             convertToCbz = convertToCbz ?: existing.convertToCbz,
@@ -192,6 +199,7 @@ class LibraryController(
             hashKoreader = hashKoreader ?: existing.hashKoreader,
             analyzeDimensions = analyzeDimensions ?: existing.analyzeDimensions,
             oneshotsDirectory = if (isSet("oneshotsDirectory")) oneshotsDirectory?.ifBlank { null } else existing.oneshotsDirectory,
+            parentId = if (isSet("parentId")) parentId?.ifBlank { null } else existing.parentId,
           )
         }
       try {
@@ -202,6 +210,7 @@ class LibraryController(
           is DirectoryNotFoundException,
           is DuplicateNameException,
           is PathContainedInPath,
+          is IllegalArgumentException,
           ->
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, e.message)
 
@@ -242,15 +251,23 @@ class LibraryController(
   @Operation(summary = "Analyze a library")
   fun libraryAnalyze(
     @PathVariable libraryId: String,
+    @RequestBody(required = false) search: BookSearch? = null,
   ) {
-    val books =
-      bookRepository
-        .findAll(
-          SearchCondition.LibraryId(SearchOperator.Is(libraryId)),
-          SearchContext.empty(),
-          Pageable.unpaged(),
-        ).content
-    taskEmitter.analyzeBook(books, HIGH_PRIORITY)
+    findLeafLibrariesOrNull(libraryId)?.forEach { library ->
+      val libraryCondition = SearchCondition.LibraryId(SearchOperator.Is(library.id))
+      val condition =
+        search?.condition?.let {
+          SearchCondition.AllOfBook(libraryCondition, it)
+        } ?: libraryCondition
+      val books =
+        bookRepository
+          .findAll(
+            condition,
+            SearchContext.empty(),
+            Pageable.unpaged(),
+          ).content
+      taskEmitter.analyzeBook(books, HIGH_PRIORITY)
+    } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
   }
 
   @PostMapping("{libraryId}/metadata/refresh")
@@ -260,16 +277,18 @@ class LibraryController(
   fun libraryRefreshMetadata(
     @PathVariable libraryId: String,
   ) {
-    val books =
-      bookRepository
-        .findAll(
-          SearchCondition.LibraryId(SearchOperator.Is(libraryId)),
-          SearchContext.empty(),
-          Pageable.unpaged(),
-        ).content
-    taskEmitter.refreshBookMetadata(books, priority = HIGH_PRIORITY)
-    taskEmitter.refreshBookLocalArtwork(books, priority = HIGH_PRIORITY)
-    taskEmitter.refreshSeriesLocalArtwork(seriesRepository.findAllIdsByLibraryId(libraryId), priority = HIGH_PRIORITY)
+    findLeafLibrariesOrNull(libraryId)?.forEach { library ->
+      val books =
+        bookRepository
+          .findAll(
+            SearchCondition.LibraryId(SearchOperator.Is(library.id)),
+            SearchContext.empty(),
+            Pageable.unpaged(),
+          ).content
+      taskEmitter.refreshBookMetadata(books, priority = HIGH_PRIORITY)
+      taskEmitter.refreshBookLocalArtwork(books, priority = HIGH_PRIORITY)
+      taskEmitter.refreshSeriesLocalArtwork(seriesRepository.findAllIdsByLibraryId(library.id), priority = HIGH_PRIORITY)
+    } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
   }
 
   @PostMapping("{libraryId}/empty-trash")
@@ -279,8 +298,16 @@ class LibraryController(
   fun libraryEmptyTrash(
     @PathVariable libraryId: String,
   ) {
-    libraryRepository.findByIdOrNull(libraryId)?.let { library ->
+    findLeafLibrariesOrNull(libraryId)?.forEach { library ->
       taskEmitter.emptyTrash(library.id, HIGH_PRIORITY)
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+  }
+
+  private fun findLeafLibrariesOrNull(libraryId: String): Collection<Library>? = libraryRepository.findByIdOrNull(libraryId)?.let { findLeafLibraries(it) }
+
+  private fun findLeafLibraries(library: Library): Collection<Library> {
+    val children = libraryRepository.findAllByParentId(library.id)
+    if (children.isEmpty()) return if (library.root != null) listOf(library) else emptyList()
+    return children.flatMap { findLeafLibraries(it) }
   }
 }

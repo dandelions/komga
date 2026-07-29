@@ -11,6 +11,8 @@ interface LibraryRepository {
 
   fun findAllByIds(libraryIds: Collection<String>): Collection<Library>
 
+  fun findAllByParentId(parentId: String): Collection<Library>
+
   fun delete(libraryId: String)
 
   fun deleteAll()

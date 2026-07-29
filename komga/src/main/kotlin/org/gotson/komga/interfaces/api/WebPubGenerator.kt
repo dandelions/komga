@@ -128,19 +128,37 @@ class WebPubGenerator(
     seriesMetadata: SeriesMetadata,
   ): WPPublicationDto {
     val uriBuilder = ServletUriComponentsBuilder.fromCurrentContextPath().pathSegment(*pathSegments.toTypedArray())
+    val syntheticPages = if (media.mediaType == KomgaMediaType.PDF.type) emptyList() else bookAnalyzer.getPdfPagesDynamic(media)
+
     return toBasePublicationDto(bookDto).let {
       it.copy(
         mediaType = MEDIATYPE_WEBPUB_JSON,
         metadata = it.metadata.withSeriesMetadata(seriesMetadata).copy(conformsTo = PROFILE_PDF),
         readingOrder =
-          List(media.pageCount) { index: Int ->
-            WPLinkDto(
-              href = uriBuilder.cloneBuilder().path("books/${bookDto.id}/pages/${index + 1}/raw").toUriString(),
-              type = KomgaMediaType.PDF.type,
-            )
+          if (media.mediaType == KomgaMediaType.PDF.type) {
+            List(media.pageCount) { index: Int ->
+              WPLinkDto(
+                href = uriBuilder.cloneBuilder().path("books/${bookDto.id}/pages/${index + 1}/raw").toUriString(),
+                type = KomgaMediaType.PDF.type,
+              )
+            }
+          } else {
+            syntheticPages.mapIndexed { index: Int, page: BookPage ->
+              WPLinkDto(
+                href =
+                  uriBuilder
+                    .cloneBuilder()
+                    .path("books/${bookDto.id}/pages/${index + 1}")
+                    .queryParam("contentNegotiation", "false")
+                    .toUriString(),
+                type = page.mediaType,
+                width = page.dimension?.width,
+                height = page.dimension?.height,
+              )
+            }
           },
         resources = buildThumbnailLinkDtos(bookDto.id),
-        toc = bookAnalyzer.getPdfToc(book).map { entry -> entry.toWPLinkDto(uriBuilder.cloneBuilder(), bookDto.id) },
+        toc = bookAnalyzer.getPdfToc(book, media.mediaType).map { entry -> entry.toWPLinkDto(uriBuilder.cloneBuilder(), bookDto.id, media.mediaType, syntheticPages) },
       )
     }
   }
@@ -217,12 +235,25 @@ class WebPubGenerator(
   private fun PdfTocEntry.toWPLinkDto(
     uriBuilder: UriComponentsBuilder,
     bookId: String,
+    mediaType: String?,
+    pages: List<BookPage>,
   ): WPLinkDto =
     WPLinkDto(
       title = title,
-      href = pageNumber?.let { uriBuilder.cloneBuilder().path("books/$bookId/pages/$it/raw").toUriString() },
-      type = pageNumber?.let { KomgaMediaType.PDF.type },
-      children = children.map { it.toWPLinkDto(uriBuilder, bookId) },
+      href =
+        pageNumber?.let {
+          if (mediaType == KomgaMediaType.PDF.type) {
+            uriBuilder.cloneBuilder().path("books/$bookId/pages/$it/raw").toUriString()
+          } else {
+            uriBuilder
+              .cloneBuilder()
+              .path("books/$bookId/pages/$it")
+              .queryParam("contentNegotiation", "false")
+              .toUriString()
+          }
+        },
+      type = pageNumber?.let { if (mediaType == KomgaMediaType.PDF.type) KomgaMediaType.PDF.type else pages.getOrNull(it - 1)?.mediaType },
+      children = children.map { it.toWPLinkDto(uriBuilder, bookId, mediaType, pages) },
     )
 
   protected fun toWPMetadataDto(bookDto: BookDto) =

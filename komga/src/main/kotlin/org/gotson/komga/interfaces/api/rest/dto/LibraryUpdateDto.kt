@@ -12,7 +12,10 @@ class LibraryUpdateDto {
   val name: String? = null
 
   @get:NullOrNotBlank
-  val root: String? = null
+  var root: String?
+    by Delegates.observable(null) { prop, _, _ ->
+      isSet[prop.name] = true
+    }
 
   val importComicInfoBook: Boolean? = null
   val importComicInfoSeries: Boolean? = null
@@ -31,6 +34,8 @@ class LibraryUpdateDto {
   val scanCbx: Boolean? = null
   val scanPdf: Boolean? = null
   val scanEpub: Boolean? = null
+  val scanBypassDailyFileLimit: Boolean? = null
+  val scanOnlyNewBooks: Boolean? = null
   var scanDirectoryExclusions: Set<String>?
     by Delegates.observable(null) { prop, _, _ ->
       isSet[prop.name] = true
@@ -45,6 +50,11 @@ class LibraryUpdateDto {
   val hashKoreader: Boolean? = null
   val analyzeDimensions: Boolean? = null
   var oneshotsDirectory: String?
+    by Delegates.observable(null) { prop, _, _ ->
+      isSet[prop.name] = true
+    }
+
+  var parentId: String?
     by Delegates.observable(null) { prop, _, _ ->
       isSet[prop.name] = true
     }

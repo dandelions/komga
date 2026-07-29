@@ -6,11 +6,17 @@ const vuexModule: Module<any, any> = {
   state: {
     taskCount: 0,
     taskCountByType: {} as { [key: string]: number },
+    readyTaskCountByType: {} as { [key: string]: number },
+    runningTaskCountByType: {} as { [key: string]: number },
+    libraryScanDailyFileLimitUsage: undefined,
   },
   mutations: {
     setTaskCount (state, event) {
       state.taskCount = event.count
       state.taskCountByType = event.countByType
+      state.readyTaskCountByType = event.readyCountByType || {}
+      state.runningTaskCountByType = event.runningCountByType || {}
+      state.libraryScanDailyFileLimitUsage = event.libraryScanDailyFileLimitUsage
     },
   },
 }

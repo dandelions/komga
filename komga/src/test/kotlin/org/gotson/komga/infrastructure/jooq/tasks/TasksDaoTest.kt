@@ -6,6 +6,7 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
+import java.time.LocalDateTime
 
 @SpringBootTest
 class TasksDaoTest(
@@ -90,6 +91,38 @@ class TasksDaoTest(
 
     // then
     assertThat(task).isNull()
+  }
+
+  @Test
+  fun `given future available task when taking first then it is not returned before available date`() {
+    // given
+    val task = Task.ScanLibrary("library1", false, 2, continuationDate = "2099-01-01")
+    tasksDao.save(task, LocalDateTime.now().plusDays(1))
+
+    // when
+    val available = tasksDao.hasAvailable()
+    val taken = tasksDao.takeFirst()
+
+    // then
+    assertThat(available).isFalse
+    assertThat(taken).isNull()
+    assertThat(tasksDao.findAll()).hasSize(1)
+  }
+
+  @Test
+  fun `given past available task when taking first then it is returned`() {
+    // given
+    val task = Task.ScanLibrary("library1", false, 2, continuationDate = "2000-01-01")
+    tasksDao.save(task, LocalDateTime.now().minusDays(1))
+
+    // when
+    val taken = tasksDao.takeFirst()
+
+    // then
+    assertThat(taken)
+      .isInstanceOf(Task.ScanLibrary::class.java)
+      .hasFieldOrPropertyWithValue("libraryId", task.libraryId)
+      .hasFieldOrPropertyWithValue("continuationDate", task.continuationDate)
   }
 
   @Test
@@ -274,6 +307,28 @@ class TasksDaoTest(
   }
 
   @Test
+  fun `given running task replaced when deleting by previous owner then replacement remains queued`() {
+    // given
+    val task1 = Task.AnalyzeBook("book1", 0, "group1")
+    val task2 = Task.AnalyzeBook("book1", 5, "group1")
+    tasksDao.save(task1)
+    tasksDao.takeFirst("thread1")
+
+    // when
+    tasksDao.deleteAll()
+    tasksDao.save(task2)
+    val deleted = tasksDao.delete(task1.uniqueId, "thread1")
+
+    // then
+    assertThat(deleted).isEqualTo(0)
+    assertThat(tasksDao.findAll()).hasSize(1)
+    assertThat(tasksDao.findAllGroupedByOwner().keys).containsExactly(null)
+    assertThat(tasksDao.takeFirst("thread2"))
+      .isInstanceOf(Task.AnalyzeBook::class.java)
+      .hasFieldOrPropertyWithValue("priority", task2.priority)
+  }
+
+  @Test
   fun `given a single task with owner when counting tasks then the count is 1`() {
     // given
     tasksDao.save(Task.HashBookPages("book1", 5))
@@ -286,5 +341,77 @@ class TasksDaoTest(
     // then
     assertThat(count).isEqualTo(1)
     assertThat(countByType.values.sum()).isEqualTo(1)
+  }
+
+  @Test
+  fun `given future task when counting ready or running tasks then future task is ignored`() {
+    // given
+    tasksDao.save(Task.HashBookPages("book1", 5))
+    tasksDao.save(
+      Task.ScanLibrary("library1", false, 2, continuationDate = "2099-01-01"),
+      LocalDateTime.now().plusDays(1),
+    )
+    tasksDao.takeFirst()
+
+    // when
+    val count = tasksDao.count()
+    val countByType = tasksDao.countReadyOrRunningBySimpleType()
+
+    // then
+    assertThat(count).isEqualTo(2)
+    assertThat(countByType.values.sum()).isEqualTo(1)
+    assertThat(countByType).containsEntry("HashBookPages", 1)
+    assertThat(countByType).doesNotContainKey("ScanLibrary")
+  }
+
+  @Test
+  fun `given future scan library task when making future scan tasks available then task is ready`() {
+    // given
+    tasksDao.save(Task.HashBookPages("book1", 5), LocalDateTime.now().plusDays(1))
+    tasksDao.save(
+      Task.ScanLibrary("library1", false, 2, continuationDate = "2099-01-01"),
+      LocalDateTime.now().plusDays(1),
+    )
+
+    // when
+    val updated = tasksDao.makeFutureScanLibraryTasksAvailable()
+    val countByType = tasksDao.countReadyBySimpleType()
+
+    // then
+    assertThat(updated).isEqualTo(1)
+    assertThat(countByType).containsEntry("ScanLibrary", 1)
+    assertThat(countByType).doesNotContainKey("HashBookPages")
+  }
+
+  @Test
+  fun `given ready and running tasks when counting by status then tasks are grouped by owner`() {
+    // given
+    tasksDao.save(Task.HashBookPages("book1", 5))
+    tasksDao.save(Task.HashBook("book2", 4))
+    tasksDao.takeFirst()
+
+    // when
+    val readyCountByType = tasksDao.countReadyBySimpleType()
+    val runningCountByType = tasksDao.countRunningBySimpleType()
+
+    // then
+    assertThat(readyCountByType).containsEntry("HashBook", 1)
+    assertThat(readyCountByType).doesNotContainKey("HashBookPages")
+    assertThat(runningCountByType).containsEntry("HashBookPages", 1)
+    assertThat(runningCountByType).doesNotContainKey("HashBook")
+  }
+
+  @Test
+  fun `given owned tasks when deleting all tasks then owned tasks are deleted too`() {
+    // given
+    tasksDao.save(Task.HashBookPages("book1", 5))
+    tasksDao.takeFirst()
+
+    // when
+    val deleted = tasksDao.deleteAll()
+
+    // then
+    assertThat(deleted).isEqualTo(1)
+    assertThat(tasksDao.count()).isEqualTo(0)
   }
 }

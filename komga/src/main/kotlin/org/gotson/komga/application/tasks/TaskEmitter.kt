@@ -11,18 +11,22 @@ import org.gotson.komga.domain.model.SearchCondition
 import org.gotson.komga.domain.model.SearchContext
 import org.gotson.komga.domain.model.SearchOperator
 import org.gotson.komga.domain.persistence.BookRepository
+import org.gotson.komga.domain.persistence.MediaRepository
 import org.gotson.komga.domain.service.BookConverter
+import org.gotson.komga.infrastructure.configuration.LibraryScanDailyFileLimitTime
 import org.gotson.komga.infrastructure.jooq.UnpagedSorted
 import org.gotson.komga.infrastructure.search.LuceneEntity
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
+import java.time.LocalDateTime
 
 private val logger = KotlinLogging.logger {}
 
 @Service
 class TaskEmitter(
   private val bookRepository: BookRepository,
+  private val mediaRepository: MediaRepository,
   private val bookConverter: BookConverter,
   private val tasksRepository: TasksRepository,
   private val eventPublisher: ApplicationEventPublisher,
@@ -35,6 +39,17 @@ class TaskEmitter(
     submitTask(Task.ScanLibrary(libraryId, scanDeep, priority))
   }
 
+  fun scanLibraryTomorrow(
+    libraryId: String,
+    scanDeep: Boolean = false,
+    priority: Int = DEFAULT_PRIORITY,
+  ) {
+    val tomorrow = LibraryScanDailyFileLimitTime.nextResetDate()
+    val availableAt = LibraryScanDailyFileLimitTime.nextResetAtUtc()
+
+    submitTask(Task.ScanLibrary(libraryId, scanDeep, priority, continuationDate = tomorrow.toString()), availableAt)
+  }
+
   fun emptyTrash(
     libraryId: String,
     priority: Int = DEFAULT_PRIORITY,
@@ -42,20 +57,96 @@ class TaskEmitter(
     submitTask(Task.EmptyTrash(libraryId, priority))
   }
 
-  fun analyzeUnknownAndOutdatedBooks(library: Library) {
+  fun analyzeUnknownAndOutdatedBooks(
+    library: Library,
+    priority: Int = DEFAULT_PRIORITY,
+  ) {
+    analyzeBooks(library, setOf(Media.Status.UNKNOWN, Media.Status.OUTDATED), priority)
+  }
+
+  fun analyzeUnknownOutdatedAndErrorBooks(
+    library: Library,
+    priority: Int = DEFAULT_PRIORITY,
+  ) {
+    analyzeBooks(library, setOf(Media.Status.UNKNOWN, Media.Status.OUTDATED, Media.Status.ERROR), priority)
+  }
+
+  fun analyzeUnknownBooks(
+    library: Library,
+    priority: Int = DEFAULT_PRIORITY,
+  ) {
+    analyzeBooks(library, setOf(Media.Status.UNKNOWN), priority)
+  }
+
+  private fun analyzeBooks(
+    library: Library,
+    statuses: Set<Media.Status>,
+    priority: Int,
+  ) {
+    val statusConditions = statuses.map { SearchCondition.MediaStatus(SearchOperator.Is(it)) }
+    val mediaStatusCondition: SearchCondition.Book =
+      if (statusConditions.size == 1) {
+        statusConditions.first()
+      } else {
+        SearchCondition.AnyOfBook(statusConditions)
+      }
+
     bookRepository
       .findAll(
         SearchCondition.AllOfBook(
           SearchCondition.LibraryId(SearchOperator.Is(library.id)),
-          SearchCondition.AnyOfBook(
-            SearchCondition.MediaStatus(SearchOperator.Is(Media.Status.UNKNOWN)),
-            SearchCondition.MediaStatus(SearchOperator.Is(Media.Status.OUTDATED)),
-          ),
+          SearchCondition.Deleted(SearchOperator.IsFalse),
+          mediaStatusCondition,
         ),
         SearchContext.empty(),
         UnpagedSorted(Sort.by(Sort.Order.asc("seriesId"), Sort.Order.asc("number"))),
       ).content
-      .map { Task.AnalyzeBook(it.id, groupId = it.seriesId) }
+      .map { Task.AnalyzeBook(it.id, priority, it.seriesId) }
+      .let { submitTasks(it) }
+  }
+
+  fun analyzeUnknownAndOutdatedBooks(
+    bookIds: Collection<String>,
+    priority: Int = DEFAULT_PRIORITY,
+  ) {
+    analyzeBooks(bookIds, setOf(Media.Status.UNKNOWN, Media.Status.OUTDATED), priority)
+  }
+
+  fun analyzeUnknownOutdatedAndErrorBooks(
+    bookIds: Collection<String>,
+    priority: Int = DEFAULT_PRIORITY,
+  ) {
+    analyzeBooks(bookIds, setOf(Media.Status.UNKNOWN, Media.Status.OUTDATED, Media.Status.ERROR), priority)
+  }
+
+  fun analyzeUnknownBooks(
+    bookIds: Collection<String>,
+    priority: Int = DEFAULT_PRIORITY,
+  ) {
+    analyzeBooks(bookIds, setOf(Media.Status.UNKNOWN), priority)
+  }
+
+  private fun analyzeBooks(
+    bookIds: Collection<String>,
+    statuses: Set<Media.Status>,
+    priority: Int,
+  ) {
+    bookIds
+      .mapNotNull { bookRepository.findByIdOrNull(it) }
+      .filterNot { it.deletedDate != null }
+      .mapNotNull { book ->
+        mediaRepository.findByIdOrNull(book.id)?.let { media -> book to media }
+      }.filter { (_, media) -> statuses.contains(media.status) }
+      .sortedWith(
+        compareBy<Pair<Book, Media>> {
+          when (it.second.status) {
+            Media.Status.UNKNOWN -> 0
+            Media.Status.OUTDATED -> 1
+            else -> 2
+          }
+        }.thenBy { it.first.seriesId }
+          .thenBy { it.first.number },
+      ).map { (book, _) -> Task.AnalyzeBook(book.id, priority, book.seriesId) }
       .let { submitTasks(it) }
   }
 
@@ -146,6 +237,10 @@ class TaskEmitter(
     book: Book,
     priority: Int = DEFAULT_PRIORITY,
   ) {
+    if (book.deletedDate != null) {
+      logger.info { "Skipping analysis task for deleted book: $book" }
+      return
+    }
     submitTask(Task.AnalyzeBook(book.id, priority, book.seriesId))
   }
 
@@ -154,6 +249,7 @@ class TaskEmitter(
     priority: Int = DEFAULT_PRIORITY,
   ) {
     books
+      .filterNot { it.deletedDate != null }
       .map { Task.AnalyzeBook(it.id, priority, it.seriesId) }
       .let { submitTasks(it) }
   }
@@ -281,9 +377,12 @@ class TaskEmitter(
     submitTask(Task.FindBookThumbnailsToRegenerate(forBiggerResultOnly, priority))
   }
 
-  private fun submitTask(task: Task) {
+  private fun submitTask(
+    task: Task,
+    availableDate: LocalDateTime? = null,
+  ) {
     logger.info { "Sending task: $task" }
-    tasksRepository.save(task)
+    tasksRepository.save(task, availableDate)
     eventPublisher.publishEvent(TaskAddedEvent)
   }
 

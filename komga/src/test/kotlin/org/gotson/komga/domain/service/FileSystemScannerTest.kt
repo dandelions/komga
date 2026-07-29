@@ -69,6 +69,75 @@ class FileSystemScannerTest {
   }
 
   @Test
+  fun `given max counted books when scanning then stop before exceeding counted book limit`() {
+    Jimfs.newFileSystem(Configuration.unix()).use { fs ->
+      // given
+      val root = fs.getPath("/root")
+      Files.createDirectory(root)
+
+      listOf("file1.cbz", "file2.cbz").forEach { Files.createFile(root.resolve(it)) }
+
+      // when
+      val scanResult = scanner.scanRootFolder(root, maxCountedBooks = 1)
+
+      // then
+      assertThat(scanResult.limited).isTrue
+      assertThat(scanResult.countedBookCount).isEqualTo(1)
+      assertThat(scanResult.scannedBookCount).isEqualTo(1)
+    }
+  }
+
+  @Test
+  fun `given max counted books when scanning then uncounted books do not consume the limit`() {
+    Jimfs.newFileSystem(Configuration.unix()).use { fs ->
+      // given
+      val root = fs.getPath("/root")
+      Files.createDirectory(root)
+
+      listOf("unchanged.cbz", "changed.cbz").forEach { Files.createFile(root.resolve(it)) }
+
+      // when
+      val scanResult = scanner.scanRootFolder(root, maxCountedBooks = 1, countBook = { book -> book.name == "changed" })
+
+      // then
+      assertThat(scanResult.limited).isFalse
+      assertThat(scanResult.countedBookCount).isEqualTo(1)
+      assertThat(scanResult.scannedBookCount).isEqualTo(2)
+      val scannedNames =
+        scanResult.series
+          .values
+          .flatten()
+          .map { it.name }
+      assertThat(scannedNames).containsExactlyInAnyOrder("unchanged", "changed")
+    }
+  }
+
+  @Test
+  fun `given counted book cannot be consumed when scanning then stop before adding it`() {
+    Jimfs.newFileSystem(Configuration.unix()).use { fs ->
+      // given
+      val root = fs.getPath("/root")
+      Files.createDirectory(root)
+
+      listOf("file1.cbz", "file2.cbz").forEach { Files.createFile(root.resolve(it)) }
+      var consumedBooks = 0
+
+      // when
+      val scanResult =
+        scanner.scanRootFolder(
+          root,
+          maxCountedBooks = 10,
+          consumeCountedBook = { consumedBooks++ == 0 },
+        )
+
+      // then
+      assertThat(scanResult.limited).isTrue
+      assertThat(scanResult.countedBookCount).isEqualTo(1)
+      assertThat(scanResult.scannedBookCount).isEqualTo(1)
+    }
+  }
+
+  @Test
   fun `given root directory as filesystem root when scanning then return 1 series containing those files as books`() {
     Jimfs.newFileSystem(Configuration.unix()).use { fs ->
       // given
@@ -144,15 +213,15 @@ class FileSystemScannerTest {
   }
 
   private fun libraryScanFileTypesArguments(): Stream<Arguments> {
-    val sourceFiles = listOf("cbz.cbz", "cbr.cbr", "zip.zip", "rar.rar", "pdf.pdf", "epub.epub")
+    val sourceFiles = listOf("cbz.cbz", "cbr.cbr", "zip.zip", "rar.rar", "pdf.pdf", "djvu.djvu", "djv.djv", "epub.epub", "mobi.mobi", "azw3.azw3")
     return Stream.of(
-      Arguments.of(sourceFiles, true, true, true, listOf("cbz", "cbr", "zip", "rar", "pdf", "epub")),
-      Arguments.of(sourceFiles, false, true, true, listOf("pdf", "epub")),
-      Arguments.of(sourceFiles, true, false, true, listOf("cbz", "cbr", "zip", "rar", "epub")),
-      Arguments.of(sourceFiles, true, true, false, listOf("cbz", "cbr", "zip", "rar", "pdf")),
-      Arguments.of(sourceFiles, false, false, true, listOf("epub")),
+      Arguments.of(sourceFiles, true, true, true, listOf("cbz", "cbr", "zip", "rar", "pdf", "djvu", "djv", "epub", "mobi", "azw3")),
+      Arguments.of(sourceFiles, false, true, true, listOf("pdf", "djvu", "djv", "epub", "mobi", "azw3")),
+      Arguments.of(sourceFiles, true, false, true, listOf("cbz", "cbr", "zip", "rar", "epub", "mobi", "azw3")),
+      Arguments.of(sourceFiles, true, true, false, listOf("cbz", "cbr", "zip", "rar", "pdf", "djvu", "djv")),
+      Arguments.of(sourceFiles, false, false, true, listOf("epub", "mobi", "azw3")),
       Arguments.of(sourceFiles, true, false, false, listOf("cbz", "cbr", "zip", "rar")),
-      Arguments.of(sourceFiles, false, true, false, listOf("pdf")),
+      Arguments.of(sourceFiles, false, true, false, listOf("pdf", "djvu", "djv")),
       Arguments.of(sourceFiles, false, false, false, emptyList<String>()),
     )
   }
@@ -298,6 +367,26 @@ class FileSystemScannerTest {
 
       assertThat(scan.keys.map { it.name }).containsExactlyInAnyOrder("dir1", "subdir1")
       assertThat(scan.values.flatMap { list -> list.map { it.name } }).containsExactlyInAnyOrder("comic", "comic2")
+    }
+  }
+
+  @Test
+  fun `given excluded paths when scanning then excluded files and subtrees are not returned`() {
+    Jimfs.newFileSystem(Configuration.unix()).use { fs ->
+      val root = fs.getPath("/root")
+      Files.createDirectory(root)
+      val included = makeSubDir(root, "included", listOf("keep.cbz", "skip.cbz"))
+      val excluded = makeSubDir(root, "excluded", listOf("hidden.cbz"))
+
+      val scan =
+        scanner
+          .scanRootFolder(
+            root,
+            excludedPaths = setOf(included.resolve("skip.cbz"), excluded),
+          ).series
+
+      assertThat(scan.keys.map { it.name }).containsExactly("included")
+      assertThat(scan.values.flatten().map { it.name }).containsExactly("keep")
     }
   }
 

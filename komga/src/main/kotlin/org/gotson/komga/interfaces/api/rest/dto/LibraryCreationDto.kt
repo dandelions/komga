@@ -4,7 +4,7 @@ import jakarta.validation.constraints.NotBlank
 
 data class LibraryCreationDto(
   @get:NotBlank val name: String,
-  @get:NotBlank val root: String,
+  val root: String? = null,
   val importComicInfoBook: Boolean = true,
   val importComicInfoSeries: Boolean = true,
   val importComicInfoCollection: Boolean = true,
@@ -21,6 +21,8 @@ data class LibraryCreationDto(
   val scanCbx: Boolean = true,
   val scanPdf: Boolean = true,
   val scanEpub: Boolean = true,
+  val scanBypassDailyFileLimit: Boolean = false,
+  val scanOnlyNewBooks: Boolean = false,
   val scanDirectoryExclusions: Set<String> = emptySet(),
   val repairExtensions: Boolean = false,
   val convertToCbz: Boolean = false,
@@ -31,4 +33,5 @@ data class LibraryCreationDto(
   val hashKoreader: Boolean = false,
   val analyzeDimensions: Boolean = true,
   val oneshotsDirectory: String? = null,
+  val parentId: String? = null,
 )

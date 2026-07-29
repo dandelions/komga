@@ -16,6 +16,10 @@
         <v-list-item @click="confirmAnalyzeModal = true" v-if="isAdmin">
           <v-list-item-title>{{ $t('menu.analyze') }}</v-list-item-title>
         </v-list-item>
+        <v-list-item v-if="isAdmin" @click="toggleIncludeChildren">
+          <v-list-item-action><v-checkbox :input-value="includeChildren" hide-details @click.stop="toggleIncludeChildren"/></v-list-item-action>
+          <v-list-item-title>{{ $t('menu.include_child_libraries') }}</v-list-item-title>
+        </v-list-item>
         <v-list-item @click="confirmRefreshMetadataModal = true" v-if="isAdmin">
           <v-list-item-title>{{ $t('menu.refresh_metadata') }}</v-list-item-title>
         </v-list-item>
@@ -63,6 +67,7 @@
 import Vue from 'vue'
 import ConfirmationDialog from '@/components/dialogs/ConfirmationDialog.vue'
 import {LibraryDto} from '@/types/komga-libraries'
+import {BookSearch} from '@/types/komga-search'
 
 export default Vue.extend({
   name: 'LibraryActionsMenu',
@@ -72,12 +77,17 @@ export default Vue.extend({
       type: Object as () => LibraryDto,
       required: true,
     },
+    analyzeSearch: {
+      type: Object as () => BookSearch | undefined,
+      required: false,
+    },
   },
   data: () => {
     return {
       confirmAnalyzeModal: false,
       confirmRefreshMetadataModal: false,
       confirmEmptyTrash: false,
+      includeChildren: false,
     }
   },
   computed: {
@@ -85,12 +95,36 @@ export default Vue.extend({
       return this.$store.getters.meAdmin
     },
   },
+  mounted() {
+    this.loadIncludeChildren()
+  },
+  watch: {
+    library() {
+      this.loadIncludeChildren()
+    },
+  },
   methods: {
+    loadIncludeChildren() {
+      this.includeChildren = localStorage.getItem(`komga.includeChildLibraries.${this.library.id}`) === 'true'
+    },
+    toggleIncludeChildren() {
+      this.includeChildren = !this.includeChildren
+      localStorage.setItem(`komga.includeChildLibraries.${this.library.id}`, `${this.includeChildren}`)
+    },
+    childLibraries(): LibraryDto[] {
+      const all = this.$store.getters.getLibraries as LibraryDto[]
+      const result: LibraryDto[] = []
+      const visit = (id: string) => all.filter(l => l.parentId === id).forEach(l => { result.push(l); visit(l.id) })
+      visit(this.library.id)
+      return result
+    },
     scan(scanDeep: boolean) {
-      this.$komgaLibraries.scanLibrary(this.library, scanDeep)
+      const libraries = this.includeChildren ? [this.library, ...this.childLibraries()] : [this.library]
+      libraries.forEach(library => this.$komgaLibraries.scanLibrary(library, scanDeep))
     },
     analyze() {
-      this.$komgaLibraries.analyzeLibrary(this.library)
+      const libraries = this.includeChildren ? [this.library, ...this.childLibraries()] : [this.library]
+      libraries.forEach(library => this.$komgaLibraries.analyzeLibrary(library, this.analyzeSearch))
     },
     refreshMetadata() {
       this.$komgaLibraries.refreshMetadata(this.library)

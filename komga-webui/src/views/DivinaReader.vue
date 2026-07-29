@@ -47,7 +47,7 @@
           </v-btn>
 
           <v-btn
-            v-if="$vuetify.breakpoint.mdAndUp"
+            v-if="isPdf && $vuetify.breakpoint.mdAndUp"
             icon
             :disabled="continuousReader"
             :title="landscapeDisplay ? 'Portrait' : 'Landscape'"
@@ -57,13 +57,13 @@
           </v-btn>
 
           <v-btn
-            v-if="$vuetify.breakpoint.mdAndUp"
+            v-if="isPdf && $vuetify.breakpoint.mdAndUp"
             icon
             :disabled="continuousReader"
             title="Reflow"
             @click="toggleReflowMode"
           >
-            <v-icon>{{ reflowMode ? 'mdi-file-document' : 'mdi-file-document-outline' }}</v-icon>
+            <v-icon>{{ reflowMode || reflowSetupMode ? 'mdi-file-document' : 'mdi-file-document-outline' }}</v-icon>
           </v-btn>
 
           <v-btn
@@ -111,9 +111,9 @@
                   </v-list-item-icon>
                   <v-list-item-title>{{ landscapeDisplay ? 'Portrait' : 'Landscape' }}</v-list-item-title>
                 </v-list-item>
-                <v-list-item :disabled="continuousReader" @click="toggleReflowMode">
+                <v-list-item v-if="isPdf" :disabled="continuousReader" @click="toggleReflowMode">
                   <v-list-item-icon>
-                    <v-icon>{{ reflowMode ? 'mdi-file-document' : 'mdi-file-document-outline' }}</v-icon>
+                    <v-icon>{{ reflowMode || reflowSetupMode ? 'mdi-file-document' : 'mdi-file-document-outline' }}</v-icon>
                   </v-list-item-icon>
                   <v-list-item-title>Reflow</v-list-item-title>
                 </v-list-item>
@@ -209,60 +209,165 @@
       :class="{'reader-frame-landscape': landscapeDisplay && !continuousReader}"
     >
       <div
-        v-if="reflowMode && !continuousReader"
+        v-if="isPdf && k2ReflowMode && !continuousReader"
         class="reflow-reader"
+        v-touch="reflowTouchHandlers"
       >
-        <reflowed-page
+        <k2-reflowed-page
+          ref="k2ReflowedPage"
           :page="currentPage"
           :target-width="reflowTargetWidth"
-          :options="reflowOptions"
-          :cached-items="cachedReflowItems(currentPage)"
-          :cache-key="reflowCacheKey"
-          @text-scale-change="setReflowTextScale"
-          @column-count-change="setReflowColumnCount"
-          @stroke-strength-change="setReflowStrokeStrength"
-          @block-spacing-change="setReflowBlockSpacing"
+          :rotation="readerRotation"
+          :start-at-end="k2ReflowStartAtEnd"
+          :crop-rois-by-parity="reflowSettings.cropRoisByParity"
+          :settings="reflowSettings.k2Settings"
+          :night-display="nightDisplay"
+          @exit-k2-reflow="exitK2ReflowMode"
+          @source-previous="k2SourcePreviousPage"
+          @source-next="k2SourceNextPage"
           @crop-mode-change="setReflowCropMode"
-          @exit-reflow="exitReflowMode"
-          @reflowed="cacheReflowPage"
-        />
-        <reflowed-page
-          v-if="prefetchReflowPage"
-          class="reflow-prefetch"
-          :page="prefetchReflowPage"
-          :target-width="reflowTargetWidth"
-          :options="reflowOptions"
-          :cached-items="cachedReflowItems(prefetchReflowPage)"
-          :cache-key="reflowCacheKey"
-          preload
-          @reflowed="cacheReflowPage"
+          @crop-rois-change="setReflowCropRois"
+          @settings-change="setK2ReflowSettings"
+          @rotation-change="setReaderRotation"
+          @page-image-transfer="recordReflowAssetTransfer"
+          @show-pdf-toc="openPdfToc"
+          @toggle-night-display="toggleNightDisplay"
+          @back-to-book="closeBook"
         />
 
         <div
           v-if="!reflowCropMode"
-          @click="reflowPreviousPage"
-          class="reflow-click-top"
+          @click="reflowOutsideNavigateLeftSide"
+          class="reflow-click-left"
+          :style="reflowClickLayerStyle"
         />
         <div
           v-if="!reflowCropMode"
-          @click="reflowNextPage"
-          class="reflow-click-bottom"
+          @click="reflowOutsideNavigateRightSide"
+          class="reflow-click-right"
+          :style="reflowClickLayerStyle"
         />
         <div
           v-if="!reflowCropMode"
-          @click="toggleToolbars()"
+          @click="reflowOutsideCenterClick"
           class="reflow-click-center"
+          :style="reflowClickLayerStyle"
+        />
+      </div>
+
+      <div
+        v-else-if="isPdf && (reflowMode || reflowSetupMode) && !continuousReader"
+        class="reflow-reader"
+        v-touch="reflowTouchHandlers"
+      >
+        <reflowed-page
+          ref="reflowedPage"
+          :page="reflowRootPageDto"
+          :target-width="reflowTargetWidth"
+          :rotation="readerRotation"
+          :options="reflowOptions"
+          :cached-items="cachedReflowItems(reflowRootPageDto)"
+          :cached-page-background="cachedReflowBackground(reflowRootPageDto)"
+          :cached-transfer-stats="cachedReflowTransferStats(reflowRootPageDto)"
+          :session-transfer-bytes="reflowSessionTransferBytes"
+          :session-reflow-transfer-bytes="reflowSessionResponseTransferBytes"
+          :session-original-transfer-bytes="reflowSessionOriginalTransferBytes"
+          :continuation-pages="reflowContinuationPages"
+          :cache-key="reflowCacheKey"
+          :night-display="nightDisplay"
+          :server-reflow="reflowSettings.processingMode === 'server'"
+          :server-reflow-url="reflowPageUrl(reflowRootPageDto)"
+          :controls-top-offset="reflowControlsTopOffset"
+          :start-at-end="reflowStartAtEnd"
+          :defer-reflow="reflowSetupMode"
+          @text-scale-change="setReflowTextScale"
+          @processing-mode-change="setReflowProcessingMode"
+          @column-count-change="setReflowColumnCount"
+          @skew-correction-change="setReflowSkewCorrection"
+          @auto-skew-correction-change="setReflowAutoSkewCorrection"
+          @vertical-text-change="setReflowVerticalText"
+          @vertical-direction-change="setReflowVerticalDirection"
+          @stroke-strength-change="setReflowStrokeStrength"
+          @image-quality-change="setReflowImageQuality"
+          @contrast-enhancement-change="setReflowContrastEnhancement"
+          @match-background-change="setReflowMatchBackground"
+          @match-background-mode-change="setReflowMatchBackgroundMode"
+          @block-spacing-change="setReflowBlockSpacing"
+          @rotation-change="setReaderRotation"
+          @crop-mode-change="setReflowCropMode"
+          @crop-rois-change="setReflowCropRois"
+          @manual-image-rois-change="setReflowManualImageRois"
+          @deskew-analysis-rois-change="setReflowDeskewAnalysisRois"
+          @start-reflow="startReflowMode"
+          @force-reflow="forceCurrentReflow"
+          @exit-reflow="exitReflowMode"
+          @reflowed="cacheReflowPage"
+          @page-image-transfer="recordReflowAssetTransfer"
+          @visible-source-page-change="setReflowVisiblePage"
+          @source-previous="reflowSourcePreviousPage"
+          @source-next="reflowSourceNextPage"
+          @show-pdf-toc="openPdfToc"
+          @toggle-night-display="toggleNightDisplay"
+          @toggle-reader-toolbar="toggleToolbars"
+          @back-to-book="closeBook"
+        />
+        <reflowed-page
+          v-for="prefetchPage in prefetchReflowPages"
+          :key="`reflow-prefetch-${prefetchPage.number}-${reflowCacheKey}`"
+          class="reflow-prefetch"
+          :page="prefetchPage"
+          :target-width="reflowTargetWidth"
+          :rotation="readerRotation"
+          :options="reflowOptions"
+          :cached-items="cachedReflowItems(prefetchPage)"
+          :cached-page-background="cachedReflowBackground(prefetchPage)"
+          :cached-transfer-stats="cachedReflowTransferStats(prefetchPage)"
+          :cache-key="reflowCacheKey"
+          :night-display="nightDisplay"
+          :server-reflow="reflowSettings.processingMode === 'server'"
+          :server-reflow-url="reflowPageUrl(prefetchPage)"
+          :controls-top-offset="0"
+          preload
+          @reflowed="cacheReflowPage"
+          @page-image-transfer="recordReflowAssetTransfer"
+        />
+
+        <div
+          v-if="reflowMode && !reflowCropMode"
+          @click="reflowOutsideNavigateLeftSide"
+          class="reflow-click-left"
+          :style="reflowClickLayerStyle"
+        />
+        <div
+          v-if="reflowMode && !reflowCropMode"
+          @click="reflowOutsideNavigateRightSide"
+          class="reflow-click-right"
+          :style="reflowClickLayerStyle"
+        />
+        <div
+          v-if="reflowMode && !reflowCropMode"
+          @click="reflowOutsideCenterClick"
+          class="reflow-click-center"
+          :style="reflowClickLayerStyle"
         />
       </div>
 
       <continuous-reader
         v-else-if="continuousReader"
+        :key="`continuous-reader-${readerViewKey}`"
         :pages="pages"
         :page.sync="page"
-        :animations="animations"
-        :scale="continuousScale"
-        :sidePadding="sidePadding"
-        :page-margin="pageMargin"
+          :animations="animations"
+          :scale="continuousScale"
+          :sidePadding="sidePadding"
+          :page-margin="pageMargin"
+          :image-filter="normalReaderImageFilter"
+          :rotation="readerRotation"
+          :skew-correction="readerSkewCorrection"
+          :contrast-enhancement="readerContrastEnhancement"
+          :crop-regions-by-parity="readerCropRegionsByParity"
+          :page-display-urls="readerDeskewedPageUrls"
+          :active-crop-region="readerActiveCropRegion"
         @menu="toggleToolbars()"
         @jump-previous="jumpToPrevious()"
         @jump-next="jumpToNext()"
@@ -270,17 +375,74 @@
 
       <paged-reader
         v-else
+        :key="`paged-reader-${readerViewKey}`"
+        ref="pagedReader"
         :pages="pages"
         :page.sync="page"
         :reading-direction="readingDirection"
         :page-layout="pageLayout"
         :scale="scale"
         :animations="animations"
-        :swipe="swipe"
+        :swipe="readerSwipeEnabled"
+        :left-navigation-action="pagedLeftNavigationAction"
+        :image-filter="normalReaderImageFilter"
+        :rotation="readerRotation"
+        :skew-correction="readerSkewCorrection"
+        :contrast-enhancement="readerContrastEnhancement"
+        :crop-regions-by-parity="readerCropRegionsByParity"
+        :page-display-urls="readerDeskewedPageUrls"
+        :active-crop-region="readerActiveCropRegion"
+        @update:active-crop-region="setReaderActiveCropRegion"
         @menu="toggleToolbars()"
         @jump-previous="jumpToPrevious()"
         @jump-next="jumpToNext()"
       ></paged-reader>
+    </div>
+
+    <div v-if="readerCropMode" class="reader-crop-panel" @click.stop>
+      <div class="reader-crop-toolbar">
+        <v-btn small @click="cancelReaderCropMode">取消</v-btn>
+        <v-btn small color="primary" :disabled="!readerCropCanComplete" @click="completeReaderCropMode">完成</v-btn>
+        <span>拖拽选择阅读范围</span>
+        <div class="reader-crop-skew-control">
+          <span>手动纠斜</span>
+          <v-btn icon small dark @click="adjustReaderCropSkewCorrection(-0.5)">
+            <v-icon small>mdi-minus</v-icon>
+          </v-btn>
+          <input
+            type="range"
+            min="-10"
+            max="10"
+            step="0.5"
+            :value="readerSkewCorrection"
+            @input="setReaderCropSkewCorrection"
+          />
+          <v-btn icon small dark @click="adjustReaderCropSkewCorrection(0.5)">
+            <v-icon small>mdi-plus</v-icon>
+          </v-btn>
+          <span>{{ readerSkewCorrectionLabel }}</span>
+        </div>
+      </div>
+      <div
+        class="reader-crop-stage"
+        @pointerdown="startReaderCrop"
+        @pointermove="moveReaderCrop"
+        @pointerup="finishReaderCrop"
+        @pointercancel="cancelReaderCropDraft"
+      >
+        <img
+          ref="readerCropImage"
+          :src="readerCropImageSrc"
+          class="reader-crop-image"
+          alt=""
+          draggable="false"
+        />
+        <div
+          v-if="readerCropActiveRect"
+          class="reader-crop-rect"
+          :style="readerCropActiveRect"
+        />
+      </div>
     </div>
 
     <thumbnail-explorer-dialog
@@ -377,6 +539,69 @@
                 :label="$t('bookreader.settings.background_color')"
               />
             </v-list-item>
+            <v-list-item v-if="!activeReflowMode">
+              <v-slider
+                v-model="readerStrokeStrength"
+                label="Stroke"
+                min="0"
+                max="3"
+                step="0.1"
+                thumb-label
+              />
+            </v-list-item>
+            <v-list-item v-if="!activeReflowMode">
+              <settings-switch v-model="readerContrastEnhancement" label="文字/背景增强"/>
+            </v-list-item>
+            <v-list-item v-if="isPdf">
+              <div class="reader-rotation-setting">
+                <span class="mr-2 text-caption">旋转</span>
+                <v-btn small class="mr-1" :color="readerRotation === -90 ? 'primary' : undefined" @click="setReaderRotation(-90)">
+                  -90°
+                </v-btn>
+                <v-btn small class="mr-1" :color="readerRotation === 0 ? 'primary' : undefined" @click="setReaderRotation(0)">
+                  0°
+                </v-btn>
+                <v-btn small class="mr-1" :color="readerRotation === 90 ? 'primary' : undefined" @click="setReaderRotation(90)">
+                  +90°
+                </v-btn>
+                <v-btn small :color="readerRotation === 180 ? 'primary' : undefined" @click="setReaderRotation(180)">
+                  180°
+                </v-btn>
+              </div>
+            </v-list-item>
+            <v-list-item v-if="!activeReflowMode">
+              <v-slider
+                v-model="readerSkewCorrection"
+                label="手动纠斜"
+                min="-10"
+                max="10"
+                step="0.5"
+                thumb-label
+                suffix="°"
+              >
+                <template v-slot:prepend>
+                  <v-btn icon small @click="adjustReaderSkewCorrection(-0.5)">
+                    <v-icon small>mdi-minus</v-icon>
+                  </v-btn>
+                </template>
+                <template v-slot:append>
+                  <span class="mr-1 text-caption">{{ readerSkewCorrectionLabel }}</span>
+                  <v-btn icon small @click="adjustReaderSkewCorrection(0.5)">
+                    <v-icon small>mdi-plus</v-icon>
+                  </v-btn>
+                </template>
+              </v-slider>
+            </v-list-item>
+            <v-list-item v-if="!activeReflowMode">
+              <settings-switch v-model="readerCropEnabled" label="截取区域"/>
+            </v-list-item>
+            <v-list-item v-if="!activeReflowMode && readerCropEnabled">
+              <span class="mr-2">{{ readerCropPageParityLabel }}</span>
+              <v-btn small class="mr-1" :color="readerActiveCropRegion === 0 ? 'primary' : undefined" @click="setReaderActiveCropRegion(0)">区域 1</v-btn>
+              <v-btn small class="mr-2" :color="readerActiveCropRegion === 1 ? 'primary' : undefined" @click="setReaderActiveCropRegion(1)">区域 2</v-btn>
+              <v-btn small class="mr-2" @click="startReaderCropMode">设置截取区域</v-btn>
+              <v-btn small text @click="clearReaderCropRegion">清除</v-btn>
+            </v-list-item>
 
             <template v-if="continuousReader">
               <v-subheader class="font-weight-black text-h6">{{ $t('bookreader.settings.webtoon') }}</v-subheader>
@@ -421,13 +646,60 @@
                 />
               </v-list-item>
 
-              <v-subheader class="font-weight-black text-h6">Reflow</v-subheader>
               <v-list-item>
-                <settings-switch v-model="reflowMode" label="Reflow page"/>
+                <settings-select
+                  :items="pagedLeftNavigationActions"
+                  v-model="pagedLeftNavigationAction"
+                  label="左侧点击/左滑"
+                />
               </v-list-item>
-              <template v-if="reflowMode">
+
+              <template v-if="isPdf">
+                <v-subheader class="font-weight-black text-h6">Reflow</v-subheader>
+                <v-list-item>
+                  <settings-switch :value="reflowEnabled" label="Reflow page" @input="setReflowEnabled"/>
+                </v-list-item>
+              </template>
+              <template v-if="isPdf && reflowEnabled">
+                <v-list-item>
+                  <settings-select
+                    :items="reflowProcessingModes"
+                    v-model="reflowSettings.processingMode"
+                    label="重排位置"
+                  />
+                </v-list-item>
                 <v-list-item>
                   <settings-switch v-model="reflowSettings.autoCropBorder" label="Auto crop borders"/>
+                </v-list-item>
+                <v-list-item>
+                  <settings-switch v-model="reflowSettings.contrastEnhancement" label="文字/背景增强"/>
+                </v-list-item>
+                <v-list-item>
+                  <settings-switch v-model="reflowSettings.matchBackground" label="背景跟随底色"/>
+                </v-list-item>
+                <v-list-item>
+                  <settings-select
+                    :items="reflowMatchBackgroundModes"
+                    v-model="reflowSettings.matchBackgroundMode"
+                    label="文字显示"
+                  />
+                </v-list-item>
+                <v-list-item>
+                  <settings-select
+                    :items="reflowImageQualities"
+                    v-model="reflowSettings.imageQuality"
+                    label="字块质量"
+                  />
+                </v-list-item>
+                <v-list-item>
+                  <settings-switch v-model="reflowSettings.verticalText" label="Vertical text"/>
+                </v-list-item>
+                <v-list-item v-if="reflowSettings.verticalText">
+                  <settings-select
+                    :items="reflowVerticalDirections"
+                    v-model="reflowSettings.verticalDirection"
+                    label="Vertical direction"
+                  />
                 </v-list-item>
                 <v-list-item>
                   <settings-select
@@ -612,7 +884,7 @@ import ThumbnailExplorerDialog from '@/components/dialogs/ThumbnailExplorerDialo
 import ShortcutHelpDialog from '@/components/dialogs/ShortcutHelpDialog.vue'
 import {getBookTitleCompact} from '@/functions/book-title'
 import {checkImageSupport, ImageFeature} from '@/functions/check-image'
-import {bookPageUrl} from '@/functions/urls'
+import {bookPageReflowUrl, bookPageUrl} from '@/functions/urls'
 import {getFileFromUrl} from '@/functions/file'
 import {resizeImageFile} from '@/functions/resize-image'
 import {ReadingDirection} from '@/types/enum-books'
@@ -621,8 +893,9 @@ import {Location} from 'vue-router'
 import PagedReader from '@/components/readers/PagedReader.vue'
 import ContinuousReader from '@/components/readers/ContinuousReader.vue'
 import ReflowedPage from '@/components/readers/ReflowedPage.vue'
+import K2ReflowedPage from '@/components/readers/K2ReflowedPage.vue'
 import TocList from '@/components/TocList.vue'
-import {ContinuousScaleType, MarginValues, PaddingPercentage, PagedReaderLayout, ScaleType} from '@/types/enum-reader'
+import {ContinuousScaleType, MarginValues, PaddingPercentage, PagedNavigationAction, PagedReaderLayout, ScaleType} from '@/types/enum-reader'
 import {
   shortcutsLTR,
   shortcutsRTL,
@@ -642,8 +915,109 @@ import {getBookReadRouteFromMedia} from '@/functions/book-format'
 import {TocEntry} from '@/types/epub'
 import {flattenToc} from '@/functions/toc'
 import {CLIENT_SETTING, ClientSettingUserUpdateDto} from '@/types/komga-clientsettings'
+import {enhanceTextContrast} from '@/functions/image-enhancement'
+import {canonicalPageImageUrl, loadCachedPageImageWithStats} from '@/functions/page-image-cache'
+import {reflowPrefetchPageNumbers} from '@/functions/reflow-stream'
 
 const REFLOW_SETTINGS_STORAGE_PREFIX = 'komga.pdfReflowSettings.'
+const READER_IMAGE_SETTINGS_STORAGE_PREFIX = 'komga.readerImageSettings.'
+const REFLOW_CACHE_BEHIND_COUNT = 2
+const REFLOW_CONTINUATION_COUNT = 4
+const REFLOW_PREFETCH_AHEAD_COUNT = 1
+const REFLOW_PREFETCH_DELAY_MS = 750
+const MAX_REFLOW_CROP_REGIONS = 8
+
+function defaultCropRegionsByParity(enabled: boolean = false): any {
+  return {
+    enabled,
+    regionCount: 2,
+    odd: null,
+    even: null,
+    regions: {
+      odd: Array(MAX_REFLOW_CROP_REGIONS).fill(null),
+      even: Array(MAX_REFLOW_CROP_REGIONS).fill(null),
+    },
+    explicit: {
+      odd: false,
+      even: false,
+    },
+    explicitRegions: {
+      odd: Array(MAX_REFLOW_CROP_REGIONS).fill(false),
+      even: Array(MAX_REFLOW_CROP_REGIONS).fill(false),
+    },
+  }
+}
+
+function defaultManualImageRegionsByPage(): any {
+  return {
+    regionCount: 1,
+    pages: {},
+  }
+}
+
+function defaultReflowSettings(): any {
+  return {
+    processingMode: 'server',
+    autoCropBorder: true,
+    textScale: 40,
+    columnCount: 1,
+    skewCorrection: 0,
+    autoSkewCorrection: false,
+    threshold: 185,
+    columnGap: 15,
+    wordGap: 3,
+    strokeStrength: 0.1,
+    contrastEnhancement: false,
+    matchBackground: false,
+    matchBackgroundMode: 'grayscale',
+    imageQuality: 80,
+    blockSpacing: 6,
+    verticalText: false,
+    verticalDirection: 'rtl',
+    marginTop: 0,
+    marginRight: 0,
+    marginBottom: 0,
+    marginLeft: 0,
+    cropRoisByParity: defaultCropRegionsByParity(false),
+    manualImageRoisByPage: defaultManualImageRegionsByPage(),
+    deskewAnalysisRoisByParity: {
+      odd: null,
+      even: null,
+    },
+    k2Settings: {
+      textScale: 80,
+      maxColumns: 2,
+      threshold: 185,
+      strokeStrength: 0.8,
+      contrastEnhancement: false,
+      matchBackground: false,
+      matchBackgroundMode: 'grayscale',
+      wordGap: 3,
+      outputPadding: 16,
+    },
+  }
+}
+
+function defaultReaderImageSettings(): any {
+  return {
+    readingDirection: ReadingDirection.LEFT_TO_RIGHT,
+    pageLayout: PagedReaderLayout.SINGLE_PAGE,
+    leftNavigationAction: PagedNavigationAction.PREVIOUS,
+    swipe: true,
+    animations: true,
+    scale: ScaleType.SCREEN,
+    continuousScale: ContinuousScaleType.WIDTH,
+    sidePadding: 0,
+    pageMargin: 0,
+    backgroundColor: 'black',
+    alwaysFullscreen: false,
+    strokeStrength: 0,
+    rotation: 0,
+    skewCorrection: 0,
+    contrastEnhancement: false,
+    cropRegionsByParity: defaultCropRegionsByParity(false),
+  }
+}
 
 export default Vue.extend({
   name: 'DivinaReader',
@@ -651,6 +1025,7 @@ export default Vue.extend({
     ContinuousReader,
     PagedReader,
     ReflowedPage,
+    K2ReflowedPage,
     TocList,
     SettingsSwitch,
     SettingsSelect,
@@ -689,32 +1064,33 @@ export default Vue.extend({
       showSettings: false,
       showHelp: false,
       landscapeDisplay: false,
+      reflowSetupMode: false,
       reflowMode: false,
+      k2ReflowMode: false,
+      pdfModeBookId: '',
+      reflowStartAtEnd: false,
+      reflowRootPage: 1,
+      k2ReflowStartAtEnd: false,
       reflowCropMode: false,
       reflowSettingsBookId: '',
       loadingReflowSettings: false,
-      saveReflowSettingsServerDebounced: undefined as undefined | (() => void),
-      reflowCache: {} as Record<string, any[]>,
-      reflowPrefetchPage: 0,
+      saveReflowSettingsServerDebounced: undefined as undefined | ((bookId?: string, settings?: Record<string, any>) => void),
+      readerImageSettingsBookId: '',
+      loadingReaderImageSettings: false,
+      saveReaderImageSettingsServerDebounced: undefined as undefined | ((bookId?: string, settings?: Record<string, any>) => void),
+      reflowCache: {} as Record<string, any>,
+      reflowSessionTransferBytes: 0,
+      reflowSessionResponseTransferBytes: 0,
+      reflowSessionOriginalTransferBytes: 0,
+      reflowSessionTransferPages: {} as Record<string, boolean>,
+      reflowPrefetchPages: [] as number[],
       reflowPrefetchTimer: undefined as number | undefined,
-      reflowSettings: {
-        autoCropBorder: true,
-        textScale: 75,
-        columnCount: 1,
-        threshold: 185,
-        columnGap: 15,
-        wordGap: 3,
-        strokeStrength: 0.1,
-        blockSpacing: 6,
-        marginTop: 0,
-        marginRight: 0,
-        marginBottom: 0,
-        marginLeft: 0,
-      },
+      reflowSettings: defaultReflowSettings(),
       goToPage: 1,
       settings: {
         pageLayout: PagedReaderLayout.SINGLE_PAGE,
-        swipe: false,
+        leftNavigationAction: PagedNavigationAction.PREVIOUS,
+        swipe: true,
         alwaysFullscreen: false,
         animations: true,
         scale: ScaleType.SCREEN,
@@ -723,7 +1099,22 @@ export default Vue.extend({
         pageMargin: 0,
         readingDirection: ReadingDirection.LEFT_TO_RIGHT,
         backgroundColor: 'black',
+        strokeStrength: 0,
+        rotation: 0,
+        skewCorrection: 0,
+        contrastEnhancement: false,
+        cropRegionsByParity: defaultCropRegionsByParity(false),
       },
+      readerCropMode: false,
+      readerCropDrawing: false,
+      readerActiveCropRegion: 0,
+      readerCropStart: {x: 0, y: 0},
+      readerCropDraft: undefined as undefined | {x: number, y: number, w: number, h: number},
+      readerCropImageUrl: '',
+      readerCropImageRequestId: 0,
+      readerCropImagePreparationTimer: undefined as number | undefined,
+      readerDeskewedPageUrls: {} as Record<number, string>,
+      readerViewKey: 0,
       shortcuts: {} as any,
       notification: {
         enabled: false,
@@ -746,10 +1137,33 @@ export default Vue.extend({
         text: this.$i18n.t(x),
         value: x,
       })),
+      pagedLeftNavigationActions: [
+        {text: '上一页', value: PagedNavigationAction.PREVIOUS},
+        {text: '下一页', value: PagedNavigationAction.NEXT},
+      ],
       reflowColumnCounts: [
         {text: '1', value: 1},
         {text: '2', value: 2},
+        {text: '3', value: 3},
+        {text: '4', value: 4},
       ],
+      reflowVerticalDirections: [
+        {text: 'Right to left', value: 'rtl'},
+        {text: 'Left to right', value: 'ltr'},
+      ],
+      reflowProcessingModes: [
+        {text: '本地重排', value: 'local'},
+        {text: '服务端重排', value: 'server'},
+      ],
+      reflowMatchBackgroundModes: [
+        {text: '原图', value: 'original'},
+        {text: '灰阶', value: 'grayscale'},
+        {text: '黑白', value: 'monochrome'},
+      ],
+      reflowImageQualities: [90, 80, 70, 60, 50, 40].map(value => ({
+        text: `${value}%`,
+        value,
+      })),
       paddingPercentages: Object.values(PaddingPercentage).map(x => ({
         text: x === 0 ? this.$i18n.t('bookreader.settings.side_padding_none').toString() : `${x}%`,
         value: x,
@@ -777,7 +1191,8 @@ export default Vue.extend({
       if (isSupported) this.supportedMediaTypes.push('image/avif')
     })
     this.shortcuts = this.$_.keyBy([...shortcutsSettings, ...shortcutsSettingsPaged, ...shortcutsSettingsContinuous, ...shortcutsMenus, ...shortcutsAll], x => x.key)
-    this.saveReflowSettingsServerDebounced = debounce(() => this.saveReflowSettingsServer(), 700)
+    this.saveReflowSettingsServerDebounced = debounce((bookId?: string, settings?: Record<string, any>) => this.saveReflowSettingsServer(bookId, settings), 700)
+    this.saveReaderImageSettingsServerDebounced = debounce((bookId?: string, settings?: Record<string, any>) => this.saveReaderImageSettingsServer(bookId, settings), 700)
     window.addEventListener('keydown', this.keyPressed)
     if (screenfull.isEnabled) screenfull.on('change', this.fullscreenChanged)
   },
@@ -789,6 +1204,7 @@ export default Vue.extend({
     this.readingDirection = this.$store.state.persistedState.webreader.readingDirection
     this.animations = this.$store.state.persistedState.webreader.animations
     this.pageLayout = this.$store.state.persistedState.webreader.paged.pageLayout
+    this.pagedLeftNavigationAction = this.$store.state.persistedState.webreader.paged.leftNavigationAction
     this.swipe = this.$store.state.persistedState.webreader.swipe
     this.alwaysFullscreen = this.$store.state.persistedState.webreader.alwaysFullscreen
     this.scale = this.$store.state.persistedState.webreader.paged.scale
@@ -796,14 +1212,19 @@ export default Vue.extend({
     this.sidePadding = this.$store.state.persistedState.webreader.continuous.padding
     this.pageMargin = this.$store.state.persistedState.webreader.continuous.margin
     this.backgroundColor = this.$store.state.persistedState.webreader.background
+    this.readerImageSettingsBookId = this.bookId
+    this.loadReaderImageSettings(this.bookId)
     this.reflowSettingsBookId = this.bookId
-    this.loadReflowSettings(this.bookId)
+    await this.loadReflowSettings(this.bookId)
 
     this.setup(this.bookId, Number(this.$route.query.page))
   },
   destroyed() {
     document.documentElement.classList.remove('html-reader')
     this.clearReflowPrefetch()
+    this.clearReaderCropImagePreparationTimer()
+    this.revokeReaderCropImageUrl()
+    this.revokeReaderDeskewedPageUrls()
 
     this.unlockOrientation()
     this.$vuetify.rtl = (this.$t('common.locale_rtl') === 'true')
@@ -825,29 +1246,40 @@ export default Vue.extend({
       // - going to previous/next book, in this case the query.page is not set, so it will default to first page
       // - pressing the back button of the browser and navigating to the previous book, in this case the query.page is set, so we honor it
       this.$debug('[beforeRouteUpdate]', 'to.query:', to.query)
+      this.readerImageSettingsBookId = to.params.bookId
+      this.loadReaderImageSettings(to.params.bookId)
       this.reflowSettingsBookId = to.params.bookId
-      this.loadReflowSettings(to.params.bookId)
+      await this.loadReflowSettings(to.params.bookId)
       this.setup(to.params.bookId, Number(to.query.page))
     }
     next()
   },
   watch: {
+    settings: {
+      deep: true,
+      handler() {
+        this.saveReaderImageSettings()
+      },
+    },
     page: {
       handler(val, old) {
         if (val) {
+          if (!this.reflowMode) this.reflowRootPage = val
           this.markProgress(val)
           this.goToPage = val
           this.updateRoute()
-          this.clearReflowPrefetch()
-          this.$nextTick(() => {
-            if (this.reflowMode && this.cachedReflowItems(this.currentPage)) this.scheduleNextReflowPrefetch()
-          })
+          if (this.reflowMode) this.scheduleNextReflowPrefetch()
+          else this.clearReflowPrefetch()
         }
       },
       immediate: true,
     },
     reflowCacheKey() {
       this.clearReflowPrefetch()
+      if (this.reflowMode) {
+        this.reflowRootPage = this.page
+        this.scheduleNextReflowPrefetch()
+      }
     },
     reflowSettings: {
       handler() {
@@ -905,16 +1337,28 @@ export default Vue.extend({
     currentPage(): PageDtoWithUrl {
       return this.pages[this.page - 1]
     },
-    nextReflowPage(): PageDtoWithUrl | undefined {
-      if (!this.reflowMode || this.continuousReader || this.page >= this.pagesCount) return undefined
-      return this.pages[this.page]
+    reflowRootPageDto(): PageDtoWithUrl {
+      return this.pages[this.reflowRootPage - 1] || this.currentPage
     },
-    prefetchReflowPage(): PageDtoWithUrl | undefined {
-      if (this.reflowPrefetchPage <= 0) return undefined
-      return this.pages[this.reflowPrefetchPage - 1]
+    prefetchReflowPages(): PageDtoWithUrl[] {
+      if (!this.reflowMode) return []
+      return this.reflowPrefetchPages
+        .map(pageNumber => this.pages[pageNumber - 1])
+        .filter((page): page is PageDtoWithUrl => !!page)
+    },
+    reflowContinuationPages(): Array<{pageNumber: number, pageUrl: string, items: any[]}> {
+      const continuation = [] as Array<{pageNumber: number, pageUrl: string, items: any[]}>
+      for (let offset = 1; offset <= REFLOW_CONTINUATION_COUNT; offset++) {
+        const pageNumber = this.reflowRootPage + offset
+        const page = this.pages[pageNumber - 1]
+        const items = this.cachedReflowItems(page)
+        if (!page || !items) break
+        continuation.push({pageNumber, pageUrl: page.url, items})
+      }
+      return continuation
     },
     isPdf(): boolean {
-      return this.book.media?.mediaType === 'application/pdf'
+      return this.book.media?.mediaProfile === 'PDF'
     },
     pdfTocFlattened(): TocEntry[] {
       return flattenToc(this.pdfToc, 1)
@@ -922,27 +1366,107 @@ export default Vue.extend({
     nightDisplay(): boolean {
       return this.backgroundColor === 'black'
     },
+    activeReflowMode(): boolean {
+      return this.isPdf && !this.continuousReader && (this.reflowMode || this.reflowSetupMode || this.k2ReflowMode)
+    },
+    reflowEnabled(): boolean {
+      return this.reflowMode || this.reflowSetupMode
+    },
+    readerCropPageParity(): 'odd' | 'even' {
+      return this.currentPage?.number % 2 === 0 ? 'even' : 'odd'
+    },
+    readerCropPageParityLabel(): string {
+      return this.readerCropPageParity === 'even' ? '偶数页' : '奇数页'
+    },
+    readerCropImageSrc(): string {
+      const pageNumber = this.currentPage?.number
+      const preparedPageUrl = pageNumber ? this.readerDeskewedPageUrls[pageNumber] : ''
+      return this.readerCropImageUrl || preparedPageUrl || (this.currentPage?.url ? canonicalPageImageUrl(this.currentPage.url) : '')
+    },
+    readerCropActiveRect(): object | undefined {
+      const region = this.readerCropDraft || this.effectiveReaderCropRegion(this.readerCropPageParity, this.readerActiveCropRegion)
+      if (!region) return undefined
+      return {
+        left: `${region.x}%`,
+        top: `${region.y}%`,
+        width: `${region.w}%`,
+        height: `${region.h}%`,
+      }
+    },
+    readerCropCanComplete(): boolean {
+      return !!(this.readerCropDraft || this.effectiveReaderCropRegion(this.readerCropPageParity, this.readerActiveCropRegion))
+    },
+    normalReaderImageFilter(): string {
+      const filters = []
+      if (this.readerStrokeStrength > 0) {
+        filters.push(`contrast(${(1 + this.readerStrokeStrength * 0.35).toFixed(2)})`)
+        filters.push(`brightness(${(1 - this.readerStrokeStrength * 0.04).toFixed(2)})`)
+      }
+      if (this.nightDisplay) filters.push('invert(1) hue-rotate(180deg) brightness(0.92)')
+      return filters.join(' ') || 'none'
+    },
     reflowTargetWidth(): number {
       return this.$vuetify.breakpoint.width
     },
     reflowOptions(): object {
       return this.reflowSettings
     },
+    reflowControlsTopOffset(): number {
+      return this.showToolbars ? 48 : 0
+    },
+    reflowClickLayerStyle(): object {
+      const toolbarOffset = this.showToolbars ? '48px' : '0'
+      return {
+        top: toolbarOffset,
+        bottom: toolbarOffset,
+        height: 'auto',
+      }
+    },
+    reflowTouchHandlers(): object {
+      return {
+        left: this.reflowSwipeLeft,
+        right: this.reflowSwipeRight,
+        up: this.reflowSwipeUp,
+        down: this.reflowSwipeDown,
+      }
+    },
+    readerSwipeEnabled(): boolean {
+      return this.swipe || this.$vuetify.breakpoint.smAndDown
+    },
     reflowCacheKey(): string {
       return JSON.stringify({
         renderVersion: 3,
+        bookId: this.bookId,
         width: this.reflowTargetWidth,
+        processingMode: this.reflowSettings.processingMode,
+        rotation: this.readerRotation,
         autoCropBorder: this.reflowSettings.autoCropBorder,
         textScale: this.reflowSettings.textScale,
         columnCount: this.reflowSettings.columnCount,
+        skewCorrection: this.reflowSettings.skewCorrection,
+        autoSkewCorrection: this.reflowSettings.autoSkewCorrection,
+        deskewAnalysisRoisByParity: this.reflowSettings.deskewAnalysisRoisByParity,
         threshold: this.reflowSettings.threshold,
         columnGap: this.reflowSettings.columnGap,
         wordGap: this.reflowSettings.wordGap,
         strokeStrength: this.reflowSettings.strokeStrength,
+        contrastEnhancement: this.reflowSettings.contrastEnhancement,
+        matchBackground: this.reflowSettings.matchBackground,
+        matchBackgroundMode: this.reflowSettings.matchBackgroundMode,
+        imageQuality: this.reflowSettings.imageQuality,
+        verticalText: this.reflowSettings.verticalText,
+        verticalDirection: this.reflowSettings.verticalDirection,
         marginTop: this.reflowSettings.marginTop,
         marginRight: this.reflowSettings.marginRight,
         marginBottom: this.reflowSettings.marginBottom,
         marginLeft: this.reflowSettings.marginLeft,
+        cropRoisByParity: this.reflowSettings.cropRoisByParity,
+        manualImageRoisByPage: this.reflowSettings.manualImageRoisByPage,
+        darkDisplay: this.nightDisplay,
+        deskewDetectionVersion: 9,
+        imageExclusionVersion: 3,
+        detectionScaleVersion: 1,
+        darkWordRenderVersion: 2,
       })
     },
 
@@ -1010,6 +1534,80 @@ export default Vue.extend({
         }
       },
     },
+    readerStrokeStrength: {
+      get: function (): number {
+        return this.settings.strokeStrength
+      },
+      set: function (strokeStrength: number): void {
+        const normalized = Math.round(Math.max(0, Math.min(3, Number(strokeStrength) || 0)) * 10) / 10
+        this.settings.strokeStrength = normalized
+        this.saveReaderImageSettings()
+      },
+    },
+    readerContrastEnhancement: {
+      get: function (): boolean {
+        return this.settings.contrastEnhancement === true
+      },
+      set: function (contrastEnhancement: boolean): void {
+        const changed = this.settings.contrastEnhancement !== (contrastEnhancement === true)
+        this.settings.contrastEnhancement = contrastEnhancement === true
+        this.saveReaderImageSettings()
+        if (changed) this.revokeReaderDeskewedPageUrls()
+      },
+    },
+    readerRotation: {
+      get: function (): number {
+        return this.normalizedReaderRotation(this.settings.rotation)
+      },
+      set: function (rotation: number): void {
+        const normalized = this.normalizedReaderRotation(rotation)
+        const changed = this.normalizedReaderRotation(this.settings.rotation) !== normalized
+        this.settings.rotation = normalized
+        this.saveReaderImageSettings()
+        if (changed) this.readerRotationChanged()
+      },
+    },
+    readerRotationLabel(): string {
+      const rotation = this.readerRotation
+      return rotation > 0 ? `+${rotation}°` : `${rotation}°`
+    },
+    readerSkewCorrection: {
+      get: function (): number {
+        return this.settings.skewCorrection
+      },
+      set: function (skewCorrection: number): void {
+        const normalized = this.normalizedReaderSkewCorrection(skewCorrection)
+        const changed = this.settings.skewCorrection !== normalized
+        this.settings.skewCorrection = normalized
+        this.saveReaderImageSettings()
+        if (changed) this.revokeReaderDeskewedPageUrls()
+      },
+    },
+    readerSkewCorrectionLabel(): string {
+      const prefix = this.readerSkewCorrection > 0 ? '+' : ''
+      return `${prefix}${this.readerSkewCorrection.toFixed(1)}°`
+    },
+    readerCropRegionsByParity: {
+      get: function (): any {
+        return this.normalizedReaderCropRegionsByParity(this.settings.cropRegionsByParity)
+      },
+      set: function (cropRegionsByParity: any): void {
+        const normalized = this.normalizedReaderCropRegionsByParity(cropRegionsByParity)
+        this.$set(this.settings, 'cropRegionsByParity', normalized)
+        this.saveReaderImageSettings()
+      },
+    },
+    readerCropEnabled: {
+      get: function (): boolean {
+        return this.readerCropRegionsByParity.enabled
+      },
+      set: function (enabled: boolean): void {
+        const current = this.readerCropRegionsByParity
+        this.readerCropRegionsByParity = {...current, enabled}
+        const hasSavedRegion = !!this.effectiveReaderCropRegion(this.readerCropPageParity, this.readerActiveCropRegion)
+        if (enabled && !hasSavedRegion) this.$nextTick(() => this.startReaderCropMode())
+      },
+    },
     readingDirection: {
       get: function (): ReadingDirection {
         return this.settings.readingDirection
@@ -1030,6 +1628,20 @@ export default Vue.extend({
           this.settings.pageLayout = pageLayout
           this.$store.commit('setWebreaderPagedPageLayout', pageLayout)
         }
+      },
+    },
+    pagedLeftNavigationAction: {
+      get: function (): PagedNavigationAction {
+        return Object.values(PagedNavigationAction).includes(this.settings.leftNavigationAction)
+          ? this.settings.leftNavigationAction
+          : PagedNavigationAction.PREVIOUS
+      },
+      set: function (leftNavigationAction: PagedNavigationAction): void {
+        const normalized = Object.values(PagedNavigationAction).includes(leftNavigationAction)
+          ? leftNavigationAction
+          : PagedNavigationAction.PREVIOUS
+        this.settings.leftNavigationAction = normalized
+        this.$store.commit('setWebreaderPagedLeftNavigationAction', normalized)
       },
     },
     swipe: {
@@ -1054,6 +1666,520 @@ export default Vue.extend({
     },
   },
   methods: {
+    emptyReaderCropRegionsByParity(enabled: boolean = false): any {
+      return defaultCropRegionsByParity(enabled)
+    },
+    normalizedReaderRotation(value: any): number {
+      const numberValue = Number(value)
+      if (!Number.isFinite(numberValue)) return 0
+      const rounded = Math.round(numberValue / 90) * 90
+      const normalized = ((rounded % 360) + 360) % 360
+      if (normalized === 90) return 90
+      if (normalized === 180) return 180
+      if (normalized === 270) return -90
+      return 0
+    },
+    setReaderRotation(rotation: number) {
+      this.readerRotation = rotation
+    },
+    readerRotationChanged() {
+      this.revokeReaderDeskewedPageUrls()
+      this.revokeReaderCropImageUrl()
+      this.reflowCache = {}
+      this.clearReflowPrefetch()
+      if (this.readerCropMode) this.$nextTick(this.prepareReaderCropImage)
+    },
+    readerImageSettingsStorageKey(bookId: string = this.readerImageSettingsBookId || this.bookId): string {
+      return `${READER_IMAGE_SETTINGS_STORAGE_PREFIX}${bookId}`
+    },
+    loadReaderImageSettings(bookId: string = this.bookId) {
+      if (!bookId) return
+      this.loadingReaderImageSettings = true
+      try {
+        const defaults = defaultReaderImageSettings()
+        let loaded = {} as Record<string, any>
+        const serverSettings = this.readServerReaderImageSettings()[bookId]
+        const localRaw = window.localStorage.getItem(this.readerImageSettingsStorageKey(bookId))
+        const raw = serverSettings ? JSON.stringify(serverSettings) : localRaw
+        if (raw) loaded = JSON.parse(raw)
+        const normalized = this.normalizedReaderImageSettings({...defaults, ...loaded})
+        this.applyReaderImageSettings(normalized)
+        if (!serverSettings && localRaw) this.saveReaderImageSettingsServerDebounced?.(bookId, normalized)
+      } catch (e) {
+        this.applyReaderImageSettings(defaultReaderImageSettings())
+        this.$debug('Unable to load reader image settings', e)
+      } finally {
+        this.$nextTick(() => this.loadingReaderImageSettings = false)
+      }
+    },
+    applyReaderImageSettings(settings: Record<string, any>) {
+      const normalized = this.normalizedReaderImageSettings(settings)
+      const previousRotation = this.normalizedReaderRotation(this.settings.rotation)
+      const previousSkew = this.settings.skewCorrection
+      const previousContrastEnhancement = this.settings.contrastEnhancement
+      this.settings.strokeStrength = normalized.strokeStrength
+      this.settings.readingDirection = normalized.readingDirection
+      this.settings.pageLayout = normalized.pageLayout
+      this.settings.leftNavigationAction = normalized.leftNavigationAction
+      this.settings.swipe = normalized.swipe
+      this.settings.animations = normalized.animations
+      this.settings.scale = normalized.scale
+      this.settings.continuousScale = normalized.continuousScale
+      this.settings.sidePadding = normalized.sidePadding
+      this.settings.pageMargin = normalized.pageMargin
+      this.settings.backgroundColor = normalized.backgroundColor
+      this.settings.alwaysFullscreen = normalized.alwaysFullscreen
+      this.settings.rotation = normalized.rotation
+      this.settings.skewCorrection = normalized.skewCorrection
+      this.settings.contrastEnhancement = normalized.contrastEnhancement
+      this.$set(this.settings, 'cropRegionsByParity', normalized.cropRegionsByParity)
+      if (previousRotation !== normalized.rotation || previousSkew !== normalized.skewCorrection || previousContrastEnhancement !== normalized.contrastEnhancement) this.revokeReaderDeskewedPageUrls()
+      this.readerCropMode = false
+      this.readerCropDraft = undefined
+      this.readerCropDrawing = false
+      this.readerActiveCropRegion = 0
+      this.readerViewKey += 1
+    },
+    normalizedReaderImageSettings(settings: Record<string, any> = {}): Record<string, any> {
+      settings = settings || {}
+      return {
+        readingDirection: Object.values(ReadingDirection).includes(settings.readingDirection) ? settings.readingDirection : ReadingDirection.LEFT_TO_RIGHT,
+        pageLayout: Object.values(PagedReaderLayout).includes(settings.pageLayout) ? settings.pageLayout : PagedReaderLayout.SINGLE_PAGE,
+        leftNavigationAction: Object.values(PagedNavigationAction).includes(settings.leftNavigationAction) ? settings.leftNavigationAction : PagedNavigationAction.PREVIOUS,
+        swipe: settings.swipe !== false,
+        animations: settings.animations !== false,
+        scale: Object.values(ScaleType).includes(settings.scale) ? settings.scale : ScaleType.SCREEN,
+        continuousScale: Object.values(ContinuousScaleType).includes(settings.continuousScale) ? settings.continuousScale : ContinuousScaleType.WIDTH,
+        sidePadding: Number(settings.sidePadding) || 0,
+        pageMargin: Number(settings.pageMargin) || 0,
+        backgroundColor: settings.backgroundColor || 'black',
+        alwaysFullscreen: settings.alwaysFullscreen === true,
+        strokeStrength: Math.round(Math.max(0, Math.min(3, Number(settings.strokeStrength) || 0)) * 10) / 10,
+        rotation: this.normalizedReaderRotation(settings.rotation),
+        skewCorrection: this.normalizedReaderSkewCorrection(settings.skewCorrection),
+        contrastEnhancement: settings.contrastEnhancement === true,
+        cropRegionsByParity: this.normalizedReaderCropRegionsByParity(settings.cropRegionsByParity),
+      }
+    },
+    saveReaderImageSettings() {
+      if (!this.bookId || this.loadingReaderImageSettings) return
+      const settings = this.normalizedReaderImageSettings(this.settings)
+      try {
+        window.localStorage.setItem(this.readerImageSettingsStorageKey(), JSON.stringify(settings))
+      } catch (e) {
+        this.$debug('Unable to save reader image settings', e)
+      }
+      this.saveReaderImageSettingsServerDebounced?.(this.bookId, settings)
+    },
+    async saveReaderImageSettingsServer(bookId: string = this.readerImageSettingsBookId || this.bookId, settings: Record<string, any> = this.normalizedReaderImageSettings(this.settings)) {
+      if (!bookId) return
+      try {
+        const all = this.readServerReaderImageSettings()
+        all[bookId] = this.normalizedReaderImageSettings(settings)
+        const newSettings = {} as Record<string, ClientSettingUserUpdateDto>
+        newSettings[CLIENT_SETTING.WEBUI_READER_IMAGE_SETTINGS] = {
+          value: JSON.stringify(all),
+        }
+        await this.$komgaSettings.updateClientSettingUser(newSettings)
+        await this.$store.dispatch('getClientSettingsUser')
+      } catch (e) {
+        this.$debug('Unable to save reader image settings on server', e)
+      }
+    },
+    readServerReaderImageSettings(): Record<string, any> {
+      try {
+        return JSON.parse(this.$store.state.komgaSettings.clientSettingsUser[CLIENT_SETTING.WEBUI_READER_IMAGE_SETTINGS]?.value) || {}
+      } catch (e) {
+        return {}
+      }
+    },
+    adjustReaderSkewCorrection(delta: number) {
+      this.readerSkewCorrection = this.normalizedReaderSkewCorrection(this.readerSkewCorrection + delta)
+    },
+    adjustReaderCropSkewCorrection(delta: number) {
+      this.adjustReaderSkewCorrection(delta)
+      this.prepareReaderCropImage()
+    },
+    setReaderCropSkewCorrection(event: Event) {
+      const target = event.target as HTMLInputElement
+      this.readerSkewCorrection = this.normalizedReaderSkewCorrection(Number(target.value))
+      this.scheduleReaderCropImagePreparation()
+    },
+    normalizedReaderSkewCorrection(value: any): number {
+      const numberValue = Number(value)
+      if (!Number.isFinite(numberValue)) return 0
+      return Math.round(this.clampReflowNumber(numberValue, -10, 10, 0) * 2) / 2
+    },
+    normalizedReaderCropRegionsByParity(value: any): any {
+      if (this.normalizedReaderCropRegionValue(value) && !value?.regions && value?.odd === undefined && value?.even === undefined) {
+        const migrated = this.normalizedReaderCropRegionValue(value)
+        const enabled = value?.enabled === true && !!migrated
+        return {
+          enabled,
+          odd: enabled ? migrated : null,
+          even: enabled ? migrated : null,
+          regions: {
+            odd: [enabled ? migrated : null, null],
+            even: [enabled ? migrated : null, null],
+          },
+          explicit: {
+            odd: enabled,
+            even: enabled,
+          },
+          explicitRegions: {
+            odd: [enabled, false],
+            even: [enabled, false],
+          },
+        }
+      }
+
+      const odd = this.normalizedReaderCropRegionArray(value, 'odd')
+      const even = this.normalizedReaderCropRegionArray(value, 'even')
+      const oddExplicit = this.normalizedReaderCropExplicitArray(value, 'odd', odd)
+      const evenExplicit = this.normalizedReaderCropExplicitArray(value, 'even', even)
+      return {
+        enabled: value?.enabled === true,
+        odd: oddExplicit[0] ? odd[0] : null,
+        even: evenExplicit[0] ? even[0] : null,
+        regions: {
+          odd: odd.map((region, index) => oddExplicit[index] ? region : null),
+          even: even.map((region, index) => evenExplicit[index] ? region : null),
+        },
+        explicit: {
+          odd: oddExplicit[0],
+          even: evenExplicit[0],
+        },
+        explicitRegions: {
+          odd: oddExplicit,
+          even: evenExplicit,
+        },
+      }
+    },
+    normalizedReaderCropRegionArray(value: any, parity: 'odd' | 'even'): Array<any | null> {
+      const regions = value?.regions?.[parity] || []
+      const normalized = [
+        this.normalizedReaderCropRegionValue(regions[0]) || this.normalizedReaderCropRegionValue(value?.[parity]),
+        this.normalizedReaderCropRegionValue(regions[1]),
+      ]
+      return normalized
+    },
+    normalizedReaderCropExplicitArray(value: any, parity: 'odd' | 'even', regions: Array<any | null>): boolean[] {
+      const explicitRegions = value?.explicitRegions?.[parity] || []
+      return [
+        regions[0] ? (explicitRegions[0] ?? value?.explicit?.[parity]) !== false : false,
+        regions[1] ? explicitRegions[1] !== false : false,
+      ]
+    },
+    normalizedReaderCropRegionValue(region: any): any | null {
+      if (!region) return null
+      const x = this.clampReaderCropNumber(region?.x, 0)
+      const y = this.clampReaderCropNumber(region?.y, 0)
+      const w = this.clampReaderCropNumber(region?.w, 100)
+      const h = this.clampReaderCropNumber(region?.h, 100)
+      return {
+        x: Math.min(95, x),
+        y: Math.min(95, y),
+        w: Math.max(5, Math.min(100 - Math.min(95, x), w)),
+        h: Math.max(5, Math.min(100 - Math.min(95, y), h)),
+      }
+    },
+    clampReaderCropNumber(value: any, fallback: number): number {
+      const numberValue = Number(value)
+      if (!Number.isFinite(numberValue)) return fallback
+      return Math.round(Math.max(0, Math.min(100, numberValue)) * 10) / 10
+    },
+    effectiveReaderCropRegion(parity: 'odd' | 'even', regionIndex: number): any | undefined {
+      const regions = this.readerCropRegionsByParity
+      if (!regions.enabled) return undefined
+      const current = regions.regions?.[parity]?.[regionIndex]
+      if (current) return current
+      const fallbackParity = parity === 'odd' ? 'even' : 'odd'
+      return regions.regions?.[fallbackParity]?.[regionIndex] || undefined
+    },
+    setReaderActiveCropRegion(region: number) {
+      this.readerActiveCropRegion = region === 1 ? 1 : 0
+      this.readerCropDraft = undefined
+      this.readerCropDrawing = false
+    },
+    async startReaderCropMode() {
+      if (!this.currentPage?.url) return
+      this.showSettings = false
+      await this.prepareReaderCropImage()
+      this.readerCropMode = true
+      this.readerCropDrawing = false
+      const current = this.effectiveReaderCropRegion(this.readerCropPageParity, this.readerActiveCropRegion)
+      this.readerCropDraft = current ? {...current} : undefined
+    },
+    cancelReaderCropMode() {
+      this.readerCropMode = false
+      this.readerCropDrawing = false
+      this.readerCropDraft = undefined
+      if (!this.promoteReaderCropImageUrl()) this.revokeReaderCropImageUrl()
+    },
+    completeReaderCropMode() {
+      const pageNumber = this.currentPage?.number
+      const region = this.readerCropDraft || this.effectiveReaderCropRegion(this.readerCropPageParity, this.readerActiveCropRegion)
+      if (region) this.setReaderCropRegion(this.readerCropPageParity, this.readerActiveCropRegion, region)
+      this.readerCropMode = false
+      this.readerCropDrawing = false
+      this.readerCropDraft = undefined
+      if (!this.promoteReaderCropImageUrl()) this.revokeReaderCropImageUrl()
+      this.resetReaderCropNavigation(pageNumber)
+      this.refreshReaderView()
+    },
+    clearReaderCropRegion() {
+      this.setReaderCropRegion(this.readerCropPageParity, this.readerActiveCropRegion, null)
+      this.readerCropMode = false
+      this.readerCropDrawing = false
+      this.readerCropDraft = undefined
+      if (!this.promoteReaderCropImageUrl()) this.revokeReaderCropImageUrl()
+    },
+    startReaderCrop(event: PointerEvent) {
+      const point = this.readerCropPoint(event)
+      const target = event.currentTarget as HTMLElement
+      target.setPointerCapture(event.pointerId)
+      this.readerCropDrawing = true
+      this.readerCropStart = point
+      this.readerCropDraft = {x: point.x, y: point.y, w: 1, h: 1}
+      event.preventDefault()
+    },
+    moveReaderCrop(event: PointerEvent) {
+      if (!this.readerCropDrawing) return
+      this.readerCropDraft = this.normalizedReaderCropRect(this.readerCropStart, this.readerCropPoint(event))
+      event.preventDefault()
+    },
+    finishReaderCrop(event: PointerEvent) {
+      if (!this.readerCropDrawing) return
+      this.readerCropDrawing = false
+      const region = this.normalizedReaderCropRect(this.readerCropStart, this.readerCropPoint(event))
+      if (region.w >= 5 && region.h >= 5) {
+        this.readerCropDraft = region
+      }
+      event.preventDefault()
+    },
+    cancelReaderCropDraft() {
+      this.readerCropDrawing = false
+      this.readerCropDraft = undefined
+    },
+    readerCropPoint(event: PointerEvent): {x: number, y: number} {
+      const image = this.$refs.readerCropImage as HTMLImageElement | undefined
+      const rect = image?.getBoundingClientRect()
+      if (!rect || rect.width <= 0 || rect.height <= 0) return {x: 0, y: 0}
+      return {
+        x: this.clampReaderCropNumber((event.clientX - rect.left) * 100 / rect.width, 0),
+        y: this.clampReaderCropNumber((event.clientY - rect.top) * 100 / rect.height, 0),
+      }
+    },
+    async prepareReaderCropImage() {
+      this.clearReaderCropImagePreparationTimer()
+      const requestId = this.readerCropImageRequestId + 1
+      this.readerCropImageRequestId = requestId
+      const pageNumber = this.currentPage?.number
+      const pageUrl = this.currentPage?.url
+      const rotation = this.readerRotation
+      const angle = this.readerSkewCorrection || 0
+      const contrastEnhancement = this.readerContrastEnhancement
+      if (!pageNumber || !pageUrl) {
+        this.revokeReaderCropImageUrl()
+        return
+      }
+      if (this.readerDeskewedPageUrls[pageNumber]) {
+        if (this.readerCropImageUrl) {
+          URL.revokeObjectURL(this.readerCropImageUrl)
+          this.readerCropImageUrl = ''
+        }
+        return
+      }
+
+      try {
+        const blob = (await loadCachedPageImageWithStats(pageUrl)).blob
+        if (requestId !== this.readerCropImageRequestId) return
+        const url = rotation || angle || contrastEnhancement
+          ? await this.processedReaderCropObjectUrl(blob, rotation, angle, contrastEnhancement)
+          : URL.createObjectURL(blob)
+        if (
+          requestId === this.readerCropImageRequestId &&
+          this.currentPage?.number === pageNumber &&
+          this.readerRotation === rotation &&
+          this.readerSkewCorrection === angle &&
+          this.readerContrastEnhancement === contrastEnhancement
+        ) {
+          const previousUrl = this.readerCropImageUrl
+          this.readerCropImageUrl = url
+          if (previousUrl && previousUrl !== url) URL.revokeObjectURL(previousUrl)
+        } else {
+          URL.revokeObjectURL(url)
+        }
+      } catch (e) {
+        if (requestId === this.readerCropImageRequestId) this.revokeReaderCropImageUrl()
+      }
+    },
+    async processedReaderCropObjectUrl(blob: Blob, rotation: number, angle: number, contrastEnhancement: boolean): Promise<string> {
+      const image = await this.loadReaderCropImage(blob)
+      return this.readerCropCanvasObjectUrl(this.processedReaderCropCanvas(image, rotation, angle, contrastEnhancement))
+    },
+    async loadReaderCropImage(blob: Blob): Promise<HTMLImageElement> {
+      const objectUrl = URL.createObjectURL(blob)
+      try {
+        return await new Promise<HTMLImageElement>((resolve, reject) => {
+          const image = new Image()
+          image.onload = () => {
+            if (image.naturalWidth > 0 && image.naturalHeight > 0) resolve(image)
+            else reject(new Error('Decoded image is empty'))
+          }
+          image.onerror = () => reject(new Error('Unable to decode page image'))
+          image.src = objectUrl
+        })
+      } finally {
+        URL.revokeObjectURL(objectUrl)
+      }
+    },
+    processedReaderCropCanvas(image: HTMLImageElement, rotation: number, skewCorrection: number, contrastEnhancement: boolean = this.readerContrastEnhancement): HTMLCanvasElement {
+      const rotatedCanvas = rotation ? this.rotatedReaderImageCanvas(image, rotation) : this.sourceReaderImageCanvas(image)
+      const canvas = skewCorrection ? this.skewCorrectedReaderCropCanvas(rotatedCanvas, skewCorrection) : rotatedCanvas
+      if (contrastEnhancement) {
+        const context = canvas.getContext('2d')
+        if (context) enhanceTextContrast(context, canvas.width, canvas.height, {enabled: true})
+      }
+      return canvas
+    },
+    sourceReaderImageCanvas(image: HTMLImageElement): HTMLCanvasElement {
+      const canvas = document.createElement('canvas')
+      canvas.width = image.naturalWidth
+      canvas.height = image.naturalHeight
+      const context = canvas.getContext('2d')
+      if (!context) return canvas
+      context.fillStyle = '#fff'
+      context.fillRect(0, 0, canvas.width, canvas.height)
+      context.drawImage(image, 0, 0)
+      return canvas
+    },
+    rotatedReaderImageCanvas(image: HTMLImageElement, degrees: number): HTMLCanvasElement {
+      const rotation = this.normalizedReaderRotation(degrees)
+      const quarterTurn = Math.abs(rotation) === 90
+      const canvas = document.createElement('canvas')
+      canvas.width = quarterTurn ? image.naturalHeight : image.naturalWidth
+      canvas.height = quarterTurn ? image.naturalWidth : image.naturalHeight
+      const context = canvas.getContext('2d')
+      if (!context) return canvas
+      context.fillStyle = '#fff'
+      context.fillRect(0, 0, canvas.width, canvas.height)
+      context.translate(canvas.width / 2, canvas.height / 2)
+      context.rotate(rotation * Math.PI / 180)
+      context.drawImage(image, -image.naturalWidth / 2, -image.naturalHeight / 2)
+      return canvas
+    },
+    skewCorrectedReaderCropCanvas(sourceCanvas: HTMLCanvasElement, degrees: number): HTMLCanvasElement {
+      const canvas = document.createElement('canvas')
+      canvas.width = sourceCanvas.width
+      canvas.height = sourceCanvas.height
+      const context = canvas.getContext('2d')
+      if (!context) return canvas
+      context.fillStyle = '#fff'
+      context.fillRect(0, 0, canvas.width, canvas.height)
+      context.translate(canvas.width / 2, canvas.height / 2)
+      context.rotate(degrees * Math.PI / 180)
+      context.drawImage(sourceCanvas, -sourceCanvas.width / 2, -sourceCanvas.height / 2)
+      return canvas
+    },
+    readerCropCanvasObjectUrl(canvas: HTMLCanvasElement): Promise<string> {
+      return new Promise((resolve, reject) => {
+        canvas.toBlob(blob => {
+          if (blob) resolve(URL.createObjectURL(blob))
+          else reject(new Error('Unable to encode deskewed crop image'))
+        }, 'image/jpeg', 0.95)
+      })
+    },
+    revokeReaderCropImageUrl() {
+      this.clearReaderCropImagePreparationTimer()
+      this.readerCropImageRequestId += 1
+      if (this.readerCropImageUrl) URL.revokeObjectURL(this.readerCropImageUrl)
+      this.readerCropImageUrl = ''
+    },
+    promoteReaderCropImageUrl(): boolean {
+      this.clearReaderCropImagePreparationTimer()
+      if (!this.readerCropImageUrl || !this.currentPage?.number) return false
+      this.readerCropImageRequestId += 1
+      this.setReaderDeskewedPageUrl(this.currentPage.number, this.readerCropImageUrl)
+      this.readerCropImageUrl = ''
+      return true
+    },
+    setReaderDeskewedPageUrl(pageNumber: number, url: string) {
+      const previous = this.readerDeskewedPageUrls[pageNumber]
+      if (previous && previous !== url) URL.revokeObjectURL(previous)
+      this.$set(this.readerDeskewedPageUrls, pageNumber, url)
+    },
+    revokeReaderDeskewedPageUrls() {
+      Object.values(this.readerDeskewedPageUrls).forEach(url => URL.revokeObjectURL(url))
+      this.readerDeskewedPageUrls = {}
+    },
+    clearReaderCropImagePreparationTimer() {
+      if (this.readerCropImagePreparationTimer === undefined) return
+      window.clearTimeout(this.readerCropImagePreparationTimer)
+      this.readerCropImagePreparationTimer = undefined
+    },
+    scheduleReaderCropImagePreparation() {
+      this.clearReaderCropImagePreparationTimer()
+      this.readerCropImagePreparationTimer = window.setTimeout(() => {
+        this.readerCropImagePreparationTimer = undefined
+        this.prepareReaderCropImage()
+      }, 120)
+    },
+    normalizedReaderCropRect(start: {x: number, y: number}, end: {x: number, y: number}): any {
+      const left = Math.min(start.x, end.x)
+      const top = Math.min(start.y, end.y)
+      const right = Math.max(start.x, end.x)
+      const bottom = Math.max(start.y, end.y)
+      return {
+        x: Math.round(left * 10) / 10,
+        y: Math.round(top * 10) / 10,
+        w: Math.round((right - left) * 10) / 10,
+        h: Math.round((bottom - top) * 10) / 10,
+      }
+    },
+    setReaderCropRegion(parity: 'odd' | 'even', regionIndex: number, region: any | null) {
+      const current = this.normalizedReaderCropRegionsByParity(this.readerCropRegionsByParity)
+      const regions = {
+        odd: (current.regions.odd || [null, null]).slice(0, 2),
+        even: (current.regions.even || [null, null]).slice(0, 2),
+      }
+      const explicitRegions = {
+        odd: (current.explicitRegions.odd || [false, false]).slice(0, 2),
+        even: (current.explicitRegions.even || [false, false]).slice(0, 2),
+      }
+      regions[parity][regionIndex] = region
+      explicitRegions[parity][regionIndex] = !!region
+      const next = {
+        ...current,
+        enabled: true,
+        regions,
+        explicitRegions,
+        odd: regions.odd[0],
+        even: regions.even[0],
+        explicit: {
+          odd: explicitRegions.odd[0],
+          even: explicitRegions.even[0],
+        },
+      }
+      const hasAnyRegion = !!regions.odd[0] || !!regions.odd[1] || !!regions.even[0] || !!regions.even[1]
+      this.readerCropRegionsByParity = hasAnyRegion ? next : this.emptyReaderCropRegionsByParity(false)
+    },
+    resetReaderCropNavigation(pageNumber: number | undefined = this.currentPage?.number) {
+      this.setReaderActiveCropRegion(0)
+      this.$nextTick(() => {
+        const reader = this.$refs.pagedReader as any
+        reader?.refreshCropNavigation?.(pageNumber)
+      })
+    },
+    refreshReaderView() {
+      this.readerViewKey += 1
+    },
+    readerCropRegionsOverlap(a: any, b: any): boolean {
+      return a.x < b.x + b.w &&
+        a.x + a.w > b.x &&
+        a.y < b.y + b.h &&
+        a.y + a.h > b.y
+    },
     enterFullscreen() {
       if (screenfull.isEnabled) return screenfull.request(document.documentElement, {navigationUI: 'hide'})
       return Promise.resolve()
@@ -1073,25 +2199,26 @@ export default Vue.extend({
     },
     keyPressed(e: KeyboardEvent) {
       if (e.ctrlKey || e.altKey || e.shiftKey || e.metaKey) return
-      if (this.reflowMode && !this.continuousReader && this.keyPressedReflow(e)) return
+      if ((this.reflowMode || this.k2ReflowMode) && !this.continuousReader && this.keyPressedReflow(e)) return
       this.shortcuts[e.key]?.execute(this)
     },
     keyPressedReflow(e: KeyboardEvent): boolean {
+      if (this.reflowCropMode) return true
       switch (e.key) {
         case ' ':
         case 'PageDown':
         case 'ArrowDown':
-          this.reflowNextPage()
+          this.activeReflowNextPage()
           return true
         case 'PageUp':
         case 'ArrowUp':
-          this.reflowPreviousPage()
+          this.activeReflowPreviousPage()
           return true
         case 'ArrowLeft':
-          this.readingDirection === ReadingDirection.RIGHT_TO_LEFT ? this.reflowNextPage() : this.reflowPreviousPage()
+          this.readingDirection === ReadingDirection.RIGHT_TO_LEFT ? this.activeReflowNextPage() : this.activeReflowPreviousPage()
           return true
         case 'ArrowRight':
-          this.readingDirection === ReadingDirection.RIGHT_TO_LEFT ? this.reflowPreviousPage() : this.reflowNextPage()
+          this.readingDirection === ReadingDirection.RIGHT_TO_LEFT ? this.activeReflowPreviousPage() : this.activeReflowNextPage()
           return true
         default:
           return false
@@ -1099,7 +2226,13 @@ export default Vue.extend({
     },
     async setup(bookId: string, page?: number) {
       this.$debug('[setup]', `bookId:${bookId}`, `page:${page}`)
+      this.reflowCache = {}
+      this.clearReflowPrefetch()
+      this.revokeReaderDeskewedPageUrls()
       this.book = await this.$komgaBooks.getBook(bookId)
+      this.pdfModeBookId = bookId
+      this.restorePdfMode(bookId)
+      if (!this.isPdf) this.exitAllReflowModes()
       this.series = await this.$komgaSeries.getOneSeries(this.book.seriesId)
       this.showPdfToc = false
       this.pdfTocLoading = false
@@ -1168,6 +2301,12 @@ export default Vue.extend({
       }
     },
     getPageUrl(page: PageDto): string {
+      if (this.isPdf) {
+        const url = new URL(bookPageUrl(this.bookId, page.number))
+        const version = this.book.media?.lastModified || this.book.lastModified
+        if (version) url.searchParams.set('v', String(version))
+        return canonicalPageImageUrl(url.href)
+      }
       if (!this.supportedMediaTypes.includes(page.mediaType)) {
         return bookPageUrl(this.bookId, page.number, this.convertTo)
       } else {
@@ -1212,6 +2351,7 @@ export default Vue.extend({
     },
     goTo(page: number) {
       this.$debug('[goTo]', `page:${page}`)
+      this.reflowRootPage = page
       this.page = page
       this.markProgress(page)
     },
@@ -1221,12 +2361,12 @@ export default Vue.extend({
     goToLast() {
       this.goTo(this.pagesCount)
     },
-    updateRoute() {
+    updateRoute(page: number = this.page) {
       this.$router.replace({
         name: this.$route.name,
         params: {bookId: this.$route.params.bookId},
         query: {
-          page: this.page.toString(),
+          page: page.toString(),
           context: this.context.origin,
           contextId: this.context.id,
           incognito: this.incognito.toString(),
@@ -1297,6 +2437,12 @@ export default Vue.extend({
         await this.loadPdfToc()
       }
     },
+    async openPdfToc() {
+      this.showPdfToc = true
+      if (!this.pdfTocLoaded) {
+        await this.loadPdfToc()
+      }
+    },
     async loadPdfToc() {
       this.pdfTocLoading = true
       try {
@@ -1332,34 +2478,82 @@ export default Vue.extend({
     reflowSettingsStorageKey(bookId: string = this.reflowSettingsBookId || this.bookId): string {
       return `${REFLOW_SETTINGS_STORAGE_PREFIX}${bookId}`
     },
-    loadReflowSettings(bookId: string = this.bookId) {
+    pdfModeStorageKey(bookId: string = this.pdfModeBookId || this.bookId): string {
+      return `komga.pdf.reader.mode.${bookId}`
+    },
+    restorePdfMode(bookId: string) {
+      if (!this.book?.media || this.book.media.mediaProfile !== 'PDF') return
+      const mode = window.localStorage.getItem(this.pdfModeStorageKey(bookId))
+      if (mode === 'reflow') this.startReflowMode()
+      else if (mode === 'k2') this.toggleK2ReflowMode()
+      else this.exitAllReflowModes()
+    },
+    savePdfMode() {
+      if (!this.pdfModeBookId || !this.isPdf) return
+      const mode = this.k2ReflowMode ? 'k2' : (this.reflowMode || this.reflowSetupMode ? 'reflow' : 'normal')
+      window.localStorage.setItem(this.pdfModeStorageKey(), mode)
+    },
+    async loadReflowSettings(bookId: string = this.bookId) {
       if (!bookId) return
       this.loadingReflowSettings = true
       try {
-        const serverSettings = this.readServerReflowSettings()[bookId]
-        const raw = serverSettings ? JSON.stringify(serverSettings) : window.localStorage.getItem(this.reflowSettingsStorageKey(bookId))
-        if (raw) Object.assign(this.reflowSettings, this.normalizedReflowSettings(JSON.parse(raw)))
+        const defaults = defaultReflowSettings()
+        let loaded = {} as Record<string, any>
+        const localRaw = window.localStorage.getItem(this.reflowSettingsStorageKey(bookId))
+        let loadedFromLocal = false
+        let loadedFromServer = false
+        if (localRaw) {
+          try {
+            loaded = JSON.parse(localRaw)
+            loadedFromLocal = true
+          } catch (e) {
+            window.localStorage.removeItem(this.reflowSettingsStorageKey(bookId))
+            this.$debug('Unable to parse local PDF reflow settings, loading server copy', e)
+          }
+        }
+        if (!loadedFromLocal) {
+          await this.$store.dispatch('getClientSettingsUser')
+          if (this.reflowSettingsBookId !== bookId) return
+          const serverSettings = this.readServerReflowSettings()[bookId]
+          if (serverSettings) {
+            loaded = serverSettings
+            loadedFromServer = true
+          }
+        }
+        if (this.reflowSettingsBookId !== bookId) return
+        this.reflowSettings = this.normalizedReflowSettings({...defaults, ...loaded})
+        if (loadedFromServer) {
+          try {
+            window.localStorage.setItem(this.reflowSettingsStorageKey(bookId), JSON.stringify(this.reflowSettings))
+          } catch (e) {
+            this.$debug('Unable to cache server PDF reflow settings locally', e)
+          }
+        }
+        if (loadedFromLocal) this.saveReflowSettingsServerDebounced?.(bookId, this.reflowSettings)
       } catch (e) {
+        if (this.reflowSettingsBookId !== bookId) return
+        this.reflowSettings = defaultReflowSettings()
         this.$debug('Unable to load PDF reflow settings', e)
       } finally {
-        this.$nextTick(() => this.loadingReflowSettings = false)
+        if (this.reflowSettingsBookId === bookId) this.$nextTick(() => this.loadingReflowSettings = false)
       }
     },
     saveReflowSettings() {
       if (!this.bookId) return
+      const settings = this.normalizedReflowSettings(this.reflowSettings)
       try {
-        window.localStorage.setItem(this.reflowSettingsStorageKey(), JSON.stringify(this.reflowSettings))
+        window.localStorage.setItem(this.reflowSettingsStorageKey(), JSON.stringify(settings))
       } catch (e) {
         this.$debug('Unable to save PDF reflow settings', e)
       }
-      this.saveReflowSettingsServerDebounced?.()
+      this.saveReflowSettingsServerDebounced?.(this.bookId, settings)
     },
-    async saveReflowSettingsServer() {
-      const bookId = this.reflowSettingsBookId || this.bookId
+    async saveReflowSettingsServer(bookId: string = this.reflowSettingsBookId || this.bookId, settings: Record<string, any> = this.normalizedReflowSettings(this.reflowSettings)) {
       if (!bookId) return
       try {
+        await this.$store.dispatch('getClientSettingsUser')
         const all = this.readServerReflowSettings()
-        all[bookId] = this.normalizedReflowSettings(this.reflowSettings)
+        all[bookId] = this.normalizedReflowSettings(settings)
         const newSettings = {} as Record<string, ClientSettingUserUpdateDto>
         newSettings[CLIENT_SETTING.WEBUI_PDF_REFLOW_SETTINGS] = {
           value: JSON.stringify(all),
@@ -1379,19 +2573,132 @@ export default Vue.extend({
     },
     normalizedReflowSettings(settings: Record<string, any>): object {
       return {
+        processingMode: settings.processingMode === 'server' ? 'server' : 'local',
         autoCropBorder: typeof settings.autoCropBorder === 'boolean' ? settings.autoCropBorder : this.reflowSettings.autoCropBorder,
         textScale: this.clampReflowNumber(settings.textScale, 10, 140, this.reflowSettings.textScale),
-        columnCount: Number(settings.columnCount) === 2 ? 2 : 1,
+        columnCount: Math.round(this.clampReflowNumber(settings.columnCount, 1, 4, this.reflowSettings.columnCount)),
+        skewCorrection: this.normalizedReflowSkewCorrection(settings.skewCorrection),
+        autoSkewCorrection: settings.autoSkewCorrection === true,
         threshold: this.clampReflowNumber(settings.threshold, 50, 230, this.reflowSettings.threshold),
         columnGap: this.clampReflowNumber(settings.columnGap, 5, 80, this.reflowSettings.columnGap),
         wordGap: this.clampReflowNumber(settings.wordGap, 1, 30, this.reflowSettings.wordGap),
         strokeStrength: Math.round(this.clampReflowNumber(settings.strokeStrength, 0.1, 3, this.reflowSettings.strokeStrength) * 10) / 10,
+        contrastEnhancement: settings.contrastEnhancement === true,
+        matchBackground: settings.matchBackground === true,
+        matchBackgroundMode: settings.matchBackgroundMode === 'original'
+          ? 'original'
+          : settings.matchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale',
+        imageQuality: this.normalizedReflowImageQuality(settings.imageQuality),
         blockSpacing: Math.round(this.clampReflowNumber(settings.blockSpacing, 0, 24, this.reflowSettings.blockSpacing)),
+        verticalText: typeof settings.verticalText === 'boolean' ? settings.verticalText : this.reflowSettings.verticalText,
+        verticalDirection: settings.verticalDirection === 'ltr' ? 'ltr' : 'rtl',
         marginTop: this.clampReflowNumber(settings.marginTop, 0, 45, this.reflowSettings.marginTop),
         marginRight: this.clampReflowNumber(settings.marginRight, 0, 45, this.reflowSettings.marginRight),
         marginBottom: this.clampReflowNumber(settings.marginBottom, 0, 45, this.reflowSettings.marginBottom),
         marginLeft: this.clampReflowNumber(settings.marginLeft, 0, 45, this.reflowSettings.marginLeft),
+        cropRoisByParity: this.normalizedReflowCropRois(settings.cropRoisByParity),
+        manualImageRoisByPage: this.normalizedReflowManualImageRois(settings.manualImageRoisByPage),
+        deskewAnalysisRoisByParity: this.normalizedReflowDeskewAnalysisRois(settings.deskewAnalysisRoisByParity),
+        k2Settings: this.normalizedK2ReflowSettings(settings.k2Settings),
       }
+    },
+    normalizedK2ReflowSettings(settings: Record<string, any> = {}): Record<string, any> {
+      settings = settings || {}
+      return {
+        textScale: this.clampReflowNumber(settings.textScale, 20, 160, this.reflowSettings.k2Settings.textScale),
+        maxColumns: Math.round(this.clampReflowNumber(settings.maxColumns, 1, 4, this.reflowSettings.k2Settings.maxColumns)),
+        threshold: this.clampReflowNumber(settings.threshold, 50, 230, this.reflowSettings.k2Settings.threshold),
+        strokeStrength: Math.round(this.clampReflowNumber(settings.strokeStrength, 0, 3, this.reflowSettings.k2Settings.strokeStrength) * 10) / 10,
+        contrastEnhancement: settings.contrastEnhancement === true,
+        matchBackground: settings.matchBackground === true,
+        matchBackgroundMode: settings.matchBackgroundMode === 'original'
+          ? 'original'
+          : settings.matchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale',
+        wordGap: Math.round(this.clampReflowNumber(settings.wordGap, 1, 30, this.reflowSettings.k2Settings.wordGap)),
+        outputPadding: Math.round(this.clampReflowNumber(settings.outputPadding, 0, 48, this.reflowSettings.k2Settings.outputPadding)),
+      }
+    },
+    normalizedReflowCropRois(cropRoisByParity: any): Record<string, any> {
+      const regionCount = this.normalizedReflowCropRegionCount(cropRoisByParity?.regionCount)
+      const odd = this.normalizedReflowCropRegionRois(cropRoisByParity, 'odd')
+      const even = this.normalizedReflowCropRegionRois(cropRoisByParity, 'even')
+      const oddExplicit = this.normalizedReflowCropRegionExplicit(cropRoisByParity, 'odd', odd)
+      const evenExplicit = this.normalizedReflowCropRegionExplicit(cropRoisByParity, 'even', even)
+      return {
+        regionCount,
+        odd: odd[0],
+        even: even[0],
+        regions: {
+          odd,
+          even,
+        },
+        explicit: {
+          odd: oddExplicit[0],
+          even: evenExplicit[0],
+        },
+        explicitRegions: {
+          odd: oddExplicit,
+          even: evenExplicit,
+        },
+      }
+    },
+    normalizedReflowCropRegionCount(value: any): number {
+      const numberValue = Number(value)
+      if (!Number.isFinite(numberValue)) return 2
+      return Math.max(1, Math.min(MAX_REFLOW_CROP_REGIONS, Math.round(numberValue)))
+    },
+    normalizedReflowCropRegionRois(cropRoisByParity: any, parity: 'odd' | 'even'): Array<object | null> {
+      const regions = cropRoisByParity?.regions?.[parity] || []
+      return Array.from({length: MAX_REFLOW_CROP_REGIONS}, (_, index) =>
+        this.normalizedReflowCropRoi(regions[index]) || (index === 0 ? this.normalizedReflowCropRoi(cropRoisByParity?.[parity]) : null),
+      )
+    },
+    normalizedReflowCropRegionExplicit(cropRoisByParity: any, parity: 'odd' | 'even', regions: Array<object | null>): boolean[] {
+      const explicit = cropRoisByParity?.explicit || {}
+      const explicitRegions = cropRoisByParity?.explicitRegions?.[parity] || []
+      return Array.from({length: MAX_REFLOW_CROP_REGIONS}, (_, index) => {
+        if (!regions[index]) return false
+        if (index === 0) return (explicitRegions[0] ?? explicit[parity]) !== false
+        return explicitRegions[index] !== false
+      })
+    },
+    normalizedReflowCropRoi(roi: any): object | null {
+      if (!roi) return null
+      const x = Number(roi.x)
+      const y = Number(roi.y)
+      const w = Number(roi.w)
+      const h = Number(roi.h)
+      if (![x, y, w, h].every(Number.isFinite) || w <= 15 || h <= 15) return null
+      return {x, y, w, h}
+    },
+    normalizedReflowManualImageRois(manualImageRoisByPage: any): Record<string, any> {
+      const regionCount = this.normalizedReflowCropRegionCount(manualImageRoisByPage?.regionCount)
+      const pages = {} as Record<string, Array<object | null>>
+      const sourcePages = manualImageRoisByPage?.pages || {}
+      Object.keys(sourcePages).forEach(page => {
+        const regions = Array.isArray(sourcePages[page]) ? sourcePages[page] : []
+        const normalized = Array.from({length: regionCount}, (_, index) => this.normalizedReflowCropRoi(regions[index]))
+        if (normalized.some(Boolean)) pages[String(page)] = normalized
+      })
+      return {
+        regionCount,
+        pages,
+      }
+    },
+    normalizedReflowDeskewAnalysisRois(deskewAnalysisRoisByParity: any): Record<string, object | null> {
+      return {
+        odd: this.normalizedReflowCropRoi(deskewAnalysisRoisByParity?.odd),
+        even: this.normalizedReflowCropRoi(deskewAnalysisRoisByParity?.even),
+      }
+    },
+    normalizedReflowSkewCorrection(value: any): number {
+      const numberValue = Number(value)
+      if (!Number.isFinite(numberValue)) return 0
+      return Math.round(this.clampReflowNumber(numberValue, -10, 10, 0) * 2) / 2
+    },
+    normalizedReflowImageQuality(value: any): number {
+      const quality = Math.round(this.clampReflowNumber(value, 40, 90, 80) / 10) * 10
+      return [90, 80, 70, 60, 50, 40].includes(quality) ? quality : 80
     },
     clampReflowNumber(value: any, min: number, max: number, fallback: number): number {
       const numberValue = Number(value)
@@ -1399,29 +2706,212 @@ export default Vue.extend({
       return Math.max(min, Math.min(max, numberValue))
     },
     toggleReflowMode() {
+      if (!this.isPdf) return
+
       if (this.reflowMode) {
         this.exitReflowMode()
         return
       }
 
-      this.reflowMode = true
-      this.reflowCropMode = false
-      this.clearReflowPrefetch()
+      if (this.reflowSetupMode) {
+        this.startReflowMode()
+        return
+      }
+
+      this.openReflowSetupMode()
     },
-    exitReflowMode() {
+    openReflowSetupMode() {
+      if (!this.isPdf) return
+
+      this.resetReflowTransferSession()
+      this.reflowRootPage = this.page
+      this.reflowSetupMode = true
       this.reflowMode = false
+      this.k2ReflowMode = false
+      this.savePdfMode()
+      this.reflowStartAtEnd = false
       this.reflowCropMode = false
       this.clearReflowPrefetch()
       this.$nextTick(() => this.scrollToPageEdge('top'))
     },
+    startReflowMode() {
+      if (!this.isPdf) return
+
+      if (!this.reflowSetupMode) this.resetReflowTransferSession()
+      this.reflowRootPage = this.page
+      this.reflowSetupMode = false
+      this.reflowMode = true
+      this.k2ReflowMode = false
+      this.savePdfMode()
+      this.reflowStartAtEnd = false
+      this.reflowCropMode = false
+      this.clearReflowPrefetch()
+      this.scheduleNextReflowPrefetch()
+      this.$nextTick(() => this.scrollToPageEdge('top'))
+    },
+    setReflowEnabled(enabled: boolean) {
+      if (enabled === true) {
+        if (!this.reflowEnabled) this.openReflowSetupMode()
+      } else {
+        this.exitReflowMode()
+      }
+    },
+    exitReflowMode() {
+      this.reflowRootPage = this.page
+      this.reflowSetupMode = false
+      this.reflowMode = false
+      this.reflowCropMode = false
+      this.reflowStartAtEnd = false
+      this.savePdfMode()
+      this.clearReflowPrefetch()
+      this.$nextTick(() => this.scrollToPageEdge('top'))
+    },
+    toggleK2ReflowMode() {
+      if (!this.isPdf) return
+
+      if (this.k2ReflowMode) {
+        this.exitK2ReflowMode()
+        return
+      }
+
+      this.resetReflowTransferSession()
+      this.k2ReflowMode = true
+      this.reflowSetupMode = false
+      this.reflowMode = false
+      this.savePdfMode()
+      this.reflowCropMode = false
+      this.reflowStartAtEnd = false
+      this.k2ReflowStartAtEnd = false
+      this.clearReflowPrefetch()
+      this.$nextTick(() => this.scrollToPageEdge('top'))
+    },
+    exitK2ReflowMode() {
+      this.k2ReflowMode = false
+      this.savePdfMode()
+      this.reflowCropMode = false
+      this.$nextTick(() => this.scrollToPageEdge('top'))
+    },
+    exitAllReflowModes() {
+      this.reflowSetupMode = false
+      this.reflowMode = false
+      this.k2ReflowMode = false
+      this.reflowCropMode = false
+      this.reflowStartAtEnd = false
+      this.clearReflowPrefetch()
+      this.savePdfMode()
+    },
+    collapseActiveReflowControls(): boolean {
+      const reflow = (this.k2ReflowMode ? this.$refs.k2ReflowedPage : this.$refs.reflowedPage) as any
+      return reflow?.collapseControls?.() === true
+    },
+    reflowOutsideCenterClick() {
+      if (this.collapseActiveReflowControls()) return
+      this.toggleToolbars()
+    },
+    reflowOutsideNavigateLeftSide() {
+      if (this.collapseActiveReflowControls()) return
+      this.activeReflowNavigateLeftSide()
+    },
+    reflowOutsideNavigateRightSide() {
+      if (this.collapseActiveReflowControls()) return
+      this.activeReflowNavigateRightSide()
+    },
+    activeReflowNavigateLeftSide() {
+      this.pagedLeftNavigationAction === PagedNavigationAction.NEXT
+        ? this.activeReflowNextPage()
+        : this.activeReflowPreviousPage()
+    },
+    activeReflowNavigateRightSide() {
+      this.pagedLeftNavigationAction === PagedNavigationAction.NEXT
+        ? this.activeReflowPreviousPage()
+        : this.activeReflowNextPage()
+    },
+    k2PreviousPage() {
+      const reflow = this.$refs.k2ReflowedPage as any
+      reflow?.previousPage?.()
+    },
+    k2NextPage() {
+      const reflow = this.$refs.k2ReflowedPage as any
+      reflow?.nextPage?.()
+    },
+    activeReflowPreviousPage() {
+      this.k2ReflowMode ? this.k2PreviousPage() : this.reflowPreviousPage()
+    },
+    activeReflowNextPage() {
+      this.k2ReflowMode ? this.k2NextPage() : this.reflowNextPage()
+    },
+    reflowTouchEnabled(): boolean {
+      return (this.reflowMode || this.k2ReflowMode) && this.readerSwipeEnabled && !this.reflowCropMode
+    },
+    reflowSwipeLeft() {
+      if (!this.reflowTouchEnabled() || this.readingDirection === ReadingDirection.VERTICAL) return
+      this.activeReflowNavigateRightSide()
+    },
+    reflowSwipeRight() {
+      if (!this.reflowTouchEnabled() || this.readingDirection === ReadingDirection.VERTICAL) return
+      this.activeReflowNavigateLeftSide()
+    },
+    reflowSwipeUp() {
+      if (!this.reflowTouchEnabled() || this.readingDirection !== ReadingDirection.VERTICAL) return
+      this.activeReflowNextPage()
+    },
+    reflowSwipeDown() {
+      if (!this.reflowTouchEnabled() || this.readingDirection !== ReadingDirection.VERTICAL) return
+      this.activeReflowPreviousPage()
+    },
+    k2SourcePreviousPage() {
+      if (this.page > 1) {
+        this.k2ReflowStartAtEnd = true
+        this.goTo(this.page - 1)
+      } else {
+        this.jumpToPrevious()
+      }
+    },
+    k2SourceNextPage() {
+      if (this.page < this.pagesCount) {
+        this.k2ReflowStartAtEnd = false
+        this.goTo(this.page + 1)
+      } else {
+        this.jumpToNext()
+      }
+    },
     setReflowTextScale(textScale: number) {
       this.reflowSettings.textScale = textScale
     },
+    setReflowProcessingMode(processingMode: string) {
+      this.reflowSettings.processingMode = processingMode === 'server' ? 'server' : 'local'
+    },
     setReflowColumnCount(columnCount: number) {
-      this.reflowSettings.columnCount = columnCount === 2 ? 2 : 1
+      this.reflowSettings.columnCount = Math.round(Math.max(1, Math.min(4, columnCount)))
+    },
+    setReflowSkewCorrection(skewCorrection: number) {
+      this.reflowSettings.skewCorrection = this.normalizedReflowSkewCorrection(skewCorrection)
+    },
+    setReflowAutoSkewCorrection(autoSkewCorrection: boolean) {
+      this.reflowSettings.autoSkewCorrection = autoSkewCorrection === true
+    },
+    setReflowVerticalText(verticalText: boolean) {
+      this.reflowSettings.verticalText = verticalText
+    },
+    setReflowVerticalDirection(verticalDirection: string) {
+      this.reflowSettings.verticalDirection = verticalDirection === 'ltr' ? 'ltr' : 'rtl'
     },
     setReflowStrokeStrength(strokeStrength: number) {
       this.reflowSettings.strokeStrength = Math.round(Math.max(0.1, Math.min(3, strokeStrength)) * 10) / 10
+    },
+    setReflowImageQuality(imageQuality: number) {
+      this.reflowSettings.imageQuality = this.normalizedReflowImageQuality(imageQuality)
+    },
+    setReflowContrastEnhancement(contrastEnhancement: boolean) {
+      this.reflowSettings.contrastEnhancement = contrastEnhancement === true
+    },
+    setReflowMatchBackground(matchBackground: boolean) {
+      this.reflowSettings.matchBackground = matchBackground === true
+    },
+    setReflowMatchBackgroundMode(matchBackgroundMode: string) {
+      this.reflowSettings.matchBackgroundMode = matchBackgroundMode === 'original'
+        ? 'original'
+        : matchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale'
     },
     setReflowBlockSpacing(blockSpacing: number) {
       this.reflowSettings.blockSpacing = Math.max(0, Math.min(24, Math.round(blockSpacing)))
@@ -1430,25 +2920,138 @@ export default Vue.extend({
       this.reflowCropMode = cropMode
       if (cropMode) this.clearReflowPrefetch()
     },
-    cachedReflowItems(page: PageDtoWithUrl | undefined): any[] | undefined {
+    setReflowCropRois(cropRoisByParity: Record<string, any>) {
+      const normalized = this.normalizedReflowCropRois(cropRoisByParity)
+      this.$set(this.reflowSettings.cropRoisByParity, 'regionCount', normalized.regionCount)
+      this.$set(this.reflowSettings.cropRoisByParity, 'odd', normalized.odd)
+      this.$set(this.reflowSettings.cropRoisByParity, 'even', normalized.even)
+      this.$set(this.reflowSettings.cropRoisByParity, 'regions', normalized.regions)
+      this.$set(this.reflowSettings.cropRoisByParity, 'explicit', normalized.explicit)
+      this.$set(this.reflowSettings.cropRoisByParity, 'explicitRegions', normalized.explicitRegions)
+      this.clearReflowPrefetch()
+    },
+    setReflowManualImageRois(manualImageRoisByPage: Record<string, any>) {
+      const normalized = this.normalizedReflowManualImageRois(manualImageRoisByPage)
+      this.$set(this.reflowSettings, 'manualImageRoisByPage', normalized)
+      this.clearReflowPrefetch()
+    },
+    setReflowDeskewAnalysisRois(deskewAnalysisRoisByParity: Record<string, any>) {
+      const normalized = this.normalizedReflowDeskewAnalysisRois(deskewAnalysisRoisByParity)
+      this.$set(this.reflowSettings, 'deskewAnalysisRoisByParity', normalized)
+      this.clearReflowPrefetch()
+    },
+    setK2ReflowSettings(settings: Record<string, any>) {
+      const normalized = this.normalizedK2ReflowSettings(settings)
+      Object.keys(normalized).forEach(key => {
+        this.$set(this.reflowSettings.k2Settings, key, normalized[key])
+      })
+    },
+    cachedReflowEntry(page: PageDtoWithUrl | undefined): any {
       if (!page || this.reflowCropMode) return undefined
       return this.reflowCache[this.reflowCacheEntryKey(page.number, this.reflowCacheKey)]
     },
-    cacheReflowPage(payload: {pageNumber: number, cacheKey: string, items: any[]}) {
+    cachedReflowItems(page: PageDtoWithUrl | undefined): any[] | undefined {
+      const entry = this.cachedReflowEntry(page)
+      if (Array.isArray(entry)) return entry
+      return entry?.items
+    },
+    cachedReflowBackground(page: PageDtoWithUrl | undefined): string {
+      const entry = this.cachedReflowEntry(page)
+      return Array.isArray(entry) ? '' : entry?.pageBackground || ''
+    },
+    cachedReflowTransferStats(page: PageDtoWithUrl | undefined): any {
+      const entry = this.cachedReflowEntry(page)
+      return Array.isArray(entry) ? undefined : entry?.transferStats
+    },
+    cacheReflowPage(payload: {pageNumber: number, cacheKey: string, items: any[], pageBackground?: string, transferStats?: any, networkTransferBytes?: number}) {
+      this.recordReflowTransfer(payload.networkTransferBytes)
       if (payload.cacheKey !== this.reflowCacheKey) return
-      this.$set(this.reflowCache, this.reflowCacheEntryKey(payload.pageNumber, payload.cacheKey), payload.items)
+      const wasPrefetched = this.reflowPrefetchPages.includes(payload.pageNumber)
+      if (wasPrefetched) this.reflowPrefetchPages = []
+      this.$set(this.reflowCache, this.reflowCacheEntryKey(payload.pageNumber, payload.cacheKey), {
+        items: payload.items,
+        pageBackground: payload.pageBackground || '',
+        transferStats: payload.transferStats,
+      })
       this.pruneReflowCache()
-      if (payload.pageNumber === this.page) this.scheduleNextReflowPrefetch()
+      if (payload.pageNumber === this.reflowRootPage || wasPrefetched) this.scheduleNextReflowPrefetch()
+    },
+    reflowPageUrl(page: PageDtoWithUrl | undefined): string {
+      if (!page) return ''
+      return bookPageReflowUrl(this.bookId, page.number)
+    },
+    cacheCurrentReflowPage() {
+      const reflow = this.$refs.reflowedPage as any
+      const payload = reflow?.currentCachePayload?.()
+      if (payload) this.cacheReflowPage(payload)
     },
     reflowCacheEntryKey(pageNumber: number, cacheKey: string): string {
       return `${pageNumber}|${cacheKey}`
     },
+    clearReflowCacheForPage(pageNumber: number) {
+      Object.keys(this.reflowCache).forEach(key => {
+        const separator = key.indexOf('|')
+        const cachedPageNumber = Number(key.substring(0, separator))
+        if (cachedPageNumber === pageNumber) this.$delete(this.reflowCache, key)
+      })
+    },
+    resetReflowTransferSession() {
+      this.reflowSessionTransferBytes = 0
+      this.reflowSessionResponseTransferBytes = 0
+      this.reflowSessionOriginalTransferBytes = 0
+      this.reflowSessionTransferPages = {}
+    },
+    recordReflowTransfer(transferBytes: number | undefined) {
+      if (transferBytes === undefined) return
+      const bytes = Number(transferBytes)
+      if (Number.isFinite(bytes) && bytes > 0) {
+        const roundedBytes = Math.round(bytes)
+        this.reflowSessionResponseTransferBytes += roundedBytes
+        this.reflowSessionTransferBytes += roundedBytes
+      }
+    },
+    recordReflowAssetTransfer(payload: {requestId?: string, transferBytes?: number}) {
+      const requestId = String(payload?.requestId || '')
+      const bytes = Number(payload?.transferBytes)
+      if (!requestId || !Number.isFinite(bytes) || bytes <= 0) return
+      const transferKey = `asset|${requestId}`
+      if (this.reflowSessionTransferPages[transferKey]) return
+      this.$set(this.reflowSessionTransferPages, transferKey, true)
+      const roundedBytes = Math.round(bytes)
+      this.reflowSessionOriginalTransferBytes += roundedBytes
+      this.reflowSessionTransferBytes += roundedBytes
+    },
+    forceCurrentReflow(pageNumber?: number) {
+      this.clearReflowPrefetch()
+      this.reflowPrefetchPages = []
+      const targetPage = Math.max(1, Math.min(this.pagesCount, Math.round(Number(pageNumber) || this.page)))
+      this.reflowRootPage = targetPage
+      if (this.page !== targetPage) this.page = targetPage
+      this.reflowStartAtEnd = false
+      if (targetPage) this.clearReflowCacheForPage(targetPage)
+      this.$nextTick(() => {
+        const reflow = this.$refs.reflowedPage as any
+        reflow?.forceReflow?.()
+      })
+    },
     pruneReflowCache() {
+      const firstRetainedPage = Math.max(1, Math.min(this.reflowRootPage, this.page) - REFLOW_CACHE_BEHIND_COUNT)
+      const lastRetainedPage = Math.min(
+        this.pagesCount,
+        Math.max(
+          this.reflowRootPage + REFLOW_CONTINUATION_COUNT,
+          this.page + REFLOW_PREFETCH_AHEAD_COUNT,
+        ),
+      )
       Object.keys(this.reflowCache).forEach(key => {
         const separator = key.indexOf('|')
         const pageNumber = Number(key.substring(0, separator))
         const cacheKey = key.substring(separator + 1)
-        if (cacheKey !== this.reflowCacheKey || Math.abs(pageNumber - this.page) > 2) this.$delete(this.reflowCache, key)
+        const outsideActiveWindow = pageNumber < firstRetainedPage || pageNumber > lastRetainedPage
+        if (
+          cacheKey !== this.reflowCacheKey ||
+          outsideActiveWindow
+        ) this.$delete(this.reflowCache, key)
       })
     },
     clearReflowPrefetch() {
@@ -1456,54 +3059,80 @@ export default Vue.extend({
         window.clearTimeout(this.reflowPrefetchTimer)
         this.reflowPrefetchTimer = undefined
       }
-      this.reflowPrefetchPage = 0
+      this.reflowPrefetchPages = []
     },
     scheduleNextReflowPrefetch() {
-      this.clearReflowPrefetch()
-      if (!this.nextReflowPage || this.reflowCropMode) return
-      this.reflowPrefetchTimer = window.setTimeout(() => {
+      if (this.reflowPrefetchTimer !== undefined) {
+        window.clearTimeout(this.reflowPrefetchTimer)
         this.reflowPrefetchTimer = undefined
-        if (this.nextReflowPage && !this.reflowCropMode) this.reflowPrefetchPage = this.nextReflowPage.number
-      }, 350)
-    },
-    reflowPreviousPage() {
-      if (this.reflowCanScroll('up')) {
-        this.scrollReflowPage('up')
+      }
+      if (this.reflowCropMode) {
+        this.reflowPrefetchPages = []
+        return
+      }
+      const sourcePage = this.page
+      const pageNumbers =
+        reflowPrefetchPageNumbers(
+          sourcePage,
+          this.pagesCount,
+          0,
+          REFLOW_PREFETCH_AHEAD_COUNT,
+        )
+          .filter(pageNumber => !this.cachedReflowItems(this.pages[pageNumber - 1]))
+      if (pageNumbers.length === 0) {
+        this.reflowPrefetchPages = []
         return
       }
 
+      const nextPage = pageNumbers[0]
+      if (nextPage === undefined) {
+        this.reflowPrefetchPages = []
+        return
+      }
+
+      const startPrefetch = () => {
+        this.reflowPrefetchTimer = undefined
+        if (this.page !== sourcePage || this.reflowCropMode) return
+        if (this.cachedReflowItems(this.pages[nextPage - 1])) {
+          this.scheduleNextReflowPrefetch()
+          return
+        }
+        this.reflowPrefetchPages = [nextPage]
+      }
+
+      if (nextPage === sourcePage + 1) startPrefetch()
+      else this.reflowPrefetchTimer = window.setTimeout(startPrefetch, REFLOW_PREFETCH_DELAY_MS)
+    },
+    setReflowVisiblePage(pageNumber: number) {
+      const normalized = Math.max(1, Math.min(this.pagesCount, Math.round(Number(pageNumber) || this.page)))
+      if (normalized === this.page) return
+      this.page = normalized
+    },
+    reflowPreviousPage() {
+      const reflow = this.$refs.reflowedPage as any
+      reflow?.previousPage?.()
+    },
+    reflowNextPage() {
+      const reflow = this.$refs.reflowedPage as any
+      reflow?.nextPage?.()
+    },
+    reflowSourcePreviousPage() {
+      this.cacheCurrentReflowPage()
       if (this.page > 1) {
+        this.reflowStartAtEnd = true
         this.goTo(this.page - 1)
-        this.scrollToPageEdge('bottom')
       } else {
         this.jumpToPrevious()
       }
     },
-    reflowNextPage() {
-      if (this.reflowCanScroll('down')) {
-        this.scrollReflowPage('down')
-        return
-      }
-
+    reflowSourceNextPage() {
+      this.cacheCurrentReflowPage()
       if (this.page < this.pagesCount) {
+        this.reflowStartAtEnd = false
         this.goTo(this.page + 1)
-        this.scrollToPageEdge('top')
       } else {
         this.jumpToNext()
       }
-    },
-    reflowCanScroll(direction: 'up' | 'down'): boolean {
-      const scrollingElement = document.scrollingElement || document.documentElement
-      const scrollTop = scrollingElement.scrollTop || window.pageYOffset || document.documentElement.scrollTop || document.body.scrollTop || 0
-      if (direction === 'up') return scrollTop > 2
-
-      const viewportHeight = window.innerHeight || document.documentElement.clientHeight
-      const scrollHeight = scrollingElement.scrollHeight || document.documentElement.scrollHeight || document.body.scrollHeight
-      return scrollTop + viewportHeight < scrollHeight - 2
-    },
-    scrollReflowPage(direction: 'up' | 'down') {
-      const amount = Math.max(1, Math.floor((window.innerHeight || document.documentElement.clientHeight) * 0.9))
-      window.scrollBy({top: direction === 'down' ? amount : -amount, left: 0, behavior: 'auto'})
     },
     scrollToPageEdge(position: 'top' | 'bottom') {
       const scroll = () => {
@@ -1581,14 +3210,14 @@ export default Vue.extend({
     }, 50),
     downloadCurrentPage() {
       new jsFileDownloader({
-        url: `${this.currentPage.url}?contentNegotiation=false`,
+        url: canonicalPageImageUrl(this.currentPage.url),
         filename: `${this.book.name}-${this.currentPage.number}.${this.currentPage.fileName.split('.').pop()}`,
         withCredentials: true,
         forceDesktopMode: true,
       })
     },
     async setCurrentPageAsPoster(type: ItemTypes) {
-      const imageFile = await getFileFromUrl(`${this.currentPage.url}?contentNegotiation=false`, 'poster', 'image/jpeg', {credentials: 'include'})
+      const imageFile = await getFileFromUrl(canonicalPageImageUrl(this.currentPage.url), 'poster', 'image/jpeg', {credentials: 'include'})
       const newImageFile = await resizeImageFile(imageFile)
       switch (type) {
         case ItemTypes.BOOK:
@@ -1610,7 +3239,7 @@ export default Vue.extend({
 </script>
 <style scoped>
 .settings {
-  z-index: 2;
+  z-index: 100;
 }
 
 .full-height {
@@ -1653,31 +3282,98 @@ export default Vue.extend({
   pointer-events: none;
 }
 
-.reflow-click-top {
+.reflow-click-left {
   position: fixed;
   top: 0;
   left: 0;
-  height: 25vh;
-  width: 100%;
+  height: 100vh;
+  width: 30vw;
   z-index: 3;
 }
 
-.reflow-click-bottom {
+.reflow-click-right {
   position: fixed;
-  top: 75vh;
-  left: 0;
-  height: 25vh;
-  width: 100%;
+  top: 0;
+  right: 0;
+  height: 100vh;
+  width: 30vw;
   z-index: 3;
 }
 
 .reflow-click-center {
   position: fixed;
-  top: 25vh;
-  left: 0;
-  height: 50vh;
-  width: 100%;
+  top: 0;
+  left: 30vw;
+  height: 100vh;
+  width: 40vw;
   z-index: 3;
+}
+
+.reader-crop-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  box-sizing: border-box;
+  background: rgba(0, 0, 0, 0.86);
+}
+
+.reader-crop-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  min-height: 36px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.reader-rotation-setting {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.reader-crop-skew-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.reader-crop-skew-control input[type="range"] {
+  width: min(140px, 36vw);
+}
+
+.reader-crop-stage {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  max-height: calc(100vh - 60px);
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+}
+
+.reader-crop-image {
+  display: block;
+  max-width: 100%;
+  max-height: calc(100vh - 60px);
+  object-fit: contain;
+}
+
+.reader-crop-rect {
+  position: absolute;
+  border: 2px dashed #90caf9;
+  background: rgba(144, 202, 249, 0.18);
+  box-sizing: border-box;
+  pointer-events: none;
 }
 </style>
 <style>
@@ -1690,12 +3386,36 @@ export default Vue.extend({
   overscroll-behavior: none;
 }
 
-.reader-night-mode .reader-frame img,
+.reader-shell {
+  --reflow-text-background: #fff;
+  --reflow-text-filter: none;
+}
+
+.reader-night-mode {
+  --reflow-text-background: #000;
+  --reflow-text-filter: none;
+}
+
+.reader-night-mode .reader-frame img:not(.word-block):not(.k2-word),
 .reader-night-mode .reader-frame canvas {
   filter: invert(1) hue-rotate(180deg) brightness(0.92);
 }
 
-.reader-night-mode .reflow-reader .reflow-wrapper {
-  background: #000000;
+.reader-frame .reflow-wrapper,
+.reader-frame .k2-output {
+  background: var(--reflow-text-background);
 }
+
+.reader-frame img.word-block,
+.reader-frame img.k2-word {
+  background: var(--reflow-text-background);
+  filter: var(--reflow-text-filter);
+}
+
+.reader-night-mode .reader-frame img.word-block,
+.reader-night-mode .reader-frame img.k2-word {
+  background: var(--reflow-text-background);
+  filter: var(--reflow-text-filter);
+}
+
 </style>

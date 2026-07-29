@@ -36,6 +36,18 @@ export default class KomgaSettingsService {
     }
   }
 
+  async resetLibraryScanDailyFileLimitUsage() {
+    try {
+      await this.http.post(`${API_SETTINGS}/library-scan-daily-file-limit/reset`)
+    } catch (e) {
+      let msg = 'An error occurred while trying to reset the daily scan quota'
+      if (e.response.data.message) {
+        msg += `: ${e.response.data.message}`
+      }
+      throw new Error(msg)
+    }
+  }
+
   async getClientSettingsGlobal(): Promise<Record<string, ClientSettingDto>> {
     try {
       return (await this.http.get(`${API_CLIENT_SETTINGS}/global/list`)).data

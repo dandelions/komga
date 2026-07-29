@@ -58,6 +58,23 @@
                       />
                     </v-col>
                   </v-row>
+                  <v-row>
+                    <v-col>
+                      <v-switch v-model="form.showChildLibraries" :label="$t('dialog.edit_library.show_child_libraries')" />
+                      <v-switch v-model="form.includeChildLibraries" :label="$t('dialog.edit_library.include_child_libraries')" />
+                    </v-col>
+                  </v-row>
+
+                  <v-row>
+                    <v-col>
+                      <v-select
+                        v-model="form.parentId"
+                        :items="parentLibraryOptions"
+                        clearable
+                        :label="$t('dialog.edit_library.field_parent_library')"
+                      />
+                    </v-col>
+                  </v-row>
 
                   <v-row justify="center">
                     <v-col cols="8" align-self="center">
@@ -115,6 +132,20 @@
                       <v-checkbox
                         v-model="form.scanOnStartup"
                         :label="$t('dialog.edit_library.field_scanner_scan_startup')"
+                        hide-details
+                        class="mx-4"
+                      />
+
+                      <v-checkbox
+                        v-model="form.scanBypassDailyFileLimit"
+                        :label="$t('dialog.edit_library.field_scanner_bypass_daily_file_limit')"
+                        hide-details
+                        class="mx-4"
+                      />
+
+                      <v-checkbox
+                        v-model="form.scanOnlyNewBooks"
+                        :label="$t('dialog.edit_library.field_scanner_only_new_books')"
                         hide-details
                         class="mx-4"
                       />
@@ -473,6 +504,8 @@ export default Vue.extend({
         scanForceModifiedTime: false,
         scanInterval: ScanIntervalDto.EVERY_6H,
         scanOnStartup: false,
+        scanBypassDailyFileLimit: false,
+        scanOnlyNewBooks: false,
         scanTypes: [],
         scanDirectoryExclusions: [] as string[],
         repairExtensions: false,
@@ -484,6 +517,9 @@ export default Vue.extend({
         hashKoreader: false,
         analyzeDimensions: true,
         oneshotsDirectory: '',
+        parentId: null as string | null,
+        showChildLibraries: true,
+        includeChildLibraries: false,
       },
       validationFieldNames: new Map([]),
     }
@@ -521,6 +557,17 @@ export default Vue.extend({
         text: this.$t('common.epub').toString(),
         value: 'epub',
       }]
+    },
+    parentLibraryOptions(): any[] {
+      return [{
+        text: this.$t('dialog.edit_library.parent_library_none').toString(),
+        value: null,
+      }, ...this.$store.getters.getLibraries
+        .filter((it: LibraryDto) => it.id !== this.library?.id && it.parentId !== this.library?.id)
+        .map((it: LibraryDto) => ({
+          text: it.name,
+          value: it.id,
+        }))]
     },
 
     importComicInfo: {
@@ -587,7 +634,6 @@ export default Vue.extend({
   validations: {
     form: {
       name: {required},
-      path: {required},
     },
   },
   methods: {
@@ -629,6 +675,8 @@ export default Vue.extend({
       this.form.scanForceModifiedTime = library ? library.scanForceModifiedTime : false
       this.form.scanInterval = library ? library.scanInterval : ScanIntervalDto.EVERY_6H
       this.form.scanOnStartup = library ? library.scanOnStartup : false
+      this.form.scanBypassDailyFileLimit = library ? library.scanBypassDailyFileLimit : false
+      this.form.scanOnlyNewBooks = library ? library.scanOnlyNewBooks : false
       this.form.scanTypes = []
       if (!library) this.form.scanTypes = ['cbx', 'pdf', 'epub']
       if (library?.scanEpub == true) this.form.scanTypes.splice(0, 0, 'epub')
@@ -644,6 +692,9 @@ export default Vue.extend({
       this.form.hashKoreader = library ? library.hashKoreader : false
       this.form.analyzeDimensions = library ? library.analyzeDimensions : true
       this.form.oneshotsDirectory = library ? library.oneshotsDirectory : ''
+      this.form.parentId = library ? library.parentId : null
+      this.form.showChildLibraries = library ? localStorage.getItem(`komga.showChildLibraries.${library.id}`) !== 'false' : true
+      this.form.includeChildLibraries = library ? localStorage.getItem(`komga.includeChildLibraries.${library.id}`) === 'true' : false
       this.$v.$reset()
     },
     validateLibrary() {
@@ -652,7 +703,7 @@ export default Vue.extend({
       if (!this.$v.$invalid) {
         return {
           name: this.form.name,
-          root: this.form.path,
+          root: this.form.path || null,
           importComicInfoBook: this.form.importComicInfoBook,
           importComicInfoSeries: this.form.importComicInfoSeries,
           importComicInfoCollection: this.form.importComicInfoCollection,
@@ -666,6 +717,8 @@ export default Vue.extend({
           scanForceModifiedTime: this.form.scanForceModifiedTime,
           scanInterval: this.form.scanInterval,
           scanOnStartup: this.form.scanOnStartup,
+          scanBypassDailyFileLimit: this.form.scanBypassDailyFileLimit,
+          scanOnlyNewBooks: this.form.scanOnlyNewBooks,
           scanCbx: this.form.scanTypes.includes('cbx'),
           scanPdf: this.form.scanTypes.includes('pdf'),
           scanEpub: this.form.scanTypes.includes('epub'),
@@ -679,6 +732,7 @@ export default Vue.extend({
           hashKoreader: this.form.hashKoreader,
           analyzeDimensions: this.form.analyzeDimensions,
           oneshotsDirectory: this.form.oneshotsDirectory,
+          parentId: this.form.parentId,
         }
       }
       return null
@@ -689,6 +743,8 @@ export default Vue.extend({
         try {
           if (this.library) {
             await this.$store.dispatch('updateLibrary', {libraryId: this.library.id, library: library})
+            localStorage.setItem(`komga.showChildLibraries.${this.library.id}`, `${this.form.showChildLibraries}`)
+            localStorage.setItem(`komga.includeChildLibraries.${this.library.id}`, `${this.form.includeChildLibraries}`)
           } else {
             await this.$store.dispatch('postLibrary', library)
           }

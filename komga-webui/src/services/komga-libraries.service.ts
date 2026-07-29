@@ -1,5 +1,6 @@
 import {AxiosInstance} from 'axios'
 import {LibraryCreationDto, LibraryDto, LibraryUpdateDto} from '@/types/komga-libraries'
+import {BookSearch} from '@/types/komga-search'
 
 const API_LIBRARIES = '/api/v1/libraries'
 
@@ -84,9 +85,9 @@ export default class KomgaLibrariesService {
     }
   }
 
-  async analyzeLibrary(library: LibraryDto) {
+  async analyzeLibrary(library: LibraryDto, search?: BookSearch) {
     try {
-      await this.http.post(`${API_LIBRARIES}/${library.id}/analyze`)
+      await this.http.post(`${API_LIBRARIES}/${library.id}/analyze`, search)
     } catch (e) {
       let msg = `An error occurred while trying to analyze library '${library.name}'`
       if (e.response.data.message) {

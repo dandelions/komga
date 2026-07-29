@@ -53,6 +53,8 @@
       @select-all="selectedBooks = books"
       @mark-read="markSelectedRead"
       @mark-unread="markSelectedUnread"
+      show-analyze
+      @analyze="analyzeSelectedBooks"
       @add-to-collection="addToCollection"
       @add-to-readlist="addToReadList"
       @edit="editMultipleBooks"
@@ -178,7 +180,7 @@ import ReadMore from '@/components/ReadMore.vue'
 import FilterDrawer from '@/components/FilterDrawer.vue'
 import FilterPanels from '@/components/FilterPanels.vue'
 import FilterList from '@/components/FilterList.vue'
-import {ReadStatus} from '@/types/enum-books'
+import {MediaStatus, ReadStatus} from '@/types/enum-books'
 import {authorRoles} from '@/types/author-roles'
 import {LibraryDto} from '@/types/komga-libraries'
 import {mergeFilterParams, toNameValue} from '@/functions/filter'
@@ -309,6 +311,17 @@ export default Vue.extend({
             {name: this.$t('filter.read').toString(), value: ReadStatus.READ},
           ],
         },
+        mediaStatus: {
+          values: [
+            {name: this.$t('book_card.unknown').toString(), value: MediaStatus.UNKNOWN, nValue: `!${MediaStatus.UNKNOWN}`},
+            {name: `${this.$t('book_card.error')} / ${this.$t('book_card.unsupported')}`, value: `${MediaStatus.ERROR},${MediaStatus.UNSUPPORTED}`},
+          ],
+        },
+        deleted: {
+          values: [
+            {name: this.$t('common.unavailable').toString(), value: 'true', nValue: 'false'},
+          ],
+        },
       } as FiltersOptions
     },
     filterOptionsPanel(): FiltersOptions {
@@ -365,9 +378,11 @@ export default Vue.extend({
 
       // get filter from query params or local storage and validate with available filter values
       let activeFilters: any
-      if (route.query.readStatus || route.query.tag || route.query.library || authorRoles.some(role => role in route.query)) {
+      if (route.query.readStatus || route.query.mediaStatus || route.query.deleted || route.query.tag || route.query.library || authorRoles.some(role => role in route.query)) {
         activeFilters = {
           readStatus: route.query.readStatus || [],
+          mediaStatus: route.query.mediaStatus || [],
+          deleted: route.query.deleted || [],
           library: route.query.library || [],
           tag: route.query.tag || [],
         }
@@ -382,6 +397,8 @@ export default Vue.extend({
     validateFilters(filters: FiltersActive): FiltersActive {
       const validFilter = {
         readStatus: filters.readStatus?.filter(x => Object.keys(ReadStatus).includes(x)) || [],
+        mediaStatus: filters.mediaStatus?.filter(x => x === MediaStatus.UNKNOWN || x === `!${MediaStatus.UNKNOWN}` || x === `${MediaStatus.ERROR},${MediaStatus.UNSUPPORTED}`) || [],
+        deleted: filters.deleted?.filter(x => x === 'true' || x === 'false') || [],
         library: filters.library?.filter(x => this.filterOptions.library.map(n => n.value).includes(x)) || [],
         tag: filters.tag?.filter(x => this.filterOptions.tag.map(n => n.value).includes(x)) || [],
       } as any
@@ -469,7 +486,14 @@ export default Vue.extend({
         }))
       })
 
-      const booksPage = await this.$komgaReadLists.getBooks(readListId, pageRequest, this.filters.library, this.filters.readStatus, this.filters.tag, authorsFilter)
+      const mediaStatus = [] as string[]
+      this.filters.mediaStatus?.forEach((x: string) => {
+        if (x === MediaStatus.UNKNOWN) mediaStatus.push(MediaStatus.UNKNOWN)
+        if (x === `!${MediaStatus.UNKNOWN}`) mediaStatus.push(...Object.values(MediaStatus).filter(status => status !== MediaStatus.UNKNOWN))
+        if (x === `${MediaStatus.ERROR},${MediaStatus.UNSUPPORTED}`) mediaStatus.push(MediaStatus.ERROR, MediaStatus.UNSUPPORTED)
+      })
+      const deleted = this.filters.deleted?.length > 0 ? this.filters.deleted[0] === 'true' : undefined
+      const booksPage = await this.$komgaReadLists.getBooks(readListId, pageRequest, this.filters.library, this.filters.readStatus, this.filters.tag, authorsFilter, mediaStatus, deleted)
 
       this.totalPages = booksPage.totalPages
       this.totalElements = booksPage.totalElements
@@ -512,6 +536,12 @@ export default Vue.extend({
     async markSelectedUnread() {
       await Promise.all(this.selectedBooks.map(b =>
         this.$komgaBooks.deleteReadProgress(b.id),
+      ))
+      this.selectedBooks = []
+    },
+    async analyzeSelectedBooks() {
+      await Promise.all(this.selectedBooks.map(b =>
+        this.$komgaBooks.analyzeBook(b),
       ))
       this.selectedBooks = []
     },

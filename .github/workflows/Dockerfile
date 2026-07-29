@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y \
     wget \
     vim-tiny \
     iputils-ping \
+    calibre \
     openjdk-21-jre-headless \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*

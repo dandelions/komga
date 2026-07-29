@@ -1459,4 +1459,32 @@ class BookControllerTest(
         header { string("Content-Disposition", containsString(URLEncoder.encode(bookName, StandardCharsets.UTF_8.name()))) }
       }
   }
+
+  @Test
+  @WithMockCustomUser
+  fun `given epub book when getting book file then epub format is preserved`() {
+    val tempFile =
+      Files
+        .createTempFile("book", ".epub")
+        .also { it.toFile().deleteOnExit() }
+    makeSeries(name = "series", libraryId = library.id).let { series ->
+      seriesLifecycle.createSeries(series).let { created ->
+        val books = listOf(makeBook("book", libraryId = library.id, url = tempFile.toUri().toURL()))
+        seriesLifecycle.addBooks(created, books)
+      }
+    }
+
+    val book = bookRepository.findAll().first()
+    mediaRepository.findById(book.id).let {
+      mediaRepository.update(it.copy(mediaType = org.gotson.komga.domain.model.MediaType.ZIP.type))
+    }
+
+    mockMvc
+      .get("/api/v1/books/${book.id}/file/${tempFile.fileName}")
+      .andExpect {
+        status { isOk() }
+        header { string(HttpHeaders.CONTENT_DISPOSITION, containsString(tempFile.fileName.toString())) }
+        header { string(HttpHeaders.CONTENT_TYPE, containsString(org.gotson.komga.domain.model.MediaType.EPUB.type)) }
+      }
+  }
 }

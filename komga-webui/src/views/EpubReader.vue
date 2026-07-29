@@ -123,7 +123,7 @@
 
     <header id="headerMenu"/>
 
-    <div id="D2Reader-Container" style="height: 100vh" :class="appearanceClass('bg')">
+    <div id="D2Reader-Container" :style="epubReaderBackgroundStyle" :class="appearanceClass('bg')">
       <main tabindex=-1 id="iframe-wrapper" style="height: 100vh" @click="clickThrough">
         <div id="reader-loading"></div>
         <div id="reader-error"></div>
@@ -132,12 +132,15 @@
          style="left: 50%;position: fixed;color: #000;height: 24px;background: #d3d3d33b; width: 150px;transform: translate(-50%, 0); display: block"
          :style="`top: ${showToolbars ? 48 : 0}px`"
          :class="settings.navigationButtons ? '' : 'hidden'"
+         @click.capture="previousEpubPageControl"
       >
         <v-icon style="left: calc(50% - 12px); position: relative;">mdi-chevron-up</v-icon>
       </a>
       <a id="next-chapter" rel="next" role="button" aria-labelledby="next-label"
          :class="settings.navigationButtons ? '' : 'hidden'"
-         style="bottom: 0;left: 50%;position: fixed;color: #000;height: 24px;background: #d3d3d33b; width: 150px;transform: translate(-50%, 0); display: block">
+         style="bottom: 0;left: 50%;position: fixed;color: #000;height: 24px;background: #d3d3d33b; width: 150px;transform: translate(-50%, 0); display: block"
+         @click.capture="nextEpubPageControl"
+      >
         <v-icon style="left: calc(50% - 12px);position: relative;">mdi-chevron-down</v-icon>
       </a>
     </div>
@@ -146,6 +149,7 @@
       <a rel="prev" class="disabled" role="button" aria-labelledby="previous-label"
          style="top: 50%;left:0;position: fixed;height: 100px;background: #d3d3d33b;"
          :class="settings.navigationButtons ? '' : 'hidden'"
+         @click.capture="previousEpubPageControl"
       >
         <v-icon style="top: calc(50% - 12px);
                         position: relative;">mdi-chevron-left
@@ -154,12 +158,14 @@
       <a rel="next" class="disabled" role="button" aria-labelledby="next-label"
          style="top: 50%;right:0;position: fixed;height: 100px;background: #d3d3d33b;"
          :class="settings.navigationButtons ? '' : 'hidden'"
+         @click.capture="nextEpubPageControl"
       >
         <v-icon style="top: calc(50% - 12px);position: relative;">mdi-chevron-right</v-icon>
       </a>
     </footer>
 
-    <v-container fluid class="full-width" style="position: fixed; bottom: 0; font-size: .85rem"
+    <v-container fluid class="full-width epub-status-bar"
+                 :style="epubReaderStatusStyle"
                  :class="appearanceClass()"
                  v-if="!verticalScroll"
     >
@@ -208,6 +214,14 @@
                 :items="navigationOptions"
                 v-model="navigationMode"
                 :label="$t('epubreader.settings.navigation_mode')"
+              />
+            </v-list-item>
+
+            <v-list-item>
+              <settings-select
+                :items="epubVerticalSwipeLeftOptions"
+                v-model="epubVerticalSwipeLeftAction"
+                :label="$t('epubreader.settings.vertical_swipe_left_action')"
               />
             </v-list-item>
 
@@ -282,10 +296,206 @@
                 tick-size="3"
               />
             </v-list-item>
+
+            <v-list-item>
+              <settings-switch
+                v-model="epubBackgroundImagesEnabled"
+                :label="$t('epubreader.settings.background_images_enabled')"
+              />
+            </v-list-item>
+
+            <v-list-item v-if="epubBackgroundImagesEnabled">
+              <v-btn
+                block
+                outlined
+                color="primary"
+                @click="showBackgroundImageSelector = true"
+              >
+                <v-icon left>mdi-image-multiple</v-icon>
+                {{ $t('epubreader.settings.background_image_manage') }}
+              </v-btn>
+            </v-list-item>
+            <v-list-item v-else>
+              <v-btn
+                block
+                outlined
+                @click="showBackgroundImageSelector = true"
+              >
+                <v-icon left>mdi-image-multiple</v-icon>
+                {{ $t('epubreader.settings.background_image_manage') }}
+              </v-btn>
+            </v-list-item>
+            <v-divider/>
+            <v-subheader class="font-weight-black text-h6">{{ $t('epubreader.settings.custom_style') }}</v-subheader>
+
+            <v-list-item>
+              <settings-switch
+                v-model="epubCustomStyleEnabled"
+                :label="$t('epubreader.settings.custom_style_enabled')"
+              />
+            </v-list-item>
+
+            <v-list-item>
+              <settings-switch
+                v-model="epubCustomStyleDisableOriginalStyle"
+                :label="$t('epubreader.settings.custom_style_disable_original')"
+              />
+            </v-list-item>
+
+            <v-list-item>
+              <settings-select
+                :items="epubChineseConversionOptions"
+                v-model="epubCustomStyleChineseConversion"
+                :label="$t('epubreader.settings.chinese_conversion')"
+              />
+            </v-list-item>
+
+            <v-list-item>
+              <v-textarea
+                v-model="epubCustomStyleCss"
+                :label="$t('epubreader.settings.custom_style_css')"
+                auto-grow
+                outlined
+                rows="6"
+                spellcheck="false"
+                class="epub-custom-style-editor"
+              />
+            </v-list-item>
+
+            <v-list-item class="justify-end">
+              <v-btn
+                color="primary"
+                depressed
+                :loading="epubCustomStyleSaving"
+                @click="saveEpubCustomStyle"
+              >
+                {{ $t('epubreader.settings.custom_style_save') }}
+              </v-btn>
+            </v-list-item>
           </v-list>
         </v-card-text>
       </v-card>
     </v-bottom-sheet>
+
+    <v-dialog
+      v-model="showBackgroundImageSelector"
+      fullscreen
+      scrollable
+      transition="dialog-bottom-transition"
+    >
+      <v-card>
+        <v-toolbar dark color="primary">
+          <v-btn icon dark @click="showBackgroundImageSelector = false">
+            <v-icon>mdi-close</v-icon>
+          </v-btn>
+          <v-toolbar-title>{{ $t('epubreader.settings.background_image_manage') }}</v-toolbar-title>
+        </v-toolbar>
+        <v-card-text class="pa-4 epub-background-manager">
+          <settings-switch
+            v-model="epubBackgroundImagesEnabled"
+            :label="$t('epubreader.settings.background_images_enabled')"
+          />
+
+          <v-row>
+            <v-col cols="12" md="6">
+              <h2 class="subtitle-1 font-weight-bold mb-3">{{ $t('epubreader.settings.background_image_light') }}</h2>
+              <v-file-input
+                v-model="epubBackgroundImageLightFile"
+                accept="image/*"
+                prepend-icon="mdi-image-outline"
+                show-size
+                outlined
+                dense
+                :label="$t('epubreader.settings.background_image_light_upload')"
+                @change="setEpubBackgroundImage('light', $event)"
+              />
+              <div class="epub-background-grid">
+                <v-card
+                  outlined
+                  class="epub-background-card"
+                  :class="{'epub-background-card-selected': !epubBackgroundImageLightId}"
+                  @click="selectEpubBackgroundImage('light', '')"
+                >
+                  <div class="epub-background-empty">
+                    <v-icon large>mdi-image-off-outline</v-icon>
+                    <span>{{ $t('epubreader.settings.background_image_none') }}</span>
+                  </div>
+                </v-card>
+                <v-card
+                  v-for="image in epubBackgroundImages.light"
+                  :key="image.id"
+                  outlined
+                  class="epub-background-card"
+                  :class="{'epub-background-card-selected': epubBackgroundImageLightId === image.id}"
+                  @click="selectEpubBackgroundImage('light', image.id)"
+                >
+                  <v-img :src="image.dataUrl" class="epub-background-thumbnail"/>
+                  <div class="epub-background-card-footer">
+                    <span class="text-truncate">{{ image.name }}</span>
+                    <v-btn
+                      icon
+                      small
+                      :aria-label="$t('epubreader.settings.background_image_delete')"
+                      @click.stop="deleteEpubBackgroundImageById('light', image.id)"
+                    >
+                      <v-icon small>mdi-delete</v-icon>
+                    </v-btn>
+                  </div>
+                </v-card>
+              </div>
+            </v-col>
+
+            <v-col cols="12" md="6">
+              <h2 class="subtitle-1 font-weight-bold mb-3">{{ $t('epubreader.settings.background_image_dark') }}</h2>
+              <v-file-input
+                v-model="epubBackgroundImageDarkFile"
+                accept="image/*"
+                prepend-icon="mdi-image-outline"
+                show-size
+                outlined
+                dense
+                :label="$t('epubreader.settings.background_image_dark_upload')"
+                @change="setEpubBackgroundImage('dark', $event)"
+              />
+              <div class="epub-background-grid">
+                <v-card
+                  outlined
+                  class="epub-background-card"
+                  :class="{'epub-background-card-selected': !epubBackgroundImageDarkId}"
+                  @click="selectEpubBackgroundImage('dark', '')"
+                >
+                  <div class="epub-background-empty">
+                    <v-icon large>mdi-image-off-outline</v-icon>
+                    <span>{{ $t('epubreader.settings.background_image_none') }}</span>
+                  </div>
+                </v-card>
+                <v-card
+                  v-for="image in epubBackgroundImages.dark"
+                  :key="image.id"
+                  outlined
+                  class="epub-background-card"
+                  :class="{'epub-background-card-selected': epubBackgroundImageDarkId === image.id}"
+                  @click="selectEpubBackgroundImage('dark', image.id)"
+                >
+                  <v-img :src="image.dataUrl" class="epub-background-thumbnail"/>
+                  <div class="epub-background-card-footer">
+                    <span class="text-truncate">{{ image.name }}</span>
+                    <v-btn
+                      icon
+                      small
+                      :aria-label="$t('epubreader.settings.background_image_delete')"
+                      @click.stop="deleteEpubBackgroundImageById('dark', image.id)"
+                    >
+                      <v-icon small>mdi-delete</v-icon>
+                    </v-btn>
+                  </div>
+                </v-card>
+              </div>
+            </v-col>
+          </v-row>
+        </v-card-text>
+      </v-card>
+    </v-dialog>
 
     <v-snackbar
       v-model="notification.enabled"
@@ -331,6 +541,118 @@ import {getBookReadRouteFromMedia} from '@/functions/book-format'
 import SettingsSelect from '@/components/SettingsSelect.vue'
 import {createR2Progression, r2ProgressionToReadingPosition} from '@/functions/readium'
 import {debounce} from 'lodash'
+import OpenCC, {ConverterFunction} from 'opencc-js'
+import {
+  CLIENT_SETTING,
+  ClientSettingUserUpdateDto,
+  ClientSettingsEpubBackgroundImage,
+  ClientSettingsEpubBackgroundImages,
+  ClientSettingsEpubBackgroundImageSelection,
+  ClientSettingsEpubChineseConversion,
+  ClientSettingsEpubCustomStyle,
+} from '@/types/komga-clientsettings'
+
+const EPUB_CUSTOM_STYLE_WINDOW_KEY = '__KOMGA_EPUB_CUSTOM_STYLE__'
+const EPUB_CUSTOM_STYLE_ID = 'komga-epub-custom-style'
+const EPUB_AUTHOR_STYLE_DISABLED_ATTR = 'komgaAuthorStyleDisabled'
+const EPUB_AUTHOR_STYLE_ORIGINAL_MEDIA_ATTR = 'komgaOriginalMedia'
+const EPUB_AUTHOR_INLINE_STYLE_DISABLED_ATTR = 'komgaAuthorInlineStyleDisabled'
+const EPUB_AUTHOR_ORIGINAL_INLINE_STYLE_ATTR = 'komgaOriginalInlineStyle'
+const EPUB_AUTHOR_IMAGE_SIZE_DISABLED_ATTR = 'komgaAuthorImageSizeDisabled'
+const EPUB_AUTHOR_ORIGINAL_WIDTH_ATTR = 'komgaOriginalWidth'
+const EPUB_AUTHOR_ORIGINAL_HEIGHT_ATTR = 'komgaOriginalHeight'
+const EPUB_VERTICAL_PAGE_MASK_ID = 'komga-epub-vertical-page-mask'
+const EPUB_CHINESE_TEXT_ORIGINALS = new WeakMap<Text, string>()
+const EPUB_CHINESE_CONVERTERS = {} as Partial<Record<Exclude<ClientSettingsEpubChineseConversion, 'none'>, ConverterFunction>>
+const EPUB_CHINESE_TEXT_PATTERN = /[\u3400-\u9fff\uf900-\ufaff]/
+const EPUB_HORIZONTAL_SWIPE_MIN_DISTANCE = 48
+const EPUB_HORIZONTAL_SWIPE_DOMINANCE_RATIO = 1.25
+const EPUB_BACKGROUND_IMAGE_MAX_BYTES = 2 * 1024 * 1024
+const EPUB_BACKGROUND_IMAGE_MAX_DIMENSION = 1920
+const EPUB_BACKGROUND_IMAGE_JPEG_QUALITY = .86
+const EPUB_AUTHOR_INLINE_STYLE_PROPERTIES = [
+  'font-size',
+  'font-family',
+  'line-height',
+  'letter-spacing',
+  'word-spacing',
+  'color',
+  'background',
+  'background-color',
+]
+const EPUB_CHINESE_CONVERSION_SKIP_SELECTOR = [
+  'script',
+  'style',
+  'textarea',
+  'input',
+  'select',
+  'option',
+  'code',
+  'pre',
+  'kbd',
+  'samp',
+  'svg',
+  'math',
+  '.ignore-opencc',
+].join(',')
+const READIUM_CSS_BEFORE_URL = new URL('../styles/readium/ReadiumCSS-before.css.resource', import.meta.url).toString()
+const READIUM_CSS_DEFAULT_URL = new URL('../styles/readium/ReadiumCSS-default.css.resource', import.meta.url).toString()
+const READIUM_CSS_AFTER_URL = new URL('../styles/readium/ReadiumCSS-after.css.resource', import.meta.url).toString()
+const R2D2BC_POPUP_CSS_URL = new URL('../styles/r2d2bc/popup.css.resource', import.meta.url).toString()
+const R2D2BC_POPOVER_CSS_URL = new URL('../styles/r2d2bc/popover.css.resource', import.meta.url).toString()
+const R2D2BC_STYLE_CSS_URL = new URL('../styles/r2d2bc/style.css.resource', import.meta.url).toString()
+const EPUB_READER_STYLE_URLS = [
+  READIUM_CSS_BEFORE_URL,
+  READIUM_CSS_DEFAULT_URL,
+  READIUM_CSS_AFTER_URL,
+  R2D2BC_POPUP_CSS_URL,
+  R2D2BC_POPOVER_CSS_URL,
+  R2D2BC_STYLE_CSS_URL,
+]
+const createEmptyEpubBackgroundImages = (): ClientSettingsEpubBackgroundImages => ({
+  enabled: false,
+  selectedLightId: '',
+  selectedDarkId: '',
+  light: [],
+  dark: [],
+  books: {},
+})
+
+const createEmptyEpubBackgroundImageSelection = (): ClientSettingsEpubBackgroundImageSelection => ({
+  enabled: false,
+  selectedLightId: '',
+  selectedDarkId: '',
+})
+
+type EpubTouchStart = {
+  x: number,
+  y: number,
+}
+
+type EpubPageAction = 'next' | 'previous'
+type EpubBackgroundImageMode = 'light' | 'dark'
+
+type EpubReadingOrderItem = {
+  href?: string,
+  Href?: string,
+  title?: string,
+  Title?: string,
+  type?: string,
+  TypeLink?: string,
+}
+
+type EpubPublication = {
+  getAbsoluteHref: (href: string) => string,
+  getPreviousSpineItem: (href: string) => EpubReadingOrderItem | undefined,
+  getNextSpineItem: (href: string) => EpubReadingOrderItem | undefined,
+}
+
+type EpubNavigator = {
+  publication?: EpubPublication,
+  currentChapterLink?: {
+    href?: string,
+  },
+}
 
 export default Vue.extend({
   name: 'EpubReader',
@@ -348,6 +670,7 @@ export default Vue.extend({
       context: {} as Context,
       contextName: '',
       showSettings: false,
+      showBackgroundImageSelector: false,
       showToolbars: false,
       showToc: false,
       showHelp: false,
@@ -418,11 +741,27 @@ export default Vue.extend({
         alwaysFullscreen: false,
         navigationClick: true,
         navigationButtons: true,
+        verticalSwipeLeftAction: 'previous' as EpubPageAction,
+        // legacy local values, migrated to WEBUI_EPUB_BACKGROUND_IMAGES when present
+        backgroundImageLight: '',
+        backgroundImageDark: '',
       },
+      epubBackgroundImageLightFile: undefined as File | undefined,
+      epubBackgroundImageDarkFile: undefined as File | undefined,
+      epubBackgroundImages: createEmptyEpubBackgroundImages(),
       navigationOptions: [
         {text: this.$t('epubreader.settings.navigation_options.buttons').toString(), value: 'button'},
         {text: this.$t('epubreader.settings.navigation_options.click').toString(), value: 'click'},
         {text: this.$t('epubreader.settings.navigation_options.both').toString(), value: 'buttonclick'},
+      ],
+      epubVerticalSwipeLeftOptions: [
+        {text: this.$t('epubreader.settings.vertical_swipe_left_options.previous').toString(), value: 'previous'},
+        {text: this.$t('epubreader.settings.vertical_swipe_left_options.next').toString(), value: 'next'},
+      ],
+      epubChineseConversionOptions: [
+        {text: this.$t('epubreader.settings.chinese_conversion_none').toString(), value: 'none'},
+        {text: this.$t('epubreader.settings.chinese_conversion_simplified').toString(), value: 'simplified'},
+        {text: this.$t('epubreader.settings.chinese_conversion_traditional').toString(), value: 'traditional'},
       ],
       tocs: {
         toc: undefined as unknown as TocEntry[],
@@ -444,6 +783,15 @@ export default Vue.extend({
       progressionPageCount: undefined as number,
       effectiveDirection: 'ltr',
       fixedLayout: false,
+      epubCustomStyleEnabled: false,
+      epubCustomStyleDisableOriginalStyle: false,
+      epubCustomStyleChineseConversion: 'none' as ClientSettingsEpubChineseConversion,
+      epubCustomStyleCss: '',
+      epubCustomStyleSaving: false,
+      epubIframeEnhancementObserver: undefined as MutationObserver | undefined,
+      epubIframeEnhancementTimers: [] as number[],
+      epubTouchStart: undefined as EpubTouchStart | undefined,
+      pendingVerticalEpubResourceEdge: undefined as 'start' | 'end' | undefined,
     }
   },
   created() {
@@ -451,9 +799,11 @@ export default Vue.extend({
     if (screenfull.isEnabled) screenfull.on('change', this.fullscreenChanged)
   },
   beforeDestroy() {
-    this.d2Reader.stop()
+    this.stopEpubIframeEnhancements()
+    this.d2Reader?.stop?.()
   },
   destroyed() {
+    delete (window as any)[EPUB_CUSTOM_STYLE_WINDOW_KEY]
     this.$vuetify.rtl = (this.$t('common.locale_rtl') === 'true')
     if (screenfull.isEnabled) {
       screenfull.off('change', this.fullscreenChanged)
@@ -480,7 +830,8 @@ export default Vue.extend({
       // route update means either:
       // - going to previous/next book, in this case the query.page is not set, so it will default to first page
       // - pressing the back button of the browser and navigating to the previous book, in this case the query.page is set, so we honor it
-      this.d2Reader.stop()
+      this.stopEpubIframeEnhancements()
+      this.d2Reader?.stop?.()
       this.setup(to.params.bookId, Number(to.query.page))
     }
     next()
@@ -498,6 +849,79 @@ export default Vue.extend({
       const p = this.currentLocation?.locations?.totalProgression
       if (p) return `${Math.round(p * 100)}%`
       return ''
+    },
+    epubReaderBackgroundStyle(): Record<string, string> {
+      const backgroundColor = this.getEpubThemeBackgroundColor()
+      const style = {
+        height: '100vh',
+        backgroundColor: backgroundColor,
+        '--epub-reader-background-color': backgroundColor,
+      } as Record<string, string>
+      const image = this.getCurrentEpubBackgroundImage()
+      if (image) {
+        style.backgroundImage = this.toCssUrl(image)
+        style.backgroundSize = '100vw 100vh'
+        style.backgroundPosition = 'center'
+        style.backgroundRepeat = 'no-repeat'
+        style.backgroundAttachment = 'fixed'
+      }
+      return style
+    },
+    epubReaderStatusStyle(): Record<string, string> {
+      const backgroundColor = this.getEpubThemeBackgroundColor()
+      const style = {
+        position: 'fixed',
+        bottom: '0',
+        fontSize: '.85rem',
+        backgroundColor: backgroundColor,
+        '--epub-reader-status-background-color': backgroundColor,
+        '--epub-reader-status-text-color': this.getEpubThemeTextColor(),
+      } as Record<string, string>
+      const image = this.getCurrentEpubBackgroundImage()
+      if (image) {
+        style.backgroundImage = this.toCssUrl(image)
+        style.backgroundSize = '100vw 100vh'
+        style.backgroundPosition = 'center'
+        style.backgroundRepeat = 'no-repeat'
+        style.backgroundAttachment = 'fixed'
+      }
+      return style
+    },
+    epubBackgroundImagesEnabled: {
+      get: function (): boolean {
+        return this.getCurrentEpubBackgroundImageSelection().enabled
+      },
+      set: function (enabled: boolean): void {
+        this.setCurrentEpubBackgroundImageSelection({enabled})
+        this.saveEpubBackgroundImages()
+        this.scheduleEpubIframeEnhancements(false)
+      },
+    },
+    epubBackgroundImageLightId: {
+      get: function (): string {
+        return this.getCurrentEpubBackgroundImageSelection().selectedLightId || ''
+      },
+      set: function (id: string): void {
+        this.setCurrentEpubBackgroundImageSelection({selectedLightId: id})
+        this.saveEpubBackgroundImages()
+        this.scheduleEpubIframeEnhancements(false)
+      },
+    },
+    epubBackgroundImageDarkId: {
+      get: function (): string {
+        return this.getCurrentEpubBackgroundImageSelection().selectedDarkId || ''
+      },
+      set: function (id: string): void {
+        this.setCurrentEpubBackgroundImageSelection({selectedDarkId: id})
+        this.saveEpubBackgroundImages()
+        this.scheduleEpubIframeEnhancements(false)
+      },
+    },
+    epubBackgroundImageLightItems(): { text: string, value: string }[] {
+      return this.getEpubBackgroundImageItems('light')
+    },
+    epubBackgroundImageDarkItems(): { text: string, value: string }[] {
+      return this.getEpubBackgroundImageItems('dark')
     },
     shortcutsHelp(): object {
       let nav = []
@@ -545,6 +969,7 @@ export default Vue.extend({
           this.settings.appearance = color
           this.d2Reader.applyUserSettings({appearance: color})
           this.$store.commit('setEpubreaderSettings', this.settings)
+          this.scheduleEpubIframeEnhancements(false)
         }
       },
     },
@@ -635,6 +1060,17 @@ export default Vue.extend({
         this.$store.commit('setEpubreaderSettings', this.settings)
       },
     },
+    epubVerticalSwipeLeftAction: {
+      get: function (): EpubPageAction {
+        return this.settings.verticalSwipeLeftAction === 'next' ? 'next' : 'previous'
+      },
+      set: function (value: EpubPageAction): void {
+        if (this.epubVerticalSwipeLeftOptions.map(x => x.value).includes(value)) {
+          this.settings.verticalSwipeLeftAction = value
+          this.$store.commit('setEpubreaderSettings', this.settings)
+        }
+      },
+    },
     fontFamily: {
       get: function (): string {
         return this.settings.fontFamily ?? 'Original'
@@ -723,8 +1159,8 @@ export default Vue.extend({
         }
       } else {
         if (this.settings.navigationClick) {
-          if (x < this.$vuetify.breakpoint.width / 4) return this.isRtl ? this.d2Reader.nextPage() : this.d2Reader.previousPage()
-          if (x > this.$vuetify.breakpoint.width * .75) return this.isRtl ? this.d2Reader.previousPage() : this.d2Reader.nextPage()
+          if (x < this.$vuetify.breakpoint.width / 4) return this.isRtl ? this.nextEpubPage() : this.previousEpubPage()
+          if (x > this.$vuetify.breakpoint.width * .75) return this.isRtl ? this.previousEpubPage() : this.nextEpubPage()
         }
       }
       this.toggleToolbars()
@@ -732,6 +1168,7 @@ export default Vue.extend({
     async setup(bookId: string) {
       this.book = await this.$komgaBooks.getBook(bookId)
       this.series = await this.$komgaSeries.getOneSeries(this.book.seriesId)
+      await this.loadEpubCustomStyle(bookId)
 
       const progression = await this.$komgaBooks.getProgression(bookId)
       const initialLocation = r2ProgressionToReadingPosition(progression, bookId)
@@ -762,7 +1199,7 @@ export default Vue.extend({
       }))
 
       this.d2Reader = await D2Reader.load({
-        url: new URL(bookManifestUrl(this.bookId)),
+        url: new URL(bookManifestUrl(bookId)),
         userSettings: this.settings,
         storageType: 'memory',
         lastReadingPosition: initialLocation,
@@ -771,22 +1208,22 @@ export default Vue.extend({
           // we use a different extension so that the css-loader rule is not used (see vue.config.js)
           {
             type: 'style',
-            url: new URL('../styles/readium/ReadiumCSS-before.css.resource', import.meta.url).toString(),
+            url: READIUM_CSS_BEFORE_URL,
             r2before: true,
           },
           {
             type: 'style',
-            url: new URL('../styles/readium/ReadiumCSS-default.css.resource', import.meta.url).toString(),
+            url: READIUM_CSS_DEFAULT_URL,
             r2default: true,
           },
           {
             type: 'style',
-            url: new URL('../styles/readium/ReadiumCSS-after.css.resource', import.meta.url).toString(),
+            url: READIUM_CSS_AFTER_URL,
             r2after: true,
           },
-          {type: 'style', url: new URL('../styles/r2d2bc/popup.css.resource', import.meta.url).toString()},
-          {type: 'style', url: new URL('../styles/r2d2bc/popover.css.resource', import.meta.url).toString()},
-          {type: 'style', url: new URL('../styles/r2d2bc/style.css.resource', import.meta.url).toString()},
+          {type: 'style', url: R2D2BC_POPUP_CSS_URL},
+          {type: 'style', url: R2D2BC_POPOVER_CSS_URL},
+          {type: 'style', url: R2D2BC_STYLE_CSS_URL},
           ...fontFamiliesInjectables,
         ],
         requestConfig: {
@@ -816,7 +1253,7 @@ export default Vue.extend({
           enableConsumption: false,
         },
         services: {
-          positions: new URL(bookPositionsUrl(this.bookId)),
+          positions: new URL(bookPositionsUrl(bookId)),
         },
         api: {
           updateCurrentLocation: this.updateCurrentLocation,
@@ -833,6 +1270,7 @@ export default Vue.extend({
       this.tocs.toc = this.d2Reader.tableOfContents
       this.tocs.landmarks = this.d2Reader.landmarks
       this.tocs.pageList = this.d2Reader.pageList
+      this.$nextTick(() => this.startEpubIframeEnhancements())
 
       if (this.alwaysFullscreen) this.enterFullscreen()
 
@@ -868,6 +1306,7 @@ export default Vue.extend({
 
       this.markProgress(location)
       this.currentLocation = location
+      this.scheduleEpubIframeEnhancements(false)
       return new Promise(function (resolve, _) {
         resolve(location)
       })
@@ -881,6 +1320,1154 @@ export default Vue.extend({
     },
     updateDirection(dir: string) {
       this.effectiveDirection = dir
+    },
+    loadEpubBackgroundImages() {
+      this.epubBackgroundImages = this.normalizeEpubBackgroundImages(this.getEpubBackgroundImages())
+    },
+    getEpubBackgroundImages(): ClientSettingsEpubBackgroundImages {
+      try {
+        return JSON.parse(this.$store.state.komgaSettings.clientSettingsUser[CLIENT_SETTING.WEBUI_EPUB_BACKGROUND_IMAGES]?.value)
+      } catch (e) {
+        return createEmptyEpubBackgroundImages()
+      }
+    },
+    normalizeEpubBackgroundImages(config?: Partial<ClientSettingsEpubBackgroundImages>): ClientSettingsEpubBackgroundImages {
+      const light = Array.isArray(config?.light) ? config?.light.filter(this.isValidEpubBackgroundImage) || [] : []
+      const dark = Array.isArray(config?.dark) ? config?.dark.filter(this.isValidEpubBackgroundImage) || [] : []
+      const books =
+        Object.entries(config?.books || {})
+          .reduce((acc, [bookId, selection]) => {
+            acc[bookId] = this.normalizeEpubBackgroundImageSelection(selection, light, dark)
+            return acc
+          }, {} as Record<string, ClientSettingsEpubBackgroundImageSelection>)
+
+      return {
+        enabled: false,
+        selectedLightId: '',
+        selectedDarkId: '',
+        light,
+        dark,
+        books,
+      }
+    },
+    normalizeEpubBackgroundImageSelection(
+      selection: Partial<ClientSettingsEpubBackgroundImageSelection> | undefined,
+      light: ClientSettingsEpubBackgroundImage[] = this.epubBackgroundImages.light,
+      dark: ClientSettingsEpubBackgroundImage[] = this.epubBackgroundImages.dark,
+    ): ClientSettingsEpubBackgroundImageSelection {
+      return {
+        enabled: selection?.enabled || false,
+        selectedLightId: light.some(x => x.id === selection?.selectedLightId) ? selection?.selectedLightId : '',
+        selectedDarkId: dark.some(x => x.id === selection?.selectedDarkId) ? selection?.selectedDarkId : '',
+      }
+    },
+    isValidEpubBackgroundImage(image: ClientSettingsEpubBackgroundImage): boolean {
+      return !!image?.id && !!image?.name && !!image?.dataUrl
+    },
+    async migrateLocalEpubBackgroundImages() {
+      let changed = false
+      const config = this.normalizeEpubBackgroundImages(this.epubBackgroundImages)
+
+      if (this.settings.backgroundImageLight && config.light.length === 0) {
+        const image = this.createEpubBackgroundImage(
+          this.$t('epubreader.settings.background_image_light').toString(),
+          this.settings.backgroundImageLight,
+        )
+        config.light.push(image)
+        changed = true
+      }
+
+      if (this.settings.backgroundImageDark && config.dark.length === 0) {
+        const image = this.createEpubBackgroundImage(
+          this.$t('epubreader.settings.background_image_dark').toString(),
+          this.settings.backgroundImageDark,
+        )
+        config.dark.push(image)
+        changed = true
+      }
+
+      if (!changed) return
+
+      this.epubBackgroundImages = config
+      this.settings.backgroundImageLight = ''
+      this.settings.backgroundImageDark = ''
+      this.saveEpubReaderSettings()
+      await this.saveEpubBackgroundImages()
+    },
+    getEpubBackgroundImageItems(mode: EpubBackgroundImageMode): { text: string, value: string }[] {
+      return [
+        {text: this.$t('epubreader.settings.background_image_none').toString(), value: ''},
+        ...this.getEpubBackgroundImageList(mode).map(image => ({text: image.name, value: image.id})),
+      ]
+    },
+    getEpubBackgroundImageList(mode: EpubBackgroundImageMode): ClientSettingsEpubBackgroundImage[] {
+      return mode === 'light' ? this.epubBackgroundImages.light : this.epubBackgroundImages.dark
+    },
+    setEpubBackgroundImageList(mode: EpubBackgroundImageMode, images: ClientSettingsEpubBackgroundImage[]) {
+      if (mode === 'light') this.epubBackgroundImages.light = images
+      else this.epubBackgroundImages.dark = images
+    },
+    getSelectedEpubBackgroundImageId(mode: EpubBackgroundImageMode): string {
+      const selection = this.getCurrentEpubBackgroundImageSelection()
+      return mode === 'light' ? selection.selectedLightId || '' : selection.selectedDarkId || ''
+    },
+    setSelectedEpubBackgroundImageId(mode: EpubBackgroundImageMode, id: string) {
+      this.setCurrentEpubBackgroundImageSelection(mode === 'light' ? {selectedLightId: id} : {selectedDarkId: id})
+    },
+    async selectEpubBackgroundImage(mode: EpubBackgroundImageMode, id: string) {
+      this.setSelectedEpubBackgroundImageId(mode, id)
+      this.setCurrentEpubBackgroundImageSelection({enabled: true})
+      await this.saveEpubBackgroundImages()
+      this.scheduleEpubIframeEnhancements(false)
+    },
+    getSelectedEpubBackgroundImage(mode: EpubBackgroundImageMode): ClientSettingsEpubBackgroundImage | undefined {
+      const id = this.getSelectedEpubBackgroundImageId(mode)
+      return this.getEpubBackgroundImageList(mode).find(image => image.id === id)
+    },
+    getCurrentEpubBackgroundImageSelection(): ClientSettingsEpubBackgroundImageSelection {
+      return this.normalizeEpubBackgroundImageSelection(this.epubBackgroundImages.books?.[this.bookId])
+    },
+    setCurrentEpubBackgroundImageSelection(patch: Partial<ClientSettingsEpubBackgroundImageSelection>) {
+      if (!this.epubBackgroundImages.books) this.$set(this.epubBackgroundImages, 'books', {})
+
+      const selection = {
+        ...this.getCurrentEpubBackgroundImageSelection(),
+        ...patch,
+      }
+      this.$set(this.epubBackgroundImages.books, this.bookId, this.normalizeEpubBackgroundImageSelection(selection))
+    },
+    async setEpubBackgroundImage(mode: EpubBackgroundImageMode, fileOrFiles?: File | File[] | null) {
+      const file = Array.isArray(fileOrFiles) ? fileOrFiles[0] : fileOrFiles
+      if (!file) return
+
+      if (file.size > EPUB_BACKGROUND_IMAGE_MAX_BYTES) {
+        this.sendNotification(this.$t('epubreader.settings.background_image_too_large').toString())
+        this.resetEpubBackgroundImageInput(mode)
+        return
+      }
+
+      const dataUrl = await this.readOptimizedEpubBackgroundImage(file)
+      if (this.getDataUrlSize(dataUrl) > EPUB_BACKGROUND_IMAGE_MAX_BYTES) {
+        this.sendNotification(this.$t('epubreader.settings.background_image_too_large').toString())
+        this.resetEpubBackgroundImageInput(mode)
+        return
+      }
+
+      const image = this.createEpubBackgroundImage(file.name, dataUrl)
+      this.setEpubBackgroundImageList(mode, [...this.getEpubBackgroundImageList(mode), image])
+      this.setSelectedEpubBackgroundImageId(mode, image.id)
+      this.setCurrentEpubBackgroundImageSelection({enabled: true})
+
+      this.resetEpubBackgroundImageInput(mode)
+      await this.saveEpubBackgroundImages()
+      this.scheduleEpubIframeEnhancements(false)
+    },
+    async deleteEpubBackgroundImage(mode: EpubBackgroundImageMode) {
+      const selectedId = this.getSelectedEpubBackgroundImageId(mode)
+      if (!selectedId) return
+
+      await this.deleteEpubBackgroundImageById(mode, selectedId)
+    },
+    async deleteEpubBackgroundImageById(mode: EpubBackgroundImageMode, id: string) {
+      if (!id) return
+
+      const images = this.getEpubBackgroundImageList(mode).filter(image => image.id !== id)
+      this.setEpubBackgroundImageList(mode, images)
+      this.clearEpubBackgroundImageSelection(mode, id)
+
+      await this.saveEpubBackgroundImages()
+      this.scheduleEpubIframeEnhancements(false)
+    },
+    clearEpubBackgroundImageSelection(mode: EpubBackgroundImageMode, deletedId: string) {
+      Object.entries(this.epubBackgroundImages.books || {}).forEach(([bookId, selection]) => {
+        const patch = {} as Partial<ClientSettingsEpubBackgroundImageSelection>
+        if (mode === 'light' && selection.selectedLightId === deletedId) patch.selectedLightId = ''
+        if (mode === 'dark' && selection.selectedDarkId === deletedId) patch.selectedDarkId = ''
+        if (Object.keys(patch).length > 0) {
+          this.$set(this.epubBackgroundImages.books, bookId, this.normalizeEpubBackgroundImageSelection({...selection, ...patch}))
+        }
+      })
+    },
+    createEpubBackgroundImage(name: string, dataUrl: string): ClientSettingsEpubBackgroundImage {
+      return {
+        id: `epub-bg-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+        name,
+        dataUrl,
+      }
+    },
+    resetEpubBackgroundImageInput(mode: EpubBackgroundImageMode) {
+      if (mode === 'light') this.epubBackgroundImageLightFile = undefined
+      else this.epubBackgroundImageDarkFile = undefined
+    },
+    readFileAsDataUrl(file: File): Promise<string> {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result?.toString() || '')
+        reader.onerror = () => reject(reader.error)
+        reader.readAsDataURL(file)
+      })
+    },
+    async readOptimizedEpubBackgroundImage(file: File): Promise<string> {
+      const dataUrl = await this.readFileAsDataUrl(file)
+      const image = await this.loadImage(dataUrl).catch(() => undefined)
+      if (!image) return dataUrl
+
+      if (
+        image.width <= EPUB_BACKGROUND_IMAGE_MAX_DIMENSION &&
+        image.height <= EPUB_BACKGROUND_IMAGE_MAX_DIMENSION
+      ) {
+        return dataUrl
+      }
+
+      const scale = Math.min(
+        EPUB_BACKGROUND_IMAGE_MAX_DIMENSION / image.width,
+        EPUB_BACKGROUND_IMAGE_MAX_DIMENSION / image.height,
+      )
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.max(1, Math.round(image.width * scale))
+      canvas.height = Math.max(1, Math.round(image.height * scale))
+
+      const context = canvas.getContext('2d')
+      if (!context) return dataUrl
+
+      context.drawImage(image, 0, 0, canvas.width, canvas.height)
+
+      for (const quality of [EPUB_BACKGROUND_IMAGE_JPEG_QUALITY, .74, .62, .5]) {
+        const optimized = canvas.toDataURL('image/jpeg', quality)
+        if (this.getDataUrlSize(optimized) <= EPUB_BACKGROUND_IMAGE_MAX_BYTES) return optimized
+      }
+
+      return canvas.toDataURL('image/jpeg', .42)
+    },
+    loadImage(dataUrl: string): Promise<HTMLImageElement> {
+      return new Promise((resolve, reject) => {
+        const image = new Image()
+        image.onload = () => resolve(image)
+        image.onerror = () => reject(new Error('Unable to load background image'))
+        image.src = dataUrl
+      })
+    },
+    getDataUrlSize(dataUrl: string): number {
+      const base64 = dataUrl.split(',', 2)[1] || ''
+      return Math.ceil(base64.length * 3 / 4)
+    },
+    async saveEpubBackgroundImages() {
+      const update = {} as Record<string, ClientSettingUserUpdateDto>
+      update[CLIENT_SETTING.WEBUI_EPUB_BACKGROUND_IMAGES] = {
+        value: JSON.stringify(this.epubBackgroundImages),
+      }
+      await this.$komgaSettings.updateClientSettingUser(update)
+      await this.$store.dispatch('getClientSettingsUser')
+    },
+    saveEpubReaderSettings() {
+      this.$store.commit('setEpubreaderSettings', this.settings)
+    },
+    getEpubAppearanceName(): string {
+      return this.appearance.replace('readium-', '').replace('-on', '').replace('default', 'day')
+    },
+    getEpubThemeBackgroundColor(): string {
+      switch (this.getEpubAppearanceName()) {
+        case 'night':
+          return '#000000'
+        case 'sepia':
+          return '#faf4e8'
+        case 'green':
+          return '#c7edcc'
+        default:
+          return '#ffffff'
+      }
+    },
+    getEpubThemeTextColor(): string {
+      switch (this.getEpubAppearanceName()) {
+        case 'night':
+          return '#DADADA'
+        case 'green':
+          return '#33533a'
+        default:
+          return '#5B5852'
+      }
+    },
+    getCurrentEpubBackgroundImage(): string {
+      if (!this.getCurrentEpubBackgroundImageSelection().enabled) return ''
+
+      const mode = this.getEpubAppearanceName() === 'night' ? 'dark' : 'light'
+      return this.getSelectedEpubBackgroundImage(mode)?.dataUrl || ''
+    },
+    toCssUrl(value: string): string {
+      return `url("${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}")`
+    },
+    applyEpubThemeToDocument(doc: Document) {
+      const html = doc.documentElement
+      const body = doc.body
+      const backgroundColor = this.getEpubThemeBackgroundColor()
+      const backgroundImage = this.getCurrentEpubBackgroundImage()
+
+      if (backgroundImage) {
+        html.style.setProperty('--USER__backgroundColor', 'transparent')
+        html.style.setProperty('background-color', 'transparent', 'important')
+        this.clearEpubBackgroundImageFromElement(html)
+        if (body) {
+          this.clearEpubBackgroundImageFromElement(body)
+          body.style.setProperty('background-color', 'transparent', 'important')
+        }
+      } else {
+        html.style.setProperty('--USER__backgroundColor', backgroundColor)
+        html.style.setProperty('background-color', backgroundColor, 'important')
+        this.clearEpubBackgroundImageFromElement(html)
+        if (body) {
+          this.clearEpubBackgroundImageFromElement(body)
+          body.style.setProperty('background-color', backgroundColor, 'important')
+        }
+      }
+    },
+    clearEpubBackgroundImageFromElement(element: HTMLElement) {
+      element.style.removeProperty('background-image')
+      element.style.removeProperty('background-size')
+      element.style.removeProperty('background-position')
+      element.style.removeProperty('background-repeat')
+      element.style.removeProperty('background-attachment')
+    },
+    getEpubCustomStyles(): Record<string, ClientSettingsEpubCustomStyle> {
+      try {
+        return JSON.parse(this.$store.state.komgaSettings.clientSettingsUser[CLIENT_SETTING.WEBUI_EPUB_CUSTOM_STYLES]?.value) || {}
+      } catch (e) {
+        return {}
+      }
+    },
+    async loadEpubCustomStyle(bookId: string) {
+      await this.$store.dispatch('getClientSettingsUser')
+      this.loadEpubBackgroundImages()
+      await this.migrateLocalEpubBackgroundImages()
+      const config = this.getEpubCustomStyles()[bookId]
+      this.epubCustomStyleEnabled = config?.enabled || false
+      this.epubCustomStyleDisableOriginalStyle = config?.disableOriginalStyle || false
+      this.epubCustomStyleChineseConversion = config?.chineseConversion || 'none'
+      this.epubCustomStyleCss = config?.css || ''
+      this.publishEpubCustomStyle()
+    },
+    publishEpubCustomStyle() {
+      const target = window as any
+      target[EPUB_CUSTOM_STYLE_WINDOW_KEY] = {
+        enabled: this.epubCustomStyleEnabled,
+        disableOriginalStyle: this.epubCustomStyleDisableOriginalStyle,
+        chineseConversion: this.epubCustomStyleChineseConversion,
+        css: this.epubCustomStyleCss,
+      } as ClientSettingsEpubCustomStyle
+    },
+    async saveEpubCustomStyle() {
+      this.epubCustomStyleSaving = true
+      try {
+        const all = this.getEpubCustomStyles()
+        all[this.bookId] = {
+          enabled: this.epubCustomStyleEnabled,
+          disableOriginalStyle: this.epubCustomStyleDisableOriginalStyle,
+          chineseConversion: this.epubCustomStyleChineseConversion,
+          css: this.epubCustomStyleCss,
+        }
+
+        const update = {} as Record<string, ClientSettingUserUpdateDto>
+        update[CLIENT_SETTING.WEBUI_EPUB_CUSTOM_STYLES] = {
+          value: JSON.stringify(all),
+        }
+        update[CLIENT_SETTING.WEBUI_EPUB_BACKGROUND_IMAGES] = {
+          value: JSON.stringify(this.epubBackgroundImages),
+        }
+        await this.$komgaSettings.updateClientSettingUser(update)
+        await this.$store.dispatch('getClientSettingsUser')
+        await this.applyEpubIframeEnhancements()
+        this.sendNotification(this.$t('epubreader.settings.custom_style_saved').toString())
+      } finally {
+        this.epubCustomStyleSaving = false
+      }
+    },
+    startEpubIframeEnhancements() {
+      this.stopEpubIframeEnhancements()
+
+      const wrapper = document.getElementById('iframe-wrapper')
+      if (!wrapper) return
+
+      this.epubIframeEnhancementObserver = new MutationObserver(() => this.scheduleEpubIframeEnhancements(false))
+      this.epubIframeEnhancementObserver.observe(wrapper, {childList: true, subtree: true})
+      this.scheduleEpubIframeEnhancements(false)
+    },
+    stopEpubIframeEnhancements() {
+      if (this.epubIframeEnhancementObserver) {
+        this.epubIframeEnhancementObserver.disconnect()
+        this.epubIframeEnhancementObserver = undefined
+      }
+      this.clearEpubIframeEnhancementTimers()
+    },
+    clearEpubIframeEnhancementTimers() {
+      this.epubIframeEnhancementTimers.forEach(timer => window.clearTimeout(timer))
+      this.epubIframeEnhancementTimers = []
+    },
+    scheduleEpubIframeEnhancements(reflow: boolean = false) {
+      this.clearEpubIframeEnhancementTimers()
+      this.applyEpubIframeEnhancements(reflow)
+
+      ;[100, 300, 700, 1200].forEach(delay => {
+        const timer = window.setTimeout(() => {
+          this.epubIframeEnhancementTimers = this.epubIframeEnhancementTimers.filter(x => x !== timer)
+          this.applyEpubIframeEnhancements(false)
+        }, delay)
+        this.epubIframeEnhancementTimers.push(timer)
+      })
+    },
+    async applyEpubIframeEnhancements(reflow: boolean = true) {
+      this.publishEpubCustomStyle()
+      document.querySelectorAll<HTMLIFrameElement>('#iframe-wrapper iframe').forEach(iframe => {
+        this.bindEpubIframeEnhancement(iframe)
+        this.applyEpubEnhancementsToIframe(iframe)
+      })
+      if (reflow && this.d2Reader?.applyUserSettings) await this.d2Reader.applyUserSettings({})
+    },
+    bindEpubIframeEnhancement(iframe: HTMLIFrameElement) {
+      if (iframe.dataset.komgaEpubEnhancementBound === 'true') return
+
+      iframe.dataset.komgaEpubEnhancementBound = 'true'
+      iframe.addEventListener('load', () => this.scheduleEpubIframeEnhancements(false))
+    },
+    applyEpubEnhancementsToIframe(iframe: HTMLIFrameElement) {
+      try {
+        this.applyEpubThemeToIframeElement(iframe)
+        const doc = iframe.contentDocument
+        const view = iframe.contentWindow || doc?.defaultView
+        if (!doc?.documentElement || !view) return
+
+        this.bindEpubIframeTouchNavigation(doc)
+        this.applyEpubVerticalWritingMode(doc, view)
+        this.applyEpubAuthorStylePreference(doc)
+        this.applyEpubChineseConversion(doc)
+        this.applyEpubThemeToDocument(doc)
+        this.applyEpubCustomStyleToDocument(doc)
+        if ((doc.documentElement.getAttribute('data-komga-writing-mode') || '').indexOf('vertical') === 0) {
+          this.updateEpubVerticalPaginationMetrics(doc)
+          this.applyPendingVerticalEpubResourceEdge(doc)
+        }
+      } catch (e) {
+      }
+    },
+    applyEpubThemeToIframeElement(iframe: HTMLIFrameElement) {
+      if (this.getCurrentEpubBackgroundImage()) {
+        iframe.setAttribute('allowtransparency', 'true')
+        iframe.style.setProperty('background-color', 'transparent', 'important')
+      } else {
+        iframe.removeAttribute('allowtransparency')
+        iframe.style.removeProperty('background-color')
+      }
+    },
+    applyEpubVerticalWritingMode(doc: Document, view: Window) {
+      const mode = this.detectEpubVerticalWritingMode(doc, view)
+      const html = doc.documentElement
+
+      if (!mode) {
+        html.removeAttribute('data-komga-writing-mode')
+        html.style.removeProperty('--KOMGA__writingMode')
+        html.style.removeProperty('--KOMGA__verticalPageMask')
+        this.removeEpubVerticalPageMask(doc)
+        return
+      }
+
+      html.setAttribute('data-komga-writing-mode', mode)
+      html.style.setProperty('--KOMGA__writingMode', mode)
+      this.updateEpubVerticalPaginationMetrics(doc)
+    },
+    detectEpubVerticalWritingMode(doc: Document, view: Window): string {
+      const selectors = [
+        'main',
+        'article',
+        'section',
+        '[style*="writing-mode"]',
+        '[style*="-webkit-writing-mode"]',
+        '[class*="vertical"]',
+        '[class*="tcy"]',
+        '[class*="vrtl"]',
+      ]
+      const candidates = [
+        doc.documentElement,
+        doc.body,
+        ...selectors.map(selector => doc.querySelector(selector)),
+      ]
+
+      for (const candidate of candidates) {
+        const mode = this.computedEpubWritingMode(candidate, view)
+        if (mode) return mode
+      }
+
+      return ''
+    },
+    computedEpubWritingMode(element: Element | null, view: Window): string {
+      if (!element) return ''
+      const mode = view.getComputedStyle(element).writingMode || ''
+      return mode.indexOf('vertical') === 0 ? mode : ''
+    },
+    applyEpubCustomStyleToDocument(doc: Document) {
+      const config = (window as any)[EPUB_CUSTOM_STYLE_WINDOW_KEY] as ClientSettingsEpubCustomStyle | undefined
+      const html = doc.documentElement
+      const existing = doc.getElementById(EPUB_CUSTOM_STYLE_ID)
+
+      if (!config?.enabled || !config.css) {
+        if (existing?.parentNode) existing.parentNode.removeChild(existing)
+        html.removeAttribute('data-komga-custom-style')
+        return
+      }
+
+      const style = existing || doc.createElement('style')
+      if (!existing) {
+        style.id = EPUB_CUSTOM_STYLE_ID
+        style.setAttribute('type', 'text/css')
+        ;(doc.head || html).appendChild(style)
+      }
+
+      if (style.textContent !== config.css) style.textContent = config.css
+      html.setAttribute('data-komga-custom-style', 'on')
+    },
+    applyEpubAuthorStylePreference(doc: Document) {
+      const config = (window as any)[EPUB_CUSTOM_STYLE_WINDOW_KEY] as ClientSettingsEpubCustomStyle | undefined
+      const disableOriginalStyle = config?.disableOriginalStyle || false
+
+      doc.head?.querySelectorAll<HTMLElement>('link[rel~="stylesheet"], style').forEach(element => {
+        if (this.shouldPreserveEpubStyleElement(element)) {
+          this.restoreEpubStyleElement(element)
+          return
+        }
+
+        if (disableOriginalStyle) this.disableEpubStyleElement(element)
+        else this.restoreEpubStyleElement(element)
+      })
+
+      doc.body?.querySelectorAll<HTMLElement>(
+        [
+          '[style]',
+          'img[width]',
+          'img[height]',
+          '[data-komga-author-inline-style-disabled]',
+          '[data-komga-author-image-size-disabled]',
+        ].join(','),
+      ).forEach(element => {
+        if (disableOriginalStyle) this.disableEpubInlineAuthorStyle(element)
+        else this.restoreEpubInlineAuthorStyle(element)
+      })
+
+      if (disableOriginalStyle) doc.documentElement.setAttribute('data-komga-author-style-disabled', 'on')
+      else doc.documentElement.removeAttribute('data-komga-author-style-disabled')
+    },
+    shouldPreserveEpubStyleElement(element: HTMLElement): boolean {
+      if (element.id === EPUB_CUSTOM_STYLE_ID) return true
+
+      if (element.tagName.toLowerCase() !== 'link') return false
+
+      const href = (element as HTMLLinkElement).href
+      return EPUB_READER_STYLE_URLS.some(url => this.sameEpubStyleUrl(href, url)) || href.includes('/api/v1/fonts/resource/')
+    },
+    sameEpubStyleUrl(href: string, target: string): boolean {
+      try {
+        return new URL(href, window.location.href).href === new URL(target, window.location.href).href
+      } catch (e) {
+        return href === target
+      }
+    },
+    disableEpubStyleElement(element: HTMLElement) {
+      if (element.dataset[EPUB_AUTHOR_STYLE_DISABLED_ATTR] !== 'true') {
+        element.dataset[EPUB_AUTHOR_STYLE_ORIGINAL_MEDIA_ATTR] = element.getAttribute('media') || ''
+      }
+
+      element.dataset[EPUB_AUTHOR_STYLE_DISABLED_ATTR] = 'true'
+      element.setAttribute('media', 'not all')
+    },
+    restoreEpubStyleElement(element: HTMLElement) {
+      if (element.dataset[EPUB_AUTHOR_STYLE_DISABLED_ATTR] !== 'true') return
+
+      const originalMedia = element.dataset[EPUB_AUTHOR_STYLE_ORIGINAL_MEDIA_ATTR]
+      if (originalMedia) element.setAttribute('media', originalMedia)
+      else element.removeAttribute('media')
+
+      delete element.dataset[EPUB_AUTHOR_STYLE_DISABLED_ATTR]
+      delete element.dataset[EPUB_AUTHOR_STYLE_ORIGINAL_MEDIA_ATTR]
+    },
+    disableEpubInlineAuthorStyle(element: HTMLElement) {
+      if (this.isKomgaEpubReaderElement(element)) return
+
+      const originalStyle = element.getAttribute('style')
+      if (originalStyle && element.dataset[EPUB_AUTHOR_INLINE_STYLE_DISABLED_ATTR] !== 'true') {
+        element.dataset[EPUB_AUTHOR_ORIGINAL_INLINE_STYLE_ATTR] = originalStyle
+      }
+
+      if (originalStyle) {
+        EPUB_AUTHOR_INLINE_STYLE_PROPERTIES.forEach(property => element.style.removeProperty(property))
+        if (!element.getAttribute('style')?.trim()) element.removeAttribute('style')
+        element.dataset[EPUB_AUTHOR_INLINE_STYLE_DISABLED_ATTR] = 'true'
+      }
+
+      if (this.isEpubImageElement(element) && this.shouldDisableEpubImageSize(element)) {
+        const image = element as HTMLImageElement
+        if (image.dataset[EPUB_AUTHOR_IMAGE_SIZE_DISABLED_ATTR] !== 'true') {
+          image.dataset[EPUB_AUTHOR_ORIGINAL_WIDTH_ATTR] = image.getAttribute('width') || ''
+          image.dataset[EPUB_AUTHOR_ORIGINAL_HEIGHT_ATTR] = image.getAttribute('height') || ''
+        }
+
+        image.removeAttribute('width')
+        image.removeAttribute('height')
+        image.style.removeProperty('width')
+        image.style.removeProperty('height')
+        if (!image.getAttribute('style')?.trim()) image.removeAttribute('style')
+        image.dataset[EPUB_AUTHOR_IMAGE_SIZE_DISABLED_ATTR] = 'true'
+      }
+    },
+    restoreEpubInlineAuthorStyle(element: HTMLElement) {
+      if (this.isKomgaEpubReaderElement(element)) return
+
+      if (element.dataset[EPUB_AUTHOR_INLINE_STYLE_DISABLED_ATTR] === 'true') {
+        const originalStyle = element.dataset[EPUB_AUTHOR_ORIGINAL_INLINE_STYLE_ATTR]
+        if (originalStyle) element.setAttribute('style', originalStyle)
+        else element.removeAttribute('style')
+
+        delete element.dataset[EPUB_AUTHOR_INLINE_STYLE_DISABLED_ATTR]
+        delete element.dataset[EPUB_AUTHOR_ORIGINAL_INLINE_STYLE_ATTR]
+      }
+
+      if (this.isEpubImageElement(element) && element.dataset[EPUB_AUTHOR_IMAGE_SIZE_DISABLED_ATTR] === 'true') {
+        const image = element as HTMLImageElement
+        const originalWidth = image.dataset[EPUB_AUTHOR_ORIGINAL_WIDTH_ATTR]
+        const originalHeight = image.dataset[EPUB_AUTHOR_ORIGINAL_HEIGHT_ATTR]
+        if (originalWidth) image.setAttribute('width', originalWidth)
+        else image.removeAttribute('width')
+        if (originalHeight) image.setAttribute('height', originalHeight)
+        else image.removeAttribute('height')
+
+        delete image.dataset[EPUB_AUTHOR_IMAGE_SIZE_DISABLED_ATTR]
+        delete image.dataset[EPUB_AUTHOR_ORIGINAL_WIDTH_ATTR]
+        delete image.dataset[EPUB_AUTHOR_ORIGINAL_HEIGHT_ATTR]
+      }
+    },
+    shouldDisableEpubImageSize(element: HTMLImageElement): boolean {
+      const width = this.parseEpubImageSize(element.getAttribute('width'))
+      const height = this.parseEpubImageSize(element.getAttribute('height'))
+      const styleWidth = this.parseEpubImageSize(element.style.width)
+      const styleHeight = this.parseEpubImageSize(element.style.height)
+      const size = Math.max(width, height, styleWidth, styleHeight)
+      return size > 0 && size <= 80
+    },
+    isEpubImageElement(element: HTMLElement): boolean {
+      return element.tagName.toLowerCase() === 'img'
+    },
+    isKomgaEpubReaderElement(element: HTMLElement): boolean {
+      return element.id === EPUB_VERTICAL_PAGE_MASK_ID
+    },
+    parseEpubImageSize(value: string | null): number {
+      if (!value) return 0
+      const match = value.trim().match(/^(\d+(?:\.\d+)?)(?:px)?$/i)
+      return match ? Number(match[1]) : 0
+    },
+    applyEpubChineseConversion(doc: Document) {
+      const config = (window as any)[EPUB_CUSTOM_STYLE_WINDOW_KEY] as ClientSettingsEpubCustomStyle | undefined
+      const mode = config?.chineseConversion || 'none'
+      const root = doc.body
+      if (!root) return
+
+      const converter = this.getEpubChineseConverter(mode)
+      const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+      const nodes = [] as Text[]
+      let node = walker.nextNode()
+      while (node) {
+        nodes.push(node as Text)
+        node = walker.nextNode()
+      }
+
+      nodes.forEach(textNode => this.applyEpubChineseConversionToTextNode(textNode, converter))
+      doc.documentElement.setAttribute('data-komga-chinese-conversion', mode)
+    },
+    getEpubChineseConverter(mode: ClientSettingsEpubChineseConversion): ConverterFunction | undefined {
+      if (mode === 'none') return undefined
+      if (!EPUB_CHINESE_CONVERTERS[mode]) {
+        EPUB_CHINESE_CONVERTERS[mode] = mode === 'simplified'
+          ? OpenCC.Converter({from: 't', to: 'cn'})
+          : OpenCC.Converter({from: 'cn', to: 'tw'})
+      }
+      return EPUB_CHINESE_CONVERTERS[mode]
+    },
+    applyEpubChineseConversionToTextNode(textNode: Text, converter?: ConverterFunction) {
+      if (!this.shouldConvertEpubChineseTextNode(textNode)) {
+        const original = EPUB_CHINESE_TEXT_ORIGINALS.get(textNode)
+        if (original !== undefined) {
+          textNode.nodeValue = original
+          EPUB_CHINESE_TEXT_ORIGINALS.delete(textNode)
+        }
+        return
+      }
+
+      const current = textNode.nodeValue || ''
+      const original = EPUB_CHINESE_TEXT_ORIGINALS.get(textNode) || current
+      if (!converter) {
+        if (EPUB_CHINESE_TEXT_ORIGINALS.has(textNode)) {
+          textNode.nodeValue = original
+          EPUB_CHINESE_TEXT_ORIGINALS.delete(textNode)
+        }
+        return
+      }
+
+      if (!EPUB_CHINESE_TEXT_ORIGINALS.has(textNode)) EPUB_CHINESE_TEXT_ORIGINALS.set(textNode, original)
+      const converted = converter(original)
+      if (converted !== current) textNode.nodeValue = converted
+    },
+    shouldConvertEpubChineseTextNode(textNode: Text): boolean {
+      const value = textNode.nodeValue
+      if (!value || !EPUB_CHINESE_TEXT_PATTERN.test(value)) return false
+
+      const parent = textNode.parentElement
+      if (!parent) return false
+      return !parent.closest(EPUB_CHINESE_CONVERSION_SKIP_SELECTOR)
+    },
+    nextEpubPageControl(event: MouseEvent) {
+      if (this.isVerticalEpubPaginationActive()) {
+        this.stopEpubPageEvent(event)
+        this.nextEpubPage()
+      }
+    },
+    previousEpubPageControl(event: MouseEvent) {
+      if (this.isVerticalEpubPaginationActive()) {
+        this.stopEpubPageEvent(event)
+        this.previousEpubPage()
+      }
+    },
+    nextEpubPage() {
+      if (this.isVerticalEpubPaginationActive()) {
+        if (!this.tryMoveVerticalEpubPage(1)) this.nextEpubResource()
+        return
+      }
+
+      this.d2Reader.nextPage()
+    },
+    previousEpubPage() {
+      if (this.isVerticalEpubPaginationActive()) {
+        if (!this.tryMoveVerticalEpubPage(-1)) this.previousEpubResource()
+        return
+      }
+
+      this.d2Reader.previousPage()
+    },
+    nextEpubResource() {
+      if (!this.goToEpubResource(1)) {
+        const reader = this.d2Reader as D2Reader & { nextResource?: () => void }
+        if (reader.nextResource) reader.nextResource()
+        else this.d2Reader.nextPage()
+      }
+    },
+    previousEpubResource() {
+      if (!this.goToEpubResource(-1)) {
+        const reader = this.d2Reader as D2Reader & { previousResource?: () => void }
+        if (reader.previousResource) reader.previousResource()
+        else this.d2Reader.previousPage()
+      }
+    },
+    goToEpubResource(offset: 1 | -1): boolean {
+      const navigator = (this.d2Reader as D2Reader & { navigator?: EpubNavigator }).navigator
+      const publication = navigator?.publication
+      const currentHref = navigator?.currentChapterLink?.href || this.getCurrentEpubDocumentHref() || this.currentLocation?.href
+
+      if (publication && currentHref) {
+        const absoluteCurrentHref = /^[a-z][a-z0-9+.-]*:/i.test(currentHref) ? currentHref : publication.getAbsoluteHref(currentHref)
+        const target = offset > 0 ? publication.getNextSpineItem(absoluteCurrentHref) : publication.getPreviousSpineItem(absoluteCurrentHref)
+        const targetHref = this.getEpubReadingOrderHref(target)
+        if (target && targetHref) return this.goToEpubResourceHref(publication.getAbsoluteHref(targetHref), target, offset)
+      }
+
+      const reader = this.d2Reader as D2Reader & {
+        readingOrder?: EpubReadingOrderItem[],
+        currentResource?: number,
+      }
+      const readingOrder = reader.readingOrder || []
+      if (readingOrder.length === 0) return false
+
+      const currentIndex = this.getCurrentEpubResourceIndex(readingOrder)
+      if (currentIndex === undefined) return false
+
+      const target = readingOrder[currentIndex + offset]
+      const href = this.getEpubReadingOrderHref(target)
+      if (!href) return false
+
+      return this.goToEpubResourceHref(href, target, offset)
+    },
+    goToEpubResourceHref(href: string, target: EpubReadingOrderItem, offset: 1 | -1): boolean {
+      this.pendingVerticalEpubResourceEdge = offset > 0 ? 'start' : 'end'
+      this.d2Reader.goTo({
+        href,
+        locations: {
+          progression: 0,
+        },
+        title: target.title || target.Title,
+        type: target.type || target.TypeLink,
+      })
+      return true
+    },
+    getCurrentEpubResourceIndex(readingOrder: EpubReadingOrderItem[]): number | undefined {
+      const currentHrefs = [
+        this.getCurrentEpubDocumentHref(),
+        this.currentLocation?.href,
+      ].filter((href): href is string => !!href)
+
+      for (const currentHref of currentHrefs) {
+        const index = readingOrder.findIndex(item => this.sameEpubResourceHref(this.getEpubReadingOrderHref(item), currentHref))
+        if (index >= 0) return index
+      }
+
+      const reader = this.d2Reader as D2Reader & { currentResource?: number }
+      if (reader.currentResource !== undefined && reader.currentResource >= 0 && reader.currentResource < readingOrder.length) return reader.currentResource
+
+      return undefined
+    },
+    getEpubReadingOrderHref(item?: EpubReadingOrderItem): string | undefined {
+      return item?.href || item?.Href
+    },
+    getCurrentEpubDocumentHref(): string | undefined {
+      const doc = document.querySelector<HTMLIFrameElement>('#iframe-wrapper iframe')?.contentDocument
+      const baseHref = doc?.querySelector('base')?.getAttribute('href')
+      return baseHref || doc?.location?.href
+    },
+    sameEpubResourceHref(a?: string, b?: string): boolean {
+      if (!a || !b) return false
+
+      const normalize = (href: string): string => {
+        try {
+          if (!/^[a-z][a-z0-9+.-]*:/i.test(href) && !href.startsWith('/')) {
+            return decodeURIComponent(href.split('#')[0].split('?')[0]).replace(/\/+/g, '/').replace(/\/$/, '')
+          }
+          const url = new URL(href, window.location.href)
+          return decodeURIComponent(url.pathname).replace(/\/+/g, '/').replace(/\/$/, '')
+        } catch (e) {
+          return decodeURIComponent(href.split('#')[0].split('?')[0]).replace(/\/+/g, '/').replace(/\/$/, '')
+        }
+      }
+
+      const normalizedA = normalize(a)
+      const normalizedB = normalize(b)
+      return normalizedA === normalizedB || normalizedA.endsWith(`/${normalizedB}`) || normalizedB.endsWith(`/${normalizedA}`)
+    },
+    bindEpubIframeTouchNavigation(doc: Document) {
+      const html = doc.documentElement
+      if (html.dataset.komgaEpubTouchNavigationBound === 'true') return
+
+      html.dataset.komgaEpubTouchNavigationBound = 'true'
+      doc.addEventListener('touchstart', this.handleEpubIframeTouchStart, {capture: true, passive: true})
+      doc.addEventListener('touchmove', this.handleEpubIframeTouchMove, {capture: true, passive: false})
+      doc.addEventListener('touchend', this.handleEpubIframeTouchEnd, {capture: true, passive: false})
+      doc.addEventListener('touchcancel', this.handleEpubIframeTouchCancel, {capture: true, passive: true})
+    },
+    stopEpubPageEvent(event: Event) {
+      event.preventDefault()
+      event.stopPropagation()
+      event.stopImmediatePropagation()
+    },
+    handleEpubIframeTouchStart(event: TouchEvent) {
+      if (!this.shouldHandleEpubIframeTouch(event) || event.touches.length !== 1) {
+        this.epubTouchStart = undefined
+        return
+      }
+
+      const touch = event.touches[0]
+      this.epubTouchStart = {
+        x: touch.clientX,
+        y: touch.clientY,
+      }
+    },
+    handleEpubIframeTouchMove(event: TouchEvent) {
+      const start = this.epubTouchStart
+      if (!start || !this.shouldHandleEpubIframeTouch(event) || event.touches.length !== 1) return
+
+      const touch = event.touches[0]
+      if (this.getEpubHorizontalSwipeDirection(start, touch.clientX, touch.clientY) !== 0) {
+        this.stopEpubPageEvent(event)
+      }
+    },
+    handleEpubIframeTouchEnd(event: TouchEvent) {
+      const start = this.epubTouchStart
+      this.epubTouchStart = undefined
+      if (!start || !this.shouldHandleEpubIframeTouch(event) || event.changedTouches.length === 0) return
+
+      const touch = event.changedTouches[0]
+      const swipeDirection = this.getEpubHorizontalSwipeDirection(start, touch.clientX, touch.clientY)
+      if (swipeDirection === 0) return
+
+      this.stopEpubPageEvent(event)
+      this.handleEpubHorizontalSwipe(swipeDirection)
+    },
+    handleEpubIframeTouchCancel() {
+      this.epubTouchStart = undefined
+    },
+    shouldHandleEpubIframeTouch(event: TouchEvent): boolean {
+      if (this.verticalScroll) return false
+      if (this.isInteractiveEpubTouchTarget(event.target)) return false
+
+      const doc = this.getEpubTouchDocument(event)
+      const view = doc?.defaultView
+      const html = doc?.documentElement
+      if (!doc || !view || !html) return false
+
+      const mode = html.getAttribute('data-komga-writing-mode') || this.detectEpubVerticalWritingMode(doc, view)
+      return mode.indexOf('vertical') === 0
+    },
+    isInteractiveEpubTouchTarget(target: EventTarget | null): boolean {
+      const element = target as Element | null
+      return !!element?.closest?.('a, button, input, textarea, select, option, label, audio, video')
+    },
+    getEpubTouchDocument(event: TouchEvent): Document | undefined {
+      const currentTarget = event.currentTarget as Document | Window | null
+      if (currentTarget && 'documentElement' in currentTarget) return currentTarget
+      if (currentTarget && 'document' in currentTarget) return currentTarget.document
+      return (event.target as Node | null)?.ownerDocument || undefined
+    },
+    getEpubHorizontalSwipeDirection(start: EpubTouchStart, x: number, y: number): -1 | 0 | 1 {
+      const deltaX = x - start.x
+      const deltaY = y - start.y
+      const absX = Math.abs(deltaX)
+      const absY = Math.abs(deltaY)
+      if (absX < EPUB_HORIZONTAL_SWIPE_MIN_DISTANCE) return 0
+      if (absX < absY * EPUB_HORIZONTAL_SWIPE_DOMINANCE_RATIO) return 0
+      return deltaX < 0 ? -1 : 1
+    },
+    handleEpubHorizontalSwipe(swipeDirection: -1 | 1) {
+      const leftSwipeAction = this.epubVerticalSwipeLeftAction
+      const action = swipeDirection < 0
+        ? leftSwipeAction
+        : leftSwipeAction === 'next' ? 'previous' : 'next'
+
+      if (action === 'next') this.nextEpubPage()
+      else this.previousEpubPage()
+    },
+    isVerticalEpubPaginationActive(): boolean {
+      if (this.verticalScroll) return false
+
+      const iframe = document.querySelector<HTMLIFrameElement>('#iframe-wrapper iframe')
+      const doc = iframe?.contentDocument
+      const html = doc?.documentElement
+      const view = iframe?.contentWindow || doc?.defaultView
+      const mode = html?.getAttribute('data-komga-writing-mode') || (doc && view ? this.detectEpubVerticalWritingMode(doc, view) : '')
+      return !!doc && !!html && mode.indexOf('vertical') === 0
+    },
+    tryMoveVerticalEpubPage(direction: 1 | -1): boolean {
+      if (this.verticalScroll) return false
+
+      const iframe = document.querySelector<HTMLIFrameElement>('#iframe-wrapper iframe')
+      const doc = iframe?.contentDocument
+      const html = doc?.documentElement
+      const view = iframe?.contentWindow || doc?.defaultView
+      const mode = html?.getAttribute('data-komga-writing-mode') || (doc && view ? this.detectEpubVerticalWritingMode(doc, view) : '')
+      if (!doc || !html || mode.indexOf('vertical') !== 0) return false
+
+      const scroller = doc.scrollingElement as HTMLElement | null
+      if (!scroller) return false
+
+      const {pageStep} = this.getVerticalEpubPaginationMetrics(scroller, doc, iframe)
+      const maxOffset = Math.max(0, scroller.scrollWidth - scroller.clientWidth)
+      if (maxOffset <= 1) return false
+
+      const pageDirection = mode.indexOf('vertical-rl') === 0 ? -1 : 1
+      const current = scroller.scrollLeft
+      const currentPageIndex = Math.round(Math.abs(current) / pageStep)
+      const lastPageIndex = Math.max(0, Math.ceil(maxOffset / pageStep))
+      if (direction < 0 && currentPageIndex <= 0) return false
+      if (direction > 0 && currentPageIndex >= lastPageIndex) return false
+
+      const targetPageIndex = Math.max(0, Math.min(lastPageIndex, currentPageIndex + direction))
+      const target = this.clampVerticalEpubScrollLeft(
+        targetPageIndex * pageStep * pageDirection,
+        pageDirection,
+        maxOffset,
+      )
+      if (Math.abs(target - current) <= 1) return false
+
+      scroller.scrollLeft = target
+      if (Math.abs(scroller.scrollLeft - current) <= 1) return false
+
+      this.updateEpubVerticalPaginationMetrics(doc)
+      this.updateVerticalEpubPosition(scroller, pageStep, maxOffset)
+      return true
+    },
+    updateEpubVerticalPaginationMetrics(doc: Document) {
+      const scroller = doc.scrollingElement as HTMLElement | null
+      if (!scroller) return
+
+      const iframe = doc.defaultView?.frameElement as HTMLIFrameElement | null
+      const mode = doc.documentElement.getAttribute('data-komga-writing-mode') || ''
+      const {maskWidth} = this.getVerticalEpubPaginationMetrics(scroller, doc, iframe || undefined, mode)
+      doc.documentElement.style.setProperty('--KOMGA__verticalPageMask', `${maskWidth}px`)
+      this.removeEpubVerticalPageMask(doc)
+    },
+    applyPendingVerticalEpubResourceEdge(doc: Document) {
+      const edge = this.pendingVerticalEpubResourceEdge
+      if (!edge) return
+
+      const scroller = doc.scrollingElement as HTMLElement | null
+      if (!scroller) return
+
+      const mode = doc.documentElement.getAttribute('data-komga-writing-mode') || ''
+      const pageDirection = mode.indexOf('vertical-rl') === 0 ? -1 : 1
+      const maxOffset = Math.max(0, scroller.scrollWidth - scroller.clientWidth)
+      const iframe = doc.defaultView?.frameElement as HTMLIFrameElement | null
+      const {pageStep} = this.getVerticalEpubPaginationMetrics(scroller, doc, iframe || undefined, mode)
+
+      scroller.scrollLeft = edge === 'end' ? this.clampVerticalEpubScrollLeft(pageDirection * maxOffset, pageDirection, maxOffset) : 0
+      this.updateVerticalEpubPosition(scroller, pageStep, maxOffset)
+      this.pendingVerticalEpubResourceEdge = undefined
+    },
+    getVerticalEpubPaginationMetrics(scroller: HTMLElement, doc: Document, iframe?: HTMLIFrameElement, mode?: string): { pageStep: number, maskWidth: number } {
+      const pageWidth = Math.max(1, scroller.clientWidth || iframe?.clientWidth || this.$vuetify.breakpoint.width)
+      const lineAdvance = this.getVerticalEpubLineAdvance(doc)
+      const edgeOverflow = this.measureVerticalEpubEdgeOverflow(doc, mode || doc.documentElement.getAttribute('data-komga-writing-mode') || '', pageWidth, lineAdvance)
+      const pageColumns = Math.max(1, Math.floor((pageWidth - edgeOverflow) / lineAdvance))
+      const pageStep = Math.min(pageWidth, pageColumns * lineAdvance)
+      const maskWidth = Math.max(0, pageWidth - pageStep)
+      return {pageStep, maskWidth}
+    },
+    getVerticalEpubLineAdvance(doc: Document): number {
+      return this.measureVerticalEpubLineAdvance(doc) || this.getComputedVerticalEpubLineAdvance(doc)
+    },
+    getComputedVerticalEpubLineAdvance(doc: Document): number {
+      const bodyStyle = doc.defaultView?.getComputedStyle(doc.body)
+      const htmlStyle = doc.defaultView?.getComputedStyle(doc.documentElement)
+      const fontSize = this.parseCssPixelValue(bodyStyle?.fontSize) || this.parseCssPixelValue(htmlStyle?.fontSize) || 16
+      const lineHeight = this.parseCssPixelValue(bodyStyle?.lineHeight) || this.parseCssPixelValue(htmlStyle?.lineHeight) || fontSize * 1.5
+      return Math.max(1, Math.ceil(Math.max(fontSize, lineHeight)))
+    },
+    measureVerticalEpubLineAdvance(doc: Document): number {
+      const positions = this.collectVerticalEpubTextRectPositions(doc, 260).map(rect => rect.left)
+      const columns = this.groupVerticalEpubPositions(positions)
+      const diffs = [] as number[]
+
+      for (let i = 1; i < columns.length; i++) {
+        const diff = Math.abs(columns[i] - columns[i - 1])
+        if (diff >= 6 && diff <= 120) diffs.push(diff)
+      }
+
+      if (diffs.length === 0) return 0
+      diffs.sort((a, b) => a - b)
+      return Math.max(1, Math.ceil(diffs[Math.floor(diffs.length / 2)]))
+    },
+    collectVerticalEpubTextRectPositions(doc: Document, maxRects: number): DOMRect[] {
+      const root = doc.body
+      if (!root) return []
+
+      const rects = [] as DOMRect[]
+      const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+      let node = walker.nextNode()
+
+      while (node && rects.length < maxRects) {
+        const textNode = node as Text
+        const value = textNode.nodeValue || ''
+        const parent = textNode.parentElement
+
+        if (parent && value.trim() && !parent.closest(EPUB_CHINESE_CONVERSION_SKIP_SELECTOR) && !this.isKomgaEpubReaderElement(parent)) {
+          const range = doc.createRange()
+          const length = Math.min(value.length, 180)
+
+          for (let i = 0; i < length && rects.length < maxRects; i++) {
+            if (!value[i]?.trim()) continue
+
+            try {
+              range.setStart(textNode, i)
+              range.setEnd(textNode, i + 1)
+              const rect = Array.from(range.getClientRects()).find(item => item.width > 0 && item.height > 0)
+              if (rect) rects.push(rect)
+            } catch (e) {
+            }
+          }
+
+          range.detach()
+        }
+
+        node = walker.nextNode()
+      }
+
+      return rects
+    },
+    groupVerticalEpubPositions(positions: number[]): number[] {
+      const sorted = positions
+        .filter(position => Number.isFinite(position))
+        .sort((a, b) => a - b)
+      const groups = [] as number[]
+
+      sorted.forEach(position => {
+        const last = groups[groups.length - 1]
+        if (last === undefined || Math.abs(position - last) > 2) groups.push(position)
+        else groups[groups.length - 1] = (last + position) / 2
+      })
+
+      return groups
+    },
+    measureVerticalEpubEdgeOverflow(doc: Document, mode: string, pageWidth: number, lineAdvance: number): number {
+      const rects = this.collectVerticalEpubTextRectPositions(doc, 360)
+      let overflow = 0
+
+      if (mode.indexOf('vertical-rl') === 0) {
+        rects.forEach(rect => {
+          if (rect.left < 1 && rect.right > 1) overflow = Math.max(overflow, rect.right)
+        })
+      } else if (mode.indexOf('vertical-lr') === 0) {
+        rects.forEach(rect => {
+          if (rect.left < pageWidth - 1 && rect.right > pageWidth - 1) overflow = Math.max(overflow, pageWidth - rect.left)
+        })
+      }
+
+      return Math.min(lineAdvance, Math.max(0, Math.ceil(overflow) + 2))
+    },
+    updateEpubVerticalPageMask(doc: Document, mode: string, maskWidth: number) {
+      if (!doc.body || this.verticalScroll || mode.indexOf('vertical') !== 0 || maskWidth <= 0) {
+        this.removeEpubVerticalPageMask(doc)
+        return
+      }
+
+      const mask = (doc.getElementById(EPUB_VERTICAL_PAGE_MASK_ID) || doc.createElement('div')) as HTMLElement
+      if (!mask.parentElement) {
+        mask.id = EPUB_VERTICAL_PAGE_MASK_ID
+        mask.setAttribute('aria-hidden', 'true')
+        doc.body.appendChild(mask)
+      }
+
+      mask.style.setProperty('all', 'initial')
+      mask.style.setProperty('position', 'fixed', 'important')
+      mask.style.setProperty('top', '0', 'important')
+      mask.style.setProperty('bottom', '0', 'important')
+      mask.style.setProperty('width', `${Math.ceil(maskWidth)}px`, 'important')
+      mask.style.setProperty('background-color', this.getEpubDocumentBackgroundColor(doc), 'important')
+      mask.style.setProperty('pointer-events', 'none', 'important')
+      mask.style.setProperty('z-index', '2147483647', 'important')
+      mask.style.setProperty('writing-mode', 'horizontal-tb', 'important')
+      mask.style.setProperty('display', 'block', 'important')
+
+      if (mode.indexOf('vertical-rl') === 0) {
+        mask.style.setProperty('left', '0', 'important')
+        mask.style.removeProperty('right')
+      } else {
+        mask.style.setProperty('right', '0', 'important')
+        mask.style.removeProperty('left')
+      }
+    },
+    removeEpubVerticalPageMask(doc: Document) {
+      const mask = doc.getElementById(EPUB_VERTICAL_PAGE_MASK_ID)
+      if (mask?.parentElement) mask.parentElement.removeChild(mask)
+    },
+    getEpubDocumentBackgroundColor(doc: Document): string {
+      const view = doc.defaultView
+      const colors = [
+        view?.getComputedStyle(doc.documentElement).backgroundColor,
+        doc.body ? view?.getComputedStyle(doc.body).backgroundColor : undefined,
+      ]
+      return colors.find(color => !!color && color !== 'rgba(0, 0, 0, 0)' && color !== 'transparent') || '#FFFFFF'
+    },
+    parseCssPixelValue(value?: string): number {
+      if (!value) return 0
+      const parsed = Number.parseFloat(value)
+      return Number.isFinite(parsed) ? parsed : 0
+    },
+    clampVerticalEpubScrollLeft(value: number, pageDirection: number, maxOffset: number): number {
+      if (pageDirection < 0) return Math.max(-maxOffset, Math.min(0, value))
+      return Math.max(0, Math.min(maxOffset, value))
+    },
+    updateVerticalEpubPosition(scroller: HTMLElement, pageStep: number, maxOffset: number) {
+      const pageCount = Math.max(1, Math.ceil(maxOffset / pageStep) + 1)
+      const page = Math.min(pageCount, Math.round(Math.abs(scroller.scrollLeft) / pageStep) + 1)
+      this.progressionPage = page
+      this.progressionPageCount = pageCount
     },
     appearanceClass(suffix?: string): string {
       let c = this.appearance.replace('readium-', '').replace('-on', '').replace('default', 'day')
@@ -999,6 +2586,74 @@ export default Vue.extend({
 
 .day {
   color: #5B5852;
+}
+
+.green-bg {
+  background-color: #c7edcc;
+}
+
+.green {
+  color: #33533a;
+}
+
+.epub-background-manager {
+  background-color: var(--v-background-base, #fff);
+}
+
+.epub-background-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.epub-background-card {
+  cursor: pointer;
+  overflow: hidden;
+  border-radius: 6px;
+}
+
+.epub-background-card-selected {
+  border-color: var(--v-primary-base) !important;
+  box-shadow: 0 0 0 2px var(--v-primary-base);
+}
+
+.epub-background-thumbnail {
+  height: 120px;
+  background-color: rgba(0, 0, 0, .06);
+}
+
+.epub-background-card-footer {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 40px;
+  padding: 4px 4px 4px 8px;
+}
+
+.epub-background-card-footer span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.epub-background-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 160px;
+  color: rgba(0, 0, 0, .58);
+}
+
+.epub-status-bar {
+  box-sizing: border-box;
+  z-index: 13;
+  background-color: var(--epub-reader-status-background-color) !important;
+  color: var(--epub-reader-status-text-color) !important;
+}
+
+.epub-status-bar .col {
+  color: inherit;
 }
 
 .night-bg {

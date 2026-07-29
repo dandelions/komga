@@ -56,6 +56,17 @@
         </v-chip>
       </template>
 
+      <template v-slot:item.actions="{ item }">
+        <v-btn
+          v-if="isAdmin"
+          icon
+          :title="$t('menu.analyze')"
+          @click="analyzeBook(item)"
+        >
+          <v-icon>mdi-play-circle-outline</v-icon>
+        </v-btn>
+      </template>
+
       <template v-slot:footer.prepend>
         <v-btn icon @click="loadBooks">
           <v-icon>mdi-refresh</v-icon>
@@ -70,6 +81,7 @@ import Vue from 'vue'
 import {MediaStatus} from '@/types/enum-books'
 import {BookDto} from '@/types/komga-books'
 import {convertErrorCodes} from '@/functions/error-codes'
+import {ERROR, ErrorEvent, NOTIFICATION, NotificationEvent} from '@/types/events'
 import {
   BookSearch,
   SearchConditionAllOfBook,
@@ -119,11 +131,16 @@ export default Vue.extend({
         {text: this.$i18n.t('media_analysis.name').toString(), value: 'name'},
         {text: this.$i18n.t('media_analysis.status').toString(), value: 'media.status'},
         {text: this.$i18n.t('media_analysis.comment').toString(), value: 'media.comment'},
+        {text: this.$i18n.t('media_analysis.analysis_date').toString(), value: 'media.lastModified'},
         {text: this.$i18n.t('media_analysis.media_type').toString(), value: 'media.mediaType'},
         {text: this.$i18n.t('media_analysis.url').toString(), value: 'url'},
         {text: this.$i18n.t('media_analysis.size').toString(), value: 'size'},
         {text: '', value: 'deleted', groupable: false, sortable: false},
+        {text: '', value: 'actions', groupable: false, sortable: false},
       ]
+    },
+    isAdmin(): boolean {
+      return this.$store.getters.meAdmin
     },
     booksData(): BookDto[] {
       return this.books.map((b: BookDto) => ({
@@ -131,6 +148,7 @@ export default Vue.extend({
         media: {
           ...b.media,
           comment: convertErrorCodes(b.media.comment),
+          lastModified: this.formatDateTime(b.media.lastModified),
           status: this.$t(`enums.media_status.${b.media.status}`).toString(),
         },
       }))
@@ -139,6 +157,25 @@ export default Vue.extend({
   methods: {
     getLibraryName(libraryId: string): string {
       return this.$store.getters.getLibraryById(libraryId).name
+    },
+    formatDateTime(value: string): string {
+      if (!value) return ''
+      return new Intl.DateTimeFormat(
+        this.$i18n.locale,
+        {
+          dateStyle: 'medium',
+          timeStyle: 'short',
+        } as Intl.DateTimeFormatOptions,
+      ).format(new Date(value))
+    },
+    async analyzeBook(book: BookDto) {
+      try {
+        await this.$komgaBooks.analyzeBook(book)
+        this.$eventHub.$emit(NOTIFICATION, {message: this.$t('notification.analysis_task_submitted').toString()} as NotificationEvent)
+        setTimeout(() => this.loadBooks(), 1500)
+      } catch (e) {
+        this.$eventHub.$emit(ERROR, {message: e.message} as ErrorEvent)
+      }
     },
     async loadBooks() {
       this.loading = true

@@ -6,6 +6,7 @@ import org.gotson.komga.application.tasks.Task
 import org.gotson.komga.application.tasks.TasksRepository
 import org.gotson.komga.infrastructure.jooq.SplitDslDaoBase
 import org.gotson.komga.jooq.tasks.Tables
+import org.jooq.Condition
 import org.jooq.DSLContext
 import org.jooq.Query
 import org.jooq.Record2
@@ -31,8 +32,13 @@ class TasksDao(
   TasksRepository {
   private val t = Tables.TASK
 
-  private val tasksAvailableCondition =
+  private fun nowUtc() = LocalDateTime.now(ZoneId.of("Z"))
+
+  private fun readyOrRunningCondition() = t.AVAILABLE_DATE.isNull.or(t.AVAILABLE_DATE.le(nowUtc()))
+
+  private fun tasksAvailableCondition() =
     t.OWNER.isNull
+      .and(readyOrRunningCondition())
       .and(
         t.GROUP_ID
           .notIn(
@@ -47,7 +53,7 @@ class TasksDao(
   override fun hasAvailable(): Boolean =
     dslRO.fetchExists(
       t,
-      tasksAvailableCondition,
+      tasksAvailableCondition(),
     )
 
   @Transactional
@@ -55,7 +61,7 @@ class TasksDao(
     val task =
       dslRW
         .selectBase()
-        .where(tasksAvailableCondition)
+        .where(tasksAvailableCondition())
         .orderBy(t.PRIORITY.desc(), t.LAST_MODIFIED_DATE)
         .limit(1)
         .fetchOne()
@@ -107,21 +113,48 @@ class TasksDao(
 
   override fun count(): Int = dslRO.fetchCount(t)
 
-  override fun countBySimpleType(): Map<String, Int> =
+  override fun exists(taskId: String): Boolean =
+    dslRO.fetchExists(
+      t,
+      t.ID.eq(taskId),
+    )
+
+  override fun exists(
+    taskId: String,
+    owner: String,
+  ): Boolean =
+    dslRO.fetchExists(
+      t,
+      t.ID.eq(taskId).and(t.OWNER.eq(owner)),
+    )
+
+  override fun countBySimpleType(): Map<String, Int> = countTasksBySimpleType()
+
+  override fun countReadyOrRunningBySimpleType(): Map<String, Int> = countTasksBySimpleType(readyOrRunningCondition())
+
+  override fun countReadyBySimpleType(): Map<String, Int> = countTasksBySimpleType(readyOrRunningCondition().and(t.OWNER.isNull))
+
+  override fun countRunningBySimpleType(): Map<String, Int> = countTasksBySimpleType(readyOrRunningCondition().and(t.OWNER.isNotNull))
+
+  private fun countTasksBySimpleType(condition: Condition = DSL.trueCondition()): Map<String, Int> =
     dslRO
       .select(t.SIMPLE_TYPE, DSL.count(t.SIMPLE_TYPE))
       .from(t)
+      .where(condition)
       .groupBy(t.SIMPLE_TYPE)
       .fetch()
       .associate { it.value1() to it.value2() }
 
-  override fun save(task: Task) {
-    task.toQuery(dslRW).execute()
+  override fun save(
+    task: Task,
+    availableDate: LocalDateTime?,
+  ) {
+    task.toQuery(dslRW, availableDate).execute()
   }
 
   override fun save(tasks: Collection<Task>) {
     tasks
-      .map { it.toQuery(dslRW) }
+      .map { it.toQuery(dslRW, null) }
       .chunked(batchSize)
       .forEach { chunk -> dslRW.batch(chunk).execute() }
   }
@@ -137,13 +170,35 @@ class TasksDao(
     dslRW.deleteFrom(t).where(t.ID.eq(taskId)).execute()
   }
 
-  override fun deleteAll() {
-    dslRW.deleteFrom(t).execute()
-  }
+  override fun delete(
+    taskId: String,
+    owner: String,
+  ): Int =
+    dslRW
+      .deleteFrom(t)
+      .where(t.ID.eq(taskId))
+      .and(t.OWNER.eq(owner))
+      .execute()
+
+  override fun deleteAll(): Int = dslRW.deleteFrom(t).execute()
 
   override fun deleteAllWithoutOwner(): Int = dslRW.deleteFrom(t).where(t.OWNER.isNull).execute()
 
-  private fun Task.toQuery(dsl: DSLContext): Query =
+  override fun makeFutureScanLibraryTasksAvailable(): Int =
+    dslRW
+      .update(t)
+      .set(t.AVAILABLE_DATE, null as LocalDateTime?)
+      .set(t.LAST_MODIFIED_DATE, nowUtc())
+      .where(t.SIMPLE_TYPE.eq(Task.ScanLibrary::class.simpleName))
+      .and(t.OWNER.isNull)
+      .and(t.AVAILABLE_DATE.isNotNull)
+      .and(t.AVAILABLE_DATE.gt(nowUtc()))
+      .execute()
+
+  private fun Task.toQuery(
+    dsl: DSLContext,
+    availableDate: LocalDateTime?,
+  ): Query =
     dsl
       .insertInto(
         t,
@@ -153,6 +208,7 @@ class TasksDao(
         t.CLASS,
         t.SIMPLE_TYPE,
         t.PAYLOAD,
+        t.AVAILABLE_DATE,
       ).values(
         uniqueId,
         priority,
@@ -160,11 +216,13 @@ class TasksDao(
         javaClass.typeName,
         javaClass.simpleName,
         objectMapper.writeValueAsString(this),
+        availableDate,
       ).onDuplicateKeyUpdate()
       .set(t.GROUP_ID, groupId)
       .set(t.PRIORITY, priority)
       .set(t.CLASS, javaClass.typeName)
       .set(t.SIMPLE_TYPE, javaClass.simpleName)
       .set(t.PAYLOAD, objectMapper.writeValueAsString(this))
-      .set(t.LAST_MODIFIED_DATE, LocalDateTime.now(ZoneId.of("Z")))
+      .set(t.AVAILABLE_DATE, availableDate)
+      .set(t.LAST_MODIFIED_DATE, nowUtc())
 }

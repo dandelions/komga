@@ -173,6 +173,7 @@
     "tooltip_incognito": "Read progress will not be saved"
   },
   "browse_book": {
+    "analysis_date": "ANALYZED",
     "comment": "COMMENT",
     "date_created": "CREATED",
     "date_modified": "LAST MODIFIED",
@@ -246,6 +247,8 @@
     "go_to_series": "Go to series",
     "i_understand": "I understand",
     "library": "Library",
+    "library_scan_daily_file_limit": "Daily scan quota",
+    "library_scan_daily_file_limit_usage": "{remaining} remaining today ({used}/{limit} used)",
     "locale_name": "English",
     "locale_rtl": "false",
     "lock_all": "Lock all",
@@ -455,6 +458,22 @@
       "tab_general": "General",
       "tab_poster": "Poster"
     },
+    "move_libraries": {
+      "confirm": "Move",
+      "root_hint": "Leave empty to move the selected libraries to the top level.",
+      "target_parent": "New parent library",
+      "title": "Move selected libraries"
+    },
+    "move_books": {
+      "confirm": "Move",
+      "target_library": "Target library",
+      "title": "Move selected books"
+    },
+    "move_series": {
+      "confirm": "Move",
+      "target_library": "Target library",
+      "title": "Move selected series"
+    },
     "edit_library": {
       "button_browse": "Browse",
       "button_cancel": "Cancel",
@@ -480,10 +499,16 @@
       "field_import_mylar_series": "Series metadata",
       "field_name": "Name",
       "field_oneshotsdirectory": "One-Shots directory",
+      "field_parent_library": "Parent library",
+      "parent_library_none": "None (top-level library)",
+      "show_child_libraries": "Show child library content",
+      "include_child_libraries": "Scan and analyze child libraries",
       "field_repair_extensions": "Automatically repair incorrect file extensions",
       "field_root_folder": "Root folder",
       "field_scan_interval": "Scan interval",
       "field_scanner_empty_trash_after_scan": "Empty trash automatically after every scan",
+      "field_scanner_bypass_daily_file_limit": "Do not apply the daily scan quota to this library",
+      "field_scanner_only_new_books": "Only scan and analyze new books",
       "field_scanner_force_directory_modified_time": "Force directory modified time",
       "field_scanner_scan_startup": "Scan on startup",
       "field_series_cover": "Series cover",
@@ -782,6 +807,30 @@
         "buttons": "Buttons",
         "click": "Click / Tap"
       },
+      "vertical_swipe_left_action": "Left swipe in vertical EPUB",
+      "vertical_swipe_left_options": {
+        "next": "Next page",
+        "previous": "Previous page"
+      },
+      "chinese_conversion": "Chinese conversion",
+      "chinese_conversion_none": "No conversion",
+      "chinese_conversion_simplified": "Simplified",
+      "chinese_conversion_traditional": "Traditional",
+      "background_image_delete": "Delete background image",
+      "background_image_dark": "Dark background image",
+      "background_image_dark_upload": "Upload dark background image",
+      "background_image_light": "Light background image",
+      "background_image_light_upload": "Upload light background image",
+      "background_image_manage": "Manage background images",
+      "background_image_none": "None",
+      "background_image_too_large": "Background image must be 2MB or smaller",
+      "background_images_enabled": "Use background images",
+      "custom_style": "Custom style",
+      "custom_style_css": "CSS",
+      "custom_style_disable_original": "Disable EPUB publisher styles",
+      "custom_style_enabled": "Use custom style",
+      "custom_style_save": "Save settings",
+      "custom_style_saved": "EPUB settings saved",
       "page_margins": "Page margins",
       "viewing_theme": "Viewing theme"
     },
@@ -834,7 +883,9 @@
     "ERR_1036": "Error while getting EPUB Landmarks",
     "ERR_1037": "Error while getting EPUB page list",
     "ERR_1038": "Error while getting EPUB divina pages",
-    "ERR_1039": "Error while getting EPUB positions"
+    "ERR_1039": "Error while getting EPUB positions",
+    "ERR_1040": "Error while converting ebook to EPUB",
+    "ERR_1041": "Book analysis timed out"
   },
   "filter": {
     "age_rating": "age rating",
@@ -888,6 +939,7 @@
     "unclaimed_html": "This Komga server is not yet active, you need to create a user account to be able to access it.<br/><br/>Choose an <strong>email</strong> and <strong>password</strong> and click on <strong>Create user account</strong>."
   },
   "media_analysis": {
+    "analysis_date": "Analyzed",
     "comment": "Comment",
     "media_analysis": "Media Analysis",
     "media_type": "Media Type",
@@ -895,6 +947,9 @@
     "size": "Size",
     "status": "Status",
     "url": "URL"
+  },
+  "notification": {
+    "analysis_task_submitted": "Analysis task submitted"
   },
   "menu": {
     "add_to_collection": "Add to collection",
@@ -910,6 +965,8 @@
     "empty_trash": "Empty trash",
     "mark_read": "Mark as read",
     "mark_unread": "Mark as unread",
+    "move_to_library": "Move to library",
+    "include_child_libraries": "Include child libraries",
     "pin": "Pin",
     "refresh_metadata": "Refresh metadata",
     "scan_library_files": "Scan library files",
@@ -932,6 +989,7 @@
   "navigation": {
     "home": "Home",
     "libraries": "Libraries",
+    "show_child_libraries": "Show child libraries",
     "logout": "Log Out"
   },
   "no_libraries_pinned": {
@@ -983,6 +1041,7 @@
     "updates": "Updates"
   },
   "server_settings": {
+    "button_reset_library_scan_daily_file_limit_usage": "Reset today's usage",
     "config_precedence": "Takes precedence over the configuration file",
     "dialog_regenerate_thumbnails": {
       "body": "Thumbnails size has changed. Do you want to regenerate book thumbnails?",
@@ -991,10 +1050,12 @@
       "btn_confirm": "Yes, but only if bigger",
       "title": "Regenerate thumbnails"
     },
+    "hint_library_scan_daily_file_limit": "Leave empty for no daily limit",
     "hint_kobo_port": "Set only in case of sync issues with covers and downloads",
     "label_delete_empty_collections": "Delete empty collections after scan",
     "label_delete_empty_readlists": "Delete empty read lists after scan",
     "label_kepubify_path": "Path to kepubify",
+    "label_library_scan_daily_file_limit": "Daily library scan file limit",
     "label_kobo_port": "Kobo Sync external port",
     "label_kobo_proxy": "Proxy Kobo Sync requests to Kobo Store",
     "label_rememberme_duration": "Remember me duration (in days)",

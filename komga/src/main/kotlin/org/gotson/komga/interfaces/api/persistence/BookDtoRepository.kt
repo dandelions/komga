@@ -17,9 +17,22 @@ interface BookDtoRepository {
   ): Page<BookDto>
 
   fun findAll(
+    context: SearchContext,
+    pageable: Pageable,
+    includeTotal: Boolean,
+  ): Page<BookDto>
+
+  fun findAll(
     search: BookSearch,
     context: SearchContext,
     pageable: Pageable,
+  ): Page<BookDto>
+
+  fun findAll(
+    search: BookSearch,
+    context: SearchContext,
+    pageable: Pageable,
+    includeTotal: Boolean,
   ): Page<BookDto>
 
   fun findByIdOrNull(
@@ -57,6 +70,14 @@ interface BookDtoRepository {
     userId: String,
     filterOnLibraryIds: Collection<String>?,
     pageable: Pageable,
+    restrictions: ContentRestrictions = ContentRestrictions(),
+  ): Page<BookDto>
+
+  fun findAllOnDeck(
+    userId: String,
+    filterOnLibraryIds: Collection<String>?,
+    pageable: Pageable,
+    includeTotal: Boolean,
     restrictions: ContentRestrictions = ContentRestrictions(),
   ): Page<BookDto>
 

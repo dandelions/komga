@@ -6,6 +6,7 @@ data class SettingsDto(
   val rememberMeDurationDays: Long,
   val thumbnailSize: ThumbnailSizeDto,
   val taskPoolSize: Int,
+  val libraryScanDailyFileLimit: Int?,
   val serverPort: SettingMultiSource<Int?>,
   val serverContextPath: SettingMultiSource<String?>,
   val koboProxy: Boolean,

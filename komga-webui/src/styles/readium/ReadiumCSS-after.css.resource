@@ -223,6 +223,54 @@ body {
 
 /* Vertical writing needs body height set */
 
+:root[data-komga-writing-mode] {
+  writing-mode: var(--KOMGA__writingMode) !important;
+  text-orientation: mixed;
+  width: auto !important;
+  max-width: none !important;
+  min-width: 100% !important;
+  overflow: hidden;
+}
+
+:root[data-komga-writing-mode] body {
+  writing-mode: inherit;
+  text-orientation: inherit;
+  width: max-content !important;
+  min-width: 100% !important;
+  max-width: none !important;
+  height: 100vh !important;
+  min-height: 100vh !important;
+  max-height: 100vh !important;
+  margin: 0 auto !important;
+  padding: calc(var(--RS__pageGutter) * var(--USER__pageMargins, 1)) 0 !important;
+}
+
+:root[data-komga-writing-mode="vertical-rl"]:not([style*="readium-scroll-on"]) body {
+  padding-left: var(--KOMGA__verticalPageMask, 0px) !important;
+  transform: translateX(calc(-1 * var(--KOMGA__verticalPageMask, 0px))) !important;
+  transform-origin: top left !important;
+}
+
+:root[data-komga-writing-mode="vertical-lr"]:not([style*="readium-scroll-on"]) body {
+  padding-right: var(--KOMGA__verticalPageMask, 0px) !important;
+  transform: translateX(var(--KOMGA__verticalPageMask, 0px)) !important;
+  transform-origin: top left !important;
+}
+
+:root[data-komga-writing-mode][style*="readium-scroll-on"] {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+:root[data-komga-writing-mode][style*="readium-scroll-on"] body {
+  min-height: 100vh !important;
+}
+
+:root[data-komga-writing-mode][lang|="ja"],
+:root[data-komga-writing-mode] :lang(ja) {
+  --RS__baseFontFamily: var(--RS__serif-ja-v);
+}
+
 /* Do we add a top/bottom margin for body in vertical scroll or not? */
 
 /* Readium CSS

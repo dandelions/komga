@@ -52,6 +52,12 @@ class LibraryDao(
       .where(l.ID.`in`(libraryIds))
       .fetchAndMap()
 
+  override fun findAllByParentId(parentId: String): Collection<Library> =
+    dslRO
+      .selectBase()
+      .where(l.PARENT_ID.eq(parentId))
+      .fetchAndMap()
+
   private fun DSLContext.selectBase() =
     select()
       .from(l)
@@ -85,7 +91,7 @@ class LibraryDao(
       .insertInto(l)
       .set(l.ID, library.id)
       .set(l.NAME, library.name)
-      .set(l.ROOT, library.root.toString())
+      .set(l.ROOT, library.root?.toString() ?: "")
       .set(l.IMPORT_COMICINFO_BOOK, library.importComicInfoBook)
       .set(l.IMPORT_COMICINFO_SERIES, library.importComicInfoSeries)
       .set(l.IMPORT_COMICINFO_COLLECTION, library.importComicInfoCollection)
@@ -100,6 +106,8 @@ class LibraryDao(
       .set(l.SCAN_CBX, library.scanCbx)
       .set(l.SCAN_PDF, library.scanPdf)
       .set(l.SCAN_EPUB, library.scanEpub)
+      .set(l.SCAN_BYPASS_DAILY_FILE_LIMIT, library.scanBypassDailyFileLimit)
+      .set(l.SCAN_ONLY_NEW_BOOKS, library.scanOnlyNewBooks)
       .set(l.SCAN_STARTUP, library.scanOnStartup)
       .set(l.SCAN_INTERVAL, library.scanInterval.toString())
       .set(l.REPAIR_EXTENSIONS, library.repairExtensions)
@@ -111,6 +119,7 @@ class LibraryDao(
       .set(l.HASH_KOREADER, library.hashKoreader)
       .set(l.ANALYZE_DIMENSIONS, library.analyzeDimensions)
       .set(l.ONESHOTS_DIRECTORY, library.oneshotsDirectory)
+      .set(l.PARENT_ID, library.parentId)
       .set(l.UNAVAILABLE_DATE, library.unavailableDate)
       .execute()
 
@@ -122,7 +131,7 @@ class LibraryDao(
     dslRW
       .update(l)
       .set(l.NAME, library.name)
-      .set(l.ROOT, library.root.toString())
+      .set(l.ROOT, library.root?.toString() ?: "")
       .set(l.IMPORT_COMICINFO_BOOK, library.importComicInfoBook)
       .set(l.IMPORT_COMICINFO_SERIES, library.importComicInfoSeries)
       .set(l.IMPORT_COMICINFO_COLLECTION, library.importComicInfoCollection)
@@ -137,6 +146,8 @@ class LibraryDao(
       .set(l.SCAN_CBX, library.scanCbx)
       .set(l.SCAN_PDF, library.scanPdf)
       .set(l.SCAN_EPUB, library.scanEpub)
+      .set(l.SCAN_BYPASS_DAILY_FILE_LIMIT, library.scanBypassDailyFileLimit)
+      .set(l.SCAN_ONLY_NEW_BOOKS, library.scanOnlyNewBooks)
       .set(l.SCAN_STARTUP, library.scanOnStartup)
       .set(l.SCAN_INTERVAL, library.scanInterval.toString())
       .set(l.REPAIR_EXTENSIONS, library.repairExtensions)
@@ -148,6 +159,7 @@ class LibraryDao(
       .set(l.HASH_KOREADER, library.hashKoreader)
       .set(l.ANALYZE_DIMENSIONS, library.analyzeDimensions)
       .set(l.ONESHOTS_DIRECTORY, library.oneshotsDirectory)
+      .set(l.PARENT_ID, library.parentId)
       .set(l.UNAVAILABLE_DATE, library.unavailableDate)
       .set(l.LAST_MODIFIED_DATE, LocalDateTime.now(ZoneId.of("Z")))
       .where(l.ID.eq(library.id))
@@ -177,7 +189,7 @@ class LibraryDao(
   private fun LibraryRecord.toDomain(directoryExclusions: Set<String>) =
     Library(
       name = name,
-      root = URL(root),
+      root = root.takeIf { it.isNotBlank() }?.let { URL(it) },
       importComicInfoBook = importComicinfoBook,
       importComicInfoSeries = importComicinfoSeries,
       importComicInfoCollection = importComicinfoCollection,
@@ -192,6 +204,8 @@ class LibraryDao(
       scanCbx = scanCbx,
       scanPdf = scanPdf,
       scanEpub = scanEpub,
+      scanBypassDailyFileLimit = scanBypassDailyFileLimit,
+      scanOnlyNewBooks = scanOnlyNewBooks,
       scanOnStartup = scanStartup,
       scanInterval = Library.ScanInterval.valueOf(scanInterval),
       scanDirectoryExclusions = directoryExclusions,
@@ -204,6 +218,7 @@ class LibraryDao(
       hashKoreader = hashKoreader,
       analyzeDimensions = analyzeDimensions,
       oneshotsDirectory = oneshotsDirectory,
+      parentId = parentId,
       unavailableDate = unavailableDate,
       id = id,
       createdDate = createdDate.toCurrentTimeZone(),

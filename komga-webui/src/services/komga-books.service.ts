@@ -193,6 +193,18 @@ export default class KomgaBooksService {
     }
   }
 
+  async moveBooks(bookIds: string[], libraryId: string) {
+    try {
+      await this.http.post(`${API_BOOKS}/move`, {bookIds, libraryId})
+    } catch (e) {
+      let msg = 'An error occurred while trying to move books'
+      if (e.response.data.message) {
+        msg += `: ${e.response.data.message}`
+      }
+      throw new Error(msg)
+    }
+  }
+
   async updateReadProgress(bookId: string, readProgress: ReadProgressUpdateDto) {
     try {
       await this.http.patch(`${API_BOOKS}/${bookId}/read-progress`, readProgress)

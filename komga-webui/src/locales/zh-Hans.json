@@ -173,6 +173,7 @@
     "tooltip_incognito": "将不保存阅读进度"
   },
   "browse_book": {
+    "analysis_date": "分析时间",
     "comment": "注释",
     "date_created": "创建于",
     "date_modified": "最后修改时间",
@@ -246,6 +247,8 @@
     "go_to_series": "转到系列",
     "i_understand": "我明白",
     "library": "库",
+    "library_scan_daily_file_limit": "每日扫描额度",
+    "library_scan_daily_file_limit_usage": "今日剩余 {remaining}（已用 {used}/{limit}）",
     "locale_name": "简体中文",
     "locale_rtl": "false",
     "lock_all": "锁定全部",
@@ -455,6 +458,22 @@
       "tab_general": "常规",
       "tab_poster": "海报"
     },
+    "move_libraries": {
+      "confirm": "移动",
+      "root_hint": "留空可将选中的库移动到顶层。",
+      "target_parent": "新的父库",
+      "title": "移动选中的库"
+    },
+    "move_books": {
+      "confirm": "移动",
+      "target_library": "目标库",
+      "title": "移动选中的书籍"
+    },
+    "move_series": {
+      "confirm": "移动",
+      "target_library": "目标库",
+      "title": "移动选中的系列"
+    },
     "edit_library": {
       "button_browse": "浏览",
       "button_cancel": "取消",
@@ -480,10 +499,16 @@
       "field_import_mylar_series": "系列元数据",
       "field_name": "名称",
       "field_oneshotsdirectory": "单行本目录",
+      "field_parent_library": "父库",
+      "parent_library_none": "无（顶层库）",
+      "show_child_libraries": "显示子库内容",
+      "include_child_libraries": "扫描和分析子库",
       "field_repair_extensions": "自动修复不正确的文件扩展名",
       "field_root_folder": "根文件夹",
       "field_scan_interval": "扫描间隔",
       "field_scanner_empty_trash_after_scan": "每次扫描后自动清理垃圾",
+      "field_scanner_bypass_daily_file_limit": "此库不使用每日扫描额度限制",
+      "field_scanner_only_new_books": "只扫描分析新增书籍",
       "field_scanner_force_directory_modified_time": "强制目录修改时间",
       "field_scanner_scan_startup": "启动时扫描",
       "field_series_cover": "系列封面",
@@ -782,6 +807,30 @@
         "buttons": "按钮图标",
         "click": "单击 / 点击"
       },
+      "vertical_swipe_left_action": "竖排 EPUB 左滑",
+      "vertical_swipe_left_options": {
+        "next": "下一页",
+        "previous": "上一页"
+      },
+      "chinese_conversion": "繁简转换",
+      "chinese_conversion_none": "不转换",
+      "chinese_conversion_simplified": "转为简体",
+      "chinese_conversion_traditional": "转为繁体",
+      "background_image_delete": "删除背景图片",
+      "background_image_dark": "暗色背景图片",
+      "background_image_dark_upload": "上传暗色背景图片",
+      "background_image_light": "亮色背景图片",
+      "background_image_light_upload": "上传亮色背景图片",
+      "background_image_manage": "管理背景图片",
+      "background_image_none": "无",
+      "background_image_too_large": "背景图片不能超过 2MB",
+      "background_images_enabled": "使用背景图片",
+      "custom_style": "自定义样式",
+      "custom_style_css": "CSS 样式",
+      "custom_style_disable_original": "禁用 EPUB 原样式",
+      "custom_style_enabled": "使用自定义样式",
+      "custom_style_save": "保存配置",
+      "custom_style_saved": "EPUB 配置已保存",
       "page_margins": "页边距",
       "viewing_theme": "查看主题"
     },
@@ -834,7 +883,9 @@
     "ERR_1036": "获取 EPUB 地标时出错",
     "ERR_1037": "获取 EPUB 页面列表时出错",
     "ERR_1038": "获取 EPUB divina 页面时出错",
-    "ERR_1039": "获取 EPUB 位置时出错"
+    "ERR_1039": "获取 EPUB 位置时出错",
+    "ERR_1040": "将电子书转换为 EPUB 时出错",
+    "ERR_1041": "分析书籍超时"
   },
   "filter": {
     "age_rating": "年龄限制",
@@ -888,6 +939,7 @@
     "unclaimed_html": "该 Komga 服务器尚未激活，您需要创建一个用户帐户才能访问它。<br><br>选择一个 <strong>邮箱</strong> 和 <strong>密码</strong> 然后点击 <strong>创建账户</strong>。"
   },
   "media_analysis": {
+    "analysis_date": "分析时间",
     "comment": "注释",
     "media_analysis": "媒体分析",
     "media_type": "媒体类型",
@@ -895,6 +947,9 @@
     "size": "大小",
     "status": "状态",
     "url": "地址"
+  },
+  "notification": {
+    "analysis_task_submitted": "分析任务已提交"
   },
   "menu": {
     "add_to_collection": "添加到收藏",
@@ -910,6 +965,8 @@
     "empty_trash": "清理垃圾",
     "mark_read": "标记为已读",
     "mark_unread": "标记为未读",
+    "move_to_library": "移动到库",
+    "include_child_libraries": "包含子库",
     "pin": "固定",
     "refresh_metadata": "刷新元数据",
     "scan_library_files": "扫描库文件",
@@ -932,6 +989,7 @@
   "navigation": {
     "home": "主页",
     "libraries": "库",
+    "show_child_libraries": "显示子库内容",
     "logout": "退出登录"
   },
   "no_libraries_pinned": {
@@ -983,6 +1041,7 @@
     "updates": "更新"
   },
   "server_settings": {
+    "button_reset_library_scan_daily_file_limit_usage": "重置今日用量",
     "config_precedence": "优先于配置文件",
     "dialog_regenerate_thumbnails": {
       "body": "缩略图大小已更改。您想重新生成书籍缩略图吗？",
@@ -991,10 +1050,12 @@
       "btn_confirm": "是，但前提是更大",
       "title": "重新生成缩略图"
     },
+    "hint_library_scan_daily_file_limit": "留空表示不限制每日数量",
     "hint_kobo_port": "仅在封面和下载同步出现问题时设置",
     "label_delete_empty_collections": "扫描后删除空的收藏",
     "label_delete_empty_readlists": "扫描后删除空的阅读列表",
     "label_kepubify_path": "kepubify 的路径",
+    "label_library_scan_daily_file_limit": "每日库扫描文件上限",
     "label_kobo_port": "Kobo 同步外部端口",
     "label_kobo_proxy": "代理 Kobo 同步请求至 Kobo 商店",
     "label_rememberme_duration": "保持登录状态的时间（天数）",

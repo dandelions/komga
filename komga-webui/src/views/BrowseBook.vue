@@ -17,6 +17,7 @@
       <!--   Action menu   -->
       <book-actions-menu v-if="book"
                          :book="book"
+                         @analyzed="refreshAfterAnalyze"
       />
 
       <v-btn icon @click="editBook" v-if="isAdmin">
@@ -441,6 +442,11 @@
         <v-col class="py-1 error--text font-weight-bold" cols="8" sm="9" md="10" xl="11">{{ mediaComment }}</v-col>
       </v-row>
 
+      <v-row v-if="mediaAnalysisDate" class="align-center text-caption">
+        <v-col class="py-1 text-uppercase" cols="4" sm="3" md="2" xl="1">{{ $t('browse_book.analysis_date') }}</v-col>
+        <v-col class="py-1" cols="8" sm="9" md="10" xl="11">{{ mediaAnalysisDate }}</v-col>
+      </v-row>
+
       <v-row class="align-center text-caption">
         <v-col class="py-1 text-uppercase" cols="4" sm="3" md="2" xl="1">{{ $t('browse_book.format') }}</v-col>
         <v-col class="py-1" cols="8" sm="9" md="10" xl="11">{{ format.type }}</v-col>
@@ -586,7 +592,7 @@ export default Vue.extend({
       return getBookReadRouteFromMedia(this.book.media)
     },
     isPdf(): boolean {
-      return this.book.media?.mediaType === 'application/pdf'
+      return this.book.media?.mediaProfile === 'PDF'
     },
     pdfTocFlattened(): TocEntry[] {
       return flattenToc(this.pdfToc, 1)
@@ -606,8 +612,11 @@ export default Vue.extend({
     thumbnailUrl(): string {
       return bookThumbnailUrl(this.bookId)
     },
+    bookFilename(): string {
+      return this.book.url.split(/[\\/]/).pop() || this.book.name
+    },
     fileUrl(): string {
-      return bookFileUrl(this.bookId)
+      return bookFileUrl(this.bookId, this.bookFilename)
     },
     format(): BookFormat {
       return getBookFormatFromMedia(this.book.media)
@@ -649,6 +658,16 @@ export default Vue.extend({
     },
     mediaComment(): string {
       return convertErrorCodes(this.book.media.comment)
+    },
+    mediaAnalysisDate(): string | undefined {
+      if (this.book.media.status !== 'ERROR' || !this.book.media.lastModified) return undefined
+      return new Intl.DateTimeFormat(
+        this.$i18n.locale,
+        {
+          dateStyle: 'medium',
+          timeStyle: 'short',
+        } as Intl.DateTimeFormatOptions,
+      ).format(new Date(this.book.media.lastModified))
     },
     parentLocation(): RawLocation {
       if (this.contextReadList)
@@ -744,8 +763,12 @@ export default Vue.extend({
           .catch(e => this.siblingPrevious = {} as BookDto)
       }
     },
-    analyze() {
-      this.$komgaBooks.analyzeBook(this.book)
+    async analyze() {
+      await this.$komgaBooks.analyzeBook(this.book)
+      this.refreshAfterAnalyze()
+    },
+    refreshAfterAnalyze() {
+      setTimeout(() => this.loadBook(this.bookId), 1500)
     },
     refreshMetadata() {
       this.$komgaBooks.refreshMetadata(this.book)

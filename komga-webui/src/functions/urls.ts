@@ -22,8 +22,9 @@ export function bookThumbnailUrlByThumbnailId(bookId: string, thumbnailId: strin
   return `${urls.originNoSlash}/api/v1/books/${bookId}/thumbnails/${thumbnailId}`
 }
 
-export function bookFileUrl(bookId: string): string {
-  return `${urls.originNoSlash}/api/v1/books/${bookId}/file`
+export function bookFileUrl(bookId: string, filename?: string): string {
+  const base = `${urls.originNoSlash}/api/v1/books/${bookId}/file`
+  return filename ? `${base}/${encodeURIComponent(filename)}` : base
 }
 
 export function bookPageUrl(bookId: string, page: number, convertTo?: string): string {
@@ -32,6 +33,10 @@ export function bookPageUrl(bookId: string, page: number, convertTo?: string): s
     url += `?convert=${convertTo}`
   }
   return url
+}
+
+export function bookPageReflowUrl(bookId: string, page: number): string {
+  return `${urls.originNoSlash}/api/v1/books/${bookId}/pages/${page}/reflow`
 }
 
 export function bookPageThumbnailUrl(bookId: string, page: number): string {

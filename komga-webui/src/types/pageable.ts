@@ -31,7 +31,8 @@ interface PageRequest {
   size?: number,
   page?: number,
   sort?: string[],
-  unpaged?: boolean
+  unpaged?: boolean,
+  include_total?: boolean
 }
 
 interface SortOption {

@@ -244,6 +244,8 @@
     "go_to_series": "前往系列書",
     "i_understand": "我明白",
     "library": "書庫",
+    "library_scan_daily_file_limit": "每日掃描額度",
+    "library_scan_daily_file_limit_usage": "今日剩餘 {remaining}（已用 {used}/{limit}）",
     "locale_name": "繁體中文",
     "locale_rtl": "false",
     "lock_all": "鎖定全部",
@@ -453,6 +455,22 @@
       "tab_general": "常規",
       "tab_poster": "海報"
     },
+    "move_libraries": {
+      "confirm": "移動",
+      "root_hint": "留空可將選取的書庫移動到頂層。",
+      "target_parent": "新的父書庫",
+      "title": "移動選取的書庫"
+    },
+    "move_books": {
+      "confirm": "移動",
+      "target_library": "目標書庫",
+      "title": "移動選取的書籍"
+    },
+    "move_series": {
+      "confirm": "移動",
+      "target_library": "目標庫",
+      "title": "移動選取的系列"
+    },
     "edit_library": {
       "button_browse": "瀏覽",
       "button_cancel": "取消",
@@ -478,10 +496,12 @@
       "field_import_mylar_series": "系列元資料",
       "field_name": "名稱",
       "field_oneshotsdirectory": "單發作品目錄",
+      "field_parent_library": "父庫",
       "field_repair_extensions": "自動修復不正確的檔案擴展名",
       "field_root_folder": "根資料夾",
       "field_scan_interval": "掃描間隔",
       "field_scanner_empty_trash_after_scan": "每次掃描後自動清理垃圾",
+      "field_scanner_only_new_books": "只掃描分析新增書籍",
       "field_scanner_force_directory_modified_time": "強制目錄修改時間",
       "field_scanner_scan_startup": "啟動時掃描",
       "field_series_cover": "系列封面",
@@ -780,6 +800,11 @@
         "buttons": "按鈕",
         "click": "單擊/點擊"
       },
+      "vertical_swipe_left_action": "直排 EPUB 左滑",
+      "vertical_swipe_left_options": {
+        "next": "下一頁",
+        "previous": "上一頁"
+      },
       "page_margins": "頁邊距",
       "viewing_theme": "觀看主題"
     },
@@ -908,6 +933,7 @@
     "empty_trash": "清理垃圾",
     "mark_read": "標記為已讀",
     "mark_unread": "標記為未讀",
+    "move_to_library": "移動到書庫",
     "pin": "釘選",
     "refresh_metadata": "刷新元資料",
     "scan_library_files": "掃描書庫檔案",
@@ -989,10 +1015,12 @@
       "btn_confirm": "是的，但前提是更大",
       "title": "重新產生縮圖"
     },
+    "hint_library_scan_daily_file_limit": "留空表示不限制每日數量",
     "hint_kobo_port": "僅在同步封面和下載出現問題時設定",
     "label_delete_empty_collections": "掃描後刪除空的收藏",
     "label_delete_empty_readlists": "掃描後刪除空的讀取清單",
     "label_kepubify_path": "kepubify 的位置",
+    "label_library_scan_daily_file_limit": "每日書庫掃描檔案上限",
     "label_kobo_port": "Kobo 同步外部通訊埠",
     "label_kobo_proxy": "代理 Kobo 同步請求至 Kobo 商店",
     "label_rememberme_duration": "記住我的持續時間（天）",

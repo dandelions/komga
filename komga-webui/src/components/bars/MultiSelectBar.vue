@@ -23,6 +23,15 @@
         <span>{{ $tc('common.n_selected', value.length) }}</span>
       </v-toolbar-title>
 
+      <v-btn icon @click="doDelete" v-if="isAdmin">
+        <v-tooltip bottom>
+          <template v-slot:activator="{ on }">
+            <v-icon v-on="on">mdi-delete</v-icon>
+          </template>
+          <span>{{ $t('menu.delete') }}</span>
+        </v-tooltip>
+      </v-btn>
+
       <v-spacer/>
 
       <v-btn icon @click="markRead" v-if="kind === 'books' || kind === 'series'">
@@ -61,12 +70,37 @@
         </v-tooltip>
       </v-btn>
 
+      <v-btn icon @click="analyze" v-if="isAdmin && showAnalyze">
+        <v-tooltip bottom>
+          <template v-slot:activator="{ on }">
+            <v-icon v-on="on">mdi-book-search</v-icon>
+          </template>
+          <span>{{ $t('menu.analyze') }}</span>
+        </v-tooltip>
+      </v-btn>
+
       <v-btn icon @click="bulkEdit" v-if="isAdmin && kind === 'books'">
         <v-tooltip bottom>
           <template v-slot:activator="{ on }">
             <v-icon v-on="on">mdi-table-edit</v-icon>
           </template>
           <span>{{ $t('menu.bulk_edit_metadata') }}</span>
+        </v-tooltip>
+      </v-btn>
+
+      <v-btn icon @click="moveBooksDialog = true" v-if="isAdmin && kind === 'books'">
+        <v-tooltip bottom>
+          <template v-slot:activator="{ on }">
+            <v-icon v-on="on">mdi-folder-move</v-icon>
+          </template>
+          <span>{{ $t('menu.move_to_library') }}</span>
+        </v-tooltip>
+      </v-btn>
+
+      <v-btn icon @click="moveSeriesDialog = true" v-if="isAdmin && kind === 'series'">
+        <v-tooltip bottom>
+          <template v-slot:activator="{ on }"><v-icon v-on="on">mdi-folder-move</v-icon></template>
+          <span>{{ $t('menu.move_to_library') }}</span>
         </v-tooltip>
       </v-btn>
 
@@ -79,14 +113,20 @@
         </v-tooltip>
       </v-btn>
 
-      <v-btn icon @click="doDelete" v-if="isAdmin">
-        <v-tooltip bottom>
-          <template v-slot:activator="{ on }">
-            <v-icon v-on="on">mdi-delete</v-icon>
-          </template>
-          <span>{{ $t('menu.delete') }}</span>
-        </v-tooltip>
-      </v-btn>
+      <move-books-dialog
+        v-if="kind === 'books'"
+        v-model="moveBooksDialog"
+        :books="value"
+        @moved="booksMoved"
+      />
+
+      <move-series-dialog
+        v-if="kind === 'series'"
+        v-model="moveSeriesDialog"
+        :series="value"
+        @moved="booksMoved"
+      />
+
     </toolbar-sticky>
   </v-scroll-y-transition>
 </template>
@@ -94,12 +134,17 @@
 <script lang="ts">
 import Vue from 'vue'
 import ToolbarSticky from './ToolbarSticky.vue'
+import MoveBooksDialog from '@/components/dialogs/MoveBooksDialog.vue'
+import MoveSeriesDialog from '@/components/dialogs/MoveSeriesDialog.vue'
 
 export default Vue.extend({
   name: 'MultiSelectBar',
-  components: { ToolbarSticky },
+  components: {MoveBooksDialog, MoveSeriesDialog, ToolbarSticky},
   data: () => {
-    return {}
+    return {
+      moveBooksDialog: false,
+      moveSeriesDialog: false,
+    }
   },
   props: {
     value: {
@@ -119,6 +164,10 @@ export default Vue.extend({
       default: false,
     },
     showSelectAll: {
+      type: Boolean,
+      default: false,
+    },
+    showAnalyze: {
       type: Boolean,
       default: false,
     },
@@ -147,11 +196,18 @@ export default Vue.extend({
     addToReadList () {
       this.$emit('add-to-readlist')
     },
+    analyze () {
+      this.$emit('analyze')
+    },
     edit () {
       this.$emit('edit')
     },
     bulkEdit () {
       this.$emit('bulk-edit')
+    },
+    booksMoved () {
+      this.$emit('moved')
+      this.unselectAll()
     },
     doDelete () {
       this.$emit('delete')

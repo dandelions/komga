@@ -1,0 +1,5 @@
+ALTER TABLE TASK
+    ADD COLUMN AVAILABLE_DATE datetime NULL;
+
+CREATE INDEX idx__tasks__available_date
+    ON TASK (AVAILABLE_DATE);

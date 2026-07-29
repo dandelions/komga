@@ -118,6 +118,28 @@ class LibraryLifecycleTest(
         .isInstanceOf(PathContainedInPath::class.java)
         .hasMessageContaining("parent")
     }
+
+    @Test
+    fun `when adding top-level library without root folder then it is created`() {
+      // when
+      val created = libraryLifecycle.addLibrary(Library("parent", null))
+
+      // then
+      assertThat(created.root).isNull()
+    }
+
+    @Test
+    fun `given parent library when adding child library without root folder then it is created`() {
+      // given
+      val parent = libraryLifecycle.addLibrary(Library("parent", null))
+
+      // when
+      val child = libraryLifecycle.addLibrary(Library("child", null, parentId = parent.id))
+
+      // then
+      assertThat(child.root).isNull()
+      assertThat(child.parentId).isEqualTo(parent.id)
+    }
   }
 
   @Nested
@@ -284,6 +306,40 @@ class LibraryLifecycleTest(
       assertThat(thrown)
         .isInstanceOf(PathContainedInPath::class.java)
         .hasMessageContaining("parent")
+    }
+
+    @Test
+    fun `given top-level library when updating without root folder then it is updated`() {
+      // given
+      val existing = libraryLifecycle.addLibrary(library)
+
+      // when
+      val toUpdate = existing.copy(root = null)
+      val thrown =
+        catchThrowable {
+          libraryLifecycle.updateLibrary(toUpdate)
+        }
+
+      // then
+      assertThat(thrown).doesNotThrowAnyException()
+      assertThat(libraryRepository.findById(existing.id).root).isNull()
+    }
+
+    @Test
+    fun `given child library when updating without root folder then it is updated`(
+      @TempDir childRoot: Path,
+    ) {
+      // given
+      val parent = libraryLifecycle.addLibrary(Library("parent", null))
+      val child = libraryLifecycle.addLibrary(Library("child", childRoot.toUri().toURL(), parentId = parent.id))
+
+      // when
+      libraryLifecycle.updateLibrary(child.copy(root = null))
+
+      // then
+      val updated = libraryRepository.findById(child.id)
+      assertThat(updated.root).isNull()
+      assertThat(updated.parentId).isEqualTo(parent.id)
     }
   }
 }

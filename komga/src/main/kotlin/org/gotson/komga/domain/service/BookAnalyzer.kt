@@ -22,6 +22,9 @@ import org.gotson.komga.infrastructure.image.ImageConverter
 import org.gotson.komga.infrastructure.image.ImageType
 import org.gotson.komga.infrastructure.mediacontainer.ContentDetector
 import org.gotson.komga.infrastructure.mediacontainer.divina.DivinaExtractor
+import org.gotson.komga.infrastructure.mediacontainer.djvu.DjvuExtractor
+import org.gotson.komga.infrastructure.mediacontainer.epub.EbookConversionException
+import org.gotson.komga.infrastructure.mediacontainer.epub.EbookConverter
 import org.gotson.komga.infrastructure.mediacontainer.epub.EpubExtractor
 import org.gotson.komga.infrastructure.mediacontainer.epub.epub
 import org.gotson.komga.infrastructure.mediacontainer.pdf.PdfExtractor
@@ -32,16 +35,20 @@ import org.springframework.stereotype.Service
 import java.io.ByteArrayOutputStream
 import java.nio.file.AccessDeniedException
 import java.nio.file.NoSuchFileException
+import java.nio.file.Path
 import javax.imageio.ImageIO
 import kotlin.io.path.extension
 
 private val logger = KotlinLogging.logger {}
+private const val ANALYSIS_ERROR_COMMENT_MAX_LENGTH = 1000
 
 @Service
 class BookAnalyzer(
   private val contentDetector: ContentDetector,
   extractors: List<DivinaExtractor>,
   private val pdfExtractor: PdfExtractor,
+  private val djvuExtractor: DjvuExtractor,
+  private val ebookConverter: EbookConverter,
   private val epubExtractor: EpubExtractor,
   private val imageConverter: ImageConverter,
   private val imageAnalyzer: ImageAnalyzer,
@@ -64,10 +71,20 @@ class BookAnalyzer(
   ): Media {
     logger.info { "Trying to analyze book: $book" }
     return try {
+      val mediaTypeFromExtension =
+        when (book.path.extension.lowercase()) {
+          "djvu", "djv" -> MediaType.DJVU
+          "mobi" -> MediaType.MOBI
+          "azw3" -> MediaType.AZW3
+          else -> null
+        }
+
       var mediaType =
         contentDetector.detectMediaType(book.path).let {
           logger.info { "Detected media type: $it" }
-          MediaType.fromMediaType(it) ?: return Media(mediaType = it, status = Media.Status.UNSUPPORTED, comment = "ERR_1001", bookId = book.id)
+          mediaTypeFromExtension
+            ?: MediaType.fromMediaType(it)
+            ?: return Media(mediaType = it, status = Media.Status.UNSUPPORTED, comment = "ERR_1001", bookId = book.id)
         }
 
       if (book.path.extension.lowercase() == "epub" && mediaType != MediaType.EPUB) {
@@ -81,18 +98,23 @@ class BookAnalyzer(
 
       when (mediaType.profile) {
         MediaProfile.DIVINA -> analyzeDivina(book, mediaType, analyzeDimensions)
-        MediaProfile.PDF -> analyzePdf(book, analyzeDimensions)
-        MediaProfile.EPUB -> analyzeEpub(book, analyzeDimensions)
+        MediaProfile.PDF -> analyzePdf(book, mediaType, analyzeDimensions)
+        MediaProfile.EPUB ->
+          when (mediaType) {
+            MediaType.EPUB -> analyzeEpub(book, book.path, analyzeDimensions)
+            MediaType.MOBI, MediaType.AZW3 -> analyzeConvertedEpub(book, analyzeDimensions)
+            else -> Media(status = Media.Status.UNSUPPORTED)
+          }
       }.copy(mediaType = mediaType.type)
     } catch (ade: AccessDeniedException) {
       logger.error(ade) { "Error while analyzing book: $book" }
-      Media(status = Media.Status.ERROR, comment = "ERR_1000")
+      Media(status = Media.Status.ERROR, comment = analysisErrorComment("ERR_1000", ade))
     } catch (ex: NoSuchFileException) {
       logger.error(ex) { "Error while analyzing book: $book" }
-      Media(status = Media.Status.ERROR, comment = "ERR_1018")
+      Media(status = Media.Status.ERROR, comment = analysisErrorComment("ERR_1018", ex))
     } catch (ex: Exception) {
       logger.error(ex) { "Error while analyzing book: $book" }
-      Media(status = Media.Status.ERROR, comment = "ERR_1005")
+      Media(status = Media.Status.ERROR, comment = analysisErrorComment("ERR_1005", ex))
     }.copy(bookId = book.id)
   }
 
@@ -109,7 +131,7 @@ class BookAnalyzer(
         return Media(status = Media.Status.UNSUPPORTED, comment = ex.code)
       } catch (ex: Exception) {
         logger.error(ex) { "Error while analyzing book: $book" }
-        return Media(status = Media.Status.ERROR, comment = "ERR_1008")
+        return Media(status = Media.Status.ERROR, comment = analysisErrorComment("ERR_1008", ex))
       }
 
     val (pages, others) =
@@ -143,9 +165,10 @@ class BookAnalyzer(
 
   private fun analyzeEpub(
     book: Book,
+    epubPath: Path,
     analyzeDimensions: Boolean,
   ): Media {
-    book.path.epub { epub ->
+    epubPath.epub { epub ->
       val (resources, missingResources) = epubExtractor.getResources(epub).partition { it.fileSize != null }
       val isKepub = epubExtractor.isKepub(epub, resources)
 
@@ -191,7 +214,7 @@ class BookAnalyzer(
 
       val positions =
         try {
-          epubExtractor.computePositions(epub, book.path, resources, isFixedLayout, isKepub)
+          epubExtractor.computePositions(epub, epubPath, resources, isFixedLayout, isKepub)
         } catch (e: Exception) {
           logger.error(e) { "Error while getting EPUB positions" }
           errors.add("ERR_1039")
@@ -230,11 +253,47 @@ class BookAnalyzer(
     }
   }
 
-  private fun analyzePdf(
+  private fun analyzeConvertedEpub(
     book: Book,
     analyzeDimensions: Boolean,
+  ): Media =
+    try {
+      analyzeEpub(book, ebookConverter.getOrConvertToEpub(book.path), analyzeDimensions)
+    } catch (e: EbookConversionException) {
+      logger.error(e) { "Error while converting ebook to EPUB: $book" }
+      Media(status = Media.Status.ERROR, comment = analysisErrorComment("ERR_1040", e))
+    }
+
+  private fun analysisErrorComment(
+    code: String,
+    throwable: Throwable,
+  ): String {
+    val reason =
+      sequenceOf(throwable::class.simpleName, throwable.message)
+        .filterNotNull()
+        .joinToString(": ")
+        .replace(Regex("\\s+"), " ")
+        .trim()
+
+    return if (reason.isBlank()) {
+      code
+    } else {
+      "$code [$reason]".take(ANALYSIS_ERROR_COMMENT_MAX_LENGTH)
+    }
+  }
+
+  private fun analyzePdf(
+    book: Book,
+    mediaType: MediaType,
+    analyzeDimensions: Boolean,
   ): Media {
-    val pages = pdfExtractor.getPages(book.path, analyzeDimensions).map { BookPage(it.name, "", it.dimension) }
+    val entries =
+      when (mediaType) {
+        MediaType.PDF -> pdfExtractor.getPages(book.path, analyzeDimensions)
+        MediaType.DJVU, MediaType.DJVU_X, MediaType.DJVU_APPLICATION -> djvuExtractor.getPages(book.path, analyzeDimensions)
+        else -> throw MediaUnsupportedException("Unsupported PDF profile media type: ${mediaType.type}")
+      }
+    val pages = entries.map { BookPage(it.name, "", it.dimension) }
     return Media(status = Media.Status.READY, pages = pages)
   }
 
@@ -268,8 +327,17 @@ class BookAnalyzer(
   fun getPoster(book: BookWithMedia): TypedBytes? =
     when (book.media.profile) {
       MediaProfile.DIVINA -> divinaExtractors[book.media.mediaType]?.getPoster(book)
-      MediaProfile.PDF -> pdfExtractor.getPageContentAsImage(book.book.path, 1)
-      MediaProfile.EPUB -> epubExtractor.getCover(book.book.path) ?: if (book.media.epubDivinaCompatible) divinaExtractors[MediaType.ZIP.type]?.getPoster(book) else null
+      MediaProfile.PDF ->
+        when (book.media.mediaType) {
+          MediaType.PDF.type -> pdfExtractor.getPageContentAsImage(book.book.path, 1)
+          MediaType.DJVU.type, MediaType.DJVU_X.type, MediaType.DJVU_APPLICATION.type -> djvuExtractor.getPageContentAsImage(book.book.path, 1)
+          else -> null
+        }
+      MediaProfile.EPUB -> {
+        val epubPath = book.epubPath()
+        epubExtractor.getCover(epubPath)
+          ?: if (book.book.path == epubPath && book.media.epubDivinaCompatible) divinaExtractors[MediaType.ZIP.type]?.getPoster(book) else null
+      }
       null -> null
     }
 
@@ -311,10 +379,15 @@ class BookAnalyzer(
 
     return when (book.media.profile) {
       MediaProfile.DIVINA -> divinaExtractors.getValue(book.media.mediaType!!).getEntryStream(book.book.path, book.media.pages[number - 1].fileName)
-      MediaProfile.PDF -> pdfExtractor.getPageContentAsImage(book.book.path, number).bytes
+      MediaProfile.PDF ->
+        when (book.media.mediaType) {
+          MediaType.PDF.type -> pdfExtractor.getPageContentAsImage(book.book.path, number).bytes
+          MediaType.DJVU.type, MediaType.DJVU_X.type, MediaType.DJVU_APPLICATION.type -> djvuExtractor.getPageContentAsImage(book.book.path, number).bytes
+          else -> throw MediaUnsupportedException("Unsupported PDF profile media type: ${book.media.mediaType}")
+        }
       MediaProfile.EPUB ->
         if (book.media.epubDivinaCompatible)
-          epubExtractor.getEntryStream(book.book.path, book.media.pages[number - 1].fileName)
+          epubExtractor.getEntryStream(book.epubPath(), book.media.pages[number - 1].fileName)
         else
           throw MediaUnsupportedException("Epub profile does not support getting page content")
 
@@ -331,7 +404,7 @@ class BookAnalyzer(
     number: Int,
   ): TypedBytes {
     logger.debug { "Get raw page #$number for book: $book" }
-    if (book.media.profile != MediaProfile.PDF) throw MediaUnsupportedException("Extractor does not support raw extraction of pages")
+    if (book.media.mediaType != MediaType.PDF.type) throw MediaUnsupportedException("Extractor does not support raw extraction of pages")
 
     if (book.media.status != Media.Status.READY) {
       logger.warn { "Book media is not ready, cannot get pages" }
@@ -362,10 +435,16 @@ class BookAnalyzer(
 
     return when (book.media.profile) {
       MediaProfile.DIVINA -> divinaExtractors.getValue(book.media.mediaType!!).getEntryStream(book.book.path, fileName)
-      MediaProfile.EPUB -> epubExtractor.getEntryStream(book.book.path, fileName)
+      MediaProfile.EPUB -> epubExtractor.getEntryStream(book.epubPath(), fileName)
       MediaProfile.PDF, null -> throw MediaUnsupportedException("Extractor does not support extraction of files")
     }
   }
+
+  private fun BookWithMedia.epubPath(): Path =
+    when (media.mediaType) {
+      MediaType.MOBI.type, MediaType.AZW3.type -> ebookConverter.getOrConvertToEpub(book.path)
+      else -> book.path
+    }
 
   /**
    * Will hash the first and last pages of the given book.
@@ -417,16 +496,23 @@ class BookAnalyzer(
     return media.pages.map { page ->
       page.copy(
         mediaType = pdfImageType.mediaType,
-        dimension = page.dimension?.let { pdfExtractor.scaleDimension(it) },
+        dimension = if (media.mediaType == MediaType.PDF.type) page.dimension?.let { pdfExtractor.scaleDimension(it) } else page.dimension,
       )
     }
   }
 
-  fun getPdfToc(book: Book): List<PdfTocEntry> =
+  fun getPdfToc(
+    book: Book,
+    mediaType: String?,
+  ): List<PdfTocEntry> =
     try {
-      pdfExtractor.getToc(book.path)
+      when (mediaType) {
+        MediaType.PDF.type -> pdfExtractor.getToc(book.path)
+        MediaType.DJVU.type, MediaType.DJVU_X.type, MediaType.DJVU_APPLICATION.type -> djvuExtractor.getToc(book.path)
+        else -> emptyList()
+      }
     } catch (e: Exception) {
-      logger.error(e) { "Error while getting PDF TOC" }
+      logger.error(e) { "Error while getting PDF profile TOC" }
       emptyList()
     }
 }

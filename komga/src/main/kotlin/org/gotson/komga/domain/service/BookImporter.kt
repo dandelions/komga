@@ -77,7 +77,9 @@ class BookImporter(
       if (series.oneshot && upgradeBookId.isNullOrEmpty()) throw IllegalArgumentException("Destination series is oneshot but upgradeBookId is missing")
 
       libraryRepository.findAll().forEach { library ->
-        if (sourceFile.startsWith(library.path)) throw PathContainedInPath("Cannot import file that is part of an existing library", "ERR_1019")
+        library.path?.let {
+          if (sourceFile.startsWith(it)) throw PathContainedInPath("Cannot import file that is part of an existing library", "ERR_1019")
+        }
       }
 
       val bookToUpgrade =
