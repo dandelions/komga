@@ -173,6 +173,18 @@ type WordBlock = {
   h: number,
 }
 
+type BlockEdges = {
+  left: boolean,
+  right: boolean,
+  top: boolean,
+  bottom: boolean,
+}
+
+type EdgeAdjustedBlock = {
+  block: WordBlock,
+  dirtyEdges: BlockEdges,
+}
+
 type RenderedWordBlock = WordBlock & {
   type: 'word',
   src: string,
@@ -210,6 +222,9 @@ const BLOCK_PADDING = 1
 const WORD_SCALE = 0.75
 const MIN_CROP_SIZE = 15
 const MIN_INDENT = 8
+const EDGE_INK_THRESHOLD = 245
+const MAX_EDGE_TRIM = 6
+const MAX_EDGE_EXPANSION = 10
 
 export default Vue.extend({
   name: 'ReflowedPage',
@@ -374,7 +389,7 @@ export default Vue.extend({
         const imageData = context.getImageData(0, 0, canvas.width, canvas.height)
         const lines = this.detectWordLines(imageData, canvas.width, canvas.height)
         if (requestId !== this.requestId) return
-        this.reflowItems = this.renderReflowItems(canvas, lines)
+        this.reflowItems = this.renderReflowItems(canvas, imageData, lines)
         this.lastDetectionKey = detectionKey
         this.emitReflowed()
       } catch (e) {
@@ -786,7 +801,7 @@ export default Vue.extend({
         h: lineBounds.bottom - lineBounds.top + 1,
       }
     },
-    renderReflowItems(sourceCanvas: HTMLCanvasElement, lines: WordLine[]): ReflowItem[] {
+    renderReflowItems(sourceCanvas: HTMLCanvasElement, sourceImageData: ImageData, lines: WordLine[]): ReflowItem[] {
       const sourceContext = sourceCanvas.getContext('2d')
       if (!sourceContext) return []
       const rendered = [] as ReflowItem[]
@@ -800,12 +815,14 @@ export default Vue.extend({
         if (startParagraph && rendered.length > 0) rendered.push({type: 'break'})
         if (indent > 0) rendered.push({type: 'indent', sourceWidth: indent, width: this.scaledIndentWidth(indent)})
 
-        line.words.forEach(block => {
-          if (block.w < 2 || block.h < 2) return
+        line.words.forEach(detectedBlock => {
+          if (detectedBlock.w < 2 || detectedBlock.h < 2) return
+          const {block, dirtyEdges} = this.adjustBlockEdges(sourceImageData, detectedBlock)
           sliceCanvas.width = block.w
           sliceCanvas.height = block.h
           sliceContext.clearRect(0, 0, block.w, block.h)
           sliceContext.drawImage(sourceCanvas, block.x, block.y, block.w, block.h, 0, 0, block.w, block.h)
+          this.clearDirtyBlockEdges(sliceContext, block.w, block.h, dirtyEdges)
           rendered.push({
             ...block,
             type: 'word',
@@ -816,6 +833,131 @@ export default Vue.extend({
       })
 
       return rendered
+    },
+    adjustBlockEdges(source: ImageData, original: WordBlock): EdgeAdjustedBlock {
+      let left = original.x
+      let right = original.x + original.w
+      let top = original.y
+      let bottom = original.y + original.h
+      const trimDistance = Math.max(2, Math.min(MAX_EDGE_TRIM, Math.round(original.h * 0.08)))
+      const expansionDistance = Math.max(3, Math.min(MAX_EDGE_EXPANSION, Math.round(original.h * 0.16)))
+      const dirtyEdges: BlockEdges = {left: false, right: false, top: false, bottom: false}
+
+      if (this.verticalLineHasInk(source, left, top, bottom)) {
+        const inner = this.findClearVerticalLine(source, left + 1, Math.min(right - 2, left + trimDistance), 1, top, bottom)
+        if (inner !== undefined) left = inner
+        else {
+          const outer = this.findClearVerticalLine(source, left - 1, Math.max(0, left - expansionDistance), -1, top, bottom)
+          if (outer !== undefined) left = outer
+          else dirtyEdges.left = true
+        }
+      }
+
+      if (this.verticalLineHasInk(source, right - 1, top, bottom)) {
+        const inner = this.findClearVerticalLine(source, right - 2, Math.max(left + 1, right - 1 - trimDistance), -1, top, bottom)
+        if (inner !== undefined) right = inner + 1
+        else {
+          const outer = this.findClearVerticalLine(source, right, Math.min(source.width - 1, right - 1 + expansionDistance), 1, top, bottom)
+          if (outer !== undefined) right = outer + 1
+          else dirtyEdges.right = true
+        }
+      }
+
+      if (this.horizontalLineHasInk(source, top, left, right)) {
+        const inner = this.findClearHorizontalLine(source, top + 1, Math.min(bottom - 2, top + trimDistance), 1, left, right)
+        if (inner !== undefined) top = inner
+        else {
+          const outer = this.findClearHorizontalLine(source, top - 1, Math.max(0, top - expansionDistance), -1, left, right)
+          if (outer !== undefined) top = outer
+          else dirtyEdges.top = true
+        }
+      }
+
+      if (this.horizontalLineHasInk(source, bottom - 1, left, right)) {
+        const inner = this.findClearHorizontalLine(source, bottom - 2, Math.max(top + 1, bottom - 1 - trimDistance), -1, left, right)
+        if (inner !== undefined) bottom = inner + 1
+        else {
+          const outer = this.findClearHorizontalLine(source, bottom, Math.min(source.height - 1, bottom - 1 + expansionDistance), 1, left, right)
+          if (outer !== undefined) bottom = outer + 1
+          else dirtyEdges.bottom = true
+        }
+      }
+
+      return {
+        block: {x: left, y: top, w: right - left, h: bottom - top},
+        dirtyEdges,
+      }
+    },
+    findClearVerticalLine(
+      source: ImageData,
+      start: number,
+      end: number,
+      step: number,
+      top: number,
+      bottom: number,
+    ): number | undefined {
+      if ((step > 0 && start > end) || (step < 0 && start < end)) return undefined
+      for (let x = start; step > 0 ? x <= end : x >= end; x += step) {
+        if (!this.verticalLineHasInk(source, x, top, bottom)) return x
+      }
+      return undefined
+    },
+    findClearHorizontalLine(
+      source: ImageData,
+      start: number,
+      end: number,
+      step: number,
+      left: number,
+      right: number,
+    ): number | undefined {
+      if ((step > 0 && start > end) || (step < 0 && start < end)) return undefined
+      for (let y = start; step > 0 ? y <= end : y >= end; y += step) {
+        if (!this.horizontalLineHasInk(source, y, left, right)) return y
+      }
+      return undefined
+    },
+    verticalLineHasInk(source: ImageData, x: number, top: number, bottom: number): boolean {
+      if (x < 0 || x >= source.width) return true
+      for (let y = Math.max(0, top); y < Math.min(source.height, bottom); y++) {
+        if (this.sourcePixelIsInk(source, x, y)) return true
+      }
+      return false
+    },
+    horizontalLineHasInk(source: ImageData, y: number, left: number, right: number): boolean {
+      if (y < 0 || y >= source.height) return true
+      for (let x = Math.max(0, left); x < Math.min(source.width, right); x++) {
+        if (this.sourcePixelIsInk(source, x, y)) return true
+      }
+      return false
+    },
+    sourcePixelIsInk(source: ImageData, x: number, y: number): boolean {
+      const offset = (y * source.width + x) * 4
+      const data = source.data
+      const luma = 0.299 * data[offset] + 0.587 * data[offset + 1] + 0.114 * data[offset + 2]
+      return data[offset + 3] > 0 && luma < EDGE_INK_THRESHOLD
+    },
+    clearDirtyBlockEdges(
+      context: CanvasRenderingContext2D,
+      width: number,
+      height: number,
+      dirtyEdges: BlockEdges,
+    ) {
+      if (!dirtyEdges.left && !dirtyEdges.right && !dirtyEdges.top && !dirtyEdges.bottom) return
+      const imageData = context.getImageData(0, 0, width, height)
+      const data = imageData.data
+      const clearPixel = (x: number, y: number) => {
+        const offset = (y * width + x) * 4
+        data[offset] = 255
+        data[offset + 1] = 255
+        data[offset + 2] = 255
+        data[offset + 3] = 255
+      }
+
+      if (dirtyEdges.left) for (let y = 0; y < height; y++) clearPixel(0, y)
+      if (dirtyEdges.right) for (let y = 0; y < height; y++) clearPixel(width - 1, y)
+      if (dirtyEdges.top) for (let x = 0; x < width; x++) clearPixel(x, 0)
+      if (dirtyEdges.bottom) for (let x = 0; x < width; x++) clearPixel(x, height - 1)
+      context.putImageData(imageData, 0, 0)
     },
     prepareSourceCanvas(targetContext: CanvasRenderingContext2D, width: number, height: number) {
       const strength = this.strokeStrength
