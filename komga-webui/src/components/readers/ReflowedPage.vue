@@ -737,7 +737,7 @@ const DETECTION_FULL_RES_MAX_PIXELS = 6000000
 const DETECTION_MAX_SIDE = 2800
 const DETECTION_MAX_PIXELS = 5000000
 const DETECTION_MIN_SCALE = 0.4
-const REFLOW_RESPONSE_VERSION = 2
+const REFLOW_RESPONSE_VERSION = 3
 
 export default Vue.extend({
   name: 'ReflowedPage',
@@ -1453,7 +1453,7 @@ export default Vue.extend({
             manualImageRegions,
           )
           const imageRegions = this.applyManualImageRegions(detectedImageRegions, manualImageRegions)
-          regionItems.push(this.renderReflowItems(sourceCanvas, lines, imageRegions))
+          regionItems.push(this.renderReflowItems(sourceCanvas, lines, imageRegions, manualImageRegions))
         }
         if (requestId !== this.requestId) return
         this.transferStats = this.localTransferStats()
@@ -5310,7 +5310,12 @@ export default Vue.extend({
       const coveredWidth = thinBlocks.reduce((sum, block) => sum + block.w, 0)
       return right - left >= Math.max(120, glyphHeight * 4) && coveredWidth >= Math.max(48, glyphHeight * 2)
     },
-    renderReflowItems(sourceCanvas: HTMLCanvasElement, lines: WordLine[], imageRegions: ImageRegion[]): ReflowItem[] {
+    renderReflowItems(
+      sourceCanvas: HTMLCanvasElement,
+      lines: WordLine[],
+      imageRegions: ImageRegion[],
+      manualImageRegions: ImageRegion[] = [],
+    ): ReflowItem[] {
       const sourceContext = this.canvasContext(sourceCanvas)
       if (!sourceContext) return []
       const sourceImageData = sourceContext.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height)
@@ -5329,8 +5334,19 @@ export default Vue.extend({
       lines.forEach((line, index) => {
         this.appendImageItems(rendered, sourceCanvas, sliceCanvas, sliceContext, imageSlots[index])
         const previousLine = lines[index - 1]
-        const previousBlankCue = previousLine ? this.hasHorizontalParagraphBlankCue(previousLine, line, glyphHeight) : false
-        const startParagraph = this.isParagraphStart(line, previousLine) || previousBlankCue
+        const manualImageTrailingBlank = Boolean(
+          previousLine &&
+          this.manualImageOccupiesHorizontalTrailingBlank(previousLine, manualImageRegions, glyphHeight),
+        )
+        const previousBlankCue = Boolean(
+          previousLine &&
+          this.hasHorizontalParagraphBlankCue(previousLine, line, glyphHeight, manualImageTrailingBlank),
+        )
+        const manualImageColumnTransition = Boolean(
+          previousLine &&
+          this.manualImageExplainsHorizontalColumnTransition(previousLine, line, manualImageRegions, glyphHeight),
+        )
+        const startParagraph = this.isParagraphStart(line, previousLine, manualImageColumnTransition) || previousBlankCue
         let indent = 0
         if (startParagraph) {
           const lineIndent = this.lineIndentSourceWidth(line)
@@ -5999,9 +6015,9 @@ export default Vue.extend({
       data[offset + 2] = Math.round(data[offset + 2] * (1 - clampedInfluence))
       data[offset + 3] = Math.max(data[offset + 3], Math.round(255 * clampedInfluence))
     },
-    isParagraphStart(line: WordLine, previousLine: WordLine | undefined): boolean {
+    isParagraphStart(line: WordLine, previousLine: WordLine | undefined, ignoreColumnChange: boolean = false): boolean {
       if (!previousLine) return true
-      if (line.column.start !== previousLine.column.start || line.column.end !== previousLine.column.end) return true
+      if (!ignoreColumnChange && (line.column.start !== previousLine.column.start || line.column.end !== previousLine.column.end)) return true
 
       const currentHeight = line.words[0]?.h || line.line.end - line.line.start
 
@@ -6035,7 +6051,12 @@ export default Vue.extend({
       if (widths.length === 0) return 0
       return Math.max(8, this.medianNumber(widths))
     },
-    hasHorizontalParagraphBlankCue(line: WordLine, nextLine: WordLine, glyphHeight: number): boolean {
+    hasHorizontalParagraphBlankCue(
+      line: WordLine,
+      nextLine: WordLine,
+      glyphHeight: number,
+      ignoreTrailingBlank: boolean = false,
+    ): boolean {
       const words = line.words
         .filter(word => word.w >= 2 && word.h >= 2 && !this.isRuleLikeBlock(word))
         .slice()
@@ -6063,11 +6084,51 @@ export default Vue.extend({
       const blankThreshold = Math.max(12, glyphWidth * 2)
       const lastWord = words[words.length - 1]
       const trailingBlank = line.column.end - (lastWord.x + lastWord.w)
-      if (trailingBlank >= blankThreshold) return true
+      if (!ignoreTrailingBlank && trailingBlank >= blankThreshold) return true
 
       return words.some((word, index) => {
         const nextWord = words[index + 1]
         return nextWord ? nextWord.x - (word.x + word.w) >= blankThreshold : false
+      })
+    },
+    manualImageOccupiesHorizontalTrailingBlank(line: WordLine, manualRegions: ImageRegion[], glyphHeight: number): boolean {
+      const bounds = this.horizontalLineBlockBounds(line)
+      if (!bounds) return false
+      const overlapTolerance = Math.max(8, glyphHeight * 0.35)
+      const gapTolerance = Math.max(12, glyphHeight * 2)
+
+      return manualRegions.some(region => {
+        const verticalOverlap = Math.max(0, Math.min(line.line.end, region.y + region.h) - Math.max(line.line.start, region.y))
+        const gap = region.x - bounds.end
+        return verticalOverlap > 0 &&
+          region.x < line.column.end &&
+          region.x + region.w > bounds.end &&
+          gap >= -overlapTolerance &&
+          gap <= gapTolerance
+      })
+    },
+    manualImageExplainsHorizontalColumnTransition(
+      line: WordLine,
+      nextLine: WordLine,
+      manualRegions: ImageRegion[],
+      glyphHeight: number,
+    ): boolean {
+      if (line.column.start === nextLine.column.start && line.column.end === nextLine.column.end) return false
+      const bounds = this.horizontalLineBlockBounds(line)
+      const nextBounds = this.horizontalLineBlockBounds(nextLine)
+      if (!bounds || !nextBounds) return false
+      const sourceGap = nextLine.line.start - line.line.end
+      if (sourceGap > Math.max(12, glyphHeight * 1.5)) return false
+
+      const overlapTolerance = Math.max(8, glyphHeight * 0.35)
+      const gapTolerance = Math.max(12, glyphHeight * 2)
+      return manualRegions.some(region => {
+        const verticalOverlap = Math.max(0, Math.min(line.line.end, region.y + region.h) - Math.max(line.line.start, region.y))
+        const gap = region.x - bounds.end
+        return verticalOverlap > 0 &&
+          gap >= -overlapTolerance &&
+          gap <= gapTolerance &&
+          nextBounds.end > region.x + overlapTolerance
       })
     },
     scaledIndentWidth(sourceWidth: number): number {

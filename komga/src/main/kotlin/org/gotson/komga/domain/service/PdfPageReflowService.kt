@@ -41,6 +41,7 @@ private const val VERTICAL_PARAGRAPH_BLANK_BLOCKS = 2.0
 private const val EDGE_INK_THRESHOLD = 245
 private const val MAX_EDGE_TRIM = 6
 private const val MAX_EDGE_EXPANSION = 10
+private const val REFLOW_ALGORITHM_VERSION = 2
 
 data class PdfPageReflowOptions(
   val targetWidth: Int,
@@ -161,6 +162,7 @@ private data class EncodedReflowImage(
 )
 
 private data class PdfPageReflowCacheKey(
+  val algorithmVersion: Int,
   val bookId: String,
   val fileLastModified: String,
   val fileSize: Long,
@@ -200,6 +202,7 @@ class PdfPageReflowService(
     pageCount?.let { pageImageCacheService.prefetchAround(book, pageNumber, it) }
     val key =
       PdfPageReflowCacheKey(
+        algorithmVersion = REFLOW_ALGORITHM_VERSION,
         bookId = book.id,
         fileLastModified = book.fileLastModified.toString(),
         fileSize = book.fileSize,
@@ -2193,8 +2196,17 @@ class PdfPageReflowService(
     lines.forEachIndexed { index, line ->
       appendImageItems(items, image, imageSlots[index], options, textScale)
       val previousLine = lines.getOrNull(index - 1)
-      val previousBlankCue = previousLine?.let { hasHorizontalParagraphBlankCue(it, line, glyphHeight) } ?: false
-      val startParagraph = isHorizontalParagraphStart(line, previousLine) || previousBlankCue
+      val manualImageTrailingBlank =
+        previousLine?.let { manualImageOccupiesHorizontalTrailingBlank(it, manualImageRegions, glyphHeight) } ?: false
+      val previousBlankCue =
+        previousLine?.let {
+          hasHorizontalParagraphBlankCue(it, line, glyphHeight, manualImageTrailingBlank)
+        } ?: false
+      val manualImageColumnTransition =
+        previousLine?.let {
+          manualImageExplainsHorizontalColumnTransition(it, line, manualImageRegions, glyphHeight)
+        } ?: false
+      val startParagraph = isHorizontalParagraphStart(line, previousLine, manualImageColumnTransition) || previousBlankCue
       val indent =
         if (startParagraph) {
           val lineIndent = horizontalLineIndentSourceWidth(line)
@@ -2242,9 +2254,10 @@ class PdfPageReflowService(
   private fun isHorizontalParagraphStart(
     line: HorizontalTextLine,
     previousLine: HorizontalTextLine?,
+    ignoreColumnChange: Boolean = false,
   ): Boolean {
     if (previousLine == null) return true
-    if (line.column.start != previousLine.column.start || line.column.end != previousLine.column.end) return true
+    if (!ignoreColumnChange && (line.column.start != previousLine.column.start || line.column.end != previousLine.column.end)) return true
 
     val currentHeight = line.blocks.firstOrNull()?.h ?: (line.line.end - line.line.start)
     val indent = rawHorizontalLineIndent(line)
@@ -2385,6 +2398,7 @@ class PdfPageReflowService(
     line: HorizontalTextLine,
     nextLine: HorizontalTextLine,
     glyphHeight: Double,
+    ignoreTrailingBlank: Boolean = false,
   ): Boolean {
     val blocks = line.blocks.filter { it.w >= 2 && it.h >= 2 && !isRuleLikeBlock(it) }.sortedBy { it.x }
     if (blocks.isEmpty()) return false
@@ -2405,10 +2419,54 @@ class PdfPageReflowService(
     val blankThreshold = max(12.0, glyphWidth * 2.0)
     val last = blocks.last()
     val trailingBlank = line.column.end - (last.x + last.w)
-    if (trailingBlank >= blankThreshold) return true
+    if (!ignoreTrailingBlank && trailingBlank >= blankThreshold) return true
 
     return blocks.zipWithNext().any { (left, right) ->
       right.x - (left.x + left.w) >= blankThreshold
+    }
+  }
+
+  private fun manualImageOccupiesHorizontalTrailingBlank(
+    line: HorizontalTextLine,
+    manualImageRegions: List<Roi>,
+    glyphHeight: Double,
+  ): Boolean {
+    val bounds = horizontalTextBounds(listOf(line)) ?: return false
+    val overlapTolerance = max(8.0, glyphHeight * 0.35)
+    val gapTolerance = max(12.0, glyphHeight * 2.0)
+
+    return manualImageRegions.any { region ->
+      val verticalOverlap = max(0, min(line.line.end, region.y + region.h) - max(line.line.start, region.y))
+      val gap = region.x - bounds.end
+      verticalOverlap > 0 &&
+        region.x < line.column.end &&
+        region.x + region.w > bounds.end &&
+        gap >= -overlapTolerance &&
+        gap <= gapTolerance
+    }
+  }
+
+  private fun manualImageExplainsHorizontalColumnTransition(
+    line: HorizontalTextLine,
+    nextLine: HorizontalTextLine,
+    manualImageRegions: List<Roi>,
+    glyphHeight: Double,
+  ): Boolean {
+    if (line.column == nextLine.column) return false
+    val bounds = horizontalTextBounds(listOf(line)) ?: return false
+    val nextBounds = horizontalTextBounds(listOf(nextLine)) ?: return false
+    val sourceGap = nextLine.line.start - line.line.end
+    if (sourceGap > max(12.0, glyphHeight * 1.5)) return false
+
+    val overlapTolerance = max(8.0, glyphHeight * 0.35)
+    val gapTolerance = max(12.0, glyphHeight * 2.0)
+    return manualImageRegions.any { region ->
+      val verticalOverlap = max(0, min(line.line.end, region.y + region.h) - max(line.line.start, region.y))
+      val gap = region.x - bounds.end
+      verticalOverlap > 0 &&
+        gap >= -overlapTolerance &&
+        gap <= gapTolerance &&
+        nextBounds.end > region.x + overlapTolerance
     }
   }
 

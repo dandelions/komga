@@ -752,6 +752,14 @@ class PdfPageReflowServiceTest {
     assertThat(firstRegression)
       .withFailMessage("source row regressed around: %s; y=0 blocks: %s", regressionContext, firstRowContext)
       .isEqualTo(-1)
+
+    val sideTextStart = response.items.indexOfFirst { it.type == "word" && it.y == 485 }
+    val fullWidthTextStart = response.items.indexOfFirst { it.type == "word" && it.y == 1548 }
+    assertThat(sideTextStart).isGreaterThanOrEqualTo(0)
+    assertThat(fullWidthTextStart).isGreaterThan(sideTextStart)
+    assertThat(response.items.subList(sideTextStart, fullWidthTextStart).filter { it.type == "break" })
+      .withFailMessage("manual image trailing space must not split each source row into a paragraph")
+      .isEmpty()
   }
 
   private fun defaultOptions() =

@@ -102,4 +102,50 @@ describe('ReflowedPage manual image reading order', () => {
     expect(merged).toHaveLength(1)
     expect(merged[0].words.map((word: any) => word.x)).toEqual([5, 48])
   })
+
+  test('ignores trailing paragraph space occupied by a manual image', () => {
+    const line = {
+      column: {start: 0, end: 220},
+      line: {start: 100, end: 130},
+      words: [{x: 0, y: 100, w: 118, h: 30}],
+    }
+
+    expect(methods.manualImageOccupiesHorizontalTrailingBlank.call(
+      lineAnalyzer,
+      line,
+      [{x: 125, y: 90, w: 95, h: 100}],
+      30,
+    )).toBe(true)
+    expect(methods.manualImageOccupiesHorizontalTrailingBlank.call(
+      lineAnalyzer,
+      line,
+      [{x: 125, y: 140, w: 95, h: 100}],
+      30,
+    )).toBe(false)
+  })
+
+  test('keeps text continuous when the column widens below a manual image', () => {
+    const line = {
+      column: {start: 0, end: 160},
+      line: {start: 100, end: 130},
+      words: [{x: 0, y: 100, w: 118, h: 30}],
+    }
+    const nextLine = {
+      column: {start: 0, end: 240},
+      line: {start: 145, end: 175},
+      words: [{x: 0, y: 145, w: 230, h: 30}],
+    }
+    const regions = [{x: 125, y: 90, w: 115, h: 50}]
+
+    const imageTransition = methods.manualImageExplainsHorizontalColumnTransition.call(
+      lineAnalyzer,
+      line,
+      nextLine,
+      regions,
+      30,
+    )
+
+    expect(imageTransition).toBe(true)
+    expect(methods.isParagraphStart.call(lineAnalyzer, nextLine, line, imageTransition)).toBe(false)
+  })
 })
