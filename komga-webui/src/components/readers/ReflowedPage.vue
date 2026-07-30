@@ -4360,7 +4360,8 @@ export default Vue.extend({
       const first = leftBounds.start <= rightBounds.start ? leftBounds : rightBounds
       const second = first === leftBounds ? rightBounds : leftBounds
       const gap = second.start - first.end
-      return gap >= 0 && gap <= Math.max(8, glyphHeight * 0.85)
+      const boundaryOverlap = Math.max(8, glyphHeight * 0.35)
+      return gap >= -boundaryOverlap && gap <= Math.max(8, glyphHeight * 0.85)
     },
     horizontalLineBlockBounds(line: WordLine): Column | undefined {
       if (line.words.length === 0) return undefined

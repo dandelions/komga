@@ -2337,7 +2337,8 @@ class PdfPageReflowService(
     val rightBounds = horizontalTextBounds(listOf(right)) ?: return false
     val (first, second) = if (leftBounds.start <= rightBounds.start) leftBounds to rightBounds else rightBounds to leftBounds
     val gap = second.start - first.end
-    return gap >= 0 && gap <= max(8.0, glyphHeight * 0.85)
+    val boundaryOverlap = max(8.0, glyphHeight * 0.35)
+    return gap >= -boundaryOverlap && gap <= max(8.0, glyphHeight * 0.85)
   }
 
   private fun mergeHorizontalLineFragmentGroup(lines: List<HorizontalTextLine>): HorizontalTextLine =

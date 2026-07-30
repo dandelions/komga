@@ -86,4 +86,20 @@ describe('ReflowedPage manual image reading order', () => {
     expect(merged.map((line: any) => line.line.start)).toEqual([10, 40])
     expect(merged.map((line: any) => line.words.map((word: any) => word.x))).toEqual([[5, 50], [5, 50]])
   })
+
+  test('merges same-baseline fragments that overlap at a detected column boundary', () => {
+    const lines = [
+      {column: {start: 0, end: 50}, line: {start: 10, end: 30}, words: [{x: 5, y: 10, w: 47, h: 20}]},
+      {column: {start: 50, end: 100}, line: {start: 10, end: 30}, words: [{x: 48, y: 10, w: 40, h: 20}]},
+    ]
+
+    const merged = methods.mergeManualImageHorizontalLineFragments.call(
+      lineAnalyzer,
+      lines,
+      [{x: 100, y: 10, w: 40, h: 50}],
+    )
+
+    expect(merged).toHaveLength(1)
+    expect(merged[0].words.map((word: any) => word.x)).toEqual([5, 48])
+  })
 })

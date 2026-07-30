@@ -13,6 +13,7 @@ import java.awt.geom.AffineTransform
 import java.awt.image.BufferedImage
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.util.Base64
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -716,6 +717,41 @@ class PdfPageReflowServiceTest {
     val sourceRows = response.items.filter { it.type == "word" }.mapNotNull { it.y }
     assertThat(sourceRows).hasSizeGreaterThanOrEqualTo(6)
     assertThat(sourceRows.zipWithNext()).allMatch { (current, next) -> current <= next }
+  }
+
+  @Test
+  fun `given reflow59 manual image when reflowing split columns then text keeps source row order`() {
+    val pageBytes = File("../example/ori59.jpg").readBytes()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/jpeg")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(columnCount = 3),
+        cropRegions = listOf(PdfPageReflowRegion(x = 100, y = 1300, w = 2800, h = 2300)),
+        manualImageRegions = listOf(PdfPageReflowRegion(x = 1657, y = 1469, w = 1053, h = 1248)),
+      )
+
+    val wordItems = response.items.filter { it.type == "word" }
+    val firstRegression = (0 until maxOf(0, wordItems.size - 1)).firstOrNull { wordItems[it].y!! > wordItems[it + 1].y!! } ?: -1
+    val regressionContext =
+      if (firstRegression < 0) {
+        "none"
+      } else {
+        wordItems
+          .subList(maxOf(0, firstRegression - 3), minOf(wordItems.size, firstRegression + 5))
+          .joinToString { "x=${it.x},y=${it.y},w=${it.w},h=${it.h}" }
+      }
+    val firstRowContext =
+      wordItems
+        .filter { it.y == 0 }
+        .joinToString { "x=${it.x},w=${it.w},h=${it.h}" }
+    assertThat(wordItems).hasSizeGreaterThanOrEqualTo(20)
+    assertThat(firstRegression)
+      .withFailMessage("source row regressed around: %s; y=0 blocks: %s", regressionContext, firstRowContext)
+      .isEqualTo(-1)
   }
 
   private fun defaultOptions() =
