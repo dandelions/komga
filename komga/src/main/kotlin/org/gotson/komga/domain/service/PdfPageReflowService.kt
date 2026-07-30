@@ -38,6 +38,9 @@ private const val REFLOW_INLINE_MAX_PIXELS = 1_400_000
 private const val REFLOW_INLINE_MAX_SIDE = 1800
 private const val REFLOW_INLINE_MIN_SCALE = 0.35
 private const val VERTICAL_PARAGRAPH_BLANK_BLOCKS = 2.0
+private const val EDGE_INK_THRESHOLD = 245
+private const val MAX_EDGE_TRIM = 6
+private const val MAX_EDGE_EXPANSION = 10
 
 data class PdfPageReflowOptions(
   val targetWidth: Int,
@@ -105,6 +108,18 @@ private data class Roi(
   val y: Int,
   val w: Int,
   val h: Int,
+)
+
+private data class BlockEdges(
+  val left: Boolean = false,
+  val right: Boolean = false,
+  val top: Boolean = false,
+  val bottom: Boolean = false,
+)
+
+private data class EdgeAdjustedBlock(
+  val block: Roi,
+  val dirtyEdges: BlockEdges,
 )
 
 private data class LineBand(
@@ -2195,10 +2210,15 @@ class PdfPageReflowService(
       if (startParagraph && items.isNotEmpty()) appendBreakIfNeeded(items)
       if (indent > 0) items += horizontalIndentItem(indent, options, textScale)
 
-      line.blocks
-        .map { expandShortHorizontalGlyphBlock(it, glyphHeight, image.height) }
-        .map { renderWordItem(image, it, options, textScale) }
-        .forEach { items += it }
+      val adjustedBlocks =
+        line.blocks
+          .map { expandShortHorizontalGlyphBlock(it, glyphHeight, image.height) }
+          .map { adjustWordBlockEdges(image, it) }
+      if (adjustedBlocks.isNotEmpty()) {
+        val outputTop = adjustedBlocks.minOf { it.block.y }
+        val outputBottom = adjustedBlocks.maxOf { it.block.y + it.block.h }
+        adjustedBlocks.forEach { items += renderWordItem(image, it, outputTop, outputBottom, options, textScale) }
+      }
     }
     appendImageItems(items, image, imageSlots[lines.size], options, textScale)
 
@@ -3308,12 +3328,22 @@ class PdfPageReflowService(
     val sourceY = max(0, block.y - verticalPadding)
     val sourceRight = min(image.width, block.x + block.w + horizontalPadding)
     val sourceBottom = min(image.height, block.y + block.h + verticalPadding)
-    val source = Roi(sourceX, sourceY, max(1, sourceRight - sourceX), max(1, sourceBottom - sourceY))
+    val originalSource = Roi(sourceX, sourceY, max(1, sourceRight - sourceX), max(1, sourceBottom - sourceY))
+    val adjusted = adjustWordBlockEdges(image, originalSource, adjustHorizontalEdges = false, adjustVerticalEdges = true)
+    val source = adjusted.block
     val outputWidth = block.w + horizontalPadding * 2
     val outputHeight = block.h + verticalPadding * 2
-    val offsetX = horizontalPadding - (block.x - source.x)
-    val offsetY = verticalPadding - (block.y - source.y)
+    val originalOffsetX = horizontalPadding - (block.x - originalSource.x)
+    val originalOffsetY = verticalPadding - (block.y - originalSource.y)
+    val offsetX = originalOffsetX + source.x - originalSource.x
+    val offsetY = originalOffsetY + source.y - originalSource.y
     val slice = copyPaddedSlice(image, source, outputWidth, outputHeight, offsetX, offsetY, options)
+    clearDirtyBlockEdges(
+      slice,
+      adjusted.dirtyEdges,
+      Roi(offsetX, offsetY, source.w, source.h),
+      edgeBackgroundColor(image, source, options),
+    )
 
     return PdfPageReflowItemDto(
       type = "word",
@@ -3328,20 +3358,203 @@ class PdfPageReflowService(
 
   private fun renderWordItem(
     image: BufferedImage,
-    block: Roi,
+    adjusted: EdgeAdjustedBlock,
+    outputTop: Int,
+    outputBottom: Int,
     options: PdfPageReflowOptions,
     textScale: Double,
   ): PdfPageReflowItemDto {
-    val slice = copySlice(image, block, options)
+    val block = adjusted.block
+    val outputHeight = outputBottom - outputTop
+    val offsetY = block.y - outputTop
+    val slice = copyPaddedSlice(image, block, block.w, outputHeight, 0, offsetY, options)
+    clearDirtyBlockEdges(
+      slice,
+      adjusted.dirtyEdges,
+      Roi(0, offsetY, block.w, block.h),
+      edgeBackgroundColor(image, block, options),
+    )
     return PdfPageReflowItemDto(
       type = "word",
       src = encodeReflowDataUrl(slice, options, allowResize = false),
       x = block.x,
-      y = block.y,
+      y = outputTop,
       w = block.w,
-      h = block.h,
-      height = block.h * textScale,
+      h = outputHeight,
+      height = outputHeight * textScale,
     )
+  }
+
+  private fun adjustWordBlockEdges(
+    image: BufferedImage,
+    original: Roi,
+    adjustHorizontalEdges: Boolean = true,
+    adjustVerticalEdges: Boolean = true,
+  ): EdgeAdjustedBlock {
+    val block = clampRoi(original, image.width, image.height)
+    var left = block.x
+    var right = block.x + block.w
+    var top = block.y
+    var bottom = block.y + block.h
+    val trimDistance = max(2, min(MAX_EDGE_TRIM, (block.h * 0.08).roundToInt()))
+    val expansionDistance = max(3, min(MAX_EDGE_EXPANSION, (block.h * 0.16).roundToInt()))
+    val backgroundLuma = estimateBackgroundLuma(image, block)
+    var dirtyLeft = false
+    var dirtyRight = false
+    var dirtyTop = false
+    var dirtyBottom = false
+
+    if (adjustHorizontalEdges && verticalLineHasInk(image, left, top, bottom, backgroundLuma)) {
+      val inner = findClearVerticalLine(image, left + 1, min(right - 2, left + trimDistance), 1, top, bottom, backgroundLuma)
+      if (inner != null) {
+        left = inner
+      } else {
+        val outer = findClearVerticalLine(image, left - 1, max(0, left - expansionDistance), -1, top, bottom, backgroundLuma)
+        if (outer != null) left = outer else dirtyLeft = true
+      }
+    }
+
+    if (adjustHorizontalEdges && verticalLineHasInk(image, right - 1, top, bottom, backgroundLuma)) {
+      val inner = findClearVerticalLine(image, right - 2, max(left + 1, right - 1 - trimDistance), -1, top, bottom, backgroundLuma)
+      if (inner != null) {
+        right = inner + 1
+      } else {
+        val outer = findClearVerticalLine(image, right, min(image.width - 1, right - 1 + expansionDistance), 1, top, bottom, backgroundLuma)
+        if (outer != null) right = outer + 1 else dirtyRight = true
+      }
+    }
+
+    if (adjustVerticalEdges && horizontalLineHasInk(image, top, left, right, backgroundLuma)) {
+      val inner = findClearHorizontalLine(image, top + 1, min(bottom - 2, top + trimDistance), 1, left, right, backgroundLuma)
+      if (inner != null) {
+        top = inner
+      } else {
+        val outer = findClearHorizontalLine(image, top - 1, max(0, top - expansionDistance), -1, left, right, backgroundLuma)
+        if (outer != null) top = outer else dirtyTop = true
+      }
+    }
+
+    if (adjustVerticalEdges && horizontalLineHasInk(image, bottom - 1, left, right, backgroundLuma)) {
+      val inner = findClearHorizontalLine(image, bottom - 2, max(top + 1, bottom - 1 - trimDistance), -1, left, right, backgroundLuma)
+      if (inner != null) {
+        bottom = inner + 1
+      } else {
+        val outer = findClearHorizontalLine(image, bottom, min(image.height - 1, bottom - 1 + expansionDistance), 1, left, right, backgroundLuma)
+        if (outer != null) bottom = outer + 1 else dirtyBottom = true
+      }
+    }
+
+    return EdgeAdjustedBlock(
+      block = Roi(left, top, right - left, bottom - top),
+      dirtyEdges = BlockEdges(dirtyLeft, dirtyRight, dirtyTop, dirtyBottom),
+    )
+  }
+
+  private fun findClearVerticalLine(
+    image: BufferedImage,
+    start: Int,
+    end: Int,
+    step: Int,
+    top: Int,
+    bottom: Int,
+    backgroundLuma: Double,
+  ): Int? {
+    if ((step > 0 && start > end) || (step < 0 && start < end)) return null
+    var x = start
+    while (if (step > 0) x <= end else x >= end) {
+      if (!verticalLineHasInk(image, x, top, bottom, backgroundLuma)) return x
+      x += step
+    }
+    return null
+  }
+
+  private fun findClearHorizontalLine(
+    image: BufferedImage,
+    start: Int,
+    end: Int,
+    step: Int,
+    left: Int,
+    right: Int,
+    backgroundLuma: Double,
+  ): Int? {
+    if ((step > 0 && start > end) || (step < 0 && start < end)) return null
+    var y = start
+    while (if (step > 0) y <= end else y >= end) {
+      if (!horizontalLineHasInk(image, y, left, right, backgroundLuma)) return y
+      y += step
+    }
+    return null
+  }
+
+  private fun verticalLineHasInk(
+    image: BufferedImage,
+    x: Int,
+    top: Int,
+    bottom: Int,
+    backgroundLuma: Double,
+  ): Boolean {
+    if (x !in 0 until image.width) return true
+    for (y in max(0, top) until min(image.height, bottom)) {
+      if (edgePixelIsInk(image.getRGB(x, y), backgroundLuma)) return true
+    }
+    return false
+  }
+
+  private fun horizontalLineHasInk(
+    image: BufferedImage,
+    y: Int,
+    left: Int,
+    right: Int,
+    backgroundLuma: Double,
+  ): Boolean {
+    if (y !in 0 until image.height) return true
+    for (x in max(0, left) until min(image.width, right)) {
+      if (edgePixelIsInk(image.getRGB(x, y), backgroundLuma)) return true
+    }
+    return false
+  }
+
+  private fun edgePixelIsInk(
+    rgb: Int,
+    backgroundLuma: Double,
+  ): Boolean {
+    if (rgb ushr 24 and 0xff == 0) return false
+    val luma = pixelLuma(rgb)
+    return if (backgroundLuma < 128.0) {
+      luma > min(255.0, backgroundLuma + 12.0)
+    } else {
+      luma < max(0.0, min(EDGE_INK_THRESHOLD.toDouble(), backgroundLuma - 12.0))
+    }
+  }
+
+  private fun edgeBackgroundColor(
+    image: BufferedImage,
+    block: Roi,
+    options: PdfPageReflowOptions,
+  ): Color {
+    if (options.darkDisplay) return Color.BLACK
+    val normalized = options.contrastEnhancement || options.matchBackground || options.matchBackgroundMode != "original"
+    if (normalized) return Color.WHITE
+    val luma = clamp(estimateBackgroundLuma(image, block).roundToInt(), 0, 255)
+    return Color(luma, luma, luma)
+  }
+
+  private fun clearDirtyBlockEdges(
+    image: BufferedImage,
+    dirtyEdges: BlockEdges,
+    bounds: Roi,
+    background: Color,
+  ) {
+    if (!dirtyEdges.left && !dirtyEdges.right && !dirtyEdges.top && !dirtyEdges.bottom) return
+    val block = clampRoi(bounds, image.width, image.height)
+    val left = block.x
+    val right = block.x + block.w - 1
+    val top = block.y
+    val bottom = block.y + block.h - 1
+    if (dirtyEdges.left) for (y in top..bottom) image.setRGB(left, y, background.rgb)
+    if (dirtyEdges.right) for (y in top..bottom) image.setRGB(right, y, background.rgb)
+    if (dirtyEdges.top) for (x in left..right) image.setRGB(x, top, background.rgb)
+    if (dirtyEdges.bottom) for (x in left..right) image.setRGB(x, bottom, background.rgb)
   }
 
   private fun renderFallbackImage(

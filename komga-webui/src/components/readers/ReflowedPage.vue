@@ -593,6 +593,18 @@ type WordBlock = {
   h: number,
 }
 
+type BlockEdges = {
+  left: boolean,
+  right: boolean,
+  top: boolean,
+  bottom: boolean,
+}
+
+type EdgeAdjustedBlock = {
+  block: WordBlock,
+  dirtyEdges: BlockEdges,
+}
+
 type InkBlockMetrics = {
   bounds: WordBlock,
   inkCount: number,
@@ -713,6 +725,9 @@ const WORD_SCALE = 0.4
 const MIN_CROP_SIZE = 15
 const MAX_CROP_REGIONS = 8
 const MIN_INDENT = 8
+const EDGE_INK_THRESHOLD = 245
+const MAX_EDGE_TRIM = 6
+const MAX_EDGE_EXPANSION = 10
 const REFLOW_CONTROLS_HEIGHT = 48
 const DEFAULT_REFLOW_IMAGE_QUALITY = 80
 const REFLOW_IMAGE_QUALITY_OPTIONS = [90, 80, 70, 60, 50, 40]
@@ -5297,12 +5312,16 @@ export default Vue.extend({
     renderReflowItems(sourceCanvas: HTMLCanvasElement, lines: WordLine[], imageRegions: ImageRegion[]): ReflowItem[] {
       const sourceContext = this.canvasContext(sourceCanvas)
       if (!sourceContext) return []
+      const sourceImageData = sourceContext.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height)
+      const edgeBackgroundLuma = this.estimateSliceBackgroundLuma(sourceImageData.data, sourceCanvas.width, sourceCanvas.height)
       const rendered = [] as ReflowItem[]
       const sliceCanvas = document.createElement('canvas')
       const sliceContext = this.canvasContext(sliceCanvas, true)
       if (!sliceContext) return []
 
-      if (this.verticalText) return this.renderVerticalReflowItems(sourceCanvas, sliceCanvas, sliceContext, lines, imageRegions)
+      if (this.verticalText) {
+        return this.renderVerticalReflowItems(sourceCanvas, sourceImageData, edgeBackgroundLuma, sliceCanvas, sliceContext, lines, imageRegions)
+      }
 
       const glyphHeight = this.horizontalGlyphSourceHeight(lines)
       const imageSlots = this.horizontalImageSlots(imageRegions, lines)
@@ -5319,30 +5338,190 @@ export default Vue.extend({
         if (startParagraph && rendered.length > 0) this.appendBreakIfNeeded(rendered)
         if (indent > 0) rendered.push({type: 'indent', sourceWidth: indent, width: this.scaledIndentWidth(indent)})
 
+        const adjustedBlocks = [] as EdgeAdjustedBlock[]
         line.words.forEach(block => {
           if (block.w < 2 || block.h < 1 || this.isHorizontalRuleLikeBlock(block, glyphHeight)) return
-          const renderBlock = this.padHorizontalGlyphBlock(
+          const paddedBlock = this.padHorizontalGlyphBlock(
             this.expandShortHorizontalGlyphBlock(block, glyphHeight, sourceCanvas.height),
             glyphHeight,
             sourceCanvas.width,
           )
+          adjustedBlocks.push(this.adjustBlockEdges(sourceImageData, paddedBlock, true, true, edgeBackgroundLuma))
+        })
+        if (adjustedBlocks.length === 0) return
+
+        const outputTop = Math.min(...adjustedBlocks.map(adjusted => adjusted.block.y))
+        const outputBottom = Math.max(...adjustedBlocks.map(adjusted => adjusted.block.y + adjusted.block.h))
+        const outputHeight = outputBottom - outputTop
+        adjustedBlocks.forEach(({block: renderBlock, dirtyEdges}) => {
+          const offsetY = renderBlock.y - outputTop
           sliceCanvas.width = renderBlock.w
-          sliceCanvas.height = renderBlock.h
-          this.fillWordSliceBackground(sliceContext, renderBlock.w, renderBlock.h)
-          sliceContext.drawImage(sourceCanvas, renderBlock.x, renderBlock.y, renderBlock.w, renderBlock.h, 0, 0, renderBlock.w, renderBlock.h)
-          this.boldenSourceCanvas(sliceContext, renderBlock.w, renderBlock.h)
-          this.finishWordSlice(sliceContext, renderBlock.w, renderBlock.h)
+          sliceCanvas.height = outputHeight
+          this.fillWordSliceBackground(sliceContext, renderBlock.w, outputHeight)
+          sliceContext.drawImage(sourceCanvas, renderBlock.x, renderBlock.y, renderBlock.w, renderBlock.h, 0, offsetY, renderBlock.w, renderBlock.h)
+          this.boldenSourceCanvas(sliceContext, renderBlock.w, outputHeight)
+          this.finishWordSlice(sliceContext, renderBlock.w, outputHeight)
+          this.clearDirtyBlockEdges(
+            sliceContext,
+            renderBlock.w,
+            outputHeight,
+            dirtyEdges,
+            {x: 0, y: offsetY, w: renderBlock.w, h: renderBlock.h},
+          )
           rendered.push({
             ...renderBlock,
+            y: outputTop,
+            h: outputHeight,
             type: 'word',
             src: this.reflowSliceDataUrl(sliceCanvas),
-            height: renderBlock.h * this.textScale(),
+            height: outputHeight * this.textScale(),
           })
         })
       })
       this.appendImageItems(rendered, sourceCanvas, sliceCanvas, sliceContext, imageSlots[lines.length])
 
       return rendered
+    },
+    adjustBlockEdges(
+      source: ImageData,
+      original: WordBlock,
+      adjustHorizontalEdges: boolean = true,
+      adjustVerticalEdges: boolean = true,
+      backgroundLuma: number = 255,
+    ): EdgeAdjustedBlock {
+      let left = original.x
+      let right = original.x + original.w
+      let top = original.y
+      let bottom = original.y + original.h
+      const trimDistance = Math.max(2, Math.min(MAX_EDGE_TRIM, Math.round(original.h * 0.08)))
+      const expansionDistance = Math.max(3, Math.min(MAX_EDGE_EXPANSION, Math.round(original.h * 0.16)))
+      const dirtyEdges: BlockEdges = {left: false, right: false, top: false, bottom: false}
+
+      if (adjustHorizontalEdges && this.verticalLineHasInk(source, left, top, bottom, backgroundLuma)) {
+        const inner = this.findClearVerticalLine(source, left + 1, Math.min(right - 2, left + trimDistance), 1, top, bottom, backgroundLuma)
+        if (inner !== undefined) left = inner
+        else {
+          const outer = this.findClearVerticalLine(source, left - 1, Math.max(0, left - expansionDistance), -1, top, bottom, backgroundLuma)
+          if (outer !== undefined) left = outer
+          else dirtyEdges.left = true
+        }
+      }
+
+      if (adjustHorizontalEdges && this.verticalLineHasInk(source, right - 1, top, bottom, backgroundLuma)) {
+        const inner = this.findClearVerticalLine(source, right - 2, Math.max(left + 1, right - 1 - trimDistance), -1, top, bottom, backgroundLuma)
+        if (inner !== undefined) right = inner + 1
+        else {
+          const outer = this.findClearVerticalLine(source, right, Math.min(source.width - 1, right - 1 + expansionDistance), 1, top, bottom, backgroundLuma)
+          if (outer !== undefined) right = outer + 1
+          else dirtyEdges.right = true
+        }
+      }
+
+      if (adjustVerticalEdges && this.horizontalLineHasInk(source, top, left, right, backgroundLuma)) {
+        const inner = this.findClearHorizontalLine(source, top + 1, Math.min(bottom - 2, top + trimDistance), 1, left, right, backgroundLuma)
+        if (inner !== undefined) top = inner
+        else {
+          const outer = this.findClearHorizontalLine(source, top - 1, Math.max(0, top - expansionDistance), -1, left, right, backgroundLuma)
+          if (outer !== undefined) top = outer
+          else dirtyEdges.top = true
+        }
+      }
+
+      if (adjustVerticalEdges && this.horizontalLineHasInk(source, bottom - 1, left, right, backgroundLuma)) {
+        const inner = this.findClearHorizontalLine(source, bottom - 2, Math.max(top + 1, bottom - 1 - trimDistance), -1, left, right, backgroundLuma)
+        if (inner !== undefined) bottom = inner + 1
+        else {
+          const outer = this.findClearHorizontalLine(source, bottom, Math.min(source.height - 1, bottom - 1 + expansionDistance), 1, left, right, backgroundLuma)
+          if (outer !== undefined) bottom = outer + 1
+          else dirtyEdges.bottom = true
+        }
+      }
+
+      return {
+        block: {x: left, y: top, w: right - left, h: bottom - top},
+        dirtyEdges,
+      }
+    },
+    findClearVerticalLine(
+      source: ImageData,
+      start: number,
+      end: number,
+      step: number,
+      top: number,
+      bottom: number,
+      backgroundLuma: number,
+    ): number | undefined {
+      if ((step > 0 && start > end) || (step < 0 && start < end)) return undefined
+      for (let x = start; step > 0 ? x <= end : x >= end; x += step) {
+        if (!this.verticalLineHasInk(source, x, top, bottom, backgroundLuma)) return x
+      }
+      return undefined
+    },
+    findClearHorizontalLine(
+      source: ImageData,
+      start: number,
+      end: number,
+      step: number,
+      left: number,
+      right: number,
+      backgroundLuma: number,
+    ): number | undefined {
+      if ((step > 0 && start > end) || (step < 0 && start < end)) return undefined
+      for (let y = start; step > 0 ? y <= end : y >= end; y += step) {
+        if (!this.horizontalLineHasInk(source, y, left, right, backgroundLuma)) return y
+      }
+      return undefined
+    },
+    verticalLineHasInk(source: ImageData, x: number, top: number, bottom: number, backgroundLuma: number): boolean {
+      if (x < 0 || x >= source.width) return true
+      for (let y = Math.max(0, top); y < Math.min(source.height, bottom); y++) {
+        if (this.sourcePixelIsInk(source, x, y, backgroundLuma)) return true
+      }
+      return false
+    },
+    horizontalLineHasInk(source: ImageData, y: number, left: number, right: number, backgroundLuma: number): boolean {
+      if (y < 0 || y >= source.height) return true
+      for (let x = Math.max(0, left); x < Math.min(source.width, right); x++) {
+        if (this.sourcePixelIsInk(source, x, y, backgroundLuma)) return true
+      }
+      return false
+    },
+    sourcePixelIsInk(source: ImageData, x: number, y: number, backgroundLuma: number): boolean {
+      const offset = (y * source.width + x) * 4
+      if (source.data[offset + 3] === 0) return false
+      const luma = this.pixelLuma(source.data, offset)
+      if (backgroundLuma < 128) return luma > Math.min(255, backgroundLuma + 12)
+      return luma < Math.max(0, Math.min(EDGE_INK_THRESHOLD, backgroundLuma - 12))
+    },
+    clearDirtyBlockEdges(
+      context: CanvasRenderingContext2D,
+      width: number,
+      height: number,
+      dirtyEdges: BlockEdges,
+      bounds: WordBlock = {x: 0, y: 0, w: width, h: height},
+    ) {
+      if (!dirtyEdges.left && !dirtyEdges.right && !dirtyEdges.top && !dirtyEdges.bottom) return
+      const imageData = context.getImageData(0, 0, width, height)
+      const data = imageData.data
+      const background = this.darkDisplay ? 0 : 255
+      const setBackground = (x: number, y: number) => {
+        if (x < 0 || x >= width || y < 0 || y >= height) return
+        const offset = (y * width + x) * 4
+        data[offset] = background
+        data[offset + 1] = background
+        data[offset + 2] = background
+        data[offset + 3] = 255
+      }
+      const left = bounds.x
+      const right = bounds.x + bounds.w - 1
+      const top = bounds.y
+      const bottom = bounds.y + bounds.h - 1
+
+      if (dirtyEdges.left) for (let y = top; y <= bottom; y++) setBackground(left, y)
+      if (dirtyEdges.right) for (let y = top; y <= bottom; y++) setBackground(right, y)
+      if (dirtyEdges.top) for (let x = left; x <= right; x++) setBackground(x, top)
+      if (dirtyEdges.bottom) for (let x = left; x <= right; x++) setBackground(x, bottom)
+      context.putImageData(imageData, 0, 0)
     },
     horizontalImageSlots(imageRegions: ImageRegion[], lines: WordLine[]): ImageRegion[][] {
       const slots = Array.from({length: lines.length + 1}, () => [] as ImageRegion[])
@@ -5569,6 +5748,8 @@ export default Vue.extend({
     },
     renderVerticalReflowItems(
       sourceCanvas: HTMLCanvasElement,
+      sourceImageData: ImageData,
+      edgeBackgroundLuma: number,
       sliceCanvas: HTMLCanvasElement,
       sliceContext: CanvasRenderingContext2D,
       lines: WordLine[],
@@ -5592,22 +5773,33 @@ export default Vue.extend({
         line.words.forEach(block => {
           if (block.w < 2 || block.h < 2 || this.isRuleLikeBlock(block)) return
           const renderBlock = this.paddedVerticalGlyphBlock(block, sourceCanvas.width, sourceCanvas.height)
+          const adjusted = this.adjustBlockEdges(sourceImageData, renderBlock.source, false, true, edgeBackgroundLuma)
+          const source = adjusted.block
+          const offsetX = renderBlock.offsetX + source.x - renderBlock.source.x
+          const offsetY = renderBlock.offsetY + source.y - renderBlock.source.y
           sliceCanvas.width = renderBlock.outputWidth
           sliceCanvas.height = renderBlock.outputHeight
           this.fillWordSliceBackground(sliceContext, renderBlock.outputWidth, renderBlock.outputHeight)
           sliceContext.drawImage(
             sourceCanvas,
-            renderBlock.source.x,
-            renderBlock.source.y,
-            renderBlock.source.w,
-            renderBlock.source.h,
-            renderBlock.offsetX,
-            renderBlock.offsetY,
-            renderBlock.source.w,
-            renderBlock.source.h,
+            source.x,
+            source.y,
+            source.w,
+            source.h,
+            offsetX,
+            offsetY,
+            source.w,
+            source.h,
           )
           this.boldenSourceCanvas(sliceContext, renderBlock.outputWidth, renderBlock.outputHeight)
           this.finishWordSlice(sliceContext, renderBlock.outputWidth, renderBlock.outputHeight)
+          this.clearDirtyBlockEdges(
+            sliceContext,
+            renderBlock.outputWidth,
+            renderBlock.outputHeight,
+            adjusted.dirtyEdges,
+            {x: offsetX, y: offsetY, w: source.w, h: source.h},
+          )
           rendered.push({
             x: block.x,
             y: block.y,

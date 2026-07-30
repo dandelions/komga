@@ -53,6 +53,18 @@ describe('ReflowedPage word block edge analysis', () => {
     expect(adjusted.x).toBe(2)
     expect(adjusted.w).toBe(9)
   })
+
+  test('moves right and bottom edges inward past neighboring remnants', () => {
+    const source = createImageData(24, 24)
+    drawInk(source, 6, 6, 11, 11)
+    drawInk(source, 14, 6, 15, 10)
+    drawInk(source, 6, 14, 10, 15)
+
+    const adjusted = adjust(source, {x: 5, y: 5, w: 10, h: 10})
+
+    expect(adjusted.w).toBe(9)
+    expect(adjusted.h).toBe(9)
+  })
 })
 
 describe('ReflowedPage manual image reading order', () => {
