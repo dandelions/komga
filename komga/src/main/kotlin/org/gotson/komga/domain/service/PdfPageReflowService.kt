@@ -2172,6 +2172,7 @@ class PdfPageReflowService(
                 horizontalWordBlock(image, textInk, wordBand, line, lineBounds)
               }.filter { it.w >= 2 && it.h >= 2 }
               .let { mergeHorizontalGlyphFragments(it, line, image, textInk, options) }
+              .let { separateOverlappingHorizontalBlocks(it) }
               .let { excludeManualImageWordBlocks(it, manualImageRegions) }
 
           if (blocks.isEmpty()) null else HorizontalTextLine(column, line, blocks)
@@ -2223,7 +2224,13 @@ class PdfPageReflowService(
       val adjustedBlocks =
         line.blocks
           .map { expandShortHorizontalGlyphBlock(it, glyphHeight, image.height) }
-          .map { adjustWordBlockEdges(image, it) }
+          .map { block ->
+            adjustWordBlockEdges(
+              image,
+              block,
+              horizontalLimits = LineBand(block.x, block.x + block.w),
+            )
+          }
       if (adjustedBlocks.isNotEmpty()) {
         val outputTop = adjustedBlocks.minOf { it.block.y }
         val outputBottom = adjustedBlocks.maxOf { it.block.y + it.block.h }
@@ -2742,6 +2749,23 @@ class PdfPageReflowService(
       y = y,
       h = min(sourceHeight - y, targetHeight),
     )
+  }
+
+  private fun separateOverlappingHorizontalBlocks(blocks: List<Roi>): List<Roi> {
+    if (blocks.size <= 1) return blocks
+    val sorted = blocks.sortedBy { it.x }
+    val boundaries =
+      sorted.zipWithNext().map { (left, right) ->
+        val overlapStart = right.x
+        val overlapEnd = left.x + left.w
+        if (overlapEnd > overlapStart) (overlapStart + overlapEnd) / 2 else null
+      }
+
+    return sorted.mapIndexed { index, block ->
+      val left = boundaries.getOrNull(index - 1)?.let { max(block.x, it) } ?: block.x
+      val right = boundaries.getOrNull(index)?.let { min(block.x + block.w, it) } ?: (block.x + block.w)
+      block.copy(x = left, w = max(1, right - left))
+    }
   }
 
   private fun mergeHorizontalGlyphFragments(
@@ -3508,6 +3532,7 @@ class PdfPageReflowService(
     original: Roi,
     adjustHorizontalEdges: Boolean = true,
     adjustVerticalEdges: Boolean = true,
+    horizontalLimits: LineBand? = null,
   ): EdgeAdjustedBlock {
     val block = clampRoi(original, image.width, image.height)
     var left = block.x
@@ -3527,8 +3552,17 @@ class PdfPageReflowService(
       if (inner != null) {
         left = inner
       } else {
-        val outer = findClearVerticalLine(image, left - 1, max(0, left - expansionDistance), -1, top, bottom, backgroundLuma)
-        if (outer != null) left = outer else dirtyLeft = true
+        val outer =
+          findClearVerticalLine(
+            image,
+            left - 1,
+            max(horizontalLimits?.start ?: 0, left - expansionDistance),
+            -1,
+            top,
+            bottom,
+            backgroundLuma,
+          )
+        if (outer != null) left = outer else if (horizontalLimits == null) dirtyLeft = true
       }
     }
 
@@ -3537,8 +3571,17 @@ class PdfPageReflowService(
       if (inner != null) {
         right = inner + 1
       } else {
-        val outer = findClearVerticalLine(image, right, min(image.width - 1, right - 1 + expansionDistance), 1, top, bottom, backgroundLuma)
-        if (outer != null) right = outer + 1 else dirtyRight = true
+        val outer =
+          findClearVerticalLine(
+            image,
+            right,
+            min(horizontalLimits?.end?.minus(1) ?: (image.width - 1), right - 1 + expansionDistance),
+            1,
+            top,
+            bottom,
+            backgroundLuma,
+          )
+        if (outer != null) right = outer + 1 else if (horizontalLimits == null) dirtyRight = true
       }
     }
 

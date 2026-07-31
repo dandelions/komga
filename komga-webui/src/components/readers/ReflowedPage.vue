@@ -737,7 +737,7 @@ const DETECTION_FULL_RES_MAX_PIXELS = 6000000
 const DETECTION_MAX_SIDE = 2800
 const DETECTION_MAX_PIXELS = 5000000
 const DETECTION_MIN_SCALE = 0.4
-const REFLOW_RESPONSE_VERSION = 5
+const REFLOW_RESPONSE_VERSION = 6
 
 export default Vue.extend({
   name: 'ReflowedPage',
@@ -5432,12 +5432,15 @@ export default Vue.extend({
         const adjustedBlocks = [] as EdgeAdjustedBlock[]
         line.words.forEach(block => {
           if (block.w < 2 || block.h < 1 || this.isHorizontalRuleLikeBlock(block, glyphHeight)) return
-          const paddedBlock = this.padHorizontalGlyphBlock(
-            this.expandShortHorizontalGlyphBlock(block, glyphHeight, sourceCanvas.height),
-            glyphHeight,
-            sourceCanvas.width,
-          )
-          adjustedBlocks.push(this.adjustBlockEdges(sourceImageData, paddedBlock, true, true, edgeBackgroundLuma))
+          const renderBlock = this.expandShortHorizontalGlyphBlock(block, glyphHeight, sourceCanvas.height)
+          adjustedBlocks.push(this.adjustBlockEdges(
+            sourceImageData,
+            renderBlock,
+            true,
+            true,
+            edgeBackgroundLuma,
+            {start: block.x, end: block.x + block.w},
+          ))
         })
         if (adjustedBlocks.length === 0) return
 
@@ -5479,6 +5482,7 @@ export default Vue.extend({
       adjustHorizontalEdges: boolean = true,
       adjustVerticalEdges: boolean = true,
       backgroundLuma: number = 255,
+      horizontalLimits?: Column,
     ): EdgeAdjustedBlock {
       let left = original.x
       let right = original.x + original.w
@@ -5492,9 +5496,17 @@ export default Vue.extend({
         const inner = this.findClearVerticalLine(source, left + 1, Math.min(right - 2, left + trimDistance), 1, top, bottom, backgroundLuma)
         if (inner !== undefined) left = inner
         else {
-          const outer = this.findClearVerticalLine(source, left - 1, Math.max(0, left - expansionDistance), -1, top, bottom, backgroundLuma)
+          const outer = this.findClearVerticalLine(
+            source,
+            left - 1,
+            Math.max(horizontalLimits?.start ?? 0, left - expansionDistance),
+            -1,
+            top,
+            bottom,
+            backgroundLuma,
+          )
           if (outer !== undefined) left = outer
-          else dirtyEdges.left = true
+          else if (!horizontalLimits) dirtyEdges.left = true
         }
       }
 
@@ -5502,9 +5514,17 @@ export default Vue.extend({
         const inner = this.findClearVerticalLine(source, right - 2, Math.max(left + 1, right - 1 - trimDistance), -1, top, bottom, backgroundLuma)
         if (inner !== undefined) right = inner + 1
         else {
-          const outer = this.findClearVerticalLine(source, right, Math.min(source.width - 1, right - 1 + expansionDistance), 1, top, bottom, backgroundLuma)
+          const outer = this.findClearVerticalLine(
+            source,
+            right,
+            Math.min(horizontalLimits?.end ? horizontalLimits.end - 1 : source.width - 1, right - 1 + expansionDistance),
+            1,
+            top,
+            bottom,
+            backgroundLuma,
+          )
           if (outer !== undefined) right = outer + 1
-          else dirtyEdges.right = true
+          else if (!horizontalLimits) dirtyEdges.right = true
         }
       }
 
@@ -5822,16 +5842,6 @@ export default Vue.extend({
         ...block,
         y,
         h: Math.min(sourceHeight - y, targetHeight),
-      }
-    },
-    padHorizontalGlyphBlock(block: WordBlock, glyphHeight: number, sourceWidth: number): WordBlock {
-      const padding = this.horizontalGlyphSidePadding(glyphHeight)
-      const x = Math.max(0, block.x - padding)
-      const right = Math.min(sourceWidth, block.x + block.w + padding)
-      return {
-        ...block,
-        x,
-        w: Math.max(1, right - x),
       }
     },
     horizontalGlyphSidePadding(glyphHeight: number): number {

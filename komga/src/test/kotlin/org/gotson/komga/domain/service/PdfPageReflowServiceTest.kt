@@ -67,6 +67,25 @@ class PdfPageReflowServiceTest {
   }
 
   @Test
+  fun `given close horizontal glyphs when reflowing page then word blocks do not overlap`() {
+    val pageBytes = closeHorizontalGlyphPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+        cropRegions = listOf(PdfPageReflowRegion(x = 20, y = 20, w = 120, h = 60)),
+      )
+
+    val wordBlocks = response.items.filter { it.type == "word" }.sortedBy { it.x }
+    assertThat(wordBlocks).hasSize(2)
+    assertThat(wordBlocks.zipWithNext()).allMatch { (left, right) -> left.x!! + left.w!! <= right.x!! }
+  }
+
+  @Test
   fun `given high resolution horizontal glyph split by internal blank when reflowing page then fragments are merged`() {
     val pageBytes = highResolutionHorizontalFragmentGlyphPage()
     val book = makeBook("book")
@@ -861,6 +880,21 @@ class PdfPageReflowServiceTest {
     graphics.fillRect(50, 45, 10, 26)
     graphics.fillRect(75, 58, 25, 3)
     graphics.fillRect(115, 45, 10, 26)
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun closeHorizontalGlyphPage(): ByteArray {
+    val image = BufferedImage(180, 100, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color.BLACK
+    graphics.fillRect(40, 30, 30, 40)
+    graphics.fillRect(74, 30, 30, 40)
     graphics.dispose()
 
     val output = ByteArrayOutputStream()

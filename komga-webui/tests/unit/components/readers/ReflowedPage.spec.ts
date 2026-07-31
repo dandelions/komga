@@ -80,6 +80,24 @@ describe('ReflowedPage word block edge analysis', () => {
     expect(adjusted.w).toBe(9)
     expect(adjusted.h).toBe(9)
   })
+
+  test('does not expand a glyph beyond its horizontal block boundaries', () => {
+    const source = createImageData(24, 16)
+    drawInk(source, 3, 4, 15, 10)
+
+    const adjusted = methods.adjustBlockEdges.call(
+      edgeAnalyzer,
+      source,
+      {x: 3, y: 3, w: 7, h: 8},
+      true,
+      true,
+      255,
+      {start: 3, end: 10},
+    ).block
+
+    expect(adjusted.x).toBe(3)
+    expect(adjusted.w).toBe(7)
+  })
 })
 
 describe('ReflowedPage manual image reading order', () => {
