@@ -737,7 +737,7 @@ const DETECTION_FULL_RES_MAX_PIXELS = 6000000
 const DETECTION_MAX_SIDE = 2800
 const DETECTION_MAX_PIXELS = 5000000
 const DETECTION_MIN_SCALE = 0.4
-const REFLOW_RESPONSE_VERSION = 3
+const REFLOW_RESPONSE_VERSION = 4
 
 export default Vue.extend({
   name: 'ReflowedPage',
@@ -4328,7 +4328,12 @@ export default Vue.extend({
 
       for (let left = 0; left < lines.length; left++) {
         for (let right = left + 1; right < lines.length; right++) {
-          if (this.horizontalLineFragmentsCanMerge(lines[left], lines[right], glyphHeight)) union(left, right)
+          if (
+            this.horizontalLineFragmentsCanMerge(lines[left], lines[right], glyphHeight) ||
+            this.manualImageLeftLineFragmentsCanMerge(lines[left], lines[right], manualRegions, glyphHeight)
+          ) {
+            union(left, right)
+          }
         }
       }
 
@@ -4340,13 +4345,66 @@ export default Vue.extend({
         groups.set(root, group)
       })
 
-      return Array.from(groups.values())
+      const mergedLines = Array.from(groups.values())
         .map(group => ({
           index: Math.min(...group.map(item => item.index)),
           line: group.length === 1 ? group[0].line : this.mergeHorizontalLineFragmentGroup(group.map(item => item.line)),
         }))
-        .sort((a, b) => a.index - b.index)
-        .map(item => item.line)
+      return this.orderManualImageLeftTextLines(mergedLines, manualRegions, glyphHeight)
+    },
+    manualImageLeftLineFragmentsCanMerge(
+      left: WordLine,
+      right: WordLine,
+      manualRegions: ImageRegion[],
+      glyphHeight: number,
+    ): boolean {
+      if (left.column.start === right.column.start && left.column.end === right.column.end) return false
+      const overlap = Math.max(0, Math.min(left.line.end, right.line.end) - Math.max(left.line.start, right.line.start))
+      const minHeight = Math.max(1, Math.min(left.line.end - left.line.start, right.line.end - right.line.start))
+      const centerDistance = Math.abs(
+        (left.line.start + left.line.end) - (right.line.start + right.line.end),
+      ) / 2
+      const sameSourceRow = overlap / minHeight >= 0.35 || centerDistance <= Math.max(4, glyphHeight * 0.35)
+      if (!sameSourceRow) return false
+
+      return manualRegions.some(region =>
+        this.manualImageLeftRegionContainsLine(left, region, glyphHeight) &&
+        this.manualImageLeftRegionContainsLine(right, region, glyphHeight),
+      )
+    },
+    orderManualImageLeftTextLines(
+      indexedLines: Array<{index: number, line: WordLine}>,
+      manualRegions: ImageRegion[],
+      glyphHeight: number,
+    ): WordLine[] {
+      const ordered = indexedLines.slice().sort((a, b) => a.index - b.index)
+      manualRegions.slice().sort((a, b) => a.y - b.y || a.x - b.x).forEach(region => {
+        const affectedIndexes = ordered
+          .map((item, index) => this.manualImageLeftRegionContainsLine(item.line, region, glyphHeight) ? index : -1)
+          .filter(index => index >= 0)
+        if (affectedIndexes.length < 2) return
+
+        const insertionIndex = affectedIndexes[0]
+        const affected = affectedIndexes
+          .map(index => ordered[index])
+          .sort((a, b) => {
+            const yOrder = a.line.line.start - b.line.line.start
+            if (yOrder !== 0) return yOrder
+            const leftBounds = this.horizontalLineBlockBounds(a.line)
+            const rightBounds = this.horizontalLineBlockBounds(b.line)
+            return (leftBounds?.start ?? Number.MAX_SAFE_INTEGER) - (rightBounds?.start ?? Number.MAX_SAFE_INTEGER)
+          })
+        affectedIndexes.slice().reverse().forEach(index => ordered.splice(index, 1))
+        ordered.splice(Math.min(insertionIndex, ordered.length), 0, ...affected)
+      })
+      return ordered.map(item => item.line)
+    },
+    manualImageLeftRegionContainsLine(line: WordLine, region: ImageRegion, glyphHeight: number): boolean {
+      const bounds = this.horizontalLineBlockBounds(line)
+      if (!bounds) return false
+      const verticalOverlap = Math.max(0, Math.min(line.line.end, region.y + region.h) - Math.max(line.line.start, region.y))
+      const boundaryTolerance = Math.max(8, glyphHeight * 0.35)
+      return verticalOverlap > 0 && bounds.start < region.x && bounds.end <= region.x + boundaryTolerance
     },
     horizontalLineFragmentsCanMerge(left: WordLine, right: WordLine, glyphHeight: number): boolean {
       if (left.column.start === right.column.start && left.column.end === right.column.end) return false

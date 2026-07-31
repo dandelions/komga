@@ -720,6 +720,26 @@ class PdfPageReflowServiceTest {
   }
 
   @Test
+  fun `given manual image left text starts in a later detected column then rows remain in source order`() {
+    val pageBytes = staggeredHorizontalTextBesideManualImagePage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(columnCount = 3),
+        manualImageRegions = listOf(PdfPageReflowRegion(x = 500, y = 20, w = 80, h = 220)),
+      )
+
+    val sourceRows = response.items.filter { it.type == "word" }.mapNotNull { it.y }
+    assertThat(sourceRows).isNotEmpty
+    assertThat(sourceRows.zipWithNext()).allMatch { (current, next) -> current <= next }
+    assertThat(sourceRows.distinct()).containsSubsequence(30, 80, 130)
+  }
+
+  @Test
   fun `given reflow59 manual image when reflowing split columns then text keeps source row order`() {
     val pageBytes = File("../example/ori59.jpg").readBytes()
     val book = makeBook("book")
@@ -797,6 +817,34 @@ class PdfPageReflowServiceTest {
         graphics.fillRect(40 + glyph * 24, 30 + row * 50, 14, 24)
       }
     }
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun staggeredHorizontalTextBesideManualImagePage(): ByteArray {
+    val image = BufferedImage(600, 260, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color.BLACK
+
+    fun drawRow(
+      y: Int,
+      startX: Int,
+    ) {
+      var x = startX
+      while (x < 475) {
+        graphics.fillRect(x, y, 14, 24)
+        x += 24
+      }
+    }
+
+    drawRow(y = 30, startX = 40)
+    drawRow(y = 80, startX = 230)
+    drawRow(y = 130, startX = 40)
     graphics.dispose()
 
     val output = ByteArrayOutputStream()

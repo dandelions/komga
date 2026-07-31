@@ -103,6 +103,27 @@ describe('ReflowedPage manual image reading order', () => {
     expect(merged[0].words.map((word: any) => word.x)).toEqual([5, 48])
   })
 
+  test('orders the entire detected text region to the left of a manual image by source row', () => {
+    const lines = [
+      {column: {start: 0, end: 70}, line: {start: 10, end: 30}, words: [{x: 5, y: 10, w: 20, h: 20}]},
+      {column: {start: 0, end: 70}, line: {start: 40, end: 60}, words: [{x: 5, y: 40, w: 20, h: 20}]},
+      {column: {start: 0, end: 220}, line: {start: 120, end: 140}, words: [{x: 5, y: 120, w: 200, h: 20}]},
+      {column: {start: 70, end: 160}, line: {start: 10, end: 30}, words: [{x: 110, y: 10, w: 20, h: 20}]},
+      {column: {start: 70, end: 160}, line: {start: 40, end: 60}, words: [{x: 110, y: 40, w: 20, h: 20}]},
+      {column: {start: 70, end: 160}, line: {start: 70, end: 90}, words: [{x: 110, y: 70, w: 20, h: 20}]},
+    ]
+
+    const merged = methods.mergeManualImageHorizontalLineFragments.call(
+      lineAnalyzer,
+      lines,
+      [{x: 180, y: 0, w: 60, h: 100}],
+    )
+
+    expect(merged.map((line: any) => line.line.start)).toEqual([10, 40, 70, 120])
+    expect(merged[0].words.map((word: any) => word.x)).toEqual([5, 110])
+    expect(merged[1].words.map((word: any) => word.x)).toEqual([5, 110])
+  })
+
   test('ignores trailing paragraph space occupied by a manual image', () => {
     const line = {
       column: {start: 0, end: 220},

@@ -41,7 +41,7 @@ private const val VERTICAL_PARAGRAPH_BLANK_BLOCKS = 2.0
 private const val EDGE_INK_THRESHOLD = 245
 private const val MAX_EDGE_TRIM = 6
 private const val MAX_EDGE_EXPANSION = 10
-private const val REFLOW_ALGORITHM_VERSION = 2
+private const val REFLOW_ALGORITHM_VERSION = 3
 
 data class PdfPageReflowOptions(
   val targetWidth: Int,
@@ -2322,18 +2322,79 @@ class PdfPageReflowService(
 
     for (left in lines.indices) {
       for (right in left + 1 until lines.size) {
-        if (horizontalLineFragmentsCanMerge(lines[left], lines[right], glyphHeight)) union(left, right)
+        if (
+          horizontalLineFragmentsCanMerge(lines[left], lines[right], glyphHeight) ||
+          manualImageLeftLineFragmentsCanMerge(lines[left], lines[right], manualImageRegions, glyphHeight)
+        ) {
+          union(left, right)
+        }
       }
     }
 
-    return lines.indices
-      .groupBy { find(it) }
-      .values
-      .map { indexes ->
-        val fragments = indexes.map(lines::get)
-        indexes.min() to if (fragments.size == 1) fragments.first() else mergeHorizontalLineFragmentGroup(fragments)
-      }.sortedBy { it.first }
-      .map { it.second }
+    val mergedLines =
+      lines.indices
+        .groupBy { find(it) }
+        .values
+        .map { indexes ->
+          val fragments = indexes.map(lines::get)
+          indexes.min() to if (fragments.size == 1) fragments.first() else mergeHorizontalLineFragmentGroup(fragments)
+        }
+    return orderManualImageLeftTextLines(mergedLines, manualImageRegions, glyphHeight)
+  }
+
+  private fun manualImageLeftLineFragmentsCanMerge(
+    left: HorizontalTextLine,
+    right: HorizontalTextLine,
+    manualImageRegions: List<Roi>,
+    glyphHeight: Double,
+  ): Boolean {
+    if (left.column == right.column) return false
+    val overlap = max(0, min(left.line.end, right.line.end) - max(left.line.start, right.line.start))
+    val minHeight = max(1, min(left.line.end - left.line.start, right.line.end - right.line.start))
+    val centerDistance = abs((left.line.start + left.line.end) - (right.line.start + right.line.end)) / 2.0
+    val sameSourceRow = overlap.toDouble() / minHeight >= 0.35 || centerDistance <= max(4.0, glyphHeight * 0.35)
+    if (!sameSourceRow) return false
+
+    return manualImageRegions.any { region ->
+      manualImageLeftRegionContainsLine(left, region, glyphHeight) &&
+        manualImageLeftRegionContainsLine(right, region, glyphHeight)
+    }
+  }
+
+  private fun orderManualImageLeftTextLines(
+    indexedLines: List<Pair<Int, HorizontalTextLine>>,
+    manualImageRegions: List<Roi>,
+    glyphHeight: Double,
+  ): List<HorizontalTextLine> {
+    val ordered = indexedLines.sortedBy { it.first }.toMutableList()
+    manualImageRegions.sortedWith(compareBy<Roi> { it.y }.thenBy { it.x }).forEach { region ->
+      val affectedIndexes =
+        ordered.indices.filter { index -> manualImageLeftRegionContainsLine(ordered[index].second, region, glyphHeight) }
+      if (affectedIndexes.size < 2) return@forEach
+
+      val insertionIndex = affectedIndexes.first()
+      val affected =
+        affectedIndexes
+          .map(ordered::get)
+          .sortedWith(
+            compareBy<Pair<Int, HorizontalTextLine>> { it.second.line.start }
+              .thenBy { horizontalTextBounds(listOf(it.second))?.start ?: Int.MAX_VALUE },
+          )
+      for (index in affectedIndexes.asReversed()) ordered.removeAt(index)
+      ordered.addAll(min(insertionIndex, ordered.size), affected)
+    }
+    return ordered.map { it.second }
+  }
+
+  private fun manualImageLeftRegionContainsLine(
+    line: HorizontalTextLine,
+    region: Roi,
+    glyphHeight: Double,
+  ): Boolean {
+    val bounds = horizontalTextBounds(listOf(line)) ?: return false
+    val verticalOverlap = max(0, min(line.line.end, region.y + region.h) - max(line.line.start, region.y))
+    val boundaryTolerance = max(8.0, glyphHeight * 0.35)
+    return verticalOverlap > 0 && bounds.start < region.x && bounds.end <= region.x + boundaryTolerance
   }
 
   private fun horizontalLineFragmentsCanMerge(
