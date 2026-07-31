@@ -737,7 +737,7 @@ const DETECTION_FULL_RES_MAX_PIXELS = 6000000
 const DETECTION_MAX_SIDE = 2800
 const DETECTION_MAX_PIXELS = 5000000
 const DETECTION_MIN_SCALE = 0.4
-const REFLOW_RESPONSE_VERSION = 4
+const REFLOW_RESPONSE_VERSION = 5
 
 export default Vue.extend({
   name: 'ReflowedPage',
@@ -1441,13 +1441,22 @@ export default Vue.extend({
           const detectionContext = this.canvasContext(detectionSource.canvas, true)
           if (!detectionContext) throw new Error('Canvas is unavailable')
           const imageData = detectionContext.getImageData(0, 0, detectionSource.canvas.width, detectionSource.canvas.height)
+          const manualImageRegions = this.manualImageRoisForSource(sourceCanvas, regionSource.sourceOffset)
+          const detectionManualImageRegions = manualImageRegions.map(region =>
+            this.scaleRoi(region, detectionSource.scale, detectionSource.canvas.width, detectionSource.canvas.height),
+          )
           const detectionRoi = regionSource.detectionRoi
             ? this.scaleRoi(regionSource.detectionRoi, detectionSource.scale, detectionSource.canvas.width, detectionSource.canvas.height)
             : undefined
-          const detectedContent = this.detectWordLines(imageData, detectionSource.canvas.width, detectionSource.canvas.height, detectionRoi)
+          const detectedContent = this.detectWordLines(
+            imageData,
+            detectionSource.canvas.width,
+            detectionSource.canvas.height,
+            detectionRoi,
+            detectionManualImageRegions,
+          )
           const detectedLines = this.scaleWordLines(detectedContent.lines, detectionSource.scale, sourceCanvas.width, sourceCanvas.height)
           const detectedImageRegions = this.scaleImageRegions(detectedContent.imageRegions, detectionSource.scale, sourceCanvas.width, sourceCanvas.height)
-          const manualImageRegions = this.manualImageRoisForSource(sourceCanvas, regionSource.sourceOffset)
           const lines = this.mergeManualImageHorizontalLineFragments(
             this.excludeManualImageWordBlocks(detectedLines, manualImageRegions),
             manualImageRegions,
@@ -2653,7 +2662,13 @@ export default Vue.extend({
         this.ensureCropImage(skewCorrection)
       }, 120)
     },
-    detectWordLines(imageData: ImageData, width: number, height: number, cropRoi?: Roi): DetectedReflowContent {
+    detectWordLines(
+      imageData: ImageData,
+      width: number,
+      height: number,
+      cropRoi?: Roi,
+      manualImageRegions: ImageRegion[] = [],
+    ): DetectedReflowContent {
       const pixels = imageData.data
       const threshold = this.clampNumber(this.options.threshold, 50, 230, THRESHOLD)
       const ink = this.buildDetectionInkMap(pixels, width, height, threshold)
@@ -2664,9 +2679,10 @@ export default Vue.extend({
 
       const roi = this.detectRoi(rawIsInk, width, height, cropRoi)
       const imageRegions = this.detectImageRegions(pixels, width, height, roi, threshold)
+      const excludedImageRegions = [...imageRegions, ...manualImageRegions]
       const isInk = (x: number, y: number): boolean => {
         if (x < 0 || x >= width || y < 0 || y >= height) return false
-        if (this.isInsideImageRegion(x, y, imageRegions)) return false
+        if (this.isInsideImageRegion(x, y, excludedImageRegions)) return false
         return ink[y * width + x] === 1
       }
 
@@ -2680,7 +2696,7 @@ export default Vue.extend({
       const textInk = this.suppressHorizontalGuideRules(ink, width, height, roi)
       const textIsInk = (x: number, y: number): boolean => {
         if (x < 0 || x >= width || y < 0 || y >= height) return false
-        if (this.isInsideImageRegion(x, y, imageRegions)) return false
+        if (this.isInsideImageRegion(x, y, excludedImageRegions)) return false
         return textInk[y * width + x] === 1
       }
 

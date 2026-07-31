@@ -41,7 +41,7 @@ private const val VERTICAL_PARAGRAPH_BLANK_BLOCKS = 2.0
 private const val EDGE_INK_THRESHOLD = 245
 private const val MAX_EDGE_TRIM = 6
 private const val MAX_EDGE_EXPANSION = 10
-private const val REFLOW_ALGORITHM_VERSION = 3
+private const val REFLOW_ALGORITHM_VERSION = 4
 
 data class PdfPageReflowOptions(
   val targetWidth: Int,
@@ -519,9 +519,7 @@ class PdfPageReflowService(
         .map { clampRoi(it, image.width, image.height) }
         .filter { it.w > 1 && it.h > 1 }
     val imageRegions = applyManualImageRegions(detectedImageRegions, normalizedManualImageRegions, image.width, image.height)
-    // Detect complete text blocks before applying manual image rectangles. A
-    // rectangle can touch a glyph or create a false full-page column gutter.
-    val textInk = maskInkRegions(ink, image.width, image.height, detectedImageRegions)
+    val textInk = maskInkRegions(ink, image.width, image.height, imageRegions)
     val textScale = clamp(options.textScale.toDouble() / 100.0, 0.1, 1.4)
     val items =
       if (options.verticalText) {

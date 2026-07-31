@@ -10,6 +10,21 @@ type WordBlock = {
 const methods = (ReflowedPage as any).options.methods
 const edgeAnalyzer = Object.assign({}, methods)
 const lineAnalyzer = Object.assign({}, methods, {verticalText: false})
+const detectionAnalyzer = Object.assign({}, methods, {
+  verticalText: false,
+  options: {
+    threshold: 185,
+    columnCount: 1,
+    columnGap: 15,
+    wordGap: 3,
+    strokeStrength: 0.1,
+    autoCropBorder: false,
+    marginTop: 0,
+    marginRight: 0,
+    marginBottom: 0,
+    marginLeft: 0,
+  },
+})
 
 function createImageData(width: number, height: number): ImageData {
   const data = new Uint8ClampedArray(width * height * 4)
@@ -68,6 +83,29 @@ describe('ReflowedPage word block edge analysis', () => {
 })
 
 describe('ReflowedPage manual image reading order', () => {
+  test('excludes a manual image region before detecting text lines', () => {
+    const source = createImageData(120, 80)
+    drawInk(source, 10, 10, 20, 24)
+    drawInk(source, 26, 10, 36, 24)
+    drawInk(source, 42, 10, 52, 24)
+    drawInk(source, 70, 42, 80, 56)
+    drawInk(source, 86, 42, 96, 56)
+    drawInk(source, 102, 42, 112, 56)
+
+    const detected = methods.detectWordLines.call(
+      detectionAnalyzer,
+      source,
+      source.width,
+      source.height,
+      {x: 0, y: 0, w: source.width, h: source.height},
+      [{x: 65, y: 35, w: 55, h: 30}],
+    )
+    const words = detected.lines.flatMap((line: any) => line.words)
+
+    expect(words.length).toBeGreaterThan(0)
+    expect(words.every((word: any) => word.y + word.h <= 35)).toBe(true)
+  })
+
   test('merges same-baseline fragments split across detected columns', () => {
     const lines = [
       {column: {start: 0, end: 50}, line: {start: 10, end: 30}, words: [{x: 5, y: 10, w: 35, h: 20}]},
