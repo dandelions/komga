@@ -3562,7 +3562,11 @@ class PdfPageReflowService(
             bottom,
             backgroundLuma,
           )
-        if (outer != null) left = outer else if (horizontalLimits == null) dirtyLeft = true
+        if (outer != null) {
+          left = outer
+        } else if (horizontalLimits == null) {
+          dirtyLeft = true
+        }
       }
     }
 
@@ -3581,7 +3585,11 @@ class PdfPageReflowService(
             bottom,
             backgroundLuma,
           )
-        if (outer != null) right = outer + 1 else if (horizontalLimits == null) dirtyRight = true
+        if (outer != null) {
+          right = outer + 1
+        } else if (horizontalLimits == null) {
+          dirtyRight = true
+        }
       }
     }
 
