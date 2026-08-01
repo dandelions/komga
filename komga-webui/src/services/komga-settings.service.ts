@@ -48,6 +48,19 @@ export default class KomgaSettingsService {
     }
   }
 
+  async clearEbookConversionCache(): Promise<number> {
+    try {
+      const response = await this.http.delete(`${API_SETTINGS}/ebook-conversion-cache`)
+      return response.data.deletedFiles
+    } catch (e) {
+      let msg = 'An error occurred while trying to clear the ebook conversion cache'
+      if (e.response.data.message) {
+        msg += `: ${e.response.data.message}`
+      }
+      throw new Error(msg)
+    }
+  }
+
   async getClientSettingsGlobal(): Promise<Record<string, ClientSettingDto>> {
     try {
       return (await this.http.get(`${API_CLIENT_SETTINGS}/global/list`)).data

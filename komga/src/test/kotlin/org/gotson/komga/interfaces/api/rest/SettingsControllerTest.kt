@@ -1,8 +1,12 @@
 package org.gotson.komga.interfaces.api.rest
 
+import com.ninjasquad.springmockk.MockkBean
+import io.mockk.every
+import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThat
 import org.gotson.komga.domain.model.ThumbnailSize
 import org.gotson.komga.infrastructure.configuration.KomgaSettingsProvider
+import org.gotson.komga.infrastructure.mediacontainer.epub.EbookConverter
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
@@ -13,6 +17,7 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
 import org.springframework.security.test.context.support.WithAnonymousUser
 import org.springframework.test.web.servlet.MockMvc
+import org.springframework.test.web.servlet.delete
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.patch
 import org.springframework.test.web.servlet.post
@@ -24,6 +29,9 @@ class SettingsControllerTest(
   @Autowired private val mockMvc: MockMvc,
   @Autowired private val komgaSettingsProvider: KomgaSettingsProvider,
 ) {
+  @MockkBean
+  private lateinit var ebookConverter: EbookConverter
+
   @Nested
   inner class NonAdminUser {
     @Test
@@ -61,6 +69,26 @@ class SettingsControllerTest(
     fun `given restricted user when resetting library scan daily file limit usage then returns forbidden`() {
       mockMvc
         .post("/api/v1/settings/library-scan-daily-file-limit/reset")
+        .andExpect {
+          status { isForbidden() }
+        }
+    }
+
+    @Test
+    @WithAnonymousUser
+    fun `given anonymous user when clearing ebook conversion cache then returns unauthorized`() {
+      mockMvc
+        .delete("/api/v1/settings/ebook-conversion-cache")
+        .andExpect {
+          status { isUnauthorized() }
+        }
+    }
+
+    @Test
+    @WithMockCustomUser
+    fun `given restricted user when clearing ebook conversion cache then returns forbidden`() {
+      mockMvc
+        .delete("/api/v1/settings/ebook-conversion-cache")
         .andExpect {
           status { isForbidden() }
         }
@@ -149,6 +177,21 @@ class SettingsControllerTest(
       .andExpect {
         status { isNoContent() }
       }
+  }
+
+  @Test
+  @WithMockCustomUser(roles = ["ADMIN"])
+  fun `given admin user when clearing ebook conversion cache then returns deleted file count`() {
+    every { ebookConverter.clearCache() } returns 3
+
+    mockMvc
+      .delete("/api/v1/settings/ebook-conversion-cache")
+      .andExpect {
+        status { isOk() }
+        jsonPath("deletedFiles") { value(3) }
+      }
+
+    verify(exactly = 1) { ebookConverter.clearCache() }
   }
 
   @Test

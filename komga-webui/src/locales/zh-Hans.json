@@ -1029,11 +1029,18 @@
   "server": {
     "server_management": {
       "button_cancel_all_tasks": "取消所有任务",
+      "button_clear_ebook_conversion_cache": "清理 AZW3/MOBI 转换缓存",
       "button_empty_trash": "清理所有库的垃圾",
       "button_scan_libraries": "扫描所有库",
       "button_scan_libraries_deep": "扫描所有库（深度）",
       "button_shutdown": "关闭服务器",
       "download_log": "下载日志文件",
+      "dialog_clear_ebook_conversion_cache": {
+        "body": "将删除由 AZW3 和 MOBI 书籍生成的 EPUB 缓存文件。需要时会自动重新生成。",
+        "button_confirm": "清理缓存",
+        "title": "清理 AZW3/MOBI 转换缓存"
+      },
+      "notification_ebook_conversion_cache_cleared": "电子书转换缓存已经为空 | 已删除 1 个电子书转换缓存 | 已删除 {count} 个电子书转换缓存",
       "notification_tasks_cancelled": "没有要取消的任务 | 取消了一个任务 | 取消了 {count} 个任务",
       "section_title": "服务器管理"
     },

@@ -995,11 +995,18 @@
   "server": {
     "server_management": {
       "button_cancel_all_tasks": "取消所有任務",
+      "button_clear_ebook_conversion_cache": "清理 AZW3/MOBI 轉換快取",
       "button_empty_trash": "清理所有書庫的垃圾",
       "button_scan_libraries": "掃描所有書庫",
       "button_scan_libraries_deep": "深度掃描所有書庫",
       "button_shutdown": "關機",
       "download_log": "下載日誌檔案",
+      "dialog_clear_ebook_conversion_cache": {
+        "body": "將刪除由 AZW3 和 MOBI 書籍產生的 EPUB 快取檔案。需要時會自動重新產生。",
+        "button_confirm": "清理快取",
+        "title": "清理 AZW3/MOBI 轉換快取"
+      },
+      "notification_ebook_conversion_cache_cleared": "電子書轉換快取已經是空的 | 已刪除 1 個電子書轉換快取 | 已刪除 {count} 個電子書轉換快取",
       "notification_tasks_cancelled": "無可取消任務 | 取消了一個任務 | 取消了 {count} 個任務",
       "section_title": "伺服器管理"
     },

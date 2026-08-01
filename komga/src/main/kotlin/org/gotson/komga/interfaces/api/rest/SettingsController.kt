@@ -8,6 +8,7 @@ import org.gotson.komga.application.tasks.TaskAddedEvent
 import org.gotson.komga.application.tasks.TasksRepository
 import org.gotson.komga.infrastructure.configuration.KomgaSettingsProvider
 import org.gotson.komga.infrastructure.kobo.KepubConverter
+import org.gotson.komga.infrastructure.mediacontainer.epub.EbookConverter
 import org.gotson.komga.infrastructure.openapi.OpenApiConfiguration
 import org.gotson.komga.infrastructure.web.WebServerEffectiveSettings
 import org.gotson.komga.interfaces.api.rest.dto.SettingMultiSource
@@ -20,6 +21,7 @@ import org.springframework.context.ApplicationEventPublisher
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.security.access.prepost.PreAuthorize
+import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PostMapping
@@ -41,6 +43,7 @@ class SettingsController(
   @param:Value($$"${server.servlet.context-path:#{null}}") private val configServerContextPath: String?,
   private val serverSettings: WebServerEffectiveSettings,
   private val kepubConverter: KepubConverter,
+  private val ebookConverter: EbookConverter,
 ) {
   @GetMapping
   @Operation(summary = "Retrieve server settings")
@@ -92,4 +95,12 @@ class SettingsController(
       eventPublisher.publishEvent(TaskAddedEvent)
     }
   }
+
+  @DeleteMapping("ebook-conversion-cache")
+  @Operation(summary = "Clear the AZW3/MOBI to EPUB conversion cache")
+  fun clearEbookConversionCache(): EbookConversionCacheClearResultDto = EbookConversionCacheClearResultDto(deletedFiles = ebookConverter.clearCache())
 }
+
+data class EbookConversionCacheClearResultDto(
+  val deletedFiles: Int,
+)

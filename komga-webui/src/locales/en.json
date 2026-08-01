@@ -1029,11 +1029,18 @@
   "server": {
     "server_management": {
       "button_cancel_all_tasks": "Cancel all tasks",
+      "button_clear_ebook_conversion_cache": "Clear AZW3/MOBI conversion cache",
       "button_empty_trash": "Empty trash for all libraries",
       "button_scan_libraries": "Scan all libraries",
       "button_scan_libraries_deep": "Scan all libraries (deep)",
       "button_shutdown": "Shut down",
       "download_log": "Download log file",
+      "dialog_clear_ebook_conversion_cache": {
+        "body": "Cached EPUB files generated from AZW3 and MOBI books will be deleted. They will be generated again when needed.",
+        "button_confirm": "Clear cache",
+        "title": "Clear AZW3/MOBI conversion cache"
+      },
+      "notification_ebook_conversion_cache_cleared": "The ebook conversion cache was already empty | One cached ebook conversion was deleted | {count} cached ebook conversions were deleted",
       "notification_tasks_cancelled": "No tasks to cancel | One task cancelled | {count} tasks cancelled",
       "section_title": "Server Management"
     },

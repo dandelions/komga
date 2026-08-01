@@ -19,7 +19,6 @@ import kotlin.io.path.absolutePathString
 import kotlin.io.path.deleteIfExists
 import kotlin.io.path.exists
 import kotlin.io.path.extension
-import kotlin.io.path.nameWithoutExtension
 import kotlin.io.path.readAttributes
 
 private val logger = KotlinLogging.logger {}
@@ -63,13 +62,14 @@ class EbookConverter internal constructor(
 
     Files.createDirectories(cacheDir)
 
-    val destination = cacheDir.resolve("${path.nameWithoutExtension}-${path.cacheKey()}.epub")
+    val cacheFileName = cacheFileName(path)
+    val destination = cacheDir.resolve(cacheFileName)
     if (destination.exists()) {
       markCacheUsed(destination)
       return destination
     }
 
-    val temp = Files.createTempFile(cacheDir, "${destination.fileName}.", ".epub")
+    val temp = Files.createTempFile(cacheDir, "${cacheFileName.removeSuffix(".epub")}.", ".epub")
     temp.deleteIfExists()
     try {
       val command =
@@ -102,11 +102,24 @@ class EbookConverter internal constructor(
     cleanupOldCacheFiles(Instant.now())
   }
 
+  fun clearCache(): Int {
+    val deleted = deleteCachedEpubFiles { true }
+    if (deleted > 0) logger.info { "Deleted $deleted ebook conversion cache files from: $cacheDir" }
+    return deleted
+  }
+
   internal fun cleanupOldCacheFiles(now: Instant): Int {
     if (cacheRetention.isZero || cacheRetention.isNegative) return 0
+    val cutoff = now.minus(cacheRetention)
+    val deleted = deleteCachedEpubFiles { Files.getLastModifiedTime(it).toInstant().isBefore(cutoff) }
+
+    if (deleted > 0) logger.info { "Deleted $deleted stale ebook conversion cache files from: $cacheDir" }
+    return deleted
+  }
+
+  private fun deleteCachedEpubFiles(predicate: (Path) -> Boolean): Int {
     if (!Files.isDirectory(cacheDir)) return 0
 
-    val cutoff = now.minus(cacheRetention)
     var deleted = 0
 
     Files
@@ -115,17 +128,16 @@ class EbookConverter internal constructor(
         files
           .filter { Files.isRegularFile(it) }
           .filter { it.extension.equals("epub", ignoreCase = true) }
-          .filter { Files.getLastModifiedTime(it).toInstant().isBefore(cutoff) }
+          .filter(predicate)
           .forEach {
             try {
               if (it.deleteIfExists()) deleted++
             } catch (e: Exception) {
-              logger.warn(e) { "Could not delete stale ebook conversion cache file: $it" }
+              logger.warn(e) { "Could not delete ebook conversion cache file: $it" }
             }
           }
       }
 
-    if (deleted > 0) logger.info { "Deleted $deleted stale ebook conversion cache files from: $cacheDir" }
     return deleted
   }
 
@@ -169,6 +181,8 @@ class EbookConverter internal constructor(
     }
   }
 
+  internal fun cacheFileName(path: Path): String = "${path.cacheKey()}.epub"
+
   private fun Path.cacheKey(): String {
     val attrs = readAttributes<java.nio.file.attribute.BasicFileAttributes>()
     val input = "${absolutePathString()}|${attrs.lastModifiedTime().toMillis()}|${attrs.size()}"
@@ -176,6 +190,5 @@ class EbookConverter internal constructor(
       .getInstance("SHA-256")
       .digest(input.toByteArray())
       .joinToString("") { "%02x".format(it) }
-      .take(16)
   }
 }

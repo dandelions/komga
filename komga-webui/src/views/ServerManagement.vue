@@ -20,12 +20,32 @@
     </v-row>
     <v-row>
       <v-col cols="auto">
+        <v-btn
+          color="warning"
+          :loading="clearingEbookConversionCache"
+          @click="modalClearEbookConversionCache = true"
+        >
+          {{ $t('server.server_management.button_clear_ebook_conversion_cache') }}
+        </v-btn>
+      </v-col>
+    </v-row>
+    <v-row>
+      <v-col cols="auto">
         <v-btn @click="modalStopServer = true"
                color="error"
         >{{ $t('server.server_management.button_shutdown') }}
         </v-btn>
       </v-col>
     </v-row>
+
+    <confirmation-dialog
+      v-model="modalClearEbookConversionCache"
+      :title="$t('server.server_management.dialog_clear_ebook_conversion_cache.title')"
+      :body="$t('server.server_management.dialog_clear_ebook_conversion_cache.body')"
+      :button-confirm="$t('server.server_management.dialog_clear_ebook_conversion_cache.button_confirm')"
+      button-confirm-color="warning"
+      @confirm="clearEbookConversionCache"
+    />
 
     <confirmation-dialog
       v-model="modalStopServer"
@@ -50,6 +70,8 @@ export default Vue.extend({
   name: 'ServerManagement',
   components: {ConfirmationDialog},
   data: () => ({
+    clearingEbookConversionCache: false,
+    modalClearEbookConversionCache: false,
     modalStopServer: false,
   }),
   methods: {
@@ -58,6 +80,17 @@ export default Vue.extend({
       this.$eventHub.$emit(NOTIFICATION, {
         message: this.$tc('server.server_management.notification_tasks_cancelled', count),
       } as NotificationEvent)
+    },
+    async clearEbookConversionCache() {
+      this.clearingEbookConversionCache = true
+      try {
+        const count = await this.$komgaSettings.clearEbookConversionCache()
+        this.$eventHub.$emit(NOTIFICATION, {
+          message: this.$tc('server.server_management.notification_ebook_conversion_cache_cleared', count),
+        } as NotificationEvent)
+      } finally {
+        this.clearingEbookConversionCache = false
+      }
     },
     async stopServer() {
       try {
