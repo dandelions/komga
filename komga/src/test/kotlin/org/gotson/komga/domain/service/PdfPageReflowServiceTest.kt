@@ -400,6 +400,26 @@ class PdfPageReflowServiceTest {
   }
 
   @Test
+  fun `given dark display grayscale image when reflowing page then the complete image is inverted`() {
+    val pageBytes = grayscaleImageWithCaptionPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(darkDisplay = true),
+        cropRegions = listOf(PdfPageReflowRegion(x = 0, y = 0, w = 260, h = 210)),
+      )
+
+    val image = firstImageBlock(response)
+    val center = image.getRGB(image.width / 2, image.height / 2) and 0x00ffffff
+    assertThat(image.getRGB(1, 1) and 0x00ffffff).isEqualTo(0)
+    assertThat(center).isGreaterThan(0x999999)
+  }
+
+  @Test
   fun `given two color images separated by text when reflowing page then middle text is not preserved as image`() {
     val pageBytes = twoColorImagesWithMiddleTextPage()
     val book = makeBook("book")
@@ -1005,6 +1025,25 @@ class PdfPageReflowServiceTest {
     graphics.color = Color.BLACK
     listOf(78, 104, 130, 156).forEach { x -> graphics.fillRect(x, 150, 12, 18) }
     graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun grayscaleImageWithCaptionPage(): ByteArray {
+    val colorImage = ImageIO.read(ByteArrayInputStream(colorImageWithCaptionPage()))
+    val image = BufferedImage(colorImage.width, colorImage.height, BufferedImage.TYPE_INT_RGB)
+    for (y in 0 until colorImage.height) {
+      for (x in 0 until colorImage.width) {
+        val rgb = colorImage.getRGB(x, y)
+        val red = rgb ushr 16 and 0xff
+        val green = rgb ushr 8 and 0xff
+        val blue = rgb and 0xff
+        val luma = (0.299 * red + 0.587 * green + 0.114 * blue).toInt()
+        image.setRGB(x, y, Color(luma, luma, luma).rgb)
+      }
+    }
 
     val output = ByteArrayOutputStream()
     ImageIO.write(image, "png", output)

@@ -41,7 +41,7 @@ private const val VERTICAL_PARAGRAPH_BLANK_BLOCKS = 2.0
 private const val EDGE_INK_THRESHOLD = 245
 private const val MAX_EDGE_TRIM = 6
 private const val MAX_EDGE_EXPANSION = 10
-private const val REFLOW_ALGORITHM_VERSION = 4
+private const val REFLOW_ALGORITHM_VERSION = 5
 
 data class PdfPageReflowOptions(
   val targetWidth: Int,
@@ -3859,6 +3859,14 @@ class PdfPageReflowService(
     val height = image.height
     if (width <= 0 || height <= 0) return
 
+    // Grayscale scans can use a gray or dark edge, so edge flood-fill cannot
+    // reliably identify their background. Invert the complete grayscale slice
+    // in that case; colored images continue through the edge-aware path below.
+    if (isGrayscaleImage(image)) {
+      invertGrayscaleImage(image)
+      return
+    }
+
     val background = detectEdgeLightBackgroundMask(image)
     val foreground = BooleanArray(width * height)
     val threshold = min(120, clamp(options.threshold, 50, 230) / 2)
@@ -3879,6 +3887,41 @@ class PdfPageReflowService(
           background[index] -> image.setRGB(x, y, Color.BLACK.rgb)
           foreground[index] -> image.setRGB(x, y, Color.WHITE.rgb)
         }
+      }
+    }
+  }
+
+  private fun isGrayscaleImage(image: BufferedImage): Boolean {
+    val pixels = max(1, image.width * image.height)
+    val step = max(1, kotlin.math.sqrt(pixels / 12000.0).roundToInt())
+    var sampled = 0
+    var colored = 0
+
+    for (y in 0 until image.height step step) {
+      for (x in 0 until image.width step step) {
+        val rgb = image.getRGB(x, y)
+        if (rgb ushr 24 and 0xff == 0) continue
+        val red = rgb ushr 16 and 0xff
+        val green = rgb ushr 8 and 0xff
+        val blue = rgb and 0xff
+        sampled++
+        if (max(red, max(green, blue)) - min(red, min(green, blue)) >= 28 && max(red, max(green, blue)) > 36) colored++
+      }
+    }
+
+    return sampled > 0 && colored.toDouble() / sampled <= 0.03
+  }
+
+  private fun invertGrayscaleImage(image: BufferedImage) {
+    for (y in 0 until image.height) {
+      for (x in 0 until image.width) {
+        val rgb = image.getRGB(x, y)
+        val alpha = rgb ushr 24 and 0xff
+        if (alpha == 0) continue
+        val red = 255 - (rgb ushr 16 and 0xff)
+        val green = 255 - (rgb ushr 8 and 0xff)
+        val blue = 255 - (rgb and 0xff)
+        image.setRGB(x, y, Color(red, green, blue, alpha).rgb)
       }
     }
   }

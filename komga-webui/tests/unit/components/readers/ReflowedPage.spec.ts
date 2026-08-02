@@ -68,6 +68,25 @@ describe('ReflowedPage word block edge analysis', () => {
     expect(imageData.data[(1 * 4 + 1) * 4]).toBe(255)
   })
 
+  test('inverts grayscale image slices without a light edge background', () => {
+    const context = {
+      getImageData: () => {
+        const image = createImageData(4, 4)
+        image.data.fill(128)
+        for (let channel = 0; channel < image.data.length; channel += 4) image.data[channel + 3] = 255
+        drawInk(image, 1, 1, 3, 3)
+        return image
+      },
+      putImageData: jest.fn(),
+    }
+
+    methods.normalizeImageSliceForDarkDisplay.call(imageAnalyzer, context, 4, 4)
+
+    const imageData = context.putImageData.mock.calls[0][0]
+    expect(imageData.data[0]).toBe(127)
+    expect(imageData.data[(1 * 4 + 1) * 4]).toBe(255)
+  })
+
   test('moves an edge inward past a separated neighboring text remnant', () => {
     const source = createImageData(24, 16)
     drawInk(source, 3, 5, 4, 9)

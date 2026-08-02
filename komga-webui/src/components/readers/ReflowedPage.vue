@@ -737,7 +737,7 @@ const DETECTION_FULL_RES_MAX_PIXELS = 6000000
 const DETECTION_MAX_SIDE = 2800
 const DETECTION_MAX_PIXELS = 5000000
 const DETECTION_MIN_SCALE = 0.4
-const REFLOW_RESPONSE_VERSION = 6
+const REFLOW_RESPONSE_VERSION = 7
 
 export default Vue.extend({
   name: 'ReflowedPage',
@@ -1991,7 +1991,7 @@ export default Vue.extend({
         deskewDetectionVersion: 9,
         imageExclusionVersion: 3,
         detectionScaleVersion: 3,
-        darkWordRenderVersion: 4,
+        darkWordRenderVersion: 5,
       })
     },
     emitReflowed(networkTransferBytes?: number) {
@@ -5740,6 +5740,11 @@ export default Vue.extend({
     normalizeImageSliceForDarkDisplay(context: CanvasRenderingContext2D, width: number, height: number) {
       const imageData = context.getImageData(0, 0, width, height)
       const data = imageData.data
+      if (this.isGrayscaleImage(data, width, height)) {
+        this.invertGrayscaleImage(data, width, height)
+        context.putImageData(imageData, 0, 0)
+        return
+      }
       const background = this.edgeLightBackgroundMask(data, width, height)
       const foreground = new Uint8Array(width * height)
       const threshold = Math.min(120, Math.floor(this.clampNumber(this.options.threshold, 50, 230, THRESHOLD) / 2))
@@ -5769,6 +5774,34 @@ export default Vue.extend({
       }
 
       context.putImageData(imageData, 0, 0)
+    },
+    isGrayscaleImage(data: Uint8ClampedArray, width: number, height: number): boolean {
+      const pixels = Math.max(1, width * height)
+      const step = Math.max(1, Math.round(Math.sqrt(pixels / 12000)))
+      let sampled = 0
+      let colored = 0
+
+      for (let y = 0; y < height; y += step) {
+        for (let x = 0; x < width; x += step) {
+          const offset = (y * width + x) * 4
+          if (data[offset + 3] === 0) continue
+          const max = Math.max(data[offset], data[offset + 1], data[offset + 2])
+          const min = Math.min(data[offset], data[offset + 1], data[offset + 2])
+          sampled++
+          if (max - min >= 28 && max > 36) colored++
+        }
+      }
+
+      return sampled > 0 && colored / sampled <= 0.03
+    },
+    invertGrayscaleImage(data: Uint8ClampedArray, width: number, height: number) {
+      for (let index = 0; index < width * height; index++) {
+        const offset = index * 4
+        if (data[offset + 3] === 0) continue
+        data[offset] = 255 - data[offset]
+        data[offset + 1] = 255 - data[offset + 1]
+        data[offset + 2] = 255 - data[offset + 2]
+      }
     },
     edgeLightBackgroundMask(data: Uint8ClampedArray, width: number, height: number): Uint8Array {
       const mask = new Uint8Array(width * height)
