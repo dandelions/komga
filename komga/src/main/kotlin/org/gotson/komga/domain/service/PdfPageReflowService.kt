@@ -2143,6 +2143,7 @@ class PdfPageReflowService(
     manualImageRegions: List<Roi>,
   ): List<PdfPageReflowItemDto> {
     val items = mutableListOf<PdfPageReflowItemDto>()
+    val imageItemsByRegion = imageRegions.associateWith { renderImageItem(image, it, options, textScale) }
     val textInk = suppressHorizontalGuideRules(ink, image.width, image.height, roi)
     val columns = detectHorizontalColumns(image, textInk, roi, options)
     val detectedLines =
@@ -2193,7 +2194,7 @@ class PdfPageReflowService(
 
     val imageSlots = horizontalImageSlots(imageRegions, lines)
     lines.forEachIndexed { index, line ->
-      appendImageItems(items, image, imageSlots[index], options, textScale)
+      appendImageItems(items, imageSlots[index], imageItemsByRegion)
       val previousLine = lines.getOrNull(index - 1)
       val manualImageTrailingBlank =
         previousLine?.let { manualImageOccupiesHorizontalTrailingBlank(it, manualImageRegions, glyphHeight) } ?: false
@@ -2237,7 +2238,7 @@ class PdfPageReflowService(
         adjustedBlocks.forEach { items += renderWordItem(image, it, outputTop, outputBottom, options, textScale) }
       }
     }
-    appendImageItems(items, image, imageSlots[lines.size], options, textScale)
+    appendImageItems(items, imageSlots[lines.size], imageItemsByRegion)
 
     return trimTrailingBreak(items)
   }
@@ -2871,6 +2872,7 @@ class PdfPageReflowService(
     imageRegions: List<Roi>,
     manualImageRegions: List<Roi>,
   ): List<PdfPageReflowItemDto> {
+    val imageItemsByRegion = imageRegions.associateWith { renderImageItem(image, it, options, textScale) }
     val columns =
       detectBands(roi.x, roi.x + roi.w) { x ->
         var count = 0
@@ -2906,7 +2908,7 @@ class PdfPageReflowService(
     val items = mutableListOf<PdfPageReflowItemDto>()
     val imageSlots = verticalImageSlots(imageRegions, lines, options)
     lines.forEachIndexed { index, line ->
-      appendImageItems(items, image, imageSlots[index], options, textScale)
+      appendImageItems(items, imageSlots[index], imageItemsByRegion)
       val startParagraph = isVerticalParagraphStart(line, lines.getOrNull(index - 1))
       if (startParagraph && items.isNotEmpty()) appendBreakIfNeeded(items)
 
@@ -2922,7 +2924,7 @@ class PdfPageReflowService(
         .map { renderVerticalWordItem(image, it, options, textScale) }
         .forEach { items += it }
     }
-    appendImageItems(items, image, imageSlots[lines.size], options, textScale)
+    appendImageItems(items, imageSlots[lines.size], imageItemsByRegion)
 
     return trimTrailingBreak(items)
   }
@@ -3756,13 +3758,11 @@ class PdfPageReflowService(
 
   private fun appendImageItems(
     items: MutableList<PdfPageReflowItemDto>,
-    image: BufferedImage,
     imageRegions: List<Roi>,
-    options: PdfPageReflowOptions,
-    textScale: Double,
+    imageItemsByRegion: Map<Roi, PdfPageReflowItemDto?>,
   ) {
     imageRegions.forEach { region ->
-      val imageItem = renderImageItem(image, region, options, textScale) ?: return@forEach
+      val imageItem = imageItemsByRegion[region] ?: return@forEach
       appendBreakIfNeeded(items)
       items += imageItem
       items += PdfPageReflowItemDto(type = "break")

@@ -5398,15 +5398,17 @@ export default Vue.extend({
       const sliceCanvas = document.createElement('canvas')
       const sliceContext = this.canvasContext(sliceCanvas, true)
       if (!sliceContext) return []
+      const imageItemsByRegion = new Map<ImageRegion, RenderedImageBlock | undefined>()
+      imageRegions.forEach(region => imageItemsByRegion.set(region, this.renderImageBlock(sourceCanvas, sliceCanvas, sliceContext, region)))
 
       if (this.verticalText) {
-        return this.renderVerticalReflowItems(sourceCanvas, sourceImageData, edgeBackgroundLuma, sliceCanvas, sliceContext, lines, imageRegions)
+        return this.renderVerticalReflowItems(sourceCanvas, sourceImageData, edgeBackgroundLuma, sliceCanvas, sliceContext, lines, imageRegions, imageItemsByRegion)
       }
 
       const glyphHeight = this.horizontalGlyphSourceHeight(lines)
       const imageSlots = this.horizontalImageSlots(imageRegions, lines)
       lines.forEach((line, index) => {
-        this.appendImageItems(rendered, sourceCanvas, sliceCanvas, sliceContext, imageSlots[index])
+        this.appendImageItems(rendered, sourceCanvas, sliceCanvas, sliceContext, imageSlots[index], imageItemsByRegion)
         const previousLine = lines[index - 1]
         const manualImageTrailingBlank = Boolean(
           previousLine &&
@@ -5472,7 +5474,7 @@ export default Vue.extend({
           })
         })
       })
-      this.appendImageItems(rendered, sourceCanvas, sliceCanvas, sliceContext, imageSlots[lines.length])
+      this.appendImageItems(rendered, sourceCanvas, sliceCanvas, sliceContext, imageSlots[lines.length], imageItemsByRegion)
 
       return rendered
     },
@@ -5671,9 +5673,10 @@ export default Vue.extend({
       sliceCanvas: HTMLCanvasElement,
       sliceContext: CanvasRenderingContext2D,
       imageRegions: ImageRegion[] = [],
+      imageItemsByRegion?: Map<ImageRegion, RenderedImageBlock | undefined>,
     ) {
       imageRegions.forEach(region => {
-        const image = this.renderImageBlock(sourceCanvas, sliceCanvas, sliceContext, region)
+        const image = imageItemsByRegion ? imageItemsByRegion.get(region) : this.renderImageBlock(sourceCanvas, sliceCanvas, sliceContext, region)
         if (!image) return
         this.appendBreakIfNeeded(rendered)
         rendered.push(image)
@@ -5855,12 +5858,13 @@ export default Vue.extend({
       sliceContext: CanvasRenderingContext2D,
       lines: WordLine[],
       imageRegions: ImageRegion[],
+      imageItemsByRegion: Map<ImageRegion, RenderedImageBlock | undefined>,
     ): ReflowItem[] {
       const rendered = [] as ReflowItem[]
       const imageSlots = this.verticalImageSlots(imageRegions, lines)
 
       lines.forEach((line, index) => {
-        this.appendImageItems(rendered, sourceCanvas, sliceCanvas, sliceContext, imageSlots[index])
+        this.appendImageItems(rendered, sourceCanvas, sliceCanvas, sliceContext, imageSlots[index], imageItemsByRegion)
         const startParagraph = this.isVerticalParagraphStart(line, lines[index - 1])
         if (startParagraph && rendered.length > 0) this.appendBreakIfNeeded(rendered)
 
@@ -5912,7 +5916,7 @@ export default Vue.extend({
           })
         })
       })
-      this.appendImageItems(rendered, sourceCanvas, sliceCanvas, sliceContext, imageSlots[lines.length])
+      this.appendImageItems(rendered, sourceCanvas, sliceCanvas, sliceContext, imageSlots[lines.length], imageItemsByRegion)
 
       return rendered
     },
