@@ -34,15 +34,18 @@ class EbookConverter internal constructor(
   private val ebookConvertPath: String,
   private val cacheRetention: Duration,
   private val cacheDir: Path,
+  private val conversionTimeout: Duration = Duration.ofMinutes(30),
 ) {
   @Autowired
   constructor(
     @Value($$"${komga.ebook-convert-path:ebook-convert}") ebookConvertPath: String,
     @Value($$"${komga.ebook-conversion-cache-retention:7d}") cacheRetention: Duration,
+    @Value($$"${komga.ebook-conversion-timeout:30m}") conversionTimeout: Duration,
   ) : this(
     ebookConvertPath,
     cacheRetention,
     Path.of(System.getProperty("java.io.tmpdir"), CACHE_DIR_NAME),
+    conversionTimeout,
   )
 
   final var isAvailable = false
@@ -52,7 +55,7 @@ class EbookConverter internal constructor(
   private fun configureOnStartup() {
     isAvailable = checkAvailability()
     if (isAvailable)
-      logger.info { "AZW3/MOBI conversion available. ebook-convert path: $ebookConvertPath" }
+      logger.info { "AZW3/MOBI conversion available. ebook-convert path: $ebookConvertPath, timeout: $conversionTimeout" }
     else
       logger.warn { "AZW3/MOBI conversion unavailable. ebook-convert was not found or is not executable: $ebookConvertPath" }
   }
@@ -80,7 +83,7 @@ class EbookConverter internal constructor(
         )
       logger.debug { "Starting ebook conversion with: ${command.joinToString(" ")}" }
 
-      val output = runCommand(timeoutSeconds = 300, *command)
+      val output = runCommand(timeoutSeconds = conversionTimeoutSeconds(), *command)
       logger.debug { "ebook-convert output: $output" }
 
       if (!temp.exists()) throw EbookConversionException("Converted EPUB was not created: $temp")
@@ -169,7 +172,7 @@ class EbookConverter internal constructor(
     try {
       if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
         process.destroyForcibly()
-        throw EbookConversionException("Command timed out: ${command.joinToString(" ")}")
+        throw EbookConversionException("Command timed out after ${timeoutSeconds}s: ${command.joinToString(" ")}")
       }
 
       val text = output.get(1, TimeUnit.SECONDS)
@@ -182,6 +185,8 @@ class EbookConverter internal constructor(
   }
 
   internal fun cacheFileName(path: Path): String = "${path.cacheKey()}.epub"
+
+  internal fun conversionTimeoutSeconds(): Long = conversionTimeout.seconds.coerceAtLeast(1)
 
   private fun Path.cacheKey(): String {
     val attrs = readAttributes<java.nio.file.attribute.BasicFileAttributes>()

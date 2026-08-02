@@ -13,6 +13,15 @@ import kotlin.io.path.writeText
 
 class EbookConverterTest {
   @Test
+  fun `given a configured conversion timeout when resolving timeout seconds then configured duration is used`(
+    @TempDir dir: Path,
+  ) {
+    val converter = EbookConverter("ebook-convert", Duration.ofDays(7), dir.resolve("cache"), Duration.ofMinutes(45))
+
+    assertThat(converter.conversionTimeoutSeconds()).isEqualTo(2700)
+  }
+
+  @Test
   fun `given an ebook with a long multibyte name when resolving cache file then name has a fixed safe length`(
     @TempDir dir: Path,
   ) {

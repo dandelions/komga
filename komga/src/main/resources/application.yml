@@ -15,6 +15,7 @@ logging:
     org.springframework.security.config.annotation.authentication.configuration.InitializeUserDetailsBeanManagerConfigurer: ERROR
 
 komga:
+  ebook-conversion-timeout: 30m
   database:
     file: \${komga.config-dir}/database.sqlite
   lucene:
