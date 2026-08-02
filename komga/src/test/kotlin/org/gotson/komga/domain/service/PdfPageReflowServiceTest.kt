@@ -383,6 +383,23 @@ class PdfPageReflowServiceTest {
   }
 
   @Test
+  fun `given dark display original image mode when reflowing page then edge white background becomes dark`() {
+    val pageBytes = colorImageWithCaptionPage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(darkDisplay = true, matchBackgroundMode = "original"),
+        cropRegions = listOf(PdfPageReflowRegion(x = 0, y = 0, w = 260, h = 210)),
+      )
+
+    assertThat(firstImageBlock(response).getRGB(1, 1) and 0x00ffffff).isEqualTo(0)
+  }
+
+  @Test
   fun `given two color images separated by text when reflowing page then middle text is not preserved as image`() {
     val pageBytes = twoColorImagesWithMiddleTextPage()
     val book = makeBook("book")

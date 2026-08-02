@@ -5698,7 +5698,7 @@ export default Vue.extend({
       sliceContext.imageSmoothingQuality = 'high'
       this.fillWordSliceBackground(sliceContext, source.w, source.h)
       sliceContext.drawImage(sourceCanvas, source.x, source.y, source.w, source.h, 0, 0, source.w, source.h)
-      if (this.darkDisplay && this.matchBackgroundMode !== 'original') {
+      if (this.darkDisplay) {
         this.normalizeImageSliceForDarkDisplay(sliceContext, source.w, source.h)
       } else if (this.shouldNormalizeImageSliceForDisplay(sliceContext, source.w, source.h)) {
         this.finishWordSlice(sliceContext, source.w, source.h)

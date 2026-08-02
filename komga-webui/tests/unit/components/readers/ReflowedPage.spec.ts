@@ -25,6 +25,9 @@ const detectionAnalyzer = Object.assign({}, methods, {
     marginLeft: 0,
   },
 })
+const imageAnalyzer = Object.assign({}, methods, {
+  options: {threshold: 185},
+})
 
 function createImageData(width: number, height: number): ImageData {
   const data = new Uint8ClampedArray(width * height * 4)
@@ -48,6 +51,23 @@ function adjust(source: ImageData, block: WordBlock): WordBlock {
 }
 
 describe('ReflowedPage word block edge analysis', () => {
+  test('normalizes image backgrounds for dark display in original image mode', () => {
+    const context = {
+      getImageData: () => {
+        const image = createImageData(4, 4)
+        drawInk(image, 1, 1, 3, 3)
+        return image
+      },
+      putImageData: jest.fn(),
+    }
+
+    methods.normalizeImageSliceForDarkDisplay.call(imageAnalyzer, context, 4, 4)
+
+    const imageData = context.putImageData.mock.calls[0][0]
+    expect(imageData.data[0]).toBe(0)
+    expect(imageData.data[(1 * 4 + 1) * 4]).toBe(255)
+  })
+
   test('moves an edge inward past a separated neighboring text remnant', () => {
     const source = createImageData(24, 16)
     drawInk(source, 3, 5, 4, 9)

@@ -3732,7 +3732,12 @@ class PdfPageReflowService(
     options: PdfPageReflowOptions,
     textScale: Double,
   ): PdfPageReflowItemDto {
-    val slice = if (options.matchBackgroundMode == "original") copyOriginalSlice(image, roi) else copySlice(image, roi, options)
+    val slice =
+      when {
+        options.darkDisplay -> copyDarkDisplayImageSlice(image, roi, options)
+        options.matchBackgroundMode == "original" -> copyOriginalSlice(image, roi)
+        else -> copySlice(image, roi, options)
+      }
     val maxWidth = max(1, options.targetWidth - 32).toDouble()
     val scale = min(textScale, maxWidth / roi.w)
     return PdfPageReflowItemDto(
@@ -3774,8 +3779,8 @@ class PdfPageReflowService(
     if (block.w < 2 || block.h < 2) return null
     val slice =
       when {
-        options.matchBackgroundMode == "original" -> copyOriginalSlice(image, block)
         options.darkDisplay -> copyDarkDisplayImageSlice(image, block, options)
+        options.matchBackgroundMode == "original" -> copyOriginalSlice(image, block)
         shouldNormalizeImageRegionForDisplay(image, block, options) -> copySlice(image, block, options)
         else -> copyOriginalSlice(image, block)
       }
