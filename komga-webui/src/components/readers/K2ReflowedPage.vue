@@ -24,6 +24,16 @@
       >
         <v-icon x-small>mdi-chevron-down</v-icon>
       </button>
+      <button
+        v-if="controlsCollapsed"
+        type="button"
+        class="k2-action"
+        title="打开局部放大镜"
+        aria-label="打开局部放大镜"
+        @click="$emit('open-magnifier', page.url)"
+      >
+        <v-icon small>mdi-magnify</v-icon>
+      </button>
       <template v-else>
         <label class="k2-control k2-wide-control">
           <span>Text</span>
@@ -107,6 +117,15 @@
           @click="$emit('toggle-night-display')"
         >
           <v-icon small>{{ nightDisplay ? 'mdi-white-balance-sunny' : 'mdi-weather-night' }}</v-icon>
+        </button>
+        <button
+          type="button"
+          class="k2-action"
+          title="打开局部放大镜"
+          aria-label="打开局部放大镜"
+          @click="$emit('open-magnifier', page.url)"
+        >
+          <v-icon small>mdi-magnify</v-icon>
         </button>
         <button type="button" class="k2-action k2-apply-action" @click="applyK2Reflow">
           重排

@@ -33,6 +33,15 @@
         >
           <v-icon small>{{ nightDisplay ? 'mdi-white-balance-sunny' : 'mdi-weather-night' }}</v-icon>
         </button>
+        <button
+          type="button"
+          class="reflow-control reflow-icon-control reflow-compact-control"
+          title="打开局部放大镜"
+          aria-label="打开局部放大镜"
+          @click="$emit('open-magnifier', activeVisibleSourcePageUrl)"
+        >
+          <v-icon small>mdi-magnify</v-icon>
+        </button>
         <button type="button" class="reflow-control reflow-icon-control reflow-compact-control" title="目录" aria-label="目录" @click="$emit('show-pdf-toc')">
           <v-icon small>mdi-menu</v-icon>
         </button>
@@ -84,6 +93,15 @@
             @click="$emit('toggle-night-display')"
           >
             <v-icon small>{{ nightDisplay ? 'mdi-white-balance-sunny' : 'mdi-weather-night' }}</v-icon>
+          </button>
+          <button
+            type="button"
+            class="reflow-control reflow-icon-control"
+            title="打开局部放大镜"
+            aria-label="打开局部放大镜"
+            @click="$emit('open-magnifier', activeVisibleSourcePageUrl)"
+          >
+            <v-icon small>mdi-magnify</v-icon>
           </button>
           <div class="reflow-navigation-controls">
             <button type="button" class="reflow-control reflow-nav-control reflow-exit-control" @click="exitReflow">
