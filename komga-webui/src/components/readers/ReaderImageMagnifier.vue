@@ -43,6 +43,10 @@ export default Vue.extend({
     document.addEventListener('pointermove', this.updateFromPointer, {passive: true})
     document.addEventListener('pointerup', this.pointerEnded, {passive: true})
     document.addEventListener('pointercancel', this.pointerEnded, {passive: true})
+    document.addEventListener('touchstart', this.updateFromTouch, {passive: true})
+    document.addEventListener('touchmove', this.updateFromTouch, {passive: true})
+    document.addEventListener('touchend', this.touchEnded, {passive: true})
+    document.addEventListener('touchcancel', this.touchEnded, {passive: true})
     window.addEventListener('blur', this.hide)
   },
   destroyed() {
@@ -50,32 +54,45 @@ export default Vue.extend({
     document.removeEventListener('pointermove', this.updateFromPointer)
     document.removeEventListener('pointerup', this.pointerEnded)
     document.removeEventListener('pointercancel', this.pointerEnded)
+    document.removeEventListener('touchstart', this.updateFromTouch)
+    document.removeEventListener('touchmove', this.updateFromTouch)
+    document.removeEventListener('touchend', this.touchEnded)
+    document.removeEventListener('touchcancel', this.touchEnded)
     window.removeEventListener('blur', this.hide)
   },
   methods: {
     updateFromPointer(event: PointerEvent) {
+      if (event.pointerType === 'touch') return
+      this.updateAtPoint(event.clientX, event.clientY, event.pointerType)
+    },
+    updateFromTouch(event: TouchEvent) {
+      const touch = event.touches[0]
+      if (!touch) return
+      this.updateAtPoint(touch.clientX, touch.clientY, 'touch')
+    },
+    updateAtPoint(clientX: number, clientY: number, pointerType: string) {
       if (!this.active) return
-      const image = this.magnifiableImageAt(event.clientX, event.clientY)
+      const image = this.magnifiableImageAt(clientX, clientY)
       if (!image) {
         this.hide()
         return
       }
 
       const contentRect = this.imageContentRect(image)
-      if (!this.pointInsideRect({x: event.clientX, y: event.clientY}, contentRect)) {
+      if (!this.pointInsideRect({x: clientX, y: clientY}, contentRect)) {
         this.hide()
         return
       }
 
       const lensSize = window.innerWidth < 600 ? MOBILE_LENS_SIZE : DESKTOP_LENS_SIZE
       const radius = lensSize / 2
-      const touchOffset = event.pointerType === 'touch' ? lensSize * 0.72 : 0
-      const lensCenterX = event.clientX
-      const lensCenterY = event.clientY - touchOffset
+      const touchOffset = pointerType === 'touch' ? lensSize * 0.72 : 0
+      const lensCenterX = clientX
+      const lensCenterY = clientY - touchOffset
       const left = this.clamp(lensCenterX - radius, VIEWPORT_GAP, Math.max(VIEWPORT_GAP, window.innerWidth - lensSize - VIEWPORT_GAP))
       const top = this.clamp(lensCenterY - radius, VIEWPORT_GAP, Math.max(VIEWPORT_GAP, window.innerHeight - lensSize - VIEWPORT_GAP))
-      const sourceX = event.clientX - contentRect.left
-      const sourceY = event.clientY - contentRect.top
+      const sourceX = clientX - contentRect.left
+      const sourceY = clientY - contentRect.top
       const sourceUrl = image.currentSrc || image.src
       const filter = window.getComputedStyle(image).filter
 
@@ -123,6 +140,9 @@ export default Vue.extend({
     },
     pointerEnded(event: PointerEvent) {
       if (event.pointerType === 'touch') this.hide()
+    },
+    touchEnded() {
+      this.hide()
     },
     hide() {
       this.visible = false

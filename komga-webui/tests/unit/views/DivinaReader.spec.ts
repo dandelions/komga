@@ -5,6 +5,7 @@ jest.mock('@/types/items', () => ({
 import DivinaReader from '@/views/DivinaReader.vue'
 
 const methods = (DivinaReader as any).options.methods
+const computed = (DivinaReader as any).options.computed
 
 describe('DivinaReader image magnifier', () => {
   test('toggles the in-page magnifier', () => {
@@ -15,5 +16,18 @@ describe('DivinaReader image magnifier', () => {
 
     methods.toggleMagnifier.call(reader)
     expect(reader.magnifierActive).toBe(false)
+  })
+
+  test('disables swipe page turning while the magnifier is active', () => {
+    const reader = {
+      magnifierActive: true,
+      swipe: true,
+      $vuetify: {breakpoint: {smAndDown: true}},
+    }
+
+    expect(computed.readerSwipeEnabled.call(reader)).toBe(false)
+
+    reader.magnifierActive = false
+    expect(computed.readerSwipeEnabled.call(reader)).toBe(true)
   })
 })

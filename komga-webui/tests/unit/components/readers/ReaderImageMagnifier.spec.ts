@@ -91,4 +91,17 @@ describe('ReaderImageMagnifier', () => {
       backgroundPosition: '-33px -33px',
     })
   })
+
+  test('follows touch movement without cancelling the touch event', () => {
+    const updateAtPoint = jest.fn()
+    const preventDefault = jest.fn()
+
+    methods.updateFromTouch.call({updateAtPoint}, {
+      touches: [{clientX: 42, clientY: 73}],
+      preventDefault,
+    })
+
+    expect(updateAtPoint).toHaveBeenCalledWith(42, 73, 'touch')
+    expect(preventDefault).not.toHaveBeenCalled()
+  })
 })
