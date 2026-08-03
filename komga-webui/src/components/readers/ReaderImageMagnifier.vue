@@ -30,13 +30,17 @@ export default Vue.extend({
   },
   data: () => ({
     visible: false,
+    touchTracking: false,
     lensStyle: {} as Record<string, string>,
     contentStyle: {} as Record<string, string>,
   }),
   watch: {
     active(active: boolean) {
       this.setGestureSuppression(active)
-      if (!active) this.hide()
+      if (!active) {
+        this.touchTracking = false
+        this.hide()
+      }
     },
   },
   mounted() {
@@ -45,8 +49,8 @@ export default Vue.extend({
     document.addEventListener('pointermove', this.updateFromPointer, {passive: true})
     document.addEventListener('pointerup', this.pointerEnded, {passive: true})
     document.addEventListener('pointercancel', this.pointerEnded, {passive: true})
-    document.addEventListener('touchstart', this.updateFromTouch, {passive: true})
-    document.addEventListener('touchmove', this.updateFromTouch, {passive: true})
+    document.addEventListener('touchstart', this.updateFromTouch, {passive: false})
+    document.addEventListener('touchmove', this.updateFromTouch, {passive: false})
     document.addEventListener('touchend', this.touchEnded, {passive: true})
     document.addEventListener('touchcancel', this.touchEnded, {passive: true})
     document.addEventListener('contextmenu', this.preventLongPressAction, {capture: true})
@@ -85,6 +89,11 @@ export default Vue.extend({
     updateFromTouch(event: TouchEvent) {
       const touch = event.touches[0]
       if (!touch) return
+      if (event.type === 'touchstart') {
+        this.touchTracking = this.active && Boolean(this.magnifiableImageAt(touch.clientX, touch.clientY))
+      }
+      if (!this.touchTracking) return
+      if (event.cancelable) event.preventDefault()
       this.updateAtPoint(touch.clientX, touch.clientY)
     },
     updateAtPoint(clientX: number, clientY: number) {
@@ -160,6 +169,7 @@ export default Vue.extend({
       if (event.pointerType === 'touch') this.hide()
     },
     touchEnded() {
+      this.touchTracking = false
       this.hide()
     },
     hide() {
@@ -196,6 +206,7 @@ export default Vue.extend({
 <style>
 .reader-magnifier-gesture-active [data-reader-magnifiable="true"] {
   -webkit-touch-callout: none;
+  touch-action: none;
   user-select: none;
 }
 </style>

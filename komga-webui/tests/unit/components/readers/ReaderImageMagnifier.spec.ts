@@ -92,16 +92,51 @@ describe('ReaderImageMagnifier', () => {
     })
   })
 
-  test('follows touch movement without cancelling the touch event', () => {
+  test('follows touch movement while suppressing page scrolling', () => {
     const updateAtPoint = jest.fn()
     const preventDefault = jest.fn()
+    const magnifier = {
+      active: true,
+      touchTracking: false,
+      magnifiableImageAt: jest.fn(() => loadedImage()),
+      updateAtPoint,
+    }
 
-    methods.updateFromTouch.call({updateAtPoint}, {
+    methods.updateFromTouch.call(magnifier, {
+      type: 'touchstart',
       touches: [{clientX: 42, clientY: 73}],
+      cancelable: true,
+      preventDefault,
+    })
+    methods.updateFromTouch.call(magnifier, {
+      type: 'touchmove',
+      touches: [{clientX: 48, clientY: 81}],
+      cancelable: true,
       preventDefault,
     })
 
-    expect(updateAtPoint).toHaveBeenCalledWith(42, 73)
+    expect(updateAtPoint).toHaveBeenNthCalledWith(1, 42, 73)
+    expect(updateAtPoint).toHaveBeenNthCalledWith(2, 48, 81)
+    expect(preventDefault).toHaveBeenCalledTimes(2)
+  })
+
+  test('does not suppress scrolling when touch starts outside an image', () => {
+    const updateAtPoint = jest.fn()
+    const preventDefault = jest.fn()
+
+    methods.updateFromTouch.call({
+      active: true,
+      touchTracking: false,
+      magnifiableImageAt: jest.fn(() => undefined),
+      updateAtPoint,
+    }, {
+      type: 'touchstart',
+      touches: [{clientX: 42, clientY: 73}],
+      cancelable: true,
+      preventDefault,
+    })
+
+    expect(updateAtPoint).not.toHaveBeenCalled()
     expect(preventDefault).not.toHaveBeenCalled()
   })
 
