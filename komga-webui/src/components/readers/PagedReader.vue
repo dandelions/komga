@@ -36,6 +36,7 @@
                  :fetchpriority="imageFetchPriority(i)"
                  :decoding="imageDecoding(i)"
                  :data-page-number="page.number"
+                 data-reader-magnifiable="true"
                  :class="imgClass(spread)"
                  class="img-fit-all"
                  :style="imageStyle(page)"

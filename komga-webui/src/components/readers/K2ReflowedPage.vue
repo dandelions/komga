@@ -27,10 +27,11 @@
       <button
         v-if="controlsCollapsed"
         type="button"
-        class="k2-action"
-        title="打开局部放大镜"
-        aria-label="打开局部放大镜"
-        @click="$emit('open-magnifier', page.url)"
+        class="k2-action k2-collapsed-action"
+        :class="{'k2-magnifier-active': magnifierActive}"
+        :title="magnifierActive ? '关闭局部放大镜' : '打开局部放大镜'"
+        :aria-label="magnifierActive ? '关闭局部放大镜' : '打开局部放大镜'"
+        @click="$emit('toggle-magnifier')"
       >
         <v-icon small>mdi-magnify</v-icon>
       </button>
@@ -121,9 +122,10 @@
         <button
           type="button"
           class="k2-action"
-          title="打开局部放大镜"
-          aria-label="打开局部放大镜"
-          @click="$emit('open-magnifier', page.url)"
+          :class="{'k2-magnifier-active': magnifierActive}"
+          :title="magnifierActive ? '关闭局部放大镜' : '打开局部放大镜'"
+          :aria-label="magnifierActive ? '关闭局部放大镜' : '打开局部放大镜'"
+          @click="$emit('toggle-magnifier')"
         >
           <v-icon small>mdi-magnify</v-icon>
         </button>
@@ -194,6 +196,7 @@
           :key="`image-${index}`"
           :src="item.src"
           class="k2-image"
+          data-reader-magnifiable="true"
           :style="{width: `${item.width}px`, height: `${item.height}px`}"
           alt=""
         />
@@ -307,6 +310,10 @@ export default Vue.extend({
       default: () => ({}),
     },
     nightDisplay: {
+      type: Boolean,
+      default: false,
+    },
+    magnifierActive: {
       type: Boolean,
       default: false,
     },
@@ -2585,6 +2592,12 @@ export default Vue.extend({
   color: #9e9e9e;
 }
 
+.k2-magnifier-active {
+  border-color: #2563eb;
+  background: #dbeafe;
+  color: #1e40af;
+}
+
 .k2-pull-action {
   width: 28px;
   height: 18px;
@@ -2593,6 +2606,10 @@ export default Vue.extend({
   padding: 0;
   border-radius: 0 0 5px 5px;
   opacity: 0.86;
+  pointer-events: auto;
+}
+
+.k2-collapsed-action {
   pointer-events: auto;
 }
 

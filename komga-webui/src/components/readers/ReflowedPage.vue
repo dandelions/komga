@@ -36,9 +36,10 @@
         <button
           type="button"
           class="reflow-control reflow-icon-control reflow-compact-control"
-          title="打开局部放大镜"
-          aria-label="打开局部放大镜"
-          @click="$emit('open-magnifier', activeVisibleSourcePageUrl)"
+          :class="{'reflow-magnifier-active': magnifierActive}"
+          :title="magnifierActive ? '关闭局部放大镜' : '打开局部放大镜'"
+          :aria-label="magnifierActive ? '关闭局部放大镜' : '打开局部放大镜'"
+          @click="$emit('toggle-magnifier')"
         >
           <v-icon small>mdi-magnify</v-icon>
         </button>
@@ -97,9 +98,10 @@
           <button
             type="button"
             class="reflow-control reflow-icon-control"
-            title="打开局部放大镜"
-            aria-label="打开局部放大镜"
-            @click="$emit('open-magnifier', activeVisibleSourcePageUrl)"
+            :class="{'reflow-magnifier-active': magnifierActive}"
+            :title="magnifierActive ? '关闭局部放大镜' : '打开局部放大镜'"
+            :aria-label="magnifierActive ? '关闭局部放大镜' : '打开局部放大镜'"
+            @click="$emit('toggle-magnifier')"
           >
             <v-icon small>mdi-magnify</v-icon>
           </button>
@@ -476,6 +478,7 @@
           :key="`image-${i}`"
           :src="item.src"
           class="reflow-image-block"
+          data-reader-magnifiable="true"
           :style="imageBlockStyle(item)"
           alt=""
         />
@@ -809,6 +812,10 @@ export default Vue.extend({
       default: '',
     },
     nightDisplay: {
+      type: Boolean,
+      default: false,
+    },
+    magnifierActive: {
       type: Boolean,
       default: false,
     },
@@ -7241,7 +7248,8 @@ export default Vue.extend({
   color: currentColor !important;
 }
 
-.reflow-night-active {
+.reflow-night-active,
+.reflow-magnifier-active {
   border-color: #2563eb;
   background: #dbeafe;
   color: #1e40af;
@@ -7292,7 +7300,8 @@ export default Vue.extend({
   color: #eeeeee;
 }
 
-.reflowed-page-dark .reflow-night-active {
+.reflowed-page-dark .reflow-night-active,
+.reflowed-page-dark .reflow-magnifier-active {
   border-color: #90caf9;
   background: #e3f2fd;
   color: #0d47a1;

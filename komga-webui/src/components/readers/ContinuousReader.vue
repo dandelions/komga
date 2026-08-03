@@ -14,6 +14,7 @@
            :width="calcWidth(page)"
            :id="`page${page.number}`"
            :data-page-number="page.number"
+           data-reader-magnifiable="true"
            :style="pageStyle(page, i)"
            @load="ensureDeskewedPageUrl(page, $event)"
            v-intersect="onIntersect"

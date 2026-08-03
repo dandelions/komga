@@ -1,0 +1,156 @@
+<template>
+  <div
+    v-if="active && visible"
+    class="reader-image-magnifier"
+    :style="lensStyle"
+    aria-hidden="true"
+  >
+    <div class="reader-image-magnifier-content" :style="contentStyle" />
+  </div>
+</template>
+
+<script lang="ts">
+import Vue from 'vue'
+
+type Point = {x: number, y: number}
+type Rect = {left: number, top: number, width: number, height: number}
+
+const DESKTOP_LENS_SIZE = 184
+const MOBILE_LENS_SIZE = 148
+const MAGNIFICATION = 2.5
+const VIEWPORT_GAP = 8
+
+export default Vue.extend({
+  name: 'ReaderImageMagnifier',
+  props: {
+    active: {
+      type: Boolean,
+      default: false,
+    },
+  },
+  data: () => ({
+    visible: false,
+    lensStyle: {} as Record<string, string>,
+    contentStyle: {} as Record<string, string>,
+  }),
+  watch: {
+    active(active: boolean) {
+      if (!active) this.hide()
+    },
+  },
+  mounted() {
+    document.addEventListener('pointerdown', this.updateFromPointer, {passive: true})
+    document.addEventListener('pointermove', this.updateFromPointer, {passive: true})
+    document.addEventListener('pointerup', this.pointerEnded, {passive: true})
+    document.addEventListener('pointercancel', this.pointerEnded, {passive: true})
+    window.addEventListener('blur', this.hide)
+  },
+  destroyed() {
+    document.removeEventListener('pointerdown', this.updateFromPointer)
+    document.removeEventListener('pointermove', this.updateFromPointer)
+    document.removeEventListener('pointerup', this.pointerEnded)
+    document.removeEventListener('pointercancel', this.pointerEnded)
+    window.removeEventListener('blur', this.hide)
+  },
+  methods: {
+    updateFromPointer(event: PointerEvent) {
+      if (!this.active) return
+      const image = this.magnifiableImageAt(event.clientX, event.clientY)
+      if (!image) {
+        this.hide()
+        return
+      }
+
+      const contentRect = this.imageContentRect(image)
+      if (!this.pointInsideRect({x: event.clientX, y: event.clientY}, contentRect)) {
+        this.hide()
+        return
+      }
+
+      const lensSize = window.innerWidth < 600 ? MOBILE_LENS_SIZE : DESKTOP_LENS_SIZE
+      const radius = lensSize / 2
+      const touchOffset = event.pointerType === 'touch' ? lensSize * 0.72 : 0
+      const lensCenterX = event.clientX
+      const lensCenterY = event.clientY - touchOffset
+      const left = this.clamp(lensCenterX - radius, VIEWPORT_GAP, Math.max(VIEWPORT_GAP, window.innerWidth - lensSize - VIEWPORT_GAP))
+      const top = this.clamp(lensCenterY - radius, VIEWPORT_GAP, Math.max(VIEWPORT_GAP, window.innerHeight - lensSize - VIEWPORT_GAP))
+      const sourceX = event.clientX - contentRect.left
+      const sourceY = event.clientY - contentRect.top
+      const sourceUrl = image.currentSrc || image.src
+      const filter = window.getComputedStyle(image).filter
+
+      this.lensStyle = {
+        left: `${left}px`,
+        top: `${top}px`,
+        width: `${lensSize}px`,
+        height: `${lensSize}px`,
+      }
+      this.contentStyle = {
+        backgroundImage: `url(${JSON.stringify(sourceUrl)})`,
+        backgroundSize: `${contentRect.width * MAGNIFICATION}px ${contentRect.height * MAGNIFICATION}px`,
+        backgroundPosition: `${radius - sourceX * MAGNIFICATION}px ${radius - sourceY * MAGNIFICATION}px`,
+        filter: filter === 'none' ? '' : filter,
+      }
+      this.visible = true
+    },
+    magnifiableImageAt(x: number, y: number): HTMLImageElement | undefined {
+      return document.elementsFromPoint(x, y).find(element =>
+        element instanceof HTMLImageElement &&
+        element.dataset.readerMagnifiable === 'true' &&
+        element.complete &&
+        element.naturalWidth > 0,
+      ) as HTMLImageElement | undefined
+    },
+    imageContentRect(image: HTMLImageElement): Rect {
+      const rect = image.getBoundingClientRect()
+      const objectFit = window.getComputedStyle(image).objectFit
+      if (objectFit !== 'contain' || image.naturalWidth <= 0 || image.naturalHeight <= 0) {
+        return {left: rect.left, top: rect.top, width: rect.width, height: rect.height}
+      }
+
+      const scale = Math.min(rect.width / image.naturalWidth, rect.height / image.naturalHeight)
+      const width = image.naturalWidth * scale
+      const height = image.naturalHeight * scale
+      return {
+        left: rect.left + (rect.width - width) / 2,
+        top: rect.top + (rect.height - height) / 2,
+        width,
+        height,
+      }
+    },
+    pointInsideRect(point: Point, rect: Rect): boolean {
+      return point.x >= rect.left && point.x <= rect.left + rect.width && point.y >= rect.top && point.y <= rect.top + rect.height
+    },
+    pointerEnded(event: PointerEvent) {
+      if (event.pointerType === 'touch') this.hide()
+    },
+    hide() {
+      this.visible = false
+    },
+    clamp(value: number, min: number, max: number): number {
+      return Math.max(min, Math.min(max, value))
+    },
+  },
+})
+</script>
+
+<style scoped>
+.reader-image-magnifier {
+  position: fixed;
+  z-index: 1000;
+  overflow: hidden;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  background: #111;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.48), inset 0 0 0 1px rgba(0, 0, 0, 0.3);
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.reader-image-magnifier-content {
+  width: 100%;
+  height: 100%;
+  background-repeat: no-repeat;
+  will-change: background-position;
+}
+</style>

@@ -49,9 +49,10 @@
           <v-btn
             v-if="!activeReflowMode"
             icon
-            title="打开局部放大镜"
-            aria-label="打开局部放大镜"
-            @click="openMagnifier()"
+            :color="magnifierActive ? 'primary' : undefined"
+            :title="magnifierActive ? '关闭局部放大镜' : '打开局部放大镜'"
+            :aria-label="magnifierActive ? '关闭局部放大镜' : '打开局部放大镜'"
+            @click="toggleMagnifier"
           >
             <v-icon>mdi-magnify</v-icon>
           </v-btn>
@@ -133,11 +134,11 @@
                   </v-list-item-icon>
                   <v-list-item-title>{{ $t('bookreader.help') }}</v-list-item-title>
                 </v-list-item>
-                <v-list-item v-if="!activeReflowMode" @click="openMagnifier()">
+                <v-list-item v-if="!activeReflowMode" @click="toggleMagnifier">
                   <v-list-item-icon>
                     <v-icon>mdi-magnify</v-icon>
                   </v-list-item-icon>
-                  <v-list-item-title>局部放大镜</v-list-item-title>
+                  <v-list-item-title>{{ magnifierActive ? '关闭局部放大镜' : '局部放大镜' }}</v-list-item-title>
                 </v-list-item>
                 <v-list-item @click="showExplorer = !showExplorer">
                   <v-list-item-icon>
@@ -238,6 +239,7 @@
           :crop-rois-by-parity="reflowSettings.cropRoisByParity"
           :settings="reflowSettings.k2Settings"
           :night-display="nightDisplay"
+          :magnifier-active="magnifierActive"
           @exit-k2-reflow="exitK2ReflowMode"
           @source-previous="k2SourcePreviousPage"
           @source-next="k2SourceNextPage"
@@ -248,7 +250,7 @@
           @page-image-transfer="recordReflowAssetTransfer"
           @show-pdf-toc="openPdfToc"
           @toggle-night-display="toggleNightDisplay"
-          @open-magnifier="openMagnifier"
+          @toggle-magnifier="toggleMagnifier"
           @back-to-book="closeBook"
         />
 
@@ -297,6 +299,7 @@
           :controls-top-offset="reflowControlsTopOffset"
           :start-at-end="reflowStartAtEnd"
           :defer-reflow="reflowSetupMode"
+          :magnifier-active="magnifierActive"
           @text-scale-change="setReflowTextScale"
           @processing-mode-change="setReflowProcessingMode"
           @column-count-change="setReflowColumnCount"
@@ -325,7 +328,7 @@
           @source-next="reflowSourceNextPage"
           @show-pdf-toc="openPdfToc"
           @toggle-night-display="toggleNightDisplay"
-          @open-magnifier="openMagnifier"
+          @toggle-magnifier="toggleMagnifier"
           @toggle-reader-toolbar="toggleToolbars"
           @back-to-book="closeBook"
         />
@@ -417,6 +420,8 @@
       ></paged-reader>
     </div>
 
+    <reader-image-magnifier :active="magnifierActive" />
+
     <div v-if="readerCropMode" class="reader-crop-panel" @click.stop>
       <div class="reader-crop-toolbar">
         <v-btn small @click="cancelReaderCropMode">取消</v-btn>
@@ -462,68 +467,6 @@
         />
       </div>
     </div>
-
-    <v-dialog
-      v-model="magnifierVisible"
-      fullscreen
-      hide-overlay
-      content-class="magnifier-dialog"
-      @keydown.esc.stop="closeMagnifier"
-    >
-      <v-card class="magnifier-card">
-        <v-toolbar dense dark color="primary" class="magnifier-toolbar">
-          <v-btn icon small dark title="关闭放大镜" aria-label="关闭放大镜" @click="closeMagnifier">
-            <v-icon>mdi-close</v-icon>
-          </v-btn>
-          <v-toolbar-title class="hidden-xs-only">局部放大镜</v-toolbar-title>
-          <v-spacer />
-          <v-btn
-            icon
-            small
-            dark
-            title="缩小"
-            aria-label="缩小"
-            :disabled="magnifierScale <= 1"
-            @click="adjustMagnifierScale(-0.5)"
-          >
-            <v-icon>mdi-minus</v-icon>
-          </v-btn>
-          <span class="magnifier-scale-label">{{ magnifierScalePercent }}%</span>
-          <v-btn
-            icon
-            small
-            dark
-            title="放大"
-            aria-label="放大"
-            :disabled="magnifierScale >= 4"
-            @click="adjustMagnifierScale(0.5)"
-          >
-            <v-icon>mdi-plus</v-icon>
-          </v-btn>
-          <v-btn icon small dark title="重置缩放" aria-label="重置缩放" @click="resetMagnifier">
-            <v-icon>mdi-refresh</v-icon>
-          </v-btn>
-        </v-toolbar>
-        <div
-          class="magnifier-viewport"
-          :class="{'magnifier-viewport-dragging': magnifierDragging}"
-          @pointerdown="magnifierPointerDown"
-          @pointermove="magnifierPointerMove"
-          @pointerup="magnifierPointerUp"
-          @pointercancel="magnifierPointerUp"
-          @pointerleave="magnifierPointerUp"
-        >
-          <img
-            v-if="magnifierSourceUrl"
-            :src="magnifierSourceUrl"
-            class="magnifier-image"
-            :style="magnifierImageStyle"
-            alt=""
-            draggable="false"
-          />
-        </div>
-      </v-card>
-    </v-dialog>
 
     <thumbnail-explorer-dialog
       v-model="showExplorer"
@@ -974,6 +917,7 @@ import PagedReader from '@/components/readers/PagedReader.vue'
 import ContinuousReader from '@/components/readers/ContinuousReader.vue'
 import ReflowedPage from '@/components/readers/ReflowedPage.vue'
 import K2ReflowedPage from '@/components/readers/K2ReflowedPage.vue'
+import ReaderImageMagnifier from '@/components/readers/ReaderImageMagnifier.vue'
 import TocList from '@/components/TocList.vue'
 import {ContinuousScaleType, MarginValues, PaddingPercentage, PagedNavigationAction, PagedReaderLayout, ScaleType} from '@/types/enum-reader'
 import {
@@ -1106,6 +1050,7 @@ export default Vue.extend({
     PagedReader,
     ReflowedPage,
     K2ReflowedPage,
+    ReaderImageMagnifier,
     TocList,
     SettingsSwitch,
     SettingsSelect,
@@ -1143,13 +1088,7 @@ export default Vue.extend({
       showToolbars: false,
       showSettings: false,
       showHelp: false,
-      magnifierVisible: false,
-      magnifierSourceUrl: '',
-      magnifierScale: 1,
-      magnifierPan: {x: 0, y: 0},
-      magnifierDragging: false,
-      magnifierDragStart: {x: 0, y: 0},
-      magnifierPanStart: {x: 0, y: 0},
+      magnifierActive: false,
       landscapeDisplay: false,
       reflowSetupMode: false,
       reflowMode: false,
@@ -1491,14 +1430,6 @@ export default Vue.extend({
       }
       if (this.nightDisplay) filters.push('invert(1) hue-rotate(180deg) brightness(0.92)')
       return filters.join(' ') || 'none'
-    },
-    magnifierScalePercent(): number {
-      return Math.round(this.magnifierScale * 100)
-    },
-    magnifierImageStyle(): object {
-      return {
-        transform: `translate3d(${this.magnifierPan.x}px, ${this.magnifierPan.y}px, 0) scale(${this.magnifierScale})`,
-      }
     },
     reflowTargetWidth(): number {
       return this.$vuetify.breakpoint.width
@@ -3303,42 +3234,8 @@ export default Vue.extend({
         this.$komgaBooks.updateReadProgress(this.bookId, {page: page})
       }
     }, 50),
-    openMagnifier(pageUrl?: string) {
-      const sourceUrl = pageUrl || this.currentPage?.url
-      if (!sourceUrl) return
-      this.magnifierSourceUrl = canonicalPageImageUrl(sourceUrl)
-      this.magnifierVisible = true
-      this.resetMagnifier()
-    },
-    closeMagnifier() {
-      this.magnifierVisible = false
-      this.magnifierDragging = false
-    },
-    resetMagnifier() {
-      this.magnifierScale = 1
-      this.magnifierPan = {x: 0, y: 0}
-    },
-    adjustMagnifierScale(delta: number) {
-      this.magnifierScale = Math.max(1, Math.min(4, Number((this.magnifierScale + delta).toFixed(2))))
-      this.magnifierPan = {x: 0, y: 0}
-    },
-    magnifierPointerDown(event: PointerEvent) {
-      if (this.magnifierScale <= 1) return
-      this.magnifierDragging = true
-      this.magnifierDragStart = {x: event.clientX, y: event.clientY}
-      this.magnifierPanStart = {...this.magnifierPan}
-      const target = event.currentTarget as HTMLElement
-      if (target?.setPointerCapture) target.setPointerCapture(event.pointerId)
-    },
-    magnifierPointerMove(event: PointerEvent) {
-      if (!this.magnifierDragging) return
-      this.magnifierPan = {
-        x: this.magnifierPanStart.x + event.clientX - this.magnifierDragStart.x,
-        y: this.magnifierPanStart.y + event.clientY - this.magnifierDragStart.y,
-      }
-    },
-    magnifierPointerUp() {
-      this.magnifierDragging = false
+    toggleMagnifier() {
+      this.magnifierActive = !this.magnifierActive
     },
     downloadCurrentPage() {
       new jsFileDownloader({
@@ -3508,49 +3405,6 @@ export default Vue.extend({
   pointer-events: none;
 }
 
-.magnifier-card {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-}
-
-.magnifier-toolbar {
-  flex: 0 0 auto;
-}
-
-.magnifier-scale-label {
-  min-width: 52px;
-  text-align: center;
-  color: #fff;
-  font-size: 13px;
-}
-
-.magnifier-viewport {
-  position: relative;
-  flex: 1 1 auto;
-  overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #111;
-  cursor: grab;
-  touch-action: none;
-  user-select: none;
-}
-
-.magnifier-viewport-dragging {
-  cursor: grabbing;
-}
-
-.magnifier-image {
-  display: block;
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-  pointer-events: none;
-  user-select: none;
-  will-change: transform;
-}
 </style>
 <style>
 .html-reader::-webkit-scrollbar {
