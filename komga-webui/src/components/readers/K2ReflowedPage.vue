@@ -36,6 +36,14 @@
         <v-icon small>mdi-magnify</v-icon>
       </button>
       <template v-else>
+        <label v-if="magnifierActive" class="k2-control k2-compact">
+          <span>放大镜直径</span>
+          <select :value="magnifierDiameter" @change="setMagnifierDiameter">
+            <option value="144">小 144px</option>
+            <option value="184">中 184px</option>
+            <option value="240">大 240px</option>
+          </select>
+        </label>
         <label class="k2-control k2-wide-control">
           <span>Text</span>
           <button type="button" @click="adjustTextScale(-5)">-</button>
@@ -316,6 +324,10 @@ export default Vue.extend({
     magnifierActive: {
       type: Boolean,
       default: false,
+    },
+    magnifierDiameter: {
+      type: Number,
+      default: 184,
     },
   },
   data: () => ({
@@ -2304,6 +2316,10 @@ export default Vue.extend({
       const target = event.target as HTMLSelectElement
       this.maxColumns = Math.round(this.clampNumber(Number(target.value), 1, 4, 2))
       this.emitSettingsChange()
+    },
+    setMagnifierDiameter(event: Event) {
+      const target = event.target as HTMLSelectElement
+      this.$emit('magnifier-diameter-change', Number(target.value))
     },
     setRotation(event: Event) {
       const target = event.target as HTMLSelectElement

@@ -15,6 +15,12 @@ function loadedImage(): HTMLImageElement {
 }
 
 describe('ReaderImageMagnifier', () => {
+  test('uses the configured lens diameter', () => {
+    expect(methods.lensDiameter.call({diameter: 144})).toBe(144)
+    expect(methods.lensDiameter.call({diameter: 184})).toBe(184)
+    expect(methods.lensDiameter.call({diameter: 240})).toBe(240)
+  })
+
   test('finds only loaded reader images under the pointer', () => {
     const image = loadedImage()
     Object.defineProperty(document, 'elementsFromPoint', {

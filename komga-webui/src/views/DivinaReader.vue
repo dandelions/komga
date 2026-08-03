@@ -160,6 +160,20 @@
                 </v-list-item>
                 <v-divider/>
               </template>
+              <template v-if="magnifierActive">
+                <v-subheader>放大镜直径</v-subheader>
+                <v-list-item
+                  v-for="option in magnifierDiameterOptions"
+                  :key="`magnifier-diameter-${option.value}`"
+                  @click="setMagnifierDiameter(option.value)"
+                >
+                  <v-list-item-icon>
+                    <v-icon>{{ magnifierDiameter === option.value ? 'mdi-check-circle' : 'mdi-circle-outline' }}</v-icon>
+                  </v-list-item-icon>
+                  <v-list-item-title>{{ option.text }}</v-list-item-title>
+                </v-list-item>
+                <v-divider />
+              </template>
               <v-list-item @click="downloadCurrentPage">
                 <v-list-item-title>{{ $t('bookreader.download_current_page') }}</v-list-item-title>
               </v-list-item>
@@ -240,6 +254,7 @@
           :settings="reflowSettings.k2Settings"
           :night-display="nightDisplay"
           :magnifier-active="magnifierActive"
+          :magnifier-diameter="magnifierDiameter"
           @exit-k2-reflow="exitK2ReflowMode"
           @source-previous="k2SourcePreviousPage"
           @source-next="k2SourceNextPage"
@@ -251,6 +266,7 @@
           @show-pdf-toc="openPdfToc"
           @toggle-night-display="toggleNightDisplay"
           @toggle-magnifier="toggleMagnifier"
+          @magnifier-diameter-change="setMagnifierDiameter"
           @back-to-book="closeBook"
         />
 
@@ -300,6 +316,7 @@
           :start-at-end="reflowStartAtEnd"
           :defer-reflow="reflowSetupMode"
           :magnifier-active="magnifierActive"
+          :magnifier-diameter="magnifierDiameter"
           @text-scale-change="setReflowTextScale"
           @processing-mode-change="setReflowProcessingMode"
           @column-count-change="setReflowColumnCount"
@@ -329,6 +346,7 @@
           @show-pdf-toc="openPdfToc"
           @toggle-night-display="toggleNightDisplay"
           @toggle-magnifier="toggleMagnifier"
+          @magnifier-diameter-change="setMagnifierDiameter"
           @toggle-reader-toolbar="toggleToolbars"
           @back-to-book="closeBook"
         />
@@ -420,7 +438,7 @@
       ></paged-reader>
     </div>
 
-    <reader-image-magnifier :active="magnifierActive" />
+    <reader-image-magnifier :active="magnifierActive" :diameter="magnifierDiameter" />
 
     <div v-if="readerCropMode" class="reader-crop-panel" @click.stop>
       <div class="reader-crop-toolbar">
@@ -945,6 +963,13 @@ import {reflowPrefetchPageNumbers} from '@/functions/reflow-stream'
 
 const REFLOW_SETTINGS_STORAGE_PREFIX = 'komga.pdfReflowSettings.'
 const READER_IMAGE_SETTINGS_STORAGE_PREFIX = 'komga.readerImageSettings.'
+const MAGNIFIER_DIAMETER_STORAGE_KEY = 'komga.readerMagnifierDiameter'
+const DEFAULT_MAGNIFIER_DIAMETER = 184
+const MAGNIFIER_DIAMETER_OPTIONS = [
+  {text: '小（144 px）', value: 144},
+  {text: '中（184 px）', value: 184},
+  {text: '大（240 px）', value: 240},
+]
 const REFLOW_CACHE_BEHIND_COUNT = 2
 const REFLOW_CONTINUATION_COUNT = 4
 const REFLOW_PREFETCH_AHEAD_COUNT = 1
@@ -1089,6 +1114,8 @@ export default Vue.extend({
       showSettings: false,
       showHelp: false,
       magnifierActive: false,
+      magnifierDiameter: DEFAULT_MAGNIFIER_DIAMETER,
+      magnifierDiameterOptions: MAGNIFIER_DIAMETER_OPTIONS,
       landscapeDisplay: false,
       reflowSetupMode: false,
       reflowMode: false,
@@ -1224,6 +1251,7 @@ export default Vue.extend({
   },
   async mounted() {
     document.documentElement.classList.add('html-reader')
+    this.loadMagnifierDiameter()
 
     this.$debug('[mounted]', 'route.query:', this.$route.query)
 
@@ -3237,6 +3265,24 @@ export default Vue.extend({
     }, 50),
     toggleMagnifier() {
       this.magnifierActive = !this.magnifierActive
+    },
+    loadMagnifierDiameter() {
+      try {
+        const saved = Number(window.localStorage.getItem(MAGNIFIER_DIAMETER_STORAGE_KEY))
+        if (MAGNIFIER_DIAMETER_OPTIONS.some(option => option.value === saved)) this.magnifierDiameter = saved
+      } catch (_) {
+        this.magnifierDiameter = DEFAULT_MAGNIFIER_DIAMETER
+      }
+    },
+    setMagnifierDiameter(value: number) {
+      const diameter = Number(value)
+      if (!MAGNIFIER_DIAMETER_OPTIONS.some(option => option.value === diameter)) return
+      this.magnifierDiameter = diameter
+      try {
+        window.localStorage.setItem(MAGNIFIER_DIAMETER_STORAGE_KEY, String(diameter))
+      } catch (_) {
+        // The selected size remains active for this reader session.
+      }
     },
     downloadCurrentPage() {
       new jsFileDownloader({

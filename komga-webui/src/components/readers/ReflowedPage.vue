@@ -105,6 +105,14 @@
           >
             <v-icon small>mdi-magnify</v-icon>
           </button>
+          <label v-if="magnifierActive" class="reflow-processing-control">
+            <span>直径</span>
+            <select :value="magnifierDiameter" @change="setMagnifierDiameter">
+              <option value="144">小 144px</option>
+              <option value="184">中 184px</option>
+              <option value="240">大 240px</option>
+            </select>
+          </label>
           <div class="reflow-navigation-controls">
             <button type="button" class="reflow-control reflow-nav-control reflow-exit-control" @click="exitReflow">
               <v-icon small>mdi-exit-to-app</v-icon>
@@ -818,6 +826,10 @@ export default Vue.extend({
     magnifierActive: {
       type: Boolean,
       default: false,
+    },
+    magnifierDiameter: {
+      type: Number,
+      default: 184,
     },
     serverReflow: {
       type: Boolean,
@@ -6294,6 +6306,10 @@ export default Vue.extend({
     setProcessingMode(event: Event) {
       const target = event.target as HTMLSelectElement
       this.$emit('processing-mode-change', target.value === 'server' ? 'server' : 'local')
+    },
+    setMagnifierDiameter(event: Event) {
+      const target = event.target as HTMLSelectElement
+      this.$emit('magnifier-diameter-change', Number(target.value))
     },
     setRotation(event: Event) {
       const target = event.target as HTMLSelectElement

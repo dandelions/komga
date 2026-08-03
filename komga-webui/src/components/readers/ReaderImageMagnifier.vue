@@ -15,8 +15,8 @@ import Vue from 'vue'
 type Point = {x: number, y: number}
 type Rect = {left: number, top: number, width: number, height: number}
 
-const DESKTOP_LENS_SIZE = 184
-const MOBILE_LENS_SIZE = 148
+const DEFAULT_LENS_DIAMETER = 184
+const MIN_LENS_DIAMETER = 96
 const MAGNIFICATION = 2.5
 const VIEWPORT_GAP = 8
 
@@ -26,6 +26,10 @@ export default Vue.extend({
     active: {
       type: Boolean,
       default: false,
+    },
+    diameter: {
+      type: Number,
+      default: DEFAULT_LENS_DIAMETER,
     },
   },
   data: () => ({
@@ -110,7 +114,7 @@ export default Vue.extend({
         return
       }
 
-      const lensSize = window.innerWidth < 600 ? MOBILE_LENS_SIZE : DESKTOP_LENS_SIZE
+      const lensSize = this.lensDiameter()
       const radius = lensSize / 2
       const lensCenterX = clientX
       const lensCenterY = clientY
@@ -177,6 +181,11 @@ export default Vue.extend({
     },
     clamp(value: number, min: number, max: number): number {
       return Math.max(min, Math.min(max, value))
+    },
+    lensDiameter(): number {
+      const configured = Number.isFinite(this.diameter) ? this.diameter : DEFAULT_LENS_DIAMETER
+      const viewportLimit = Math.max(MIN_LENS_DIAMETER, Math.min(window.innerWidth, window.innerHeight) - VIEWPORT_GAP * 2)
+      return Math.min(Math.max(MIN_LENS_DIAMETER, configured), viewportLimit)
     },
   },
 })

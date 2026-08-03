@@ -30,4 +30,14 @@ describe('DivinaReader image magnifier', () => {
     reader.magnifierActive = false
     expect(computed.readerSwipeEnabled.call(reader)).toBe(true)
   })
+
+  test('stores a selected magnifier diameter', () => {
+    const reader = {magnifierDiameter: 184}
+
+    methods.setMagnifierDiameter.call(reader, 240)
+
+    expect(reader.magnifierDiameter).toBe(240)
+    expect(window.localStorage.getItem('komga.readerMagnifierDiameter')).toBe('240')
+    window.localStorage.removeItem('komga.readerMagnifierDiameter')
+  })
 })
