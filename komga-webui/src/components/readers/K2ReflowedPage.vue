@@ -33,7 +33,7 @@
         :aria-label="magnifierActive ? '关闭局部放大镜' : '打开局部放大镜'"
         @click="$emit('toggle-magnifier')"
       >
-        <v-icon small>mdi-magnify</v-icon>
+        <v-icon small>mdi-magnify-plus-outline</v-icon>
       </button>
       <template v-else>
         <label v-if="magnifierActive" class="k2-control k2-compact">
@@ -135,7 +135,7 @@
           :aria-label="magnifierActive ? '关闭局部放大镜' : '打开局部放大镜'"
           @click="$emit('toggle-magnifier')"
         >
-          <v-icon small>mdi-magnify</v-icon>
+          <v-icon small>mdi-magnify-plus-outline</v-icon>
         </button>
         <button type="button" class="k2-action k2-apply-action" @click="applyK2Reflow">
           重排

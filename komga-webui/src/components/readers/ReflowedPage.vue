@@ -41,7 +41,7 @@
           :aria-label="magnifierActive ? '关闭局部放大镜' : '打开局部放大镜'"
           @click="$emit('toggle-magnifier')"
         >
-          <v-icon small>mdi-magnify</v-icon>
+          <v-icon small>mdi-magnify-plus-outline</v-icon>
         </button>
         <button type="button" class="reflow-control reflow-icon-control reflow-compact-control" title="目录" aria-label="目录" @click="$emit('show-pdf-toc')">
           <v-icon small>mdi-menu</v-icon>
@@ -103,7 +103,7 @@
             :aria-label="magnifierActive ? '关闭局部放大镜' : '打开局部放大镜'"
             @click="$emit('toggle-magnifier')"
           >
-            <v-icon small>mdi-magnify</v-icon>
+            <v-icon small>mdi-magnify-plus-outline</v-icon>
           </button>
           <label v-if="magnifierActive" class="reflow-processing-control">
             <span>直径</span>

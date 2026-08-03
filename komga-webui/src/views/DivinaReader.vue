@@ -54,7 +54,7 @@
             :aria-label="magnifierActive ? '关闭局部放大镜' : '打开局部放大镜'"
             @click="toggleMagnifier"
           >
-            <v-icon>mdi-magnify</v-icon>
+            <v-icon>mdi-magnify-plus-outline</v-icon>
           </v-btn>
 
           <v-btn
@@ -136,7 +136,7 @@
                 </v-list-item>
                 <v-list-item v-if="!activeReflowMode" @click="toggleMagnifier">
                   <v-list-item-icon>
-                    <v-icon>mdi-magnify</v-icon>
+                    <v-icon>mdi-magnify-plus-outline</v-icon>
                   </v-list-item-icon>
                   <v-list-item-title>{{ magnifierActive ? '关闭局部放大镜' : '局部放大镜' }}</v-list-item-title>
                 </v-list-item>
