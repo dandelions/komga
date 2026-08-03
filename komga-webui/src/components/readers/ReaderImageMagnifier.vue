@@ -36,6 +36,7 @@ export default Vue.extend({
   data: () => ({
     visible: false,
     touchTracking: false,
+    pointerTouchTracking: false,
     lensStyle: {} as Record<string, string>,
     contentStyle: {} as Record<string, string>,
   }),
@@ -44,6 +45,7 @@ export default Vue.extend({
       this.setGestureSuppression(active)
       if (!active) {
         this.touchTracking = false
+        this.pointerTouchTracking = false
         this.hide()
       }
     },
@@ -54,10 +56,10 @@ export default Vue.extend({
     document.addEventListener('pointermove', this.updateFromPointer, {passive: true})
     document.addEventListener('pointerup', this.pointerEnded, {passive: true})
     document.addEventListener('pointercancel', this.pointerEnded, {passive: true})
-    document.addEventListener('touchstart', this.updateFromTouch, {passive: false})
-    document.addEventListener('touchmove', this.updateFromTouch, {passive: false})
-    document.addEventListener('touchend', this.touchEnded, {passive: true})
-    document.addEventListener('touchcancel', this.touchEnded, {passive: true})
+    document.addEventListener('touchstart', this.updateFromTouch, {passive: false, capture: true})
+    document.addEventListener('touchmove', this.updateFromTouch, {passive: false, capture: true})
+    document.addEventListener('touchend', this.touchEnded, {passive: true, capture: true})
+    document.addEventListener('touchcancel', this.touchEnded, {passive: true, capture: true})
     document.addEventListener('contextmenu', this.preventLongPressAction, {capture: true})
     document.addEventListener('dragstart', this.preventLongPressAction, {capture: true})
     document.addEventListener('selectstart', this.preventLongPressAction, {capture: true})
@@ -69,10 +71,10 @@ export default Vue.extend({
     document.removeEventListener('pointermove', this.updateFromPointer)
     document.removeEventListener('pointerup', this.pointerEnded)
     document.removeEventListener('pointercancel', this.pointerEnded)
-    document.removeEventListener('touchstart', this.updateFromTouch)
-    document.removeEventListener('touchmove', this.updateFromTouch)
-    document.removeEventListener('touchend', this.touchEnded)
-    document.removeEventListener('touchcancel', this.touchEnded)
+    document.removeEventListener('touchstart', this.updateFromTouch, true)
+    document.removeEventListener('touchmove', this.updateFromTouch, true)
+    document.removeEventListener('touchend', this.touchEnded, true)
+    document.removeEventListener('touchcancel', this.touchEnded, true)
     document.removeEventListener('contextmenu', this.preventLongPressAction, true)
     document.removeEventListener('dragstart', this.preventLongPressAction, true)
     document.removeEventListener('selectstart', this.preventLongPressAction, true)
@@ -88,7 +90,14 @@ export default Vue.extend({
       event.stopPropagation()
     },
     updateFromPointer(event: PointerEvent) {
-      if (event.pointerType === 'touch') return
+      if (event.pointerType === 'touch') {
+        if (event.type === 'pointerdown') {
+          this.pointerTouchTracking = this.active && Boolean(this.magnifiableImageAt(event.clientX, event.clientY))
+        }
+        if (!this.pointerTouchTracking) return
+        this.updateAtPoint(event.clientX, event.clientY, true)
+        return
+      }
       this.updateAtPoint(event.clientX, event.clientY)
     },
     updateFromTouch(event: TouchEvent) {
@@ -172,7 +181,10 @@ export default Vue.extend({
       return point.x >= rect.left && point.x <= rect.left + rect.width && point.y >= rect.top && point.y <= rect.top + rect.height
     },
     pointerEnded(event: PointerEvent) {
-      if (event.pointerType === 'touch') this.hide()
+      if (event.pointerType === 'touch') {
+        this.pointerTouchTracking = false
+        this.hide()
+      }
     },
     touchEnded() {
       this.touchTracking = false
@@ -219,5 +231,11 @@ export default Vue.extend({
   -webkit-touch-callout: none;
   touch-action: none;
   user-select: none;
+}
+
+.reader-magnifier-gesture-active .reflow-click-left,
+.reader-magnifier-gesture-active .reflow-click-center,
+.reader-magnifier-gesture-active .reflow-click-right {
+  touch-action: none;
 }
 </style>

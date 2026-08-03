@@ -126,6 +126,34 @@ describe('ReaderImageMagnifier', () => {
     expect(preventDefault).toHaveBeenCalledTimes(2)
   })
 
+  test('applies the touch offset to pointer events over reflow images', () => {
+    const image = loadedImage()
+    image.classList.add('reflow-image-block')
+    const updateAtPoint = jest.fn()
+    const magnifier = {
+      active: true,
+      pointerTouchTracking: false,
+      magnifiableImageAt: jest.fn(() => image),
+      updateAtPoint,
+    }
+
+    methods.updateFromPointer.call(magnifier, {
+      type: 'pointerdown',
+      pointerType: 'touch',
+      clientX: 220,
+      clientY: 310,
+    })
+    methods.updateFromPointer.call(magnifier, {
+      type: 'pointermove',
+      pointerType: 'touch',
+      clientX: 228,
+      clientY: 318,
+    })
+
+    expect(updateAtPoint).toHaveBeenNthCalledWith(1, 220, 310, true)
+    expect(updateAtPoint).toHaveBeenNthCalledWith(2, 228, 318, true)
+  })
+
   test('places the touch lens above-left while keeping finger content centered', () => {
     const image = loadedImage()
     image.getBoundingClientRect = () => ({
