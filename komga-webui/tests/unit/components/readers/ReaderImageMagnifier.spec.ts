@@ -101,8 +101,38 @@ describe('ReaderImageMagnifier', () => {
       preventDefault,
     })
 
-    expect(updateAtPoint).toHaveBeenCalledWith(42, 73, 'touch')
+    expect(updateAtPoint).toHaveBeenCalledWith(42, 73)
     expect(preventDefault).not.toHaveBeenCalled()
+  })
+
+  test('keeps the magnified source aligned when the lens reaches a viewport edge', () => {
+    const image = loadedImage()
+    image.getBoundingClientRect = () => ({
+      left: 0,
+      top: 0,
+      width: 200,
+      height: 100,
+      right: 200,
+      bottom: 100,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    })
+    Object.defineProperty(document, 'elementsFromPoint', {
+      configurable: true,
+      value: jest.fn(() => [image]),
+    })
+    const magnifier = Object.assign({}, methods, {
+      active: true,
+      visible: false,
+      lensStyle: {},
+      contentStyle: {},
+    })
+
+    methods.updateAtPoint.call(magnifier, 20, 20)
+
+    expect(magnifier.lensStyle).toMatchObject({left: '8px', top: '8px'})
+    expect(magnifier.contentStyle.backgroundPosition).toBe('-38px -38px')
   })
 
   test('blocks other long-press actions only while active', () => {

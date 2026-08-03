@@ -80,14 +80,14 @@ export default Vue.extend({
     },
     updateFromPointer(event: PointerEvent) {
       if (event.pointerType === 'touch') return
-      this.updateAtPoint(event.clientX, event.clientY, event.pointerType)
+      this.updateAtPoint(event.clientX, event.clientY)
     },
     updateFromTouch(event: TouchEvent) {
       const touch = event.touches[0]
       if (!touch) return
-      this.updateAtPoint(touch.clientX, touch.clientY, 'touch')
+      this.updateAtPoint(touch.clientX, touch.clientY)
     },
-    updateAtPoint(clientX: number, clientY: number, pointerType: string) {
+    updateAtPoint(clientX: number, clientY: number) {
       if (!this.active) return
       const image = this.magnifiableImageAt(clientX, clientY)
       if (!image) {
@@ -103,13 +103,14 @@ export default Vue.extend({
 
       const lensSize = window.innerWidth < 600 ? MOBILE_LENS_SIZE : DESKTOP_LENS_SIZE
       const radius = lensSize / 2
-      const touchOffset = pointerType === 'touch' ? lensSize * 0.72 : 0
       const lensCenterX = clientX
-      const lensCenterY = clientY - touchOffset
+      const lensCenterY = clientY
       const left = this.clamp(lensCenterX - radius, VIEWPORT_GAP, Math.max(VIEWPORT_GAP, window.innerWidth - lensSize - VIEWPORT_GAP))
       const top = this.clamp(lensCenterY - radius, VIEWPORT_GAP, Math.max(VIEWPORT_GAP, window.innerHeight - lensSize - VIEWPORT_GAP))
       const sourceX = clientX - contentRect.left
       const sourceY = clientY - contentRect.top
+      const focusX = clientX - left
+      const focusY = clientY - top
       const sourceUrl = image.currentSrc || image.src
       const filter = window.getComputedStyle(image).filter
 
@@ -122,7 +123,7 @@ export default Vue.extend({
       this.contentStyle = {
         backgroundImage: `url(${JSON.stringify(sourceUrl)})`,
         backgroundSize: `${contentRect.width * MAGNIFICATION}px ${contentRect.height * MAGNIFICATION}px`,
-        backgroundPosition: `${radius - sourceX * MAGNIFICATION}px ${radius - sourceY * MAGNIFICATION}px`,
+        backgroundPosition: `${focusX - sourceX * MAGNIFICATION}px ${focusY - sourceY * MAGNIFICATION}px`,
         filter: filter === 'none' ? '' : filter,
       }
       this.visible = true
