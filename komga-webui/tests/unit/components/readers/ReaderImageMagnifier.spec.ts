@@ -121,9 +121,40 @@ describe('ReaderImageMagnifier', () => {
       preventDefault,
     })
 
-    expect(updateAtPoint).toHaveBeenNthCalledWith(1, 42, 73)
-    expect(updateAtPoint).toHaveBeenNthCalledWith(2, 48, 81)
+    expect(updateAtPoint).toHaveBeenNthCalledWith(1, 42, 73, true)
+    expect(updateAtPoint).toHaveBeenNthCalledWith(2, 48, 81, true)
     expect(preventDefault).toHaveBeenCalledTimes(2)
+  })
+
+  test('places the touch lens above-left while keeping finger content centered', () => {
+    const image = loadedImage()
+    image.getBoundingClientRect = () => ({
+      left: 0,
+      top: 0,
+      width: 500,
+      height: 500,
+      right: 500,
+      bottom: 500,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    })
+    Object.defineProperty(document, 'elementsFromPoint', {
+      configurable: true,
+      value: jest.fn(() => [image]),
+    })
+    const magnifier = Object.assign({}, methods, {
+      active: true,
+      visible: false,
+      diameter: 184,
+      lensStyle: {},
+      contentStyle: {},
+    })
+
+    methods.updateAtPoint.call(magnifier, 300, 300, true)
+
+    expect(magnifier.lensStyle).toMatchObject({left: '101px', top: '101px'})
+    expect(magnifier.contentStyle.backgroundPosition).toBe('-658px -658px')
   })
 
   test('does not suppress scrolling when touch starts outside an image', () => {

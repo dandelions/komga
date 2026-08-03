@@ -18,6 +18,7 @@ type Rect = {left: number, top: number, width: number, height: number}
 const DEFAULT_LENS_DIAMETER = 184
 const MIN_LENS_DIAMETER = 96
 const MAGNIFICATION = 2.5
+const TOUCH_LENS_OFFSET_RATIO = 0.58
 const VIEWPORT_GAP = 8
 
 export default Vue.extend({
@@ -98,9 +99,9 @@ export default Vue.extend({
       }
       if (!this.touchTracking) return
       if (event.cancelable) event.preventDefault()
-      this.updateAtPoint(touch.clientX, touch.clientY)
+      this.updateAtPoint(touch.clientX, touch.clientY, true)
     },
-    updateAtPoint(clientX: number, clientY: number) {
+    updateAtPoint(clientX: number, clientY: number, offsetForTouch: boolean = false) {
       if (!this.active) return
       const image = this.magnifiableImageAt(clientX, clientY)
       if (!image) {
@@ -116,14 +117,15 @@ export default Vue.extend({
 
       const lensSize = this.lensDiameter()
       const radius = lensSize / 2
-      const lensCenterX = clientX
-      const lensCenterY = clientY
+      const touchOffset = offsetForTouch ? Math.round(lensSize * TOUCH_LENS_OFFSET_RATIO) : 0
+      const lensCenterX = clientX - touchOffset
+      const lensCenterY = clientY - touchOffset
       const left = this.clamp(lensCenterX - radius, VIEWPORT_GAP, Math.max(VIEWPORT_GAP, window.innerWidth - lensSize - VIEWPORT_GAP))
       const top = this.clamp(lensCenterY - radius, VIEWPORT_GAP, Math.max(VIEWPORT_GAP, window.innerHeight - lensSize - VIEWPORT_GAP))
       const sourceX = clientX - contentRect.left
       const sourceY = clientY - contentRect.top
-      const focusX = clientX - left
-      const focusY = clientY - top
+      const focusX = offsetForTouch ? radius : clientX - left
+      const focusY = offsetForTouch ? radius : clientY - top
       const sourceUrl = image.currentSrc || image.src
       const filter = window.getComputedStyle(image).filter
 
