@@ -29,21 +29,13 @@
         type="button"
         class="k2-action k2-collapsed-action"
         :class="{'k2-magnifier-active': magnifierActive}"
-        :title="magnifierActive ? '关闭局部放大镜' : '打开局部放大镜'"
-        :aria-label="magnifierActive ? '关闭局部放大镜' : '打开局部放大镜'"
+        :title="magnifierActive ? '关闭局部放大镜' : '选择放大镜直径'"
+        :aria-label="magnifierActive ? '关闭局部放大镜' : '选择放大镜直径'"
         @click="$emit('toggle-magnifier')"
       >
-        <v-icon small>mdi-magnify-plus-outline</v-icon>
+        <v-icon small>{{ magnifierActive ? 'mdi-magnify-close' : 'mdi-magnify-plus-outline' }}</v-icon>
       </button>
       <template v-else>
-        <label v-if="magnifierActive" class="k2-control k2-compact">
-          <span>放大镜直径</span>
-          <select :value="magnifierDiameter" @change="setMagnifierDiameter">
-            <option value="144">小 144px</option>
-            <option value="184">中 184px</option>
-            <option value="240">大 240px</option>
-          </select>
-        </label>
         <label class="k2-control k2-wide-control">
           <span>Text</span>
           <button type="button" @click="adjustTextScale(-5)">-</button>
@@ -131,11 +123,11 @@
           type="button"
           class="k2-action"
           :class="{'k2-magnifier-active': magnifierActive}"
-          :title="magnifierActive ? '关闭局部放大镜' : '打开局部放大镜'"
-          :aria-label="magnifierActive ? '关闭局部放大镜' : '打开局部放大镜'"
+          :title="magnifierActive ? '关闭局部放大镜' : '选择放大镜直径'"
+          :aria-label="magnifierActive ? '关闭局部放大镜' : '选择放大镜直径'"
           @click="$emit('toggle-magnifier')"
         >
-          <v-icon small>mdi-magnify-plus-outline</v-icon>
+          <v-icon small>{{ magnifierActive ? 'mdi-magnify-close' : 'mdi-magnify-plus-outline' }}</v-icon>
         </button>
         <button type="button" class="k2-action k2-apply-action" @click="applyK2Reflow">
           重排
@@ -324,10 +316,6 @@ export default Vue.extend({
     magnifierActive: {
       type: Boolean,
       default: false,
-    },
-    magnifierDiameter: {
-      type: Number,
-      default: 184,
     },
   },
   data: () => ({
@@ -2316,10 +2304,6 @@ export default Vue.extend({
       const target = event.target as HTMLSelectElement
       this.maxColumns = Math.round(this.clampNumber(Number(target.value), 1, 4, 2))
       this.emitSettingsChange()
-    },
-    setMagnifierDiameter(event: Event) {
-      const target = event.target as HTMLSelectElement
-      this.$emit('magnifier-diameter-change', Number(target.value))
     },
     setRotation(event: Event) {
       const target = event.target as HTMLSelectElement

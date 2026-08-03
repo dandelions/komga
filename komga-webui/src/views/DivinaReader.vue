@@ -50,11 +50,11 @@
             v-if="!activeReflowMode"
             icon
             :color="magnifierActive ? 'primary' : undefined"
-            :title="magnifierActive ? '关闭局部放大镜' : '打开局部放大镜'"
-            :aria-label="magnifierActive ? '关闭局部放大镜' : '打开局部放大镜'"
+            :title="magnifierActive ? '关闭局部放大镜' : '选择放大镜直径'"
+            :aria-label="magnifierActive ? '关闭局部放大镜' : '选择放大镜直径'"
             @click="toggleMagnifier"
           >
-            <v-icon>mdi-magnify-plus-outline</v-icon>
+            <v-icon>{{ magnifierActive ? 'mdi-magnify-close' : 'mdi-magnify-plus-outline' }}</v-icon>
           </v-btn>
 
           <v-btn
@@ -136,9 +136,9 @@
                 </v-list-item>
                 <v-list-item v-if="!activeReflowMode" @click="toggleMagnifier">
                   <v-list-item-icon>
-                    <v-icon>mdi-magnify-plus-outline</v-icon>
+                    <v-icon>{{ magnifierActive ? 'mdi-magnify-close' : 'mdi-magnify-plus-outline' }}</v-icon>
                   </v-list-item-icon>
-                  <v-list-item-title>{{ magnifierActive ? '关闭局部放大镜' : '局部放大镜' }}</v-list-item-title>
+                  <v-list-item-title>{{ magnifierActive ? '关闭局部放大镜' : '选择放大镜直径' }}</v-list-item-title>
                 </v-list-item>
                 <v-list-item @click="showExplorer = !showExplorer">
                   <v-list-item-icon>
@@ -159,20 +159,6 @@
                   <v-list-item-title>{{ $t('bookreader.reader_settings') }}</v-list-item-title>
                 </v-list-item>
                 <v-divider/>
-              </template>
-              <template v-if="magnifierActive">
-                <v-subheader>放大镜直径</v-subheader>
-                <v-list-item
-                  v-for="option in magnifierDiameterOptions"
-                  :key="`magnifier-diameter-${option.value}`"
-                  @click="setMagnifierDiameter(option.value)"
-                >
-                  <v-list-item-icon>
-                    <v-icon>{{ magnifierDiameter === option.value ? 'mdi-check-circle' : 'mdi-circle-outline' }}</v-icon>
-                  </v-list-item-icon>
-                  <v-list-item-title>{{ option.text }}</v-list-item-title>
-                </v-list-item>
-                <v-divider />
               </template>
               <v-list-item @click="downloadCurrentPage">
                 <v-list-item-title>{{ $t('bookreader.download_current_page') }}</v-list-item-title>
@@ -254,7 +240,6 @@
           :settings="reflowSettings.k2Settings"
           :night-display="nightDisplay"
           :magnifier-active="magnifierActive"
-          :magnifier-diameter="magnifierDiameter"
           @exit-k2-reflow="exitK2ReflowMode"
           @source-previous="k2SourcePreviousPage"
           @source-next="k2SourceNextPage"
@@ -266,7 +251,6 @@
           @show-pdf-toc="openPdfToc"
           @toggle-night-display="toggleNightDisplay"
           @toggle-magnifier="toggleMagnifier"
-          @magnifier-diameter-change="setMagnifierDiameter"
           @back-to-book="closeBook"
         />
 
@@ -316,7 +300,6 @@
           :start-at-end="reflowStartAtEnd"
           :defer-reflow="reflowSetupMode"
           :magnifier-active="magnifierActive"
-          :magnifier-diameter="magnifierDiameter"
           @text-scale-change="setReflowTextScale"
           @processing-mode-change="setReflowProcessingMode"
           @column-count-change="setReflowColumnCount"
@@ -346,7 +329,6 @@
           @show-pdf-toc="openPdfToc"
           @toggle-night-display="toggleNightDisplay"
           @toggle-magnifier="toggleMagnifier"
-          @magnifier-diameter-change="setMagnifierDiameter"
           @toggle-reader-toolbar="toggleToolbars"
           @back-to-book="closeBook"
         />
@@ -439,6 +421,28 @@
     </div>
 
     <reader-image-magnifier :active="magnifierActive" :diameter="magnifierDiameter" />
+
+    <v-dialog v-model="magnifierDiameterDialog" max-width="360">
+      <v-card>
+        <v-card-title class="text-subtitle-1">选择放大镜直径</v-card-title>
+        <v-list>
+          <v-list-item
+            v-for="option in magnifierDiameterOptions"
+            :key="`magnifier-dialog-diameter-${option.value}`"
+            @click="activateMagnifier(option.value)"
+          >
+            <v-list-item-icon>
+              <v-icon>{{ magnifierDiameter === option.value ? 'mdi-check-circle' : 'mdi-circle-outline' }}</v-icon>
+            </v-list-item-icon>
+            <v-list-item-title>{{ option.text }}</v-list-item-title>
+          </v-list-item>
+        </v-list>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn text @click="magnifierDiameterDialog = false">取消</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
 
     <div v-if="readerCropMode" class="reader-crop-panel" @click.stop>
       <div class="reader-crop-toolbar">
@@ -1114,6 +1118,7 @@ export default Vue.extend({
       showSettings: false,
       showHelp: false,
       magnifierActive: false,
+      magnifierDiameterDialog: false,
       magnifierDiameter: DEFAULT_MAGNIFIER_DIAMETER,
       magnifierDiameterOptions: MAGNIFIER_DIAMETER_OPTIONS,
       landscapeDisplay: false,
@@ -3264,7 +3269,18 @@ export default Vue.extend({
       }
     }, 50),
     toggleMagnifier() {
-      this.magnifierActive = !this.magnifierActive
+      if (this.magnifierActive) {
+        this.magnifierActive = false
+        this.magnifierDiameterDialog = false
+        return
+      }
+      this.magnifierDiameterDialog = true
+    },
+    activateMagnifier(diameter: number) {
+      if (!MAGNIFIER_DIAMETER_OPTIONS.some(option => option.value === Number(diameter))) return
+      this.setMagnifierDiameter(diameter)
+      this.magnifierDiameterDialog = false
+      this.magnifierActive = true
     },
     loadMagnifierDiameter() {
       try {

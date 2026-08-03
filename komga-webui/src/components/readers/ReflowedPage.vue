@@ -37,11 +37,11 @@
           type="button"
           class="reflow-control reflow-icon-control reflow-compact-control"
           :class="{'reflow-magnifier-active': magnifierActive}"
-          :title="magnifierActive ? '关闭局部放大镜' : '打开局部放大镜'"
-          :aria-label="magnifierActive ? '关闭局部放大镜' : '打开局部放大镜'"
+          :title="magnifierActive ? '关闭局部放大镜' : '选择放大镜直径'"
+          :aria-label="magnifierActive ? '关闭局部放大镜' : '选择放大镜直径'"
           @click="$emit('toggle-magnifier')"
         >
-          <v-icon small>mdi-magnify-plus-outline</v-icon>
+          <v-icon small>{{ magnifierActive ? 'mdi-magnify-close' : 'mdi-magnify-plus-outline' }}</v-icon>
         </button>
         <button type="button" class="reflow-control reflow-icon-control reflow-compact-control" title="目录" aria-label="目录" @click="$emit('show-pdf-toc')">
           <v-icon small>mdi-menu</v-icon>
@@ -99,20 +99,12 @@
             type="button"
             class="reflow-control reflow-icon-control"
             :class="{'reflow-magnifier-active': magnifierActive}"
-            :title="magnifierActive ? '关闭局部放大镜' : '打开局部放大镜'"
-            :aria-label="magnifierActive ? '关闭局部放大镜' : '打开局部放大镜'"
+            :title="magnifierActive ? '关闭局部放大镜' : '选择放大镜直径'"
+            :aria-label="magnifierActive ? '关闭局部放大镜' : '选择放大镜直径'"
             @click="$emit('toggle-magnifier')"
           >
-            <v-icon small>mdi-magnify-plus-outline</v-icon>
+            <v-icon small>{{ magnifierActive ? 'mdi-magnify-close' : 'mdi-magnify-plus-outline' }}</v-icon>
           </button>
-          <label v-if="magnifierActive" class="reflow-processing-control">
-            <span>直径</span>
-            <select :value="magnifierDiameter" @change="setMagnifierDiameter">
-              <option value="144">小 144px</option>
-              <option value="184">中 184px</option>
-              <option value="240">大 240px</option>
-            </select>
-          </label>
           <div class="reflow-navigation-controls">
             <button type="button" class="reflow-control reflow-nav-control reflow-exit-control" @click="exitReflow">
               <v-icon small>mdi-exit-to-app</v-icon>
@@ -826,10 +818,6 @@ export default Vue.extend({
     magnifierActive: {
       type: Boolean,
       default: false,
-    },
-    magnifierDiameter: {
-      type: Number,
-      default: 184,
     },
     serverReflow: {
       type: Boolean,
@@ -6306,10 +6294,6 @@ export default Vue.extend({
     setProcessingMode(event: Event) {
       const target = event.target as HTMLSelectElement
       this.$emit('processing-mode-change', target.value === 'server' ? 'server' : 'local')
-    },
-    setMagnifierDiameter(event: Event) {
-      const target = event.target as HTMLSelectElement
-      this.$emit('magnifier-diameter-change', Number(target.value))
     },
     setRotation(event: Event) {
       const target = event.target as HTMLSelectElement

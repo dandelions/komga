@@ -8,14 +8,32 @@ const methods = (DivinaReader as any).options.methods
 const computed = (DivinaReader as any).options.computed
 
 describe('DivinaReader image magnifier', () => {
-  test('toggles the in-page magnifier', () => {
-    const reader = {magnifierActive: false}
-
-    methods.toggleMagnifier.call(reader)
-    expect(reader.magnifierActive).toBe(true)
+  test('opens the diameter selector and closes an active magnifier', () => {
+    const reader = {magnifierActive: false, magnifierDiameterDialog: false}
 
     methods.toggleMagnifier.call(reader)
     expect(reader.magnifierActive).toBe(false)
+    expect(reader.magnifierDiameterDialog).toBe(true)
+
+    reader.magnifierActive = true
+    methods.toggleMagnifier.call(reader)
+    expect(reader.magnifierActive).toBe(false)
+    expect(reader.magnifierDiameterDialog).toBe(false)
+  })
+
+  test('activates the magnifier with the selected diameter', () => {
+    const reader = Object.assign({}, methods, {
+      magnifierActive: false,
+      magnifierDiameterDialog: true,
+      magnifierDiameter: 184,
+    })
+
+    methods.activateMagnifier.call(reader, 144)
+
+    expect(reader.magnifierActive).toBe(true)
+    expect(reader.magnifierDiameterDialog).toBe(false)
+    expect(reader.magnifierDiameter).toBe(144)
+    window.localStorage.removeItem('komga.readerMagnifierDiameter')
   })
 
   test('disables swipe page turning while the magnifier is active', () => {
