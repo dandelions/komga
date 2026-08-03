@@ -35,10 +35,12 @@ export default Vue.extend({
   }),
   watch: {
     active(active: boolean) {
+      this.setGestureSuppression(active)
       if (!active) this.hide()
     },
   },
   mounted() {
+    this.setGestureSuppression(this.active)
     document.addEventListener('pointerdown', this.updateFromPointer, {passive: true})
     document.addEventListener('pointermove', this.updateFromPointer, {passive: true})
     document.addEventListener('pointerup', this.pointerEnded, {passive: true})
@@ -47,9 +49,13 @@ export default Vue.extend({
     document.addEventListener('touchmove', this.updateFromTouch, {passive: true})
     document.addEventListener('touchend', this.touchEnded, {passive: true})
     document.addEventListener('touchcancel', this.touchEnded, {passive: true})
+    document.addEventListener('contextmenu', this.preventLongPressAction, {capture: true})
+    document.addEventListener('dragstart', this.preventLongPressAction, {capture: true})
+    document.addEventListener('selectstart', this.preventLongPressAction, {capture: true})
     window.addEventListener('blur', this.hide)
   },
   destroyed() {
+    this.setGestureSuppression(false)
     document.removeEventListener('pointerdown', this.updateFromPointer)
     document.removeEventListener('pointermove', this.updateFromPointer)
     document.removeEventListener('pointerup', this.pointerEnded)
@@ -58,9 +64,20 @@ export default Vue.extend({
     document.removeEventListener('touchmove', this.updateFromTouch)
     document.removeEventListener('touchend', this.touchEnded)
     document.removeEventListener('touchcancel', this.touchEnded)
+    document.removeEventListener('contextmenu', this.preventLongPressAction, true)
+    document.removeEventListener('dragstart', this.preventLongPressAction, true)
+    document.removeEventListener('selectstart', this.preventLongPressAction, true)
     window.removeEventListener('blur', this.hide)
   },
   methods: {
+    setGestureSuppression(active: boolean) {
+      document.documentElement.classList.toggle('reader-magnifier-gesture-active', active)
+    },
+    preventLongPressAction(event: Event) {
+      if (!this.active) return
+      event.preventDefault()
+      event.stopPropagation()
+    },
     updateFromPointer(event: PointerEvent) {
       if (event.pointerType === 'touch') return
       this.updateAtPoint(event.clientX, event.clientY, event.pointerType)
@@ -172,5 +189,12 @@ export default Vue.extend({
   height: 100%;
   background-repeat: no-repeat;
   will-change: background-position;
+}
+</style>
+
+<style>
+.reader-magnifier-gesture-active [data-reader-magnifiable="true"] {
+  -webkit-touch-callout: none;
+  user-select: none;
 }
 </style>

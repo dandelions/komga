@@ -104,4 +104,19 @@ describe('ReaderImageMagnifier', () => {
     expect(updateAtPoint).toHaveBeenCalledWith(42, 73, 'touch')
     expect(preventDefault).not.toHaveBeenCalled()
   })
+
+  test('blocks other long-press actions only while active', () => {
+    const preventDefault = jest.fn()
+    const stopPropagation = jest.fn()
+
+    methods.preventLongPressAction.call({active: true}, {preventDefault, stopPropagation})
+    expect(preventDefault).toHaveBeenCalledTimes(1)
+    expect(stopPropagation).toHaveBeenCalledTimes(1)
+
+    preventDefault.mockClear()
+    stopPropagation.mockClear()
+    methods.preventLongPressAction.call({active: false}, {preventDefault, stopPropagation})
+    expect(preventDefault).not.toHaveBeenCalled()
+    expect(stopPropagation).not.toHaveBeenCalled()
+  })
 })
