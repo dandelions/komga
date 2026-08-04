@@ -4,6 +4,7 @@
       ref="k2Controls"
       class="k2-controls"
       :class="{'k2-controls-collapsed': controlsCollapsed}"
+      :style="k2ControlsStyle"
       @click.stop
       @touchstart.stop
       @touchmove.stop
@@ -17,25 +18,26 @@
       <button
         v-if="controlsCollapsed"
         type="button"
-        class="k2-action k2-pull-action"
-        title="显示重排设置"
-        aria-label="显示重排设置"
-        @click="controlsCollapsed = false"
+        class="k2-side-tab"
+        title="显示重排工具栏"
+        aria-label="显示重排工具栏"
+        @click="expandControls"
       >
-        <v-icon x-small>mdi-chevron-down</v-icon>
-      </button>
-      <button
-        v-if="controlsCollapsed"
-        type="button"
-        class="k2-action k2-collapsed-action"
-        :class="{'k2-magnifier-active': magnifierActive}"
-        :title="magnifierActive ? '关闭局部放大镜' : '选择放大镜直径'"
-        :aria-label="magnifierActive ? '关闭局部放大镜' : '选择放大镜直径'"
-        @click="$emit('toggle-magnifier')"
-      >
-        <v-icon small>{{ magnifierActive ? 'mdi-magnify-close' : 'mdi-magnify-plus-outline' }}</v-icon>
+        <v-icon small>{{ controlsSide === 'left' ? 'mdi-chevron-right' : 'mdi-chevron-left' }}</v-icon>
       </button>
       <template v-else>
+        <button
+          type="button"
+          class="k2-action k2-drag-handle"
+          title="拖动重排工具栏"
+          aria-label="拖动重排工具栏"
+          @pointerdown.stop.prevent="startControlsDrag"
+          @pointermove.stop.prevent="moveControlsDrag"
+          @pointerup.stop.prevent="finishControlsDrag"
+          @pointercancel.stop.prevent="finishControlsDrag"
+        >
+          <v-icon small>mdi-drag</v-icon>
+        </button>
         <label class="k2-control k2-wide-control">
           <span>Text</span>
           <button type="button" @click="adjustTextScale(-5)">-</button>
@@ -132,7 +134,7 @@
         <button type="button" class="k2-action k2-apply-action" @click="applyK2Reflow">
           重排
         </button>
-        <button type="button" class="k2-action k2-collapse-action" @click="controlsCollapsed = true">
+        <button type="button" class="k2-action k2-collapse-action" @click="collapseControls">
           Hide controls
         </button>
       </template>
@@ -275,7 +277,6 @@ const DEFAULT_TEXT_SCALE = 80
 const DEFAULT_OUTPUT_PADDING = 16
 const DEFAULT_WORD_GAP = 3
 const MIN_CROP_SIZE = 15
-const K2_CONTROLS_HEIGHT = 48
 const VIEWPORT_PAGE_BUFFER = 40
 const OUTPUT_PADDING = 16
 const DETECTION_MAX_SIDE = 1800
@@ -317,6 +318,10 @@ export default Vue.extend({
       type: Boolean,
       default: false,
     },
+    controlsTopOffset: {
+      type: Number,
+      default: 0,
+    },
   },
   data: () => ({
     loading: false,
@@ -326,7 +331,6 @@ export default Vue.extend({
     pages: [] as K2Item[][],
     virtualPageIndex: 0,
     viewportHeight: 0,
-    controlsHeight: 0,
     pageBackground: '#fff',
     imageSize: {w: 0, h: 0},
     requestId: 0,
@@ -335,6 +339,13 @@ export default Vue.extend({
     objectUrl: '',
     objectUrlSource: '',
     controlsCollapsed: true,
+    controlsPosition: {x: 0, y: 0},
+    controlsDragStart: {x: 0, y: 0},
+    controlsDragOrigin: {x: 0, y: 0},
+    controlsDragPointerId: undefined as number | undefined,
+    controlsDragging: false,
+    controlsPositionInitialized: false,
+    controlsSide: 'right' as 'left' | 'right',
     cropMode: false,
     drawingCrop: false,
     cropStart: {x: 0, y: 0},
@@ -390,11 +401,16 @@ export default Vue.extend({
       if (this.cropMode) return
       this.reflow()
     },
-    controlsCollapsed() {
+    controlsCollapsed(collapsed) {
       this.$nextTick(() => {
+        if (collapsed) this.snapControlsToSide()
+        else this.positionExpandedControls()
         this.updateViewportMetrics()
         this.repaginate(false)
       })
+    },
+    controlsTopOffset() {
+      this.$nextTick(this.constrainControlsPosition)
     },
     settings: {
       handler() {
@@ -405,6 +421,14 @@ export default Vue.extend({
     },
   },
   computed: {
+    k2ControlsStyle(): object {
+      const viewportHeight = this.viewportHeight || Math.floor(window.visualViewport?.height || window.innerHeight || 720)
+      return {
+        left: `${this.controlsPosition.x}px`,
+        top: `${this.controlsPosition.y}px`,
+        maxHeight: `${Math.max(64, viewportHeight - this.controlsPosition.y - 8)}px`,
+      }
+    },
     visibleItems(): K2Item[] {
       return this.pages[this.virtualPageIndex] || this.items
     },
@@ -454,6 +478,7 @@ export default Vue.extend({
     window.addEventListener('resize', this.handleResize)
     window.visualViewport?.addEventListener('resize', this.handleResize)
     this.$nextTick(() => {
+      this.initializeControlsPosition()
       this.updateViewportMetrics()
       this.repaginate(false)
     })
@@ -464,10 +489,97 @@ export default Vue.extend({
     this.revokeObjectUrl()
   },
   methods: {
+    initializeControlsPosition() {
+      if (this.controlsPositionInitialized) return
+      const viewport = this.controlsViewportSize()
+      this.controlsPosition = {
+        x: this.controlsPosition.x,
+        y: Math.max(Math.round(this.controlsTopOffset), Math.round(viewport.height * 0.35)),
+      }
+      this.controlsPositionInitialized = true
+      if (this.controlsCollapsed) this.snapControlsToSide()
+      else this.positionExpandedControls()
+    },
+    expandControls() {
+      if (!this.controlsCollapsed) return
+      this.controlsCollapsed = false
+    },
     collapseControls(): boolean {
       if (this.controlsCollapsed || this.cropMode) return false
+      this.updateControlsSide()
       this.controlsCollapsed = true
       return true
+    },
+    startControlsDrag(event: PointerEvent) {
+      if (this.controlsCollapsed || this.controlsDragging) return
+      this.controlsDragging = true
+      this.controlsDragPointerId = event.pointerId
+      this.controlsDragStart = {x: event.clientX, y: event.clientY}
+      this.controlsDragOrigin = {...this.controlsPosition}
+      const target = event.currentTarget as HTMLElement | null
+      target?.setPointerCapture?.(event.pointerId)
+    },
+    moveControlsDrag(event: PointerEvent) {
+      if (!this.controlsDragging || event.pointerId !== this.controlsDragPointerId) return
+      this.controlsPosition = this.clampControlsPosition(
+        this.controlsDragOrigin.x + event.clientX - this.controlsDragStart.x,
+        this.controlsDragOrigin.y + event.clientY - this.controlsDragStart.y,
+      )
+    },
+    finishControlsDrag(event: PointerEvent) {
+      if (!this.controlsDragging || event.pointerId !== this.controlsDragPointerId) return
+      const target = event.currentTarget as HTMLElement | null
+      if (target?.hasPointerCapture?.(event.pointerId)) target.releasePointerCapture(event.pointerId)
+      this.controlsDragging = false
+      this.controlsDragPointerId = undefined
+      this.updateControlsSide()
+    },
+    controlsViewportSize(): {width: number, height: number} {
+      return {
+        width: Math.floor(window.visualViewport?.width || window.innerWidth || document.documentElement.clientWidth || this.targetWidth || 320),
+        height: Math.floor(window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight || 720),
+      }
+    },
+    clampControlsPosition(x: number, y: number): {x: number, y: number} {
+      const viewport = this.controlsViewportSize()
+      const controls = this.$refs.k2Controls as HTMLElement | undefined
+      const fallbackWidth = this.controlsCollapsed ? 28 : Math.min(340, Math.max(28, viewport.width - 24))
+      const fallbackHeight = this.controlsCollapsed ? 64 : Math.min(520, Math.max(64, viewport.height - 24))
+      const width = controls?.offsetWidth || fallbackWidth
+      const height = controls?.offsetHeight || fallbackHeight
+      const minY = Math.max(0, Math.round(this.controlsTopOffset))
+      return {
+        x: Math.max(0, Math.min(Math.max(0, viewport.width - width), Math.round(x))),
+        y: Math.max(minY, Math.min(Math.max(minY, viewport.height - height), Math.round(y))),
+      }
+    },
+    constrainControlsPosition() {
+      if (!this.controlsPositionInitialized) return
+      if (this.controlsCollapsed) this.snapControlsToSide()
+      else this.controlsPosition = this.clampControlsPosition(this.controlsPosition.x, this.controlsPosition.y)
+    },
+    updateControlsSide() {
+      const viewport = this.controlsViewportSize()
+      const controls = this.$refs.k2Controls as HTMLElement | undefined
+      const center = this.controlsPosition.x + (controls?.offsetWidth || 0) / 2
+      this.controlsSide = center < viewport.width / 2 ? 'left' : 'right'
+    },
+    snapControlsToSide() {
+      const viewport = this.controlsViewportSize()
+      const controls = this.$refs.k2Controls as HTMLElement | undefined
+      const width = controls?.offsetWidth || 28
+      this.controlsPosition = this.clampControlsPosition(
+        this.controlsSide === 'left' ? 0 : viewport.width - width,
+        this.controlsPositionInitialized ? this.controlsPosition.y : Math.round(viewport.height * 0.35),
+      )
+    },
+    positionExpandedControls() {
+      const viewport = this.controlsViewportSize()
+      const controls = this.$refs.k2Controls as HTMLElement | undefined
+      const width = controls?.offsetWidth || Math.min(340, Math.max(28, viewport.width - 24))
+      const sideInset = viewport.width > width + 16 ? 8 : 0
+      const x = this.controlsSide === 'left' ? sideInset : viewport.width - width - sideInset
+      this.controlsPosition = this.clampControlsPosition(x, this.controlsPosition.y || Math.round(viewport.height * 0.2))
     },
     syncSettingsFromProps() {
       this.textScalePercent = this.clampNumber(Number(this.settings.textScale), 20, 160, DEFAULT_TEXT_SCALE)
@@ -561,16 +673,15 @@ export default Vue.extend({
     },
     handleResize() {
       this.updateViewportMetrics()
+      this.$nextTick(this.constrainControlsPosition)
       this.repaginate(false)
     },
     updateViewportMetrics() {
       this.viewportHeight = Math.floor(window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight || 720)
-      const controls = this.$refs.k2Controls as HTMLElement | undefined
-      this.controlsHeight = controls?.offsetHeight || 0
     },
     pageContentHeight(): number {
       const height = this.viewportHeight || Math.floor(window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight || 720)
-      return Math.max(240, height - (this.controlsHeight || K2_CONTROLS_HEIGHT))
+      return Math.max(240, height)
     },
     async ensureCropImage() {
       if (this.objectUrl && this.imageSize.w && this.imageSize.h) return
@@ -2501,36 +2612,44 @@ export default Vue.extend({
 }
 
 .k2-controls {
-  position: sticky;
-  top: 0;
-  z-index: 4;
+  position: fixed;
+  z-index: 220;
   display: flex;
+  flex-direction: column;
   flex-wrap: nowrap;
-  align-items: center;
+  align-items: stretch;
   justify-content: flex-start;
   gap: 6px;
-  min-height: 48px;
-  padding: 5px 8px;
+  width: min(340px, calc(100vw - 24px));
+  min-height: 0;
+  padding: 8px;
   box-sizing: border-box;
-  background: rgba(250, 250, 250, 0.96);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.12);
-  overflow-x: auto;
-  overflow-y: visible;
+  background: rgba(250, 250, 250, 0.97);
+  border: 1px solid rgba(0, 0, 0, 0.16);
+  border-radius: 6px;
+  box-shadow: 0 5px 18px rgba(0, 0, 0, 0.22);
+  overflow-x: hidden;
+  overflow-y: auto;
+  pointer-events: auto;
 }
 
 .k2-controls-collapsed {
-  justify-content: center;
-  min-height: 20px;
-  padding: 2px 0;
+  width: 28px;
+  height: 64px;
+  min-height: 64px;
+  padding: 0;
   background: transparent;
-  border-bottom: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
   overflow: visible;
-  pointer-events: none;
+  pointer-events: auto;
 }
 
 .k2-control {
-  flex: 0 0 280px;
-  min-width: 280px;
+  flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -2541,13 +2660,13 @@ export default Vue.extend({
 }
 
 .k2-wide-control {
-  flex-basis: 260px;
-  min-width: 260px;
+  flex-basis: auto;
+  min-width: 0;
 }
 
 .k2-control input[type="range"] {
   flex: 1;
-  min-width: 120px;
+  min-width: 0;
 }
 
 .k2-compact {
@@ -2561,14 +2680,15 @@ export default Vue.extend({
 }
 
 .k2-compact input[type="range"] {
-  width: 100px;
-  min-width: 100px;
+  width: auto;
+  min-width: 0;
 }
 
 .k2-action-controls {
   display: flex;
+  width: 100%;
   flex: 0 0 auto;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
   gap: 6px;
@@ -2598,19 +2718,34 @@ export default Vue.extend({
   color: #1e40af;
 }
 
-.k2-pull-action {
+.k2-side-tab {
+  display: inline-flex;
   width: 28px;
-  height: 18px;
-  min-height: 18px;
-  flex-basis: 28px;
+  height: 64px;
+  align-items: center;
+  justify-content: center;
   padding: 0;
-  border-radius: 0 0 5px 5px;
-  opacity: 0.86;
+  border: 1px solid rgba(0, 0, 0, 0.24);
+  border-radius: 4px;
+  background: rgba(250, 250, 250, 0.94);
+  color: #212121;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
   pointer-events: auto;
 }
 
-.k2-collapsed-action {
-  pointer-events: auto;
+.k2-controls:not(.k2-controls-collapsed) > .k2-action {
+  width: 100%;
+}
+
+.k2-controls:not(.k2-controls-collapsed) > .k2-drag-handle {
+  width: 30px;
+  align-self: flex-start;
+  cursor: grab;
+  touch-action: none;
+}
+
+.k2-drag-handle:active {
+  cursor: grabbing;
 }
 
 .k2-value {
@@ -2634,7 +2769,13 @@ export default Vue.extend({
 
 .k2-reflowed-page-dark .k2-controls-collapsed {
   background: transparent;
-  border-bottom: 0;
+  border: 0;
+}
+
+.k2-reflowed-page-dark .k2-side-tab {
+  border-color: rgba(255, 255, 255, 0.3);
+  background: rgba(30, 30, 30, 0.94);
+  color: #eeeeee;
 }
 
 .k2-reflowed-page-dark .k2-control,

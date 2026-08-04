@@ -20,50 +20,30 @@
         v-if="controlsCollapsed"
         class="reflow-collapsed-controls"
       >
-        <button type="button" class="reflow-control reflow-icon-control reflow-compact-control" title="返回" aria-label="返回" @click="$emit('back-to-book')">
-          <v-icon small>mdi-arrow-left</v-icon>
-        </button>
         <button
           type="button"
-          class="reflow-control reflow-icon-control reflow-compact-control"
-          :class="{'reflow-night-active': nightDisplay}"
-          :title="nightDisplay ? '白天模式' : '黑夜模式'"
-          :aria-label="nightDisplay ? '白天模式' : '黑夜模式'"
-          @click="$emit('toggle-night-display')"
+          class="reflow-side-tab"
+          title="显示重排工具栏"
+          aria-label="显示重排工具栏"
+          @click="expandControls"
         >
-          <v-icon small>{{ nightDisplay ? 'mdi-white-balance-sunny' : 'mdi-weather-night' }}</v-icon>
-        </button>
-        <button
-          type="button"
-          class="reflow-control reflow-icon-control reflow-compact-control"
-          :class="{'reflow-magnifier-active': magnifierActive}"
-          :title="magnifierActive ? '关闭局部放大镜' : '选择放大镜直径'"
-          :aria-label="magnifierActive ? '关闭局部放大镜' : '选择放大镜直径'"
-          @click="$emit('toggle-magnifier')"
-        >
-          <v-icon small>{{ magnifierActive ? 'mdi-magnify-close' : 'mdi-magnify-plus-outline' }}</v-icon>
-        </button>
-        <button type="button" class="reflow-control reflow-icon-control reflow-compact-control" title="目录" aria-label="目录" @click="$emit('show-pdf-toc')">
-          <v-icon small>mdi-menu</v-icon>
-        </button>
-        <button type="button" class="reflow-control reflow-icon-control reflow-compact-control" title="重排" aria-label="重排" @click="applyReflowSettings">
-          <v-icon small>mdi-refresh</v-icon>
-        </button>
-        <button type="button" class="reflow-control reflow-icon-control reflow-compact-control" title="退出重排" aria-label="退出重排" @click="exitReflow">
-          <v-icon small>mdi-exit-to-app</v-icon>
-        </button>
-        <button
-          type="button"
-          class="reflow-control reflow-pull-control"
-          title="显示重排设置"
-          aria-label="显示重排设置"
-          @click="controlsCollapsed = false"
-        >
-          <v-icon x-small>mdi-chevron-down</v-icon>
+          <v-icon small>{{ controlsSide === 'left' ? 'mdi-chevron-right' : 'mdi-chevron-left' }}</v-icon>
         </button>
       </div>
       <template v-else>
         <div class="reflow-top-controls">
+          <button
+            type="button"
+            class="reflow-control reflow-icon-control reflow-drag-handle"
+            title="拖动重排工具栏"
+            aria-label="拖动重排工具栏"
+            @pointerdown.stop.prevent="startControlsDrag"
+            @pointermove.stop.prevent="moveControlsDrag"
+            @pointerup.stop.prevent="finishControlsDrag"
+            @pointercancel.stop.prevent="finishControlsDrag"
+          >
+            <v-icon small>mdi-drag</v-icon>
+          </button>
           <button type="button" class="reflow-control reflow-icon-control reflow-compact-control" title="返回" aria-label="返回" @click="$emit('back-to-book')">
             <v-icon small>mdi-arrow-left</v-icon>
           </button>
@@ -72,7 +52,7 @@
             class="reflow-control reflow-icon-control reflow-collapse-control"
             title="隐藏重排设置"
             aria-label="隐藏重排设置"
-            @click="controlsCollapsed = true"
+            @click="collapseControls"
           >
             <v-icon small>mdi-chevron-double-up</v-icon>
           </button>
@@ -749,7 +729,6 @@ const MIN_INDENT = 8
 const EDGE_INK_THRESHOLD = 245
 const MAX_EDGE_TRIM = 6
 const MAX_EDGE_EXPANSION = 10
-const REFLOW_CONTROLS_HEIGHT = 48
 const DEFAULT_REFLOW_IMAGE_QUALITY = 80
 const REFLOW_IMAGE_QUALITY_OPTIONS = [90, 80, 70, 60, 50, 40]
 const VIEWPORT_PAGE_BUFFER = 40
@@ -853,7 +832,6 @@ export default Vue.extend({
       pages: [] as ReflowItem[][],
       virtualPageIndex: 0,
       viewportHeight: 0,
-      controlsHeight: 0,
       pageBackground: '#fff',
       lastDetectionKey: '',
       objectUrl: '',
@@ -879,6 +857,13 @@ export default Vue.extend({
       reflowRunning: false,
       reflowPending: false,
       controlsCollapsed: true,
+      controlsPosition: {x: 0, y: 0},
+      controlsDragStart: {x: 0, y: 0},
+      controlsDragOrigin: {x: 0, y: 0},
+      controlsDragPointerId: undefined as number | undefined,
+      controlsDragging: false,
+      controlsPositionInitialized: false,
+      controlsSide: 'right' as 'left' | 'right',
       imageSize: {w: 0, h: 0},
       transferStats: undefined as ReflowTransferStats | undefined,
       cropMode: false,
@@ -1027,8 +1012,11 @@ export default Vue.extend({
       return this.clampNumber(this.pendingBlockSpacing, 0, 24, 6)
     },
     reflowControlsStyle(): object {
+      const viewportHeight = this.viewportHeight || Math.floor(window.visualViewport?.height || window.innerHeight || 720)
       return {
-        top: `${Math.max(0, Math.round(this.controlsTopOffset))}px`,
+        left: `${this.controlsPosition.x}px`,
+        top: `${this.controlsPosition.y}px`,
+        maxHeight: `${Math.max(64, viewportHeight - this.controlsPosition.y - 8)}px`,
       }
     },
     reflowWrapperStyle(): object {
@@ -1313,11 +1301,16 @@ export default Vue.extend({
       if (this.cropMode) return
       this.reflow()
     },
-    controlsCollapsed() {
+    controlsCollapsed(collapsed) {
       this.$nextTick(() => {
+        if (collapsed) this.snapControlsToSide()
+        else this.positionExpandedControls()
         this.updateViewportMetrics()
         this.repaginate(false)
       })
+    },
+    controlsTopOffset() {
+      this.$nextTick(this.constrainControlsPosition)
     },
   },
   mounted() {
@@ -1326,6 +1319,7 @@ export default Vue.extend({
     window.addEventListener('resize', this.handleResize)
     window.visualViewport?.addEventListener('resize', this.handleResize)
     this.$nextTick(() => {
+      this.initializeControlsPosition()
       this.updateViewportMetrics()
       this.repaginate(false)
     })
@@ -1339,10 +1333,99 @@ export default Vue.extend({
     this.revokeObjectUrl()
   },
   methods: {
+    initializeControlsPosition() {
+      if (this.controlsPositionInitialized) return
+      const viewport = this.controlsViewportSize()
+      this.controlsPosition = {
+        x: this.controlsPosition.x,
+        y: Math.max(Math.round(this.controlsTopOffset), Math.round(viewport.height * 0.35)),
+      }
+      this.controlsPositionInitialized = true
+      if (this.controlsCollapsed) this.snapControlsToSide()
+      else this.positionExpandedControls()
+    },
+    expandControls() {
+      if (!this.controlsCollapsed) return
+      this.controlsCollapsed = false
+    },
     collapseControls(): boolean {
       if (this.controlsCollapsed || this.cropMode) return false
+      this.updateControlsSide()
       this.controlsCollapsed = true
       return true
+    },
+    startControlsDrag(event: PointerEvent) {
+      if (this.controlsCollapsed || this.controlsDragging) return
+      this.controlsDragging = true
+      this.controlsDragPointerId = event.pointerId
+      this.controlsDragStart = {x: event.clientX, y: event.clientY}
+      this.controlsDragOrigin = {...this.controlsPosition}
+      const target = event.currentTarget as HTMLElement | null
+      target?.setPointerCapture?.(event.pointerId)
+    },
+    moveControlsDrag(event: PointerEvent) {
+      if (!this.controlsDragging || event.pointerId !== this.controlsDragPointerId) return
+      const position = this.clampControlsPosition(
+        this.controlsDragOrigin.x + event.clientX - this.controlsDragStart.x,
+        this.controlsDragOrigin.y + event.clientY - this.controlsDragStart.y,
+      )
+      this.controlsPosition = position
+    },
+    finishControlsDrag(event: PointerEvent) {
+      if (!this.controlsDragging || event.pointerId !== this.controlsDragPointerId) return
+      const target = event.currentTarget as HTMLElement | null
+      if (target?.hasPointerCapture?.(event.pointerId)) target.releasePointerCapture(event.pointerId)
+      this.controlsDragging = false
+      this.controlsDragPointerId = undefined
+      this.updateControlsSide()
+    },
+    controlsViewportSize(): {width: number, height: number} {
+      return {
+        width: Math.floor(window.visualViewport?.width || window.innerWidth || document.documentElement.clientWidth || this.targetWidth || 320),
+        height: Math.floor(window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight || 720),
+      }
+    },
+    clampControlsPosition(x: number, y: number): {x: number, y: number} {
+      const viewport = this.controlsViewportSize()
+      const controls = this.$refs.reflowControls as HTMLElement | undefined
+      const fallbackWidth = this.controlsCollapsed ? 28 : Math.min(340, Math.max(28, viewport.width - 24))
+      const fallbackHeight = this.controlsCollapsed ? 64 : Math.min(520, Math.max(64, viewport.height - 24))
+      const width = controls?.offsetWidth || fallbackWidth
+      const height = controls?.offsetHeight || fallbackHeight
+      const minY = Math.max(0, Math.round(this.controlsTopOffset))
+      return {
+        x: Math.max(0, Math.min(Math.max(0, viewport.width - width), Math.round(x))),
+        y: Math.max(minY, Math.min(Math.max(minY, viewport.height - height), Math.round(y))),
+      }
+    },
+    constrainControlsPosition() {
+      if (!this.controlsPositionInitialized) return
+      if (this.controlsCollapsed) this.snapControlsToSide()
+      else this.controlsPosition = this.clampControlsPosition(this.controlsPosition.x, this.controlsPosition.y)
+    },
+    updateControlsSide() {
+      const viewport = this.controlsViewportSize()
+      const controls = this.$refs.reflowControls as HTMLElement | undefined
+      const center = this.controlsPosition.x + (controls?.offsetWidth || 0) / 2
+      this.controlsSide = center < viewport.width / 2 ? 'left' : 'right'
+    },
+    snapControlsToSide() {
+      const viewport = this.controlsViewportSize()
+      const controls = this.$refs.reflowControls as HTMLElement | undefined
+      const width = controls?.offsetWidth || 28
+      const position = this.clampControlsPosition(
+        this.controlsSide === 'left' ? 0 : viewport.width - width,
+        this.controlsPositionInitialized ? this.controlsPosition.y : Math.round(viewport.height * 0.35),
+      )
+      this.controlsPosition = position
+    },
+    positionExpandedControls() {
+      const viewport = this.controlsViewportSize()
+      const controls = this.$refs.reflowControls as HTMLElement | undefined
+      const width = controls?.offsetWidth || Math.min(340, Math.max(28, viewport.width - 24))
+      const sideInset = viewport.width > width + 16 ? 8 : 0
+      const x = this.controlsSide === 'left' ? sideInset : viewport.width - width - sideInset
+      this.controlsPosition = this.clampControlsPosition(x, this.controlsPosition.y || Math.round(viewport.height * 0.2))
     },
     syncPendingOptionsFromProps(force: boolean = false) {
       const snapshot = this.optionsSnapshotFromProps()
@@ -1651,16 +1734,15 @@ export default Vue.extend({
     },
     handleResize() {
       this.updateViewportMetrics()
+      this.$nextTick(this.constrainControlsPosition)
       this.repaginate(false)
     },
     updateViewportMetrics() {
       this.viewportHeight = Math.floor(window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight || 0)
-      const controls = this.$refs.reflowControls as HTMLElement | undefined
-      this.controlsHeight = controls?.offsetHeight || 0
     },
     pageContentHeight(): number {
       const height = this.viewportHeight || Math.floor(window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight || 0)
-      return Math.max(240, height - (this.preload ? 0 : this.controlsHeight || REFLOW_CONTROLS_HEIGHT))
+      return Math.max(240, height)
     },
     horizontalContentPadding(): number {
       if (!this.verticalText) return 16
@@ -6940,49 +7022,61 @@ export default Vue.extend({
 }
 
 .reflow-controls {
-  position: sticky;
-  top: 0;
-  z-index: 50;
+  position: fixed;
+  z-index: 220;
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  justify-content: flex-start;
   gap: 6px;
-  width: 100%;
-  min-height: 48px;
-  padding: 5px 8px;
+  width: min(340px, calc(100vw - 24px));
+  min-height: 0;
+  padding: 8px;
   box-sizing: border-box;
-  background: rgba(248, 250, 252, 0.94);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.12);
-  overflow-x: auto;
-  overflow-y: visible;
+  background: rgba(248, 250, 252, 0.97);
+  border: 1px solid rgba(0, 0, 0, 0.16);
+  border-radius: 6px;
+  box-shadow: 0 5px 18px rgba(0, 0, 0, 0.22);
+  overflow-x: hidden;
+  overflow-y: auto;
   pointer-events: auto;
 }
 
 .reflow-controls-collapsed {
-  justify-content: flex-start;
-  min-height: 34px;
-  padding: 3px 0 3px 6px;
+  width: 28px;
+  height: 64px;
+  min-height: 64px;
+  padding: 0;
   background: transparent;
-  border-bottom: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
   overflow: visible;
-  pointer-events: none;
-}
-
-.reflow-collapsed-controls {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
   pointer-events: auto;
 }
 
-.reflow-pull-control {
-  width: 30px;
-  height: 30px;
-  min-height: 30px;
-  flex-basis: 30px;
+.reflow-collapsed-controls {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+}
+
+.reflow-side-tab {
+  display: inline-flex;
+  width: 28px;
+  height: 64px;
+  align-items: center;
+  justify-content: center;
   padding: 0;
-  opacity: 1;
+  border: 1px solid rgba(0, 0, 0, 0.24);
+  border-radius: 4px;
+  background: rgba(248, 250, 252, 0.94);
+  color: #212121;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
   pointer-events: auto;
 }
 
@@ -6994,15 +7088,36 @@ export default Vue.extend({
 }
 
 .reflow-top-controls {
-  flex: 0 0 100%;
-  min-width: 100%;
+  flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: flex-start;
   gap: 6px;
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: visible;
+}
+
+.reflow-drag-handle {
+  cursor: grab;
+  touch-action: none;
+}
+
+.reflow-drag-handle:active {
+  cursor: grabbing;
+}
+
+.reflow-controls:not(.reflow-controls-collapsed) > label,
+.reflow-controls:not(.reflow-controls-collapsed) > .reflow-action-controls {
+  width: 100%;
+  min-width: 0;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+}
+
+.reflow-controls:not(.reflow-controls-collapsed) input[type="range"] {
+  min-width: 0;
 }
 
 .reflow-navigation-controls {
@@ -7270,7 +7385,13 @@ export default Vue.extend({
 
 .reflowed-page-dark .reflow-controls-collapsed {
   background: transparent;
-  border-bottom: 0;
+  border: 0;
+}
+
+.reflowed-page-dark .reflow-side-tab {
+  border-color: rgba(255, 255, 255, 0.3);
+  background: rgba(30, 30, 30, 0.94);
+  color: #eeeeee;
 }
 
 .reflowed-page-dark {

@@ -240,6 +240,7 @@
           :settings="reflowSettings.k2Settings"
           :night-display="nightDisplay"
           :magnifier-active="magnifierActive"
+          :controls-top-offset="reflowControlsTopOffset"
           @exit-k2-reflow="exitK2ReflowMode"
           @source-previous="k2SourcePreviousPage"
           @source-next="k2SourceNextPage"

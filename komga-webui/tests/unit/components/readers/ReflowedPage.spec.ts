@@ -1,4 +1,5 @@
 import ReflowedPage from '@/components/readers/ReflowedPage.vue'
+import K2ReflowedPage from '@/components/readers/K2ReflowedPage.vue'
 
 type WordBlock = {
   x: number,
@@ -8,6 +9,7 @@ type WordBlock = {
 }
 
 const methods = (ReflowedPage as any).options.methods
+const k2Methods = (K2ReflowedPage as any).options.methods
 const edgeAnalyzer = Object.assign({}, methods)
 const lineAnalyzer = Object.assign({}, methods, {verticalText: false})
 const detectionAnalyzer = Object.assign({}, methods, {
@@ -263,5 +265,97 @@ describe('ReflowedPage manual image reading order', () => {
 
     expect(imageTransition).toBe(true)
     expect(methods.isParagraphStart.call(lineAnalyzer, nextLine, line, imageTransition)).toBe(false)
+  })
+})
+
+describe.each([
+  ['standard reflow', methods, 'reflowControls'],
+  ['K2 reflow', k2Methods, 'k2Controls'],
+])('%s floating toolbar', (_name, toolbarMethods, controlsRef) => {
+  test('keeps the toolbar inside the visible viewport', () => {
+    const context = {
+      controlsCollapsed: false,
+      controlsTopOffset: 48,
+      controlsViewportSize: () => ({width: 360, height: 640}),
+      $refs: {
+        [controlsRef]: {offsetWidth: 320, offsetHeight: 400},
+      },
+    }
+
+    expect(toolbarMethods.clampControlsPosition.call(context, 100, 500)).toEqual({x: 40, y: 240})
+    expect(toolbarMethods.clampControlsPosition.call(context, -20, 0)).toEqual({x: 0, y: 48})
+  })
+
+  test('moves by the captured pointer delta', () => {
+    const target = {
+      setPointerCapture: jest.fn(),
+    }
+    const clampControlsPosition = jest.fn((x, y) => ({x, y}))
+    const context = {
+      controlsCollapsed: false,
+      controlsDragging: false,
+      controlsDragPointerId: undefined,
+      controlsPosition: {x: 120, y: 180},
+      controlsDragStart: {x: 0, y: 0},
+      controlsDragOrigin: {x: 0, y: 0},
+      clampControlsPosition,
+    }
+
+    toolbarMethods.startControlsDrag.call(context, {
+      pointerId: 7,
+      clientX: 40,
+      clientY: 60,
+      currentTarget: target,
+    })
+    toolbarMethods.moveControlsDrag.call(context, {
+      pointerId: 7,
+      clientX: 55,
+      clientY: 98,
+    })
+
+    expect(target.setPointerCapture).toHaveBeenCalledWith(7)
+    expect(clampControlsPosition).toHaveBeenCalledWith(135, 218)
+    expect(context.controlsPosition).toEqual({x: 135, y: 218})
+  })
+
+  test('selects the nearest side from the expanded toolbar center', () => {
+    const context = {
+      controlsPosition: {x: 20, y: 210},
+      controlsSide: 'right',
+      controlsViewportSize: () => ({width: 360, height: 640}),
+      $refs: {
+        [controlsRef]: {offsetWidth: 120, offsetHeight: 400},
+      },
+    }
+
+    toolbarMethods.updateControlsSide.call(context)
+    expect(context.controlsSide).toBe('left')
+
+    context.controlsPosition.x = 230
+    toolbarMethods.updateControlsSide.call(context)
+    expect(context.controlsSide).toBe('right')
+  })
+
+  test('snaps a collapsed toolbar to the selected side', () => {
+    const context: any = {
+      controlsCollapsed: true,
+      controlsTopOffset: 0,
+      controlsPosition: {x: 180, y: 210},
+      controlsPositionInitialized: true,
+      controlsSide: 'right',
+      controlsViewportSize: () => ({width: 360, height: 640}),
+      $refs: {
+        [controlsRef]: {offsetWidth: 28, offsetHeight: 64},
+      },
+    }
+    context.clampControlsPosition = (x: number, y: number) => toolbarMethods.clampControlsPosition.call(context, x, y)
+
+    toolbarMethods.snapControlsToSide.call(context)
+
+    expect(context.controlsPosition).toEqual({x: 332, y: 210})
+  })
+
+  test('uses the full viewport height for text pagination', () => {
+    expect(toolbarMethods.pageContentHeight.call({viewportHeight: 700})).toBe(700)
   })
 })
