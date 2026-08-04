@@ -84,6 +84,34 @@ class TaskHandlerTest {
   }
 
   @Test
+  fun `given library with root and children when handling scan task then the library itself is scanned`() {
+    val library = makeLibrary(id = "parent")
+    val child = makeLibrary(id = "child").copy(parentId = library.id)
+    every { libraryRepository.findByIdOrNull(library.id) } returns library
+    every { libraryRepository.findAllByParentId(library.id) } returns listOf(child)
+    every { libraryRepository.findAllByParentId(child.id) } returns emptyList()
+    every { libraryContentLifecycle.scanRootFolder(library, false) } returns
+      LibraryScanSummary(limited = false, scannedBookCount = 0, countedBookCount = 0)
+
+    taskHandler.handleTask(Task.ScanLibrary(library.id, scanDeep = false))
+
+    verify(exactly = 1) { libraryContentLifecycle.scanRootFolder(library, false) }
+    verify(exactly = 0) { libraryContentLifecycle.scanRootFolder(child, false) }
+  }
+
+  @Test
+  fun `given child library with root when handling its scan task then the child is scanned`() {
+    val child = makeLibrary(id = "child").copy(parentId = "parent")
+    every { libraryRepository.findByIdOrNull(child.id) } returns child
+    every { libraryContentLifecycle.scanRootFolder(child, false) } returns
+      LibraryScanSummary(limited = false, scannedBookCount = 0, countedBookCount = 0)
+
+    taskHandler.handleTask(Task.ScanLibrary(child.id, scanDeep = false))
+
+    verify(exactly = 1) { libraryContentLifecycle.scanRootFolder(child, false) }
+  }
+
+  @Test
   fun `given scan reaches daily file limit when handling scan task then continuation is scheduled`() {
     // given
     val library = makeLibrary(id = "library1")

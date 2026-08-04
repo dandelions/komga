@@ -101,9 +101,18 @@ class LibraryContentLifecycle(
       val root = library.root ?: throw DirectoryNotFoundException("Library root folder is not configured: ${library.name}")
       val rootPath = Paths.get(root.toURI()).toAbsolutePath().normalize()
       val descendantLibraries = findDescendantLibraries(library.id)
-      val descendantSeriesIds = descendantLibraries.flatMap { seriesRepository.findAllIdsByLibraryId(it.id) }
+      val pathlessDescendantSeriesIds =
+        descendantLibraries
+          .filter { it.path == null }
+          .flatMap { seriesRepository.findAllIdsByLibraryId(it.id) }
+      val descendantBookPaths =
+        if (pathlessDescendantSeriesIds.isEmpty()) {
+          emptyList()
+        } else {
+          bookRepository.findAllBySeriesIds(pathlessDescendantSeriesIds).map { it.path }
+        }
       val excludedPaths =
-        (descendantLibraries.mapNotNull { it.path } + bookRepository.findAllBySeriesIds(descendantSeriesIds).map { it.path })
+        (descendantLibraries.mapNotNull { it.path } + descendantBookPaths)
           .map { it.toAbsolutePath().normalize() }
           .filter { it != rootPath && it.startsWith(rootPath) }
           .toSet()

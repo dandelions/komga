@@ -14,6 +14,7 @@ import org.gotson.komga.domain.model.BookMetadataPatchCapability
 import org.gotson.komga.domain.model.Dimension
 import org.gotson.komga.domain.model.DirectoryNotFoundException
 import org.gotson.komga.domain.model.KomgaUser
+import org.gotson.komga.domain.model.Library
 import org.gotson.komga.domain.model.MarkSelectedPreference
 import org.gotson.komga.domain.model.Media
 import org.gotson.komga.domain.model.ReadList
@@ -48,6 +49,7 @@ import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.data.domain.Pageable
@@ -121,6 +123,51 @@ class LibraryContentLifecycleTest(
 
   @Nested
   inner class Scan {
+    @Test
+    fun `given library with descendants when scanning then its root is scanned and descendant paths are excluded`(
+      @TempDir root: Path,
+    ) {
+      val parentRoot = root.resolve("parent")
+      val childRoot = parentRoot.resolve("child")
+      val grandchildRoot = childRoot.resolve("grandchild")
+      val outsideRoot = root.resolve("outside")
+      val parent = Library("parent", parentRoot.toUri().toURL(), id = "parent")
+      val child = Library("child", childRoot.toUri().toURL(), parentId = parent.id, id = "child")
+      val grandchild = Library("grandchild", grandchildRoot.toUri().toURL(), parentId = child.id, id = "grandchild")
+      val outsideChild = Library("outside", outsideRoot.toUri().toURL(), parentId = parent.id, id = "outside")
+      val pathlessChild = Library("pathless", null, parentId = parent.id, id = "pathless")
+      val pathlessSeries = makeSeries("pathless-series", libraryId = pathlessChild.id)
+      val pathlessBookPath = parentRoot.resolve("pathless-series/book.cbz")
+      val pathlessBook = makeBook("pathless-book", libraryId = pathlessChild.id, seriesId = pathlessSeries.id, url = pathlessBookPath.toUri().toURL())
+      listOf(parent, child, grandchild, outsideChild, pathlessChild).forEach(libraryRepository::insert)
+      seriesRepository.insert(pathlessSeries)
+      bookRepository.insert(pathlessBook)
+      val capturedExcludedPaths = mutableListOf<Set<Path>>()
+      every {
+        mockScanner.scanRootFolder(
+          root = parentRoot.toAbsolutePath().normalize(),
+          forceDirectoryModifiedTime = any(),
+          oneshotsDir = any(),
+          scanCbx = any(),
+          scanPdf = any(),
+          scanEpub = any(),
+          directoryExclusions = any(),
+          maxCountedBooks = any(),
+          consumeCountedBook = any(),
+          countBook = any(),
+          excludedPaths = capture(capturedExcludedPaths),
+        )
+      } returns emptyMap<Series, List<Book>>().toScanResult()
+
+      libraryContentLifecycle.scanRootFolder(parent)
+
+      assertThat(capturedExcludedPaths.single()).containsExactlyInAnyOrder(
+        childRoot.toAbsolutePath().normalize(),
+        grandchildRoot.toAbsolutePath().normalize(),
+        pathlessBookPath.toAbsolutePath().normalize(),
+      )
+    }
+
     @Test
     fun `given existing series when adding files and scanning then only updated books are persisted`() {
       // given
