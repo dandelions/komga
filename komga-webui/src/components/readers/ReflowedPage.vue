@@ -25,6 +25,7 @@
           class="reflow-side-tab"
           title="显示重排工具栏"
           aria-label="显示重排工具栏"
+          @pointerdown.stop.prevent="startControlsDrag"
           @click="expandControls"
         >
           <v-icon small>{{ controlsSide === 'left' ? 'mdi-chevron-right' : 'mdi-chevron-left' }}</v-icon>
@@ -38,9 +39,6 @@
             title="拖动重排工具栏"
             aria-label="拖动重排工具栏"
             @pointerdown.stop.prevent="startControlsDrag"
-            @pointermove.stop.prevent="moveControlsDrag"
-            @pointerup.stop.prevent="finishControlsDrag"
-            @pointercancel.stop.prevent="finishControlsDrag"
           >
             <v-icon small>mdi-drag</v-icon>
           </button>
@@ -862,6 +860,7 @@ export default Vue.extend({
       controlsDragOrigin: {x: 0, y: 0},
       controlsDragPointerId: undefined as number | undefined,
       controlsDragging: false,
+      controlsDragMoved: false,
       controlsPositionInitialized: false,
       controlsSide: 'right' as 'left' | 'right',
       imageSize: {w: 0, h: 0},
@@ -1327,6 +1326,7 @@ export default Vue.extend({
   destroyed() {
     window.removeEventListener('resize', this.handleResize)
     window.visualViewport?.removeEventListener('resize', this.handleResize)
+    this.removeControlsDragListeners()
     this.requestId += 1
     this.cancelServerReflowRequest()
     this.clearCropImagePreparationTimer()
@@ -1345,6 +1345,10 @@ export default Vue.extend({
       else this.positionExpandedControls()
     },
     expandControls() {
+      if (this.controlsDragMoved) {
+        this.controlsDragMoved = false
+        return
+      }
       if (!this.controlsCollapsed) return
       this.controlsCollapsed = false
     },
@@ -1355,19 +1359,27 @@ export default Vue.extend({
       return true
     },
     startControlsDrag(event: PointerEvent) {
-      if (this.controlsCollapsed || this.controlsDragging) return
+      if (this.controlsDragging) return
       this.controlsDragging = true
+      this.controlsDragMoved = false
       this.controlsDragPointerId = event.pointerId
       this.controlsDragStart = {x: event.clientX, y: event.clientY}
       this.controlsDragOrigin = {...this.controlsPosition}
       const target = event.currentTarget as HTMLElement | null
       target?.setPointerCapture?.(event.pointerId)
+      window.addEventListener('pointermove', this.moveControlsDrag, true)
+      window.addEventListener('pointerup', this.finishControlsDrag, true)
+      window.addEventListener('pointercancel', this.finishControlsDrag, true)
     },
     moveControlsDrag(event: PointerEvent) {
       if (!this.controlsDragging || event.pointerId !== this.controlsDragPointerId) return
+      event.preventDefault()
+      const deltaX = event.clientX - this.controlsDragStart.x
+      const deltaY = event.clientY - this.controlsDragStart.y
+      if (Math.abs(deltaX) + Math.abs(deltaY) >= 4) this.controlsDragMoved = true
       const position = this.clampControlsPosition(
-        this.controlsDragOrigin.x + event.clientX - this.controlsDragStart.x,
-        this.controlsDragOrigin.y + event.clientY - this.controlsDragStart.y,
+        this.controlsDragOrigin.x + deltaX,
+        this.controlsDragOrigin.y + deltaY,
       )
       this.controlsPosition = position
     },
@@ -1378,6 +1390,13 @@ export default Vue.extend({
       this.controlsDragging = false
       this.controlsDragPointerId = undefined
       this.updateControlsSide()
+      if (this.controlsCollapsed) this.snapControlsToSide()
+      this.removeControlsDragListeners()
+    },
+    removeControlsDragListeners() {
+      window.removeEventListener('pointermove', this.moveControlsDrag, true)
+      window.removeEventListener('pointerup', this.finishControlsDrag, true)
+      window.removeEventListener('pointercancel', this.finishControlsDrag, true)
     },
     controlsViewportSize(): {width: number, height: number} {
       return {
@@ -1388,8 +1407,8 @@ export default Vue.extend({
     clampControlsPosition(x: number, y: number): {x: number, y: number} {
       const viewport = this.controlsViewportSize()
       const controls = this.$refs.reflowControls as HTMLElement | undefined
-      const fallbackWidth = this.controlsCollapsed ? 28 : Math.min(340, Math.max(28, viewport.width - 24))
-      const fallbackHeight = this.controlsCollapsed ? 64 : Math.min(520, Math.max(64, viewport.height - 24))
+      const fallbackWidth = this.controlsCollapsed ? 22 : Math.min(300, Math.max(22, viewport.width - 24))
+      const fallbackHeight = this.controlsCollapsed ? 52 : Math.min(520, Math.max(52, viewport.height - 24))
       const width = controls?.offsetWidth || fallbackWidth
       const height = controls?.offsetHeight || fallbackHeight
       const minY = Math.max(0, Math.round(this.controlsTopOffset))
@@ -1412,7 +1431,7 @@ export default Vue.extend({
     snapControlsToSide() {
       const viewport = this.controlsViewportSize()
       const controls = this.$refs.reflowControls as HTMLElement | undefined
-      const width = controls?.offsetWidth || 28
+      const width = controls?.offsetWidth || 22
       const position = this.clampControlsPosition(
         this.controlsSide === 'left' ? 0 : viewport.width - width,
         this.controlsPositionInitialized ? this.controlsPosition.y : Math.round(viewport.height * 0.35),
@@ -1422,7 +1441,7 @@ export default Vue.extend({
     positionExpandedControls() {
       const viewport = this.controlsViewportSize()
       const controls = this.$refs.reflowControls as HTMLElement | undefined
-      const width = controls?.offsetWidth || Math.min(340, Math.max(28, viewport.width - 24))
+      const width = controls?.offsetWidth || Math.min(300, Math.max(22, viewport.width - 24))
       const sideInset = viewport.width > width + 16 ? 8 : 0
       const x = this.controlsSide === 'left' ? sideInset : viewport.width - width - sideInset
       this.controlsPosition = this.clampControlsPosition(x, this.controlsPosition.y || Math.round(viewport.height * 0.2))
@@ -7023,30 +7042,32 @@ export default Vue.extend({
 
 .reflow-controls {
   position: fixed;
-  z-index: 220;
+  z-index: 20;
   display: flex;
   flex-direction: column;
   flex-wrap: nowrap;
   align-items: stretch;
   justify-content: flex-start;
   gap: 6px;
-  width: min(340px, calc(100vw - 24px));
+  width: min(300px, calc(100vw - 24px));
   min-height: 0;
   padding: 8px;
   box-sizing: border-box;
-  background: rgba(248, 250, 252, 0.97);
+  background: rgba(248, 250, 252, 0.68);
   border: 1px solid rgba(0, 0, 0, 0.16);
   border-radius: 6px;
   box-shadow: 0 5px 18px rgba(0, 0, 0, 0.22);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
   overflow-x: hidden;
   overflow-y: auto;
   pointer-events: auto;
 }
 
 .reflow-controls-collapsed {
-  width: 28px;
-  height: 64px;
-  min-height: 64px;
+  width: 22px;
+  height: 52px;
+  min-height: 52px;
   padding: 0;
   background: transparent;
   border: 0;
@@ -7067,17 +7088,23 @@ export default Vue.extend({
 
 .reflow-side-tab {
   display: inline-flex;
-  width: 28px;
-  height: 64px;
+  width: 22px;
+  height: 52px;
   align-items: center;
   justify-content: center;
   padding: 0;
   border: 1px solid rgba(0, 0, 0, 0.24);
   border-radius: 4px;
-  background: rgba(248, 250, 252, 0.94);
+  background: rgba(248, 250, 252, 0.5);
   color: #212121;
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
   pointer-events: auto;
+  cursor: grab;
+  touch-action: none;
+}
+
+.reflow-side-tab:active {
+  cursor: grabbing;
 }
 
 .reflow-compact-control {
@@ -7102,6 +7129,7 @@ export default Vue.extend({
 .reflow-drag-handle {
   cursor: grab;
   touch-action: none;
+  background: rgba(255, 255, 255, 0.48);
 }
 
 .reflow-drag-handle:active {
@@ -7379,7 +7407,7 @@ export default Vue.extend({
 }
 
 .reflowed-page-dark .reflow-controls {
-  background: rgba(30, 30, 30, 0.96);
+  background: rgba(30, 30, 30, 0.68);
   border-bottom-color: rgba(255, 255, 255, 0.14);
 }
 
@@ -7390,7 +7418,7 @@ export default Vue.extend({
 
 .reflowed-page-dark .reflow-side-tab {
   border-color: rgba(255, 255, 255, 0.3);
-  background: rgba(30, 30, 30, 0.94);
+  background: rgba(30, 30, 30, 0.5);
   color: #eeeeee;
 }
 

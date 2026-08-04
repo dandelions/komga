@@ -286,20 +286,27 @@ describe.each([
     expect(toolbarMethods.clampControlsPosition.call(context, -20, 0)).toEqual({x: 0, y: 48})
   })
 
-  test('moves by the captured pointer delta', () => {
+  test('moves the collapsed trigger by the captured pointer delta', () => {
     const target = {
       setPointerCapture: jest.fn(),
+      hasPointerCapture: jest.fn(() => false),
     }
     const clampControlsPosition = jest.fn((x, y) => ({x, y}))
-    const context = {
-      controlsCollapsed: false,
+    const context: any = {
+      controlsCollapsed: true,
       controlsDragging: false,
+      controlsDragMoved: false,
       controlsDragPointerId: undefined,
       controlsPosition: {x: 120, y: 180},
       controlsDragStart: {x: 0, y: 0},
       controlsDragOrigin: {x: 0, y: 0},
       clampControlsPosition,
+      updateControlsSide: jest.fn(),
+      snapControlsToSide: jest.fn(),
     }
+    context.moveControlsDrag = (event: PointerEvent) => toolbarMethods.moveControlsDrag.call(context, event)
+    context.finishControlsDrag = (event: PointerEvent) => toolbarMethods.finishControlsDrag.call(context, event)
+    context.removeControlsDragListeners = () => toolbarMethods.removeControlsDragListeners.call(context)
 
     toolbarMethods.startControlsDrag.call(context, {
       pointerId: 7,
@@ -307,15 +314,34 @@ describe.each([
       clientY: 60,
       currentTarget: target,
     })
-    toolbarMethods.moveControlsDrag.call(context, {
+    const preventDefault = jest.fn()
+    context.moveControlsDrag({
       pointerId: 7,
       clientX: 55,
       clientY: 98,
+      preventDefault,
     })
 
     expect(target.setPointerCapture).toHaveBeenCalledWith(7)
+    expect(preventDefault).toHaveBeenCalled()
     expect(clampControlsPosition).toHaveBeenCalledWith(135, 218)
     expect(context.controlsPosition).toEqual({x: 135, y: 218})
+    expect(context.controlsDragMoved).toBe(true)
+
+    context.finishControlsDrag({pointerId: 7, currentTarget: target})
+    expect(context.controlsDragging).toBe(false)
+    expect(context.snapControlsToSide).toHaveBeenCalled()
+  })
+
+  test('does not expand the collapsed trigger after dragging it', () => {
+    const context = {controlsCollapsed: true, controlsDragMoved: true}
+
+    toolbarMethods.expandControls.call(context)
+    expect(context.controlsCollapsed).toBe(true)
+    expect(context.controlsDragMoved).toBe(false)
+
+    toolbarMethods.expandControls.call(context)
+    expect(context.controlsCollapsed).toBe(false)
   })
 
   test('selects the nearest side from the expanded toolbar center', () => {
@@ -345,14 +371,14 @@ describe.each([
       controlsSide: 'right',
       controlsViewportSize: () => ({width: 360, height: 640}),
       $refs: {
-        [controlsRef]: {offsetWidth: 28, offsetHeight: 64},
+        [controlsRef]: {offsetWidth: 22, offsetHeight: 52},
       },
     }
     context.clampControlsPosition = (x: number, y: number) => toolbarMethods.clampControlsPosition.call(context, x, y)
 
     toolbarMethods.snapControlsToSide.call(context)
 
-    expect(context.controlsPosition).toEqual({x: 332, y: 210})
+    expect(context.controlsPosition).toEqual({x: 338, y: 210})
   })
 
   test('uses the full viewport height for text pagination', () => {
