@@ -31,6 +31,36 @@ describe('ReaderImageMagnifier', () => {
     expect(methods.magnifiableImageAt(20, 30)).toBe(image)
   })
 
+  test('does not treat an image beneath reader controls as touch content', () => {
+    const image = loadedImage()
+    const button = document.createElement('button')
+    const icon = document.createElement('span')
+    const preventDefault = jest.fn()
+    const updateAtPoint = jest.fn()
+    button.appendChild(icon)
+    Object.defineProperty(document, 'elementsFromPoint', {
+      configurable: true,
+      value: jest.fn(() => [icon, button, image]),
+    })
+
+    expect(methods.magnifiableImageAt(20, 30)).toBeUndefined()
+
+    const magnifier = Object.assign({}, methods, {
+      active: true,
+      touchTracking: false,
+      updateAtPoint,
+    })
+    methods.updateFromTouch.call(magnifier, {
+      type: 'touchstart',
+      touches: [{clientX: 20, clientY: 30}],
+      cancelable: true,
+      preventDefault,
+    })
+
+    expect(preventDefault).not.toHaveBeenCalled()
+    expect(updateAtPoint).not.toHaveBeenCalled()
+  })
+
   test('uses the rendered content bounds for contained images', () => {
     const image = loadedImage()
     image.style.objectFit = 'contain'

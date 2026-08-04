@@ -153,12 +153,32 @@ export default Vue.extend({
       this.visible = true
     },
     magnifiableImageAt(x: number, y: number): HTMLImageElement | undefined {
-      return document.elementsFromPoint(x, y).find(element =>
+      const elements = document.elementsFromPoint(x, y)
+      const imageIndex = elements.findIndex(element =>
         element instanceof HTMLImageElement &&
         element.dataset.readerMagnifiable === 'true' &&
         element.complete &&
         element.naturalWidth > 0,
-      ) as HTMLImageElement | undefined
+      )
+      if (imageIndex < 0) return undefined
+      if (elements.slice(0, imageIndex).some(this.isMagnifierControlElement)) return undefined
+      return elements[imageIndex] as HTMLImageElement
+    },
+    isMagnifierControlElement(element: Element): boolean {
+      return Boolean(element.closest([
+        'button',
+        'a',
+        'input',
+        'select',
+        'textarea',
+        '[role="button"]',
+        '.v-toolbar',
+        '.v-list-item',
+        '.v-dialog',
+        '.v-overlay',
+        '.reflow-controls',
+        '.k2-controls',
+      ].join(',')))
     },
     imageContentRect(image: HTMLImageElement): Rect {
       const rect = image.getBoundingClientRect()
