@@ -356,6 +356,8 @@ class LibraryContentLifecycle(
         }
       }
 
+      deleteDeletedAncestorBooksOwnedByLibrary(library, scannedBookUrls)
+
       // for all series where books have been removed or added, trigger a sort and refresh metadata
       seriesToSortAndRefresh.distinctBy { it.id }.forEach {
         seriesLifecycle.sortBooks(it)
@@ -439,6 +441,38 @@ class LibraryContentLifecycle(
     libraryRepository.findAllByParentId(libraryId).flatMap { child ->
       listOf(child) + findDescendantLibraries(child.id)
     }
+
+  private fun findAncestorLibraries(library: Library): Collection<Library> {
+    val parent = library.parentId?.let(libraryRepository::findByIdOrNull) ?: return emptyList()
+    return listOf(parent) + findAncestorLibraries(parent)
+  }
+
+  private fun deleteDeletedAncestorBooksOwnedByLibrary(
+    library: Library,
+    scannedBookUrls: Collection<URL>,
+  ) {
+    if (scannedBookUrls.isEmpty()) return
+    val scannedUrls = scannedBookUrls.toSet()
+
+    findAncestorLibraries(library).forEach { ancestor ->
+      val ancestorSeriesIds = seriesRepository.findAllIdsByLibraryId(ancestor.id)
+      if (ancestorSeriesIds.isEmpty()) return@forEach
+      val duplicates =
+        bookRepository
+          .findAllBySeriesIds(ancestorSeriesIds)
+          .filter { it.deletedDate != null && it.url in scannedUrls }
+      if (duplicates.isEmpty()) return@forEach
+
+      logger.info { "Deleting unavailable books from ancestor library '${ancestor.name}' now owned by '${library.name}': $duplicates" }
+      bookLifecycle.deleteMany(duplicates)
+      duplicates
+        .map { it.seriesId }
+        .distinct()
+        .mapNotNull(seriesRepository::findByIdOrNull)
+        .filter { bookRepository.findAllBySeriesId(it.id).isEmpty() }
+        .let(seriesLifecycle::deleteMany)
+    }
+  }
 
   private fun applyScanLimitPriority(
     scanResult: ScanResult,

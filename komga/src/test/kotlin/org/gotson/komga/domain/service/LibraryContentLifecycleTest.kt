@@ -169,6 +169,37 @@ class LibraryContentLifecycleTest(
     }
 
     @Test
+    fun `given child owns a file when scanning child then unavailable duplicate is removed from parent`(
+      @TempDir root: Path,
+    ) {
+      val parentRoot = root.resolve("parent")
+      val childRoot = parentRoot.resolve("child")
+      val seriesUrl = childRoot.resolve("series").toUri().toURL()
+      val bookUrl = childRoot.resolve("series/book.cbz").toUri().toURL()
+      val parent = Library("parent", parentRoot.toUri().toURL(), id = "parent")
+      val child = Library("child", childRoot.toUri().toURL(), parentId = parent.id, id = "child")
+      val parentSeries = makeSeries("parent-series", libraryId = parent.id, url = seriesUrl)
+      val parentBook =
+        makeBook("parent-book", libraryId = parent.id, seriesId = parentSeries.id, url = bookUrl)
+          .copy(deletedDate = LocalDateTime.now())
+      libraryRepository.insert(parent)
+      libraryRepository.insert(child)
+      seriesRepository.insert(parentSeries)
+      bookRepository.insert(parentBook)
+      every { mockScanner.scanRootFolder(any()) } returns
+        mapOf(
+          makeSeries("child-series", url = seriesUrl) to
+            listOf(makeBook("child-book", url = bookUrl)),
+        ).toScanResult()
+
+      libraryContentLifecycle.scanRootFolder(child)
+
+      assertThat(bookRepository.findByIdOrNull(parentBook.id)).isNull()
+      assertThat(seriesRepository.findByIdOrNull(parentSeries.id)).isNull()
+      assertThat(bookRepository.findNotDeletedByLibraryIdAndUrlOrNull(child.id, bookUrl)).isNotNull()
+    }
+
+    @Test
     fun `given existing series when adding files and scanning then only updated books are persisted`() {
       // given
       val library = makeLibrary()
