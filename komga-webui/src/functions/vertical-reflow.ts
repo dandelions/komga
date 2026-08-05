@@ -7,6 +7,7 @@ export function mergeVerticalColumnBands(
   columns: VerticalColumnBand[],
   wordGap: number,
   columnGap: number,
+  sourceScale = 1,
 ): VerticalColumnBand[] {
   if (columns.length <= 1) return columns
 
@@ -14,9 +15,13 @@ export function mergeVerticalColumnBands(
   const widths = sorted.map(column => Math.max(1, column.end - column.start)).sort((a, b) => a - b)
   const typicalWidth = widths[Math.ceil((widths.length - 1) * 0.75)]
   const maxFragmentGap = Math.max(1, Math.min(Math.floor(wordGap), Math.floor(typicalWidth * 0.18)))
+  const resolutionScale = Math.max(1, Math.min(4, sourceScale))
+  const scaledAdornmentGap = resolutionScale > 1
+    ? Math.ceil(columnGap * 0.25 * resolutionScale)
+    : Math.floor(columnGap * 0.25)
   const maxAdornmentGap = Math.max(
     maxFragmentGap,
-    Math.min(Math.floor(columnGap * 0.25), Math.floor(typicalWidth * 0.32)),
+    Math.min(scaledAdornmentGap, Math.floor(typicalWidth * 0.32)),
   )
   const narrowFragmentWidth = Math.max(2, Math.floor(typicalWidth * 0.55))
   const maxMergedWidth = Math.max(typicalWidth + maxFragmentGap, Math.floor(typicalWidth * 1.65))

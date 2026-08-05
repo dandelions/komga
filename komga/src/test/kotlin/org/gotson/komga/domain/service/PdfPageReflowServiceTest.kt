@@ -140,6 +140,25 @@ class PdfPageReflowServiceTest {
   }
 
   @Test
+  fun `given high resolution vertical side rule when reflowing page then rule stays with text column`() {
+    val pageBytes = highResolutionVerticalSideRulePage()
+    val book = makeBook("book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(verticalText = true),
+      )
+
+    val wordBlocks = response.items.filter { it.type == "word" }
+    assertThat(wordBlocks).isNotEmpty
+    assertThat(wordBlocks.mapNotNull { it.w }.min()).isGreaterThan(20)
+    assertThat(wordBlocks.mapNotNull { it.w }.max()).isGreaterThan(70)
+  }
+
+  @Test
   fun `given same page and options when reflowing from cache then page is rendered once`() {
     val pageBytes = horizontalShortGlyphPage()
     val book = makeBook("book")
@@ -1368,6 +1387,24 @@ class PdfPageReflowServiceTest {
     graphics.color = Color.BLACK
     listOf(20, 42).forEach { y -> graphics.fillRect(90, y, 10, 12) }
     listOf(20, 42, 64, 86, 108).forEach { y -> graphics.fillRect(50, y, 10, 12) }
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    return output.toByteArray()
+  }
+
+  private fun highResolutionVerticalSideRulePage(): ByteArray {
+    val image = BufferedImage(3200, 420, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color.BLACK
+    graphics.fillRect(100, 40, 5, 300)
+    listOf(40, 105, 170, 235, 300).forEach { y ->
+      graphics.fillRect(117, y, 60, 48)
+      graphics.fillRect(250, y, 60, 48)
+    }
     graphics.dispose()
 
     val output = ByteArrayOutputStream()

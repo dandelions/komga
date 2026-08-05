@@ -2814,7 +2814,7 @@ export default Vue.extend({
 
       if (this.verticalText) {
         return {
-          lines: this.detectVerticalWordLines(isInk, roi),
+          lines: this.detectVerticalWordLines(isInk, roi, width),
           imageRegions,
         }
       }
@@ -4665,8 +4665,8 @@ export default Vue.extend({
       const clamped = this.clampNumber(numberValue, -10, 10, 0)
       return Math.round(clamped * 2) / 2
     },
-    detectVerticalWordLines(isInk: (x: number, y: number) => boolean, roi: Roi): WordLine[] {
-      const columns = this.detectVerticalTextColumns(isInk, roi)
+    detectVerticalWordLines(isInk: (x: number, y: number) => boolean, roi: Roi, sourceWidth: number): WordLine[] {
+      const columns = this.detectVerticalTextColumns(isInk, roi, sourceWidth)
       const orderedColumns = columns.sort((a, b) => {
         const centerA = (a.start + a.end) / 2
         const centerB = (b.start + b.end) / 2
@@ -4707,7 +4707,7 @@ export default Vue.extend({
       if (top === Number.MAX_SAFE_INTEGER || bottom <= top) return undefined
       return {start: top, end: bottom}
     },
-    detectVerticalTextColumns(isInk: (x: number, y: number) => boolean, roi: Roi): Column[] {
+    detectVerticalTextColumns(isInk: (x: number, y: number) => boolean, roi: Roi, sourceWidth: number): Column[] {
       const colInk = new Array(roi.x + roi.w).fill(0)
       const threshold = Math.max(1, Math.floor(roi.h * 0.003))
       const maxBlankRun = Math.max(1, Math.floor(this.clampNumber(this.options.columnGap, 5, 80, COLUMN_GAP) * 0.14))
@@ -4750,6 +4750,7 @@ export default Vue.extend({
         columns,
         this.clampNumber(this.options.wordGap, 1, 30, WORD_GAP),
         this.clampNumber(this.options.columnGap, 5, 80, COLUMN_GAP),
+        sourceWidth / Math.max(1, this.targetWidth),
       )
       return mergedColumns.length > 0 ? mergedColumns : [{start: roi.x, end: roi.x + roi.w}]
     },

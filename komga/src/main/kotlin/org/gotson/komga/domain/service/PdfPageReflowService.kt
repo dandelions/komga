@@ -2881,7 +2881,7 @@ class PdfPageReflowService(
         }
         count >= 1
       }.filter { it.end - it.start >= 2 }
-        .let { mergeCloseVerticalColumns(it, options) }
+        .let { mergeCloseVerticalColumns(it, options, image.width) }
         .sortedBy { (it.start + it.end) / 2 }
         .let { if (options.verticalDirection == "ltr") it else it.reversed() }
 
@@ -3152,16 +3152,24 @@ class PdfPageReflowService(
   private fun mergeCloseVerticalColumns(
     columns: List<LineBand>,
     options: PdfPageReflowOptions,
+    sourceWidth: Int,
   ): List<LineBand> {
     if (columns.size <= 1) return columns
     val sorted = columns.sortedBy { it.start }
     val widths = sorted.map { max(1, it.end - it.start) }.sorted()
     val typicalWidth = widths[ceil((widths.size - 1) * 0.75).toInt()]
     val maxFragmentGap = max(1, min(clamp(options.wordGap, 1, 30), (typicalWidth * 0.18).toInt()))
+    val resolutionScale = clamp(sourceWidth.toDouble() / max(1, options.targetWidth), 1.0, 4.0)
+    val scaledAdornmentGap =
+      if (resolutionScale > 1.0) {
+        ceil(clamp(options.columnGap, 5, 80) * 0.25 * resolutionScale).toInt()
+      } else {
+        (clamp(options.columnGap, 5, 80) * 0.25).toInt()
+      }
     val maxAdornmentGap =
       max(
         maxFragmentGap,
-        min((clamp(options.columnGap, 5, 80) * 0.25).toInt(), (typicalWidth * 0.32).toInt()),
+        min(scaledAdornmentGap, (typicalWidth * 0.32).toInt()),
       )
     val narrowFragmentWidth = max(2, (typicalWidth * 0.55).toInt())
     val maxMergedWidth = max(typicalWidth + maxFragmentGap, (typicalWidth * 1.65).toInt())
