@@ -4847,7 +4847,11 @@ export default Vue.extend({
       return merged.filter((_, index) => !consumed.has(index)).sort((a, b) => a.y - b.y || a.x - b.x)
     },
     isVerticalAdornmentBlock(block: WordBlock, maxWidth: number, maxHeight: number): boolean {
-      return block.w <= maxWidth && block.h <= maxHeight && block.h > block.w * 1.8
+      if (!(block.h > block.w * 1.8)) return false
+      if (block.w <= maxWidth && block.h <= maxHeight) return true
+      // High-resolution: allow narrow emphasis/rule lines spanning multiple rows
+      if (block.w <= maxWidth * 0.4 && block.h <= maxHeight * 2.5) return true
+      return false
     },
     findVerticalAdornmentTarget(blocks: WordBlock[], sourceIndex: number, maxGap: number): number | undefined {
       const source = blocks[sourceIndex]
