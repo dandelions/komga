@@ -21,7 +21,7 @@
         class="k2-side-tab"
         title="显示重排工具栏"
         aria-label="显示重排工具栏"
-        @pointerdown.stop.prevent="startControlsDrag"
+        @pointerdown.stop="startControlsDrag"
         @click="expandControls"
       >
         <v-icon small>{{ controlsSide === 'left' ? 'mdi-chevron-right' : 'mdi-chevron-left' }}</v-icon>
@@ -32,7 +32,7 @@
           class="k2-action k2-drag-handle"
           title="拖动重排工具栏"
           aria-label="拖动重排工具栏"
-          @pointerdown.stop.prevent="startControlsDrag"
+          @pointerdown.stop="startControlsDrag"
         >
           <v-icon small>mdi-drag</v-icon>
         </button>
@@ -516,6 +516,8 @@ export default Vue.extend({
     },
     startControlsDrag(event: PointerEvent) {
       if (this.controlsDragging) return
+      // Prevent default on touch pointerdown to avoid browser gestures
+      if (event.pointerType === 'touch' && event.cancelable) event.preventDefault()
       this.controlsDragging = true
       this.controlsDragMoved = false
       this.controlsDragPointerId = event.pointerId
@@ -2632,7 +2634,7 @@ export default Vue.extend({
 
 .k2-controls {
   position: fixed;
-  z-index: 20;
+  z-index: 110;
   display: flex;
   flex-direction: column;
   flex-wrap: nowrap;

@@ -86,10 +86,18 @@ export default Vue.extend({
     },
     preventLongPressAction(event: Event) {
       if (!this.active) return
+      // Allow interactions inside toolbar controls
+      if (event instanceof PointerEvent || event instanceof TouchEvent || event instanceof MouseEvent) {
+        const clientX = (event as any).clientX ?? 0
+        const clientY = (event as any).clientY ?? 0
+        if (this.hasK2ControlsElement(clientX, clientY)) return
+      }
       event.preventDefault()
       event.stopPropagation()
     },
     updateFromPointer(event: PointerEvent) {
+      // Allow interactions inside toolbar controls
+      if (this.hasK2ControlsElement(event.clientX, event.clientY)) return
       if (event.pointerType === 'touch') {
         if (event.type === 'pointerdown') {
           this.pointerTouchTracking = this.active && Boolean(this.magnifiableImageAt(event.clientX, event.clientY))
@@ -103,6 +111,8 @@ export default Vue.extend({
     updateFromTouch(event: TouchEvent) {
       const touch = event.touches[0]
       if (!touch) return
+      // Allow interactions inside toolbar controls
+      if (this.hasK2ControlsElement(touch.clientX, touch.clientY)) return
       if (event.type === 'touchstart') {
         this.touchTracking = this.active && Boolean(this.magnifiableImageAt(touch.clientX, touch.clientY))
       }
@@ -180,6 +190,13 @@ export default Vue.extend({
         '.k2-controls',
       ].join(',')))
     },
+    hasK2ControlsElement(x: number, y: number): boolean {
+      const elements = document.elementsFromPoint(x, y)
+      for (const element of elements) {
+        if (element instanceof HTMLElement && element.closest('.k2-controls, .k2-side-tab')) return true
+      }
+      return false
+    },
     imageContentRect(image: HTMLImageElement): Rect {
       const rect = image.getBoundingClientRect()
       const objectFit = window.getComputedStyle(image).objectFit
@@ -228,7 +245,7 @@ export default Vue.extend({
 <style scoped>
 .reader-image-magnifier {
   position: fixed;
-  z-index: 1000;
+  z-index: 100;
   overflow: hidden;
   border: 3px solid #fff;
   border-radius: 50%;
