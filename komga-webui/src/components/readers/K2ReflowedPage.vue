@@ -125,7 +125,12 @@
           :class="{'k2-magnifier-active': magnifierActive}"
           :title="magnifierActive ? '关闭局部放大镜' : '选择放大镜直径'"
           :aria-label="magnifierActive ? '关闭局部放大镜' : '选择放大镜直径'"
-          @click="$emit('toggle-magnifier')"
+          @click="handleMagnifierClick"
+          @pointerdown.stop="startMagnifierPress"
+          @pointerup.stop="finishMagnifierPress"
+          @pointercancel.stop="cancelMagnifierPress"
+          @pointerleave.stop="cancelMagnifierPress"
+          @contextmenu.prevent
         >
           <v-icon small>{{ magnifierActive ? 'mdi-magnify-close' : 'mdi-magnify-plus-outline' }}</v-icon>
         </button>
@@ -360,6 +365,8 @@ export default Vue.extend({
     matchBackgroundMode: 'grayscale' as MatchBackgroundMode,
     wordGap: DEFAULT_WORD_GAP,
     outputPadding: DEFAULT_OUTPUT_PADDING,
+    magnifierPressTimer: undefined as number | undefined,
+    magnifierLongPressTriggered: false,
   }),
   watch: {
     page: {
@@ -489,6 +496,30 @@ export default Vue.extend({
     this.revokeObjectUrl()
   },
   methods: {
+    startMagnifierPress() {
+      this.finishMagnifierPress()
+      this.magnifierLongPressTriggered = false
+      this.magnifierPressTimer = window.setTimeout(() => {
+        this.magnifierLongPressTriggered = true
+        this.$emit('configure-magnifier')
+      }, 550)
+    },
+    finishMagnifierPress() {
+      if (this.magnifierPressTimer !== undefined) {
+        window.clearTimeout(this.magnifierPressTimer)
+        this.magnifierPressTimer = undefined
+      }
+    },
+    cancelMagnifierPress() {
+      this.finishMagnifierPress()
+    },
+    handleMagnifierClick() {
+      if (this.magnifierLongPressTriggered) {
+        this.magnifierLongPressTriggered = false
+        return
+      }
+      this.$emit('toggle-magnifier')
+    },
     initializeControlsPosition() {
       if (this.controlsPositionInitialized) return
       const viewport = this.controlsViewportSize()

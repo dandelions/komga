@@ -8,17 +8,36 @@ const methods = (DivinaReader as any).options.methods
 const computed = (DivinaReader as any).options.computed
 
 describe('DivinaReader image magnifier', () => {
-  test('opens the diameter selector and closes an active magnifier', () => {
+  test('short press toggles the magnifier directly', () => {
     const reader = {magnifierActive: false, magnifierDiameterDialog: false}
 
     methods.toggleMagnifier.call(reader)
-    expect(reader.magnifierActive).toBe(false)
-    expect(reader.magnifierDiameterDialog).toBe(true)
+    expect(reader.magnifierActive).toBe(true)
+    expect(reader.magnifierDiameterDialog).toBe(false)
 
-    reader.magnifierActive = true
     methods.toggleMagnifier.call(reader)
     expect(reader.magnifierActive).toBe(false)
     expect(reader.magnifierDiameterDialog).toBe(false)
+  })
+
+  test('applies diameter and magnification from long-press settings', () => {
+    const reader = Object.assign({}, methods, {
+      magnifierActive: false,
+      magnifierDiameterDialog: true,
+      magnifierDiameterDraft: 240,
+      magnifierMagnificationDraft: 3.5,
+      magnifierDiameter: 184,
+      magnifierMagnification: 2.5,
+    })
+
+    methods.applyMagnifierSettings.call(reader)
+
+    expect(reader.magnifierActive).toBe(true)
+    expect(reader.magnifierDiameter).toBe(240)
+    expect(reader.magnifierMagnification).toBe(3.5)
+    expect(reader.magnifierDiameterDialog).toBe(false)
+    window.localStorage.removeItem('komga.readerMagnifierDiameter')
+    window.localStorage.removeItem('komga.readerMagnifierMagnification')
   })
 
   test('activates the magnifier with the selected diameter', () => {
@@ -57,5 +76,15 @@ describe('DivinaReader image magnifier', () => {
     expect(reader.magnifierDiameter).toBe(240)
     expect(window.localStorage.getItem('komga.readerMagnifierDiameter')).toBe('240')
     window.localStorage.removeItem('komga.readerMagnifierDiameter')
+  })
+
+  test('stores a selected magnification', () => {
+    const reader = {magnifierMagnification: 2.5}
+
+    methods.setMagnifierMagnification.call(reader, 3.25)
+
+    expect(reader.magnifierMagnification).toBe(3.25)
+    expect(window.localStorage.getItem('komga.readerMagnifierMagnification')).toBe('3.25')
+    window.localStorage.removeItem('komga.readerMagnifierMagnification')
   })
 })

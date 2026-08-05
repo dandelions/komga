@@ -52,7 +52,12 @@
             :color="magnifierActive ? 'primary' : undefined"
             :title="magnifierActive ? '关闭局部放大镜' : '选择放大镜直径'"
             :aria-label="magnifierActive ? '关闭局部放大镜' : '选择放大镜直径'"
-            @click="toggleMagnifier"
+            @click="handleMagnifierClick"
+            @pointerdown="startMagnifierPress"
+            @pointerup="finishMagnifierPress"
+            @pointercancel="cancelMagnifierPress"
+            @pointerleave="cancelMagnifierPress"
+            @contextmenu.prevent
           >
             <v-icon>{{ magnifierActive ? 'mdi-magnify-close' : 'mdi-magnify-plus-outline' }}</v-icon>
           </v-btn>
@@ -134,7 +139,15 @@
                   </v-list-item-icon>
                   <v-list-item-title>{{ $t('bookreader.help') }}</v-list-item-title>
                 </v-list-item>
-                <v-list-item v-if="!activeReflowMode" @click="toggleMagnifier">
+                <v-list-item
+                  v-if="!activeReflowMode"
+                  @click="handleMagnifierClick"
+                  @pointerdown="startMagnifierPress"
+                  @pointerup="finishMagnifierPress"
+                  @pointercancel="cancelMagnifierPress"
+                  @pointerleave="cancelMagnifierPress"
+                  @contextmenu.prevent
+                >
                   <v-list-item-icon>
                     <v-icon>{{ magnifierActive ? 'mdi-magnify-close' : 'mdi-magnify-plus-outline' }}</v-icon>
                   </v-list-item-icon>
@@ -252,6 +265,7 @@
           @show-pdf-toc="openPdfToc"
           @toggle-night-display="toggleNightDisplay"
           @toggle-magnifier="toggleMagnifier"
+          @configure-magnifier="openMagnifierSettings"
           @back-to-book="closeBook"
         />
 
@@ -330,6 +344,7 @@
           @show-pdf-toc="openPdfToc"
           @toggle-night-display="toggleNightDisplay"
           @toggle-magnifier="toggleMagnifier"
+          @configure-magnifier="openMagnifierSettings"
           @toggle-reader-toolbar="toggleToolbars"
           @back-to-book="closeBook"
         />
@@ -421,26 +436,39 @@
       ></paged-reader>
     </div>
 
-    <reader-image-magnifier :active="magnifierActive" :diameter="magnifierDiameter" />
+    <reader-image-magnifier
+      :active="magnifierActive"
+      :diameter="magnifierDiameter"
+      :magnification="magnifierMagnification"
+    />
 
     <v-dialog v-model="magnifierDiameterDialog" max-width="360">
       <v-card>
-        <v-card-title class="text-subtitle-1">选择放大镜直径</v-card-title>
-        <v-list>
-          <v-list-item
-            v-for="option in magnifierDiameterOptions"
-            :key="`magnifier-dialog-diameter-${option.value}`"
-            @click="activateMagnifier(option.value)"
-          >
-            <v-list-item-icon>
-              <v-icon>{{ magnifierDiameter === option.value ? 'mdi-check-circle' : 'mdi-circle-outline' }}</v-icon>
-            </v-list-item-icon>
-            <v-list-item-title>{{ option.text }}</v-list-item-title>
-          </v-list-item>
-        </v-list>
+        <v-card-title class="text-subtitle-1">放大镜设置</v-card-title>
+        <v-card-text>
+          <v-slider
+            v-model="magnifierDiameterDraft"
+            label="直径"
+            min="96"
+            max="320"
+            step="8"
+            thumb-label
+            suffix=" px"
+          />
+          <v-slider
+            v-model="magnifierMagnificationDraft"
+            label="放大倍数"
+            min="1.25"
+            max="5"
+            step="0.25"
+            thumb-label
+            suffix="x"
+          />
+        </v-card-text>
         <v-card-actions>
           <v-spacer />
           <v-btn text @click="magnifierDiameterDialog = false">取消</v-btn>
+          <v-btn color="primary" text @click="applyMagnifierSettings">启用</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -969,7 +997,9 @@ import {reflowPrefetchPageNumbers} from '@/functions/reflow-stream'
 const REFLOW_SETTINGS_STORAGE_PREFIX = 'komga.pdfReflowSettings.'
 const READER_IMAGE_SETTINGS_STORAGE_PREFIX = 'komga.readerImageSettings.'
 const MAGNIFIER_DIAMETER_STORAGE_KEY = 'komga.readerMagnifierDiameter'
+const MAGNIFIER_MAGNIFICATION_STORAGE_KEY = 'komga.readerMagnifierMagnification'
 const DEFAULT_MAGNIFIER_DIAMETER = 184
+const DEFAULT_MAGNIFIER_MAGNIFICATION = 2.5
 const MAGNIFIER_DIAMETER_OPTIONS = [
   {text: '小（144 px）', value: 144},
   {text: '中（184 px）', value: 184},
@@ -1122,6 +1152,11 @@ export default Vue.extend({
       magnifierDiameterDialog: false,
       magnifierDiameter: DEFAULT_MAGNIFIER_DIAMETER,
       magnifierDiameterOptions: MAGNIFIER_DIAMETER_OPTIONS,
+      magnifierDiameterDraft: DEFAULT_MAGNIFIER_DIAMETER,
+      magnifierMagnification: DEFAULT_MAGNIFIER_MAGNIFICATION,
+      magnifierMagnificationDraft: DEFAULT_MAGNIFIER_MAGNIFICATION,
+      magnifierPressTimer: undefined as number | undefined,
+      magnifierLongPressTriggered: false,
       landscapeDisplay: false,
       reflowSetupMode: false,
       reflowMode: false,
@@ -1257,7 +1292,7 @@ export default Vue.extend({
   },
   async mounted() {
     document.documentElement.classList.add('html-reader')
-    this.loadMagnifierDiameter()
+    this.loadMagnifierSettings()
 
     this.$debug('[mounted]', 'route.query:', this.$route.query)
 
@@ -3270,12 +3305,43 @@ export default Vue.extend({
       }
     }, 50),
     toggleMagnifier() {
-      if (this.magnifierActive) {
-        this.magnifierActive = false
-        this.magnifierDiameterDialog = false
+      this.magnifierActive = !this.magnifierActive
+      this.magnifierDiameterDialog = false
+    },
+    startMagnifierPress() {
+      this.cancelMagnifierPress()
+      this.magnifierLongPressTriggered = false
+      this.magnifierPressTimer = window.setTimeout(() => {
+        this.magnifierLongPressTriggered = true
+        this.openMagnifierSettings()
+      }, 550)
+    },
+    finishMagnifierPress() {
+      if (this.magnifierPressTimer !== undefined) {
+        window.clearTimeout(this.magnifierPressTimer)
+        this.magnifierPressTimer = undefined
+      }
+    },
+    cancelMagnifierPress() {
+      this.finishMagnifierPress()
+    },
+    handleMagnifierClick() {
+      if (this.magnifierLongPressTriggered) {
+        this.magnifierLongPressTriggered = false
         return
       }
+      this.toggleMagnifier()
+    },
+    openMagnifierSettings() {
+      this.magnifierDiameterDraft = this.magnifierDiameter
+      this.magnifierMagnificationDraft = this.magnifierMagnification
       this.magnifierDiameterDialog = true
+    },
+    applyMagnifierSettings() {
+      this.setMagnifierDiameter(this.magnifierDiameterDraft)
+      this.setMagnifierMagnification(this.magnifierMagnificationDraft)
+      this.magnifierDiameterDialog = false
+      this.magnifierActive = true
     },
     activateMagnifier(diameter: number) {
       if (!MAGNIFIER_DIAMETER_OPTIONS.some(option => option.value === Number(diameter))) return
@@ -3283,22 +3349,35 @@ export default Vue.extend({
       this.magnifierDiameterDialog = false
       this.magnifierActive = true
     },
-    loadMagnifierDiameter() {
+    loadMagnifierSettings() {
       try {
         const saved = Number(window.localStorage.getItem(MAGNIFIER_DIAMETER_STORAGE_KEY))
-        if (MAGNIFIER_DIAMETER_OPTIONS.some(option => option.value === saved)) this.magnifierDiameter = saved
+        if (Number.isFinite(saved) && saved >= 96 && saved <= 320) this.magnifierDiameter = Math.round(saved / 8) * 8
+        const savedMagnification = Number(window.localStorage.getItem(MAGNIFIER_MAGNIFICATION_STORAGE_KEY))
+        if (Number.isFinite(savedMagnification) && savedMagnification >= 1.25 && savedMagnification <= 5) this.magnifierMagnification = savedMagnification
       } catch (_) {
         this.magnifierDiameter = DEFAULT_MAGNIFIER_DIAMETER
+        this.magnifierMagnification = DEFAULT_MAGNIFIER_MAGNIFICATION
       }
     },
     setMagnifierDiameter(value: number) {
       const diameter = Number(value)
-      if (!MAGNIFIER_DIAMETER_OPTIONS.some(option => option.value === diameter)) return
-      this.magnifierDiameter = diameter
+      if (!Number.isFinite(diameter)) return
+      this.magnifierDiameter = Math.max(96, Math.min(320, Math.round(diameter / 8) * 8))
       try {
-        window.localStorage.setItem(MAGNIFIER_DIAMETER_STORAGE_KEY, String(diameter))
+        window.localStorage.setItem(MAGNIFIER_DIAMETER_STORAGE_KEY, String(this.magnifierDiameter))
       } catch (_) {
         // The selected size remains active for this reader session.
+      }
+    },
+    setMagnifierMagnification(value: number) {
+      const magnification = Math.max(1.25, Math.min(5, Number(value)))
+      if (!Number.isFinite(magnification)) return
+      this.magnifierMagnification = Math.round(magnification * 4) / 4
+      try {
+        window.localStorage.setItem(MAGNIFIER_MAGNIFICATION_STORAGE_KEY, String(this.magnifierMagnification))
+      } catch (_) {
+        // The selected magnification remains active for this reader session.
       }
     },
     downloadCurrentPage() {

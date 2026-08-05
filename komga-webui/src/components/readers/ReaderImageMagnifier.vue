@@ -17,7 +17,9 @@ type Rect = {left: number, top: number, width: number, height: number}
 
 const DEFAULT_LENS_DIAMETER = 184
 const MIN_LENS_DIAMETER = 96
-const MAGNIFICATION = 2.5
+const DEFAULT_MAGNIFICATION = 2.5
+const MIN_MAGNIFICATION = 1.25
+const MAX_MAGNIFICATION = 5
 const TOUCH_LENS_OFFSET_RATIO = 0.58
 const VIEWPORT_GAP = 8
 
@@ -31,6 +33,10 @@ export default Vue.extend({
     diameter: {
       type: Number,
       default: DEFAULT_LENS_DIAMETER,
+    },
+    magnification: {
+      type: Number,
+      default: DEFAULT_MAGNIFICATION,
     },
   },
   data: () => ({
@@ -87,17 +93,19 @@ export default Vue.extend({
     preventLongPressAction(event: Event) {
       if (!this.active) return
       // Allow interactions inside toolbar controls
-      if (event instanceof PointerEvent || event instanceof TouchEvent || event instanceof MouseEvent) {
+      if ((typeof PointerEvent !== 'undefined' && event instanceof PointerEvent) ||
+        (typeof TouchEvent !== 'undefined' && event instanceof TouchEvent) ||
+        (typeof MouseEvent !== 'undefined' && event instanceof MouseEvent)) {
         const clientX = (event as any).clientX ?? 0
         const clientY = (event as any).clientY ?? 0
-        if (this.hasK2ControlsElement(clientX, clientY)) return
+        if (typeof this.hasK2ControlsElement === 'function' && this.hasK2ControlsElement(clientX, clientY)) return
       }
       event.preventDefault()
       event.stopPropagation()
     },
     updateFromPointer(event: PointerEvent) {
       // Allow interactions inside toolbar controls
-      if (this.hasK2ControlsElement(event.clientX, event.clientY)) return
+      if (typeof this.hasK2ControlsElement === 'function' && this.hasK2ControlsElement(event.clientX, event.clientY)) return
       if (event.pointerType === 'touch') {
         if (event.type === 'pointerdown') {
           this.pointerTouchTracking = this.active && Boolean(this.magnifiableImageAt(event.clientX, event.clientY))
@@ -112,7 +120,7 @@ export default Vue.extend({
       const touch = event.touches[0]
       if (!touch) return
       // Allow interactions inside toolbar controls
-      if (this.hasK2ControlsElement(touch.clientX, touch.clientY)) return
+      if (typeof this.hasK2ControlsElement === 'function' && this.hasK2ControlsElement(touch.clientX, touch.clientY)) return
       if (event.type === 'touchstart') {
         this.touchTracking = this.active && Boolean(this.magnifiableImageAt(touch.clientX, touch.clientY))
       }
@@ -154,10 +162,11 @@ export default Vue.extend({
         width: `${lensSize}px`,
         height: `${lensSize}px`,
       }
+      const magnification = this.magnificationValue()
       this.contentStyle = {
         backgroundImage: `url(${JSON.stringify(sourceUrl)})`,
-        backgroundSize: `${contentRect.width * MAGNIFICATION}px ${contentRect.height * MAGNIFICATION}px`,
-        backgroundPosition: `${focusX - sourceX * MAGNIFICATION}px ${focusY - sourceY * MAGNIFICATION}px`,
+        backgroundSize: `${contentRect.width * magnification}px ${contentRect.height * magnification}px`,
+        backgroundPosition: `${focusX - sourceX * magnification}px ${focusY - sourceY * magnification}px`,
         filter: filter === 'none' ? '' : filter,
       }
       this.visible = true
@@ -237,6 +246,10 @@ export default Vue.extend({
       const configured = Number.isFinite(this.diameter) ? this.diameter : DEFAULT_LENS_DIAMETER
       const viewportLimit = Math.max(MIN_LENS_DIAMETER, Math.min(window.innerWidth, window.innerHeight) - VIEWPORT_GAP * 2)
       return Math.min(Math.max(MIN_LENS_DIAMETER, configured), viewportLimit)
+    },
+    magnificationValue(): number {
+      const configured = Number.isFinite(this.magnification) ? this.magnification : DEFAULT_MAGNIFICATION
+      return Math.max(MIN_MAGNIFICATION, Math.min(MAX_MAGNIFICATION, configured))
     },
   },
 })

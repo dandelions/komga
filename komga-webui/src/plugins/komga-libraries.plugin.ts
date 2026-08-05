@@ -5,6 +5,7 @@ import {Module} from 'vuex/types'
 import {LibraryDto} from '@/types/komga-libraries'
 
 let service: KomgaLibrariesService
+let librariesRequestSequence = 0
 
 const vuexModule: Module<any, any> = {
   state: {
@@ -17,8 +18,8 @@ const vuexModule: Module<any, any> = {
         .map((it: LibraryDto) => Object.assign({}, it, settings[it.id]))
         .sort((a: LibraryDto, b: LibraryDto) => a.order - b.order)
     },
-    getLibraryById: (state, getters) => (id: number) => {
-      return getters.getLibraries.find((l: any) => l.id === id)
+    getLibraryById: (state, getters) => (id: string | number) => {
+      return getters.getLibraries.find((l: LibraryDto) => String(l.id) === String(id))
     },
     getLibrariesPinned(state, getters) {
       return getters.getLibraries.filter((it: LibraryDto) => !it.unpinned)
@@ -34,7 +35,9 @@ const vuexModule: Module<any, any> = {
   },
   actions: {
     async getLibraries({commit}) {
-      commit('setLibraries', await service.getLibraries())
+      const requestSequence = ++librariesRequestSequence
+      const libraries = await service.getLibraries()
+      if (requestSequence === librariesRequestSequence) commit('setLibraries', libraries)
     },
     async postLibrary({dispatch}, library) {
       await service.postLibrary(library)
