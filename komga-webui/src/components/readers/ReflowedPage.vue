@@ -7088,7 +7088,7 @@ export default Vue.extend({
   min-height: 0;
   padding: 8px;
   box-sizing: border-box;
-  background: rgba(248, 250, 252, 0.68);
+  background: rgba(248, 250, 252, 0.42);
   border: 1px solid rgba(0, 0, 0, 0.16);
   border-radius: 6px;
   box-shadow: 0 5px 18px rgba(0, 0, 0, 0.22);
@@ -7130,7 +7130,7 @@ export default Vue.extend({
   padding: 0;
   border: 1px solid rgba(0, 0, 0, 0.24);
   border-radius: 4px;
-  background: rgba(248, 250, 252, 0.5);
+  background: rgba(248, 250, 252, 0.24);
   color: #212121;
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
   pointer-events: auto;
@@ -7164,7 +7164,7 @@ export default Vue.extend({
 .reflow-drag-handle {
   cursor: grab;
   touch-action: none;
-  background: rgba(255, 255, 255, 0.48);
+  background: rgba(255, 255, 255, 0.34);
 }
 
 .reflow-drag-handle:active {
@@ -7407,7 +7407,7 @@ export default Vue.extend({
   gap: 3px;
   border: 1px solid rgba(0, 0, 0, 0.2);
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.94);
+  background: rgba(255, 255, 255, 0.62);
   color: #212121;
   padding: 5px 7px;
   font-size: 12px;
@@ -7442,7 +7442,7 @@ export default Vue.extend({
 }
 
 .reflowed-page-dark .reflow-controls {
-  background: rgba(30, 30, 30, 0.68);
+  background: rgba(30, 30, 30, 0.42);
   border-bottom-color: rgba(255, 255, 255, 0.14);
 }
 
@@ -7453,7 +7453,7 @@ export default Vue.extend({
 
 .reflowed-page-dark .reflow-side-tab {
   border-color: rgba(255, 255, 255, 0.3);
-  background: rgba(30, 30, 30, 0.5);
+  background: rgba(30, 30, 30, 0.24);
   color: #eeeeee;
 }
 
@@ -7480,7 +7480,7 @@ export default Vue.extend({
 .reflowed-page-dark .reflow-processing-control select,
 .reflowed-page-dark .reflow-control {
   border-color: rgba(255, 255, 255, 0.22);
-  background: rgba(48, 48, 48, 0.96);
+  background: rgba(48, 48, 48, 0.62);
   color: #eeeeee;
 }
 
