@@ -1527,6 +1527,7 @@ export default Vue.extend({
     },
     readerSwipeEnabled(): boolean {
       if (this.magnifierActive) return false
+      if (!this.continuousReader && !this.activeReflowMode && this.scale === ScaleType.ORIGINAL) return false
       return this.swipe || this.$vuetify.breakpoint.smAndDown
     },
     reflowCacheKey(): string {

@@ -68,6 +68,22 @@ describe('DivinaReader image magnifier', () => {
     expect(computed.readerSwipeEnabled.call(reader)).toBe(true)
   })
 
+  test('disables swipe page turning while a non-reflow page is shown at original size', () => {
+    const reader = {
+      magnifierActive: false,
+      continuousReader: false,
+      activeReflowMode: false,
+      scale: 'bookreader.scale_type.original',
+      swipe: true,
+      $vuetify: {breakpoint: {smAndDown: true}},
+    }
+
+    expect(computed.readerSwipeEnabled.call(reader)).toBe(false)
+
+    reader.scale = 'bookreader.scale_type.screen'
+    expect(computed.readerSwipeEnabled.call(reader)).toBe(true)
+  })
+
   test('stores a selected magnifier diameter', () => {
     const reader = {magnifierDiameter: 184}
 
