@@ -18,10 +18,10 @@
       <series-actions-menu v-if="series"
                            :series="series"
       />
-      <v-toolbar-title class="toolbar-count-title" :title="series.metadata.title">
+      <v-toolbar-title v-if="$vuetify.breakpoint.smAndUp" class="toolbar-count-title" :title="series.metadata.title">
         <span v-if="$_.get(series, 'metadata.title')">{{ series.metadata.title }}</span>
       </v-toolbar-title>
-      <v-chip v-if="totalElements !== null" label class="toolbar-count-value">
+      <v-chip v-if="totalElements !== null && $vuetify.breakpoint.smAndUp" label class="toolbar-count-value">
         <span>{{ totalElements }}</span>
       </v-chip>
 
@@ -31,13 +31,14 @@
         <v-icon>mdi-pencil</v-icon>
       </v-btn>
 
-      <page-size-select v-model="pageSize"/>
+      <page-size-select v-if="$vuetify.breakpoint.smAndUp" v-model="pageSize"/>
 
       <v-btn-toggle
         v-model="displayMode"
         mandatory
         dense
-        class="mx-2"
+        class="series-display-toggle"
+        :class="$vuetify.breakpoint.smAndUp ? 'mx-2' : 'mx-0'"
       >
         <v-btn small value="card" title="卡片显示">
           <v-icon small>mdi-view-grid</v-icon>
@@ -47,7 +48,7 @@
         </v-btn>
       </v-btn-toggle>
 
-      <v-btn icon @click="drawer = !drawer">
+      <v-btn class="series-sort-filter-button" icon @click="drawer = !drawer">
         <v-icon :color="sortOrFilterActive ? 'secondary' : ''">mdi-filter-variant</v-icon>
       </v-btn>
     </toolbar-sticky>
@@ -1273,6 +1274,9 @@ export default Vue.extend({
 
 .book-list-row {
   min-height: 76px;
+  height: auto;
+  padding-top: 7px;
+  padding-bottom: 7px;
   border-bottom: 1px solid rgba(128, 128, 128, .18);
 }
 
@@ -1294,6 +1298,7 @@ export default Vue.extend({
 }
 
 .book-list-actions {
+  flex: 0 0 auto;
   display: flex;
   flex-direction: row;
   align-items: center;
@@ -1303,6 +1308,11 @@ export default Vue.extend({
 .book-list-title {
   font-size: .95rem;
   line-height: 1.35;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .book-list-subtitle {
@@ -1311,5 +1321,26 @@ export default Vue.extend({
   gap: 4px 12px;
   margin-top: 3px;
   font-size: .78rem;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.book-list-subtitle > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.series-sort-filter-button {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 599px) {
+  .series-display-toggle ::v-deep .v-btn {
+    width: 40px;
+    min-width: 40px;
+    padding: 0;
+  }
 }
 </style>
