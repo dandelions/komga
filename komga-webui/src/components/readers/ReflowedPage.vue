@@ -734,7 +734,6 @@ const MAX_EDGE_TRIM = 6
 const MAX_EDGE_EXPANSION = 10
 const DEFAULT_REFLOW_IMAGE_QUALITY = 80
 const REFLOW_IMAGE_QUALITY_OPTIONS = [90, 80, 70, 60, 50, 40]
-const VIEWPORT_PAGE_BUFFER = 40
 const SPLIT_GUARD_BAND = 5
 const DETECTION_FULL_RES_MAX_PIXELS = 6000000
 const DETECTION_MAX_SIDE = 2800
@@ -1870,7 +1869,7 @@ export default Vue.extend({
       const paginationItems = this.paginationItems
       if (!measureWrapper || measureWrapper.children.length !== paginationItems.length) return undefined
 
-      const pageHeight = Math.max(120, this.pageContentHeight() - 32 - VIEWPORT_PAGE_BUFFER)
+      const pageHeight = Math.max(120, this.pageContentHeight() - 32)
       const rows = [] as Array<{indexes: number[], top: number, bottom: number}>
       let currentIndexes = [] as number[]
       let currentTop = 0
@@ -1937,7 +1936,7 @@ export default Vue.extend({
       if (items.length === 0) return []
 
       const contentWidth = Math.max(120, this.targetWidth - this.horizontalContentPadding() * 2)
-      const pageHeight = Math.max(120, this.pageContentHeight() - 32 - VIEWPORT_PAGE_BUFFER)
+      const pageHeight = Math.max(120, this.pageContentHeight() - 32)
       const rowGap = Math.max(0, Math.round(this.blockSpacing * 1.5))
       const columnGap = this.blockSpacing
       const pages = [] as ReflowItem[][]
@@ -1993,7 +1992,7 @@ export default Vue.extend({
       if (items.length === 0) return []
 
       const contentWidth = Math.max(120, this.targetWidth - this.horizontalContentPadding() * 2)
-      const contentHeight = Math.max(120, this.pageContentHeight() - 32 - VIEWPORT_PAGE_BUFFER)
+      const contentHeight = Math.max(120, this.pageContentHeight() - 32)
       const columnGap = Math.max(0, this.blockSpacing)
       const rowGap = Math.max(0, Math.round(this.blockSpacing * 1.5))
       const pages = [] as ReflowItem[][]
@@ -6019,7 +6018,7 @@ export default Vue.extend({
     },
     scaledImageDimensions(sourceWidth: number, sourceHeight: number): {width: number, height: number} {
       const maxWidth = Math.max(1, this.targetWidth - this.horizontalContentPadding() * 2)
-      const maxHeight = Math.max(80, this.pageContentHeight() - 32 - VIEWPORT_PAGE_BUFFER)
+      const maxHeight = Math.max(80, this.pageContentHeight() - 32)
       return fitReflowImageDimensions(sourceWidth, sourceHeight, maxWidth, maxHeight, this.textScale())
     },
     horizontalGlyphSourceHeight(lines: WordLine[]): number {

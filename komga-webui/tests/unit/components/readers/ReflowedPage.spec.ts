@@ -385,3 +385,36 @@ describe.each([
     expect(toolbarMethods.pageContentHeight.call({viewportHeight: 700})).toBe(700)
   })
 })
+
+test('standard reflow does not reserve bottom space for its side toolbar', () => {
+  const context = {
+    targetWidth: 200,
+    blockSpacing: 0,
+    pageContentHeight: () => 700,
+    horizontalContentPadding: () => 16,
+    reflowItemDisplayWidth: () => 180,
+    reflowItemDisplayHeight: () => 320,
+  }
+  const items = [
+    {type: 'word', width: 180, height: 320},
+    {type: 'word', width: 180, height: 320},
+  ]
+
+  const pages = methods.paginateItemsEstimated.call(context, items)
+
+  expect(pages).toHaveLength(1)
+})
+
+test('K2 reflow does not reserve bottom space for its side toolbar', () => {
+  const context = {pageContentHeight: () => 700}
+  const items = [
+    {type: 'word', width: 180, height: 320},
+    {type: 'break'},
+    {type: 'word', width: 180, height: 320},
+    {type: 'break'},
+  ]
+
+  const pages = k2Methods.paginateItems.call(context, items)
+
+  expect(pages).toHaveLength(1)
+})

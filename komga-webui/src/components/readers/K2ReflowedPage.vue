@@ -280,7 +280,6 @@ const DEFAULT_TEXT_SCALE = 80
 const DEFAULT_OUTPUT_PADDING = 16
 const DEFAULT_WORD_GAP = 3
 const MIN_CROP_SIZE = 15
-const VIEWPORT_PAGE_BUFFER = 40
 const OUTPUT_PADDING = 16
 const DETECTION_MAX_SIDE = 1800
 const DETECTION_MAX_PIXELS = 2000000
@@ -2275,7 +2274,7 @@ export default Vue.extend({
     paginateItems(items: K2Item[]): K2Item[][] {
       if (items.length === 0) return []
 
-      const pageHeight = Math.max(120, this.pageContentHeight() - OUTPUT_PADDING * 2 - VIEWPORT_PAGE_BUFFER)
+      const pageHeight = Math.max(120, this.pageContentHeight() - OUTPUT_PADDING * 2)
       const pageGap = 5
       const pages = [] as K2Item[][]
       let currentPage = [] as K2Item[]
@@ -2314,7 +2313,7 @@ export default Vue.extend({
       const measureOutput = this.$refs.k2MeasureOutput as HTMLElement | undefined
       if (!measureOutput || measureOutput.children.length !== this.items.length) return undefined
 
-      const pageHeight = Math.max(120, this.pageContentHeight() - OUTPUT_PADDING * 2 - VIEWPORT_PAGE_BUFFER)
+      const pageHeight = Math.max(120, this.pageContentHeight() - OUTPUT_PADDING * 2)
       const rows = [] as Array<{indexes: number[], top: number, bottom: number}>
       let currentIndexes = [] as number[]
       let currentTop = 0
