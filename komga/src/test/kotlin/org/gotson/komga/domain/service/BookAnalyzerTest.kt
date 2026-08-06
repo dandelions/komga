@@ -13,6 +13,7 @@ import org.gotson.komga.domain.model.MediaExtensionEpub
 import org.gotson.komga.domain.model.makeBook
 import org.gotson.komga.infrastructure.configuration.KomgaProperties
 import org.gotson.komga.infrastructure.mediacontainer.epub.EpubExtractor
+import org.gotson.komga.infrastructure.mediacontainer.pdf.PdfExtractor
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
@@ -22,6 +23,7 @@ import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.core.io.ClassPathResource
+import java.io.IOException
 import java.nio.file.Path
 import java.time.LocalDateTime
 import kotlin.io.path.extension
@@ -39,6 +41,9 @@ class BookAnalyzerTest(
 
   @SpykBean
   private lateinit var epubExtractor: EpubExtractor
+
+  @SpykBean
+  private lateinit var pdfExtractor: PdfExtractor
 
   @AfterEach
   fun afterEach() {
@@ -261,6 +266,22 @@ class BookAnalyzerTest(
       assertThat(media.comment).contains("ERR_1039")
       assertThat(extension).isNotNull
       assertThat(extension!!.positions).isEmpty()
+    }
+  }
+
+  @Nested
+  inner class Pdf {
+    @Test
+    fun `given malformed page tree when analyzing pdf then media status is error with a specific comment`() {
+      val file = ClassPathResource("pdf/komga.pdf")
+      val book = Book("book", file.url, LocalDateTime.now())
+
+      every { pdfExtractor.getPages(any(), any()) } throws IOException("Page tree root must be a dictionary")
+
+      val media = bookAnalyzer.analyze(book, false)
+
+      assertThat(media.status).isEqualTo(Media.Status.ERROR)
+      assertThat(media.comment).isEqualTo("ERR_1042")
     }
   }
 

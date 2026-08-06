@@ -33,6 +33,7 @@ import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import java.io.ByteArrayOutputStream
+import java.io.IOException
 import java.nio.file.AccessDeniedException
 import java.nio.file.NoSuchFileException
 import java.nio.file.Path
@@ -288,10 +289,16 @@ class BookAnalyzer(
     analyzeDimensions: Boolean,
   ): Media {
     val entries =
-      when (mediaType) {
-        MediaType.PDF -> pdfExtractor.getPages(book.path, analyzeDimensions)
-        MediaType.DJVU, MediaType.DJVU_X, MediaType.DJVU_APPLICATION -> djvuExtractor.getPages(book.path, analyzeDimensions)
-        else -> throw MediaUnsupportedException("Unsupported PDF profile media type: ${mediaType.type}")
+      try {
+        when (mediaType) {
+          MediaType.PDF -> pdfExtractor.getPages(book.path, analyzeDimensions)
+          MediaType.DJVU, MediaType.DJVU_X, MediaType.DJVU_APPLICATION -> djvuExtractor.getPages(book.path, analyzeDimensions)
+          else -> throw MediaUnsupportedException("Unsupported PDF profile media type: ${mediaType.type}")
+        }
+      } catch (ex: IOException) {
+        if (!ex.message.orEmpty().contains("Page tree root must be a dictionary")) throw ex
+        logger.warn(ex) { "PDF page tree is malformed, cannot analyze book: $book" }
+        return Media(status = Media.Status.ERROR, comment = "ERR_1042")
       }
     val pages = entries.map { BookPage(it.name, "", it.dimension) }
     return Media(status = Media.Status.READY, pages = pages)
