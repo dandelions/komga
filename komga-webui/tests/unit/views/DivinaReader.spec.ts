@@ -8,6 +8,15 @@ const methods = (DivinaReader as any).options.methods
 const computed = (DivinaReader as any).options.computed
 
 describe('DivinaReader image magnifier', () => {
+  test('selects a light background during the day and a dark background at night', () => {
+    const reader = {}
+
+    expect(methods.defaultReaderBackgroundColor.call(reader, new Date(2024, 0, 1, 5, 59))).toBe('black')
+    expect(methods.defaultReaderBackgroundColor.call(reader, new Date(2024, 0, 1, 6, 0))).toBe('white')
+    expect(methods.defaultReaderBackgroundColor.call(reader, new Date(2024, 0, 1, 17, 59))).toBe('white')
+    expect(methods.defaultReaderBackgroundColor.call(reader, new Date(2024, 0, 1, 18, 0))).toBe('black')
+  })
+
   test('short press toggles the magnifier directly', () => {
     const reader = {magnifierActive: false, magnifierDiameterDialog: false}
 

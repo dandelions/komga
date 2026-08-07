@@ -1082,6 +1082,11 @@ function defaultReflowSettings(): any {
   }
 }
 
+function defaultReaderBackgroundColor(date: Date = new Date()): 'black' | 'white' {
+  const hour = date.getHours()
+  return hour >= 6 && hour < 18 ? 'white' : 'black'
+}
+
 function defaultReaderImageSettings(): any {
   return {
     readingDirection: ReadingDirection.LEFT_TO_RIGHT,
@@ -1093,7 +1098,7 @@ function defaultReaderImageSettings(): any {
     continuousScale: ContinuousScaleType.WIDTH,
     sidePadding: 0,
     pageMargin: 0,
-    backgroundColor: 'black',
+    backgroundColor: defaultReaderBackgroundColor(),
     alwaysFullscreen: false,
     strokeStrength: 0,
     rotation: 0,
@@ -1192,7 +1197,7 @@ export default Vue.extend({
         sidePadding: 0,
         pageMargin: 0,
         readingDirection: ReadingDirection.LEFT_TO_RIGHT,
-        backgroundColor: 'black',
+        backgroundColor: defaultReaderBackgroundColor(),
         strokeStrength: 0,
         rotation: 0,
         skewCorrection: 0,
@@ -1309,6 +1314,7 @@ export default Vue.extend({
     this.backgroundColor = this.$store.state.persistedState.webreader.background
     this.readerImageSettingsBookId = this.bookId
     this.loadReaderImageSettings(this.bookId)
+    this.backgroundColor = this.defaultReaderBackgroundColor()
     this.reflowSettingsBookId = this.bookId
     await this.loadReflowSettings(this.bookId)
 
@@ -1343,6 +1349,7 @@ export default Vue.extend({
       this.$debug('[beforeRouteUpdate]', 'to.query:', to.query)
       this.readerImageSettingsBookId = to.params.bookId
       this.loadReaderImageSettings(to.params.bookId)
+      this.backgroundColor = this.defaultReaderBackgroundColor()
       this.reflowSettingsBookId = to.params.bookId
       await this.loadReflowSettings(to.params.bookId)
       this.setup(to.params.bookId, Number(to.query.page))
@@ -1763,6 +1770,9 @@ export default Vue.extend({
     },
   },
   methods: {
+    defaultReaderBackgroundColor(date: Date = new Date()): 'black' | 'white' {
+      return defaultReaderBackgroundColor(date)
+    },
     emptyReaderCropRegionsByParity(enabled: boolean = false): any {
       return defaultCropRegionsByParity(enabled)
     },
@@ -1800,6 +1810,7 @@ export default Vue.extend({
         const raw = serverSettings ? JSON.stringify(serverSettings) : localRaw
         if (raw) loaded = JSON.parse(raw)
         const normalized = this.normalizedReaderImageSettings({...defaults, ...loaded})
+        normalized.backgroundColor = this.defaultReaderBackgroundColor()
         this.applyReaderImageSettings(normalized)
         if (!serverSettings && localRaw) this.saveReaderImageSettingsServerDebounced?.(bookId, normalized)
       } catch (e) {
