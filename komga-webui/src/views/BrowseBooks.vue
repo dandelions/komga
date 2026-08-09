@@ -915,6 +915,9 @@ export default Vue.extend({
 
 .book-list-row {
   min-height: 76px;
+  height: auto;
+  padding-top: 7px;
+  padding-bottom: 7px;
   border-bottom: 1px solid rgba(128, 128, 128, .18);
 }
 
@@ -945,6 +948,11 @@ export default Vue.extend({
 .book-list-title {
   font-size: .95rem;
   line-height: 1.35;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .book-list-subtitle {
@@ -953,5 +961,14 @@ export default Vue.extend({
   gap: 4px 12px;
   margin-top: 3px;
   font-size: .78rem;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.book-list-subtitle > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 </style>
