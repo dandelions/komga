@@ -36,21 +36,17 @@ jobs:
           cache: 'npm'
           cache-dependency-path: 'komga-webui/package-lock.json'
 
-      # 2. 编译项目 (关键修复)
-      - name: Build WebUI and Package JAR
+      # 2. 编译项目：只做镜像编译，不运行测试
+      - name: Build WebUI and JAR (no tests)
         run: |
           # 核心步骤：编译前端并拷贝到 resources 目录
           npm ci --prefix komga-webui
           npm run build --prefix komga-webui
           ./gradlew webuiCopyIndex
-          # 编译后端 JAR，跳过测试以加快速度
-          ./gradlew build -x test
+          # 用 assemble 编译 JAR，不触发任何测试
+          ./gradlew assemble
 
-      # 3. 编译项目 (参考开发文档步骤)
-      - name: Build with Gradle
-        run: ./gradlew build -x test
-
-      # 4. 准备 Docker 构建环境
+      # 3. 准备 Docker 构建环境
       - name: Log in to the Container registry
         uses: docker/login-action@v3
         with:
