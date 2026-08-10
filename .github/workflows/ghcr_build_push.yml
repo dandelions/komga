@@ -32,7 +32,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version-file: 'komga-webui/.nvmrc'
           cache: 'npm'
           cache-dependency-path: 'komga-webui/package-lock.json'
 
@@ -40,7 +40,9 @@ jobs:
       - name: Build WebUI and Package JAR
         run: |
           # 核心步骤：编译前端并拷贝到 resources 目录
-          ./gradlew prepareThymeLeaf
+          npm ci --prefix komga-webui
+          npm run build --prefix komga-webui
+          ./gradlew webuiCopyIndex
           # 编译后端 JAR，跳过测试以加快速度
           ./gradlew build -x test
 
