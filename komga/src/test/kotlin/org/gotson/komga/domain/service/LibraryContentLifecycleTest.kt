@@ -47,6 +47,7 @@ import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -1509,7 +1510,8 @@ class LibraryContentLifecycleTest(
   @Nested
   inner class FileMoveToAnotherFolder {
     @Test
-    fun `given 2 series when moving 1 file from 1 series to another and scanning then moved book's media is kept`() {
+    @DisplayName("given 2 series when moving 1 file from 1 series to another and scanning then moved book's media is kept")
+    fun `file moved media kept`() {
       // given
       val library = makeLibrary()
       libraryRepository.insert(library)
@@ -1740,7 +1742,8 @@ class LibraryContentLifecycleTest(
     }
 
     @Test
-    fun `given 2 series when moving 1 file from 1 series to another and scanning then moved book's title matches the filename and book metadata is refreshed for title only`() {
+    @DisplayName("given 2 series when moving 1 file from 1 series to another and scanning then moved book's title matches the filename and book metadata is refreshed for title only")
+    fun `file moved title refreshed`() {
       // given
       val library = makeLibrary()
       libraryRepository.insert(library)

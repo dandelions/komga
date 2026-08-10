@@ -990,8 +990,9 @@
   "navigation": {
     "home": "Home",
     "libraries": "Libraries",
-    "show_child_libraries": "Show child libraries",
-    "logout": "Log Out"
+"show_child_libraries": "Show child libraries",
+    "logout": "Log Out",
+    "try_new_ui": "Try the new UI"
   },
   "no_libraries_pinned": {
     "title": "No pinned libraries",
