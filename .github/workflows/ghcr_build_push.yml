@@ -29,20 +29,37 @@ jobs:
           distribution: 'temurin'
           cache: 'gradle'
 
-      - name: Set up Node.js
+      - name: Setup WebUI node
         uses: actions/setup-node@v4
         with:
           node-version-file: 'komga-webui/.nvmrc'
           cache: 'npm'
           cache-dependency-path: 'komga-webui/package-lock.json'
 
-      # 2. 编译项目：只做镜像编译，不运行测试
-      - name: Build WebUI and JAR (no tests)
+      - name: Build WebUI
+        working-directory: komga-webui
         run: |
-          # 核心步骤：编译前端并拷贝到 resources 目录
-          npm ci --prefix komga-webui
-          npm run build --prefix komga-webui
-          ./gradlew webuiCopyIndex
+          npm ci
+          npm run build
+        env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
+
+      - name: Setup NextUI node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: 'next-ui/.nvmrc'
+          cache: 'npm'
+          cache-dependency-path: 'next-ui/package-lock.json'
+
+      - name: Build NextUI
+        working-directory: next-ui
+        run: |
+          npm ci
+          npm run build:with-i18n
+
+      - name: Build JAR (copy webui + nextui, no tests)
+        run: |
+          ./gradlew webuiCopyIndex nextuiCopyIndex
           # 用 assemble 编译 JAR，不触发任何测试
           ./gradlew assemble
 
