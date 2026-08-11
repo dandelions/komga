@@ -611,7 +611,7 @@ class BookController(
     bookRepository.findByIdOrNull(bookId)?.let { book ->
       val media = mediaRepository.findById(book.id)
       if (media.profile != MediaProfile.PDF) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Server reflow is only available for PDF books")
-      contentRestrictionChecker.checkContentRestriction(principal.user, book)
+      contentRestrictionChecker.checkContentRestrictionBook(principal.user, book)
       if (!refresh && request.checkNotModified(getBookLastModified(media))) {
         return@let ResponseEntity
           .status(HttpStatus.NOT_MODIFIED)
@@ -759,7 +759,7 @@ class BookController(
     bookRepository.findByIdOrNull(bookId)?.let { book ->
       val media = mediaRepository.findById(book.id)
       if (media.profile != MediaProfile.PDF) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Server reflow is only available for PDF books")
-      contentRestrictionChecker.checkContentRestriction(principal.user, book)
+      contentRestrictionChecker.checkContentRestrictionBook(principal.user, book)
 
       try {
         val page = if (zeroBasedIndex) pageNumber + 1 else pageNumber
