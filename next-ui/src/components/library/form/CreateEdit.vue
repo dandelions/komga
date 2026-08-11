@@ -17,7 +17,10 @@
         :complete="createMode && step > 1"
         :editable="editMode"
       >
-        <LibraryFormStepGeneral v-model="model" />
+        <LibraryFormStepGeneral
+          v-model="model"
+          :parent-library-options="parentLibraryOptions"
+        />
 
         <template #next="{ next }">
           <v-btn
@@ -116,7 +119,9 @@
 </template>
 
 <script setup lang="ts">
-import type { LibraryCreationDto } from '@/generated/openapi'
+import { getLibraryDescendants, useLibraries } from '@/colada/libraries'
+import { useIntl } from 'vue-intl'
+import type { LibraryCreationDto, LibraryDto } from '@/generated/openapi'
 
 const { createMode } = defineProps<{
   createMode: boolean
@@ -124,5 +129,29 @@ const { createMode } = defineProps<{
 
 const editMode = computed(() => !createMode)
 
-const model = defineModel<LibraryCreationDto>({ required: true })
+const model = defineModel<LibraryCreationDto | LibraryDto>({ required: true })
+const { data: libraries } = useLibraries()
+const intl = useIntl()
+
+const parentLibraryOptions = computed(() => {
+  const current = model.value as LibraryDto
+  const currentId = 'id' in current ? current.id : undefined
+  const descendants = currentId
+    ? new Set(getLibraryDescendants(current, libraries.value || []).map((library) => library.id))
+    : new Set<string>()
+
+  return [
+    {
+      title: intl.formatMessage({
+        description: 'Form add/edit library: General - no parent library',
+        defaultMessage: 'No parent library',
+        id: 'HY992L',
+      }),
+      value: null,
+    },
+    ...(libraries.value || [])
+      .filter((library) => library.id !== currentId && !descendants.has(library.id))
+      .map((library) => ({ title: library.name, value: library.id })),
+  ]
+})
 </script>

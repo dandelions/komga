@@ -326,6 +326,8 @@ export type LibraryCreationDto = {
     scanCbx: boolean;
     scanDirectoryExclusions: Array<string>;
     scanEpub: boolean;
+    scanBypassDailyFileLimit: boolean;
+    scanOnlyNewBooks: boolean;
     scanForceModifiedTime: boolean;
     scanInterval: ScanIntervalEnum;
     scanOnStartup: boolean;
@@ -359,6 +361,8 @@ export type LibraryDto = {
     scanCbx: boolean;
     scanDirectoryExclusions: Array<string>;
     scanEpub: boolean;
+    scanBypassDailyFileLimit: boolean;
+    scanOnlyNewBooks: boolean;
     scanForceModifiedTime: boolean;
     scanInterval: ScanIntervalEnum;
     scanOnStartup: boolean;
@@ -395,6 +399,8 @@ export type LibraryUpdateDto = {
     scanCbx?: boolean;
     scanDirectoryExclusions?: Array<string>;
     scanEpub?: boolean;
+    scanBypassDailyFileLimit?: boolean;
+    scanOnlyNewBooks?: boolean;
     scanForceModifiedTime?: boolean;
     scanInterval?: ScanIntervalEnum;
     scanOnStartup?: boolean;

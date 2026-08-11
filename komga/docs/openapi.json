@@ -10711,6 +10711,12 @@
           "scanEpub": {
             "type": "boolean"
           },
+          "scanBypassDailyFileLimit": {
+            "type": "boolean"
+          },
+          "scanOnlyNewBooks": {
+            "type": "boolean"
+          },
           "scanForceModifiedTime": {
             "type": "boolean"
           },
@@ -10764,6 +10770,8 @@
           "scanCbx",
           "scanDirectoryExclusions",
           "scanEpub",
+          "scanBypassDailyFileLimit",
+          "scanOnlyNewBooks",
           "scanForceModifiedTime",
           "scanInterval",
           "scanOnStartup",
@@ -10853,6 +10861,12 @@
           "scanEpub": {
             "type": "boolean"
           },
+          "scanBypassDailyFileLimit": {
+            "type": "boolean"
+          },
+          "scanOnlyNewBooks": {
+            "type": "boolean"
+          },
           "scanForceModifiedTime": {
             "type": "boolean"
           },
@@ -10910,6 +10924,8 @@
           "scanCbx",
           "scanDirectoryExclusions",
           "scanEpub",
+          "scanBypassDailyFileLimit",
+          "scanOnlyNewBooks",
           "scanForceModifiedTime",
           "scanInterval",
           "scanOnStartup",
@@ -10996,6 +11012,12 @@
             "uniqueItems": true
           },
           "scanEpub": {
+            "type": "boolean"
+          },
+          "scanBypassDailyFileLimit": {
+            "type": "boolean"
+          },
+          "scanOnlyNewBooks": {
             "type": "boolean"
           },
           "scanForceModifiedTime": {

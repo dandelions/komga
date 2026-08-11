@@ -19,6 +19,24 @@
 
     <v-row>
       <v-col>
+        <v-select
+          v-model="model.parentId"
+          :items="parentLibraryOptions"
+          clearable
+          :label="
+            $formatMessage({
+              description: 'Form add/edit library: General - parent library',
+              defaultMessage: 'Parent library',
+              id: 'bweWrg',
+            })
+          "
+          hide-details
+        />
+      </v-col>
+    </v-row>
+
+    <v-row>
+      <v-col>
         <v-alert
           type="info"
           variant="tonal"
@@ -107,12 +125,22 @@ import { useDisplay } from 'vuetify'
 import { useRules } from 'vuetify/labs/rules'
 import type { LibraryCreationDto } from '@/generated/openapi'
 
+type ParentLibraryOption = {
+  title: string
+  value: string | null
+}
+
+const { parentLibraryOptions = [] } = defineProps<{
+  parentLibraryOptions?: ParentLibraryOption[]
+}>()
+
 const display = useDisplay()
 const rules = useRules()
 
 const id = useId()
 
-type LibraryCreationGeneral = Pick<LibraryCreationDto, 'name' | 'root'>
+type LibraryCreationGeneral = Pick<LibraryCreationDto, 'name' | 'root' | 'parentId'>
 
 const model = defineModel<LibraryCreationGeneral>({ required: true })
+
 </script>

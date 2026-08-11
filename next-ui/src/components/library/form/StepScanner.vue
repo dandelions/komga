@@ -141,6 +141,30 @@
           "
           hide-details
         />
+
+        <v-checkbox
+          v-model="model.scanBypassDailyFileLimit"
+          :label="
+            $formatMessage({
+              description: 'Form add/edit library: Scanner - bypass daily file limit',
+              defaultMessage: 'Bypass daily file scan limit',
+              id: 'y0fGMp',
+            })
+          "
+          hide-details
+        />
+
+        <v-checkbox
+          v-model="model.scanOnlyNewBooks"
+          :label="
+            $formatMessage({
+              description: 'Form add/edit library: Scanner - scan only new books',
+              defaultMessage: 'Scan only new books',
+              id: '+LHOpK',
+            })
+          "
+          hide-details
+        />
       </v-col>
     </v-row>
   </v-container>
@@ -162,6 +186,8 @@ type LibraryCreationScanner = Pick<
   | 'emptyTrashAfterScan'
   | 'scanForceModifiedTime'
   | 'scanOnStartup'
+  | 'scanBypassDailyFileLimit'
+  | 'scanOnlyNewBooks'
 >
 
 const model = defineModel<LibraryCreationScanner>({ required: true })

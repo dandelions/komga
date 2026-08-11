@@ -9,9 +9,11 @@ import { type Action } from '@/types/action/action'
 import LibraryDeletionWarning from '@/components/library/DeletionWarning.vue'
 import CreateEdit from '@/components/library/form/CreateEdit.vue'
 import {
+  getLibraryDescendants,
   useAnalyzeLibrary,
   useDeleteLibrary,
   useEmptyTrashLibrary,
+  useLibraries,
   useRefreshMetadataLibrary,
   useScanLibrary,
   useUpdateLibrary,
@@ -24,6 +26,7 @@ export function useLibraryActions(
   callback: (action: LibraryAction) => void = () => {},
 ) {
   const { isAdmin } = useCurrentUser()
+  const { data: allLibraries } = useLibraries()
   const intl = useIntl()
   const { confirmEdit: dialogConfirmEdit, confirm: dialogConfirm } = storeToRefs(useDialogsStore())
   const messagesStore = useMessagesStore()
@@ -251,6 +254,14 @@ export function useLibraryActions(
   //region Analyze
   const { mutate: mutateAnalyze } = useAnalyzeLibrary()
 
+  function targetLibraries() {
+    const current = toValue(library)
+    const includeChildren =
+      typeof localStorage === 'undefined' ||
+      localStorage.getItem(`komga.includeChildLibraries.${current.id}`) === 'true'
+    return includeChildren ? getLibraryDescendants(current, allLibraries.value || []) : [current]
+  }
+
   function analyzeLibrary() {
     dialogConfirm.value.dialogProps = {
       title: intl.formatMessage({
@@ -285,7 +296,7 @@ export function useLibraryActions(
       props: {},
     }
     dialogConfirm.value.callback = () => {
-      mutateAnalyze(toValue(library).id)
+      targetLibraries().forEach((target) => mutateAnalyze(target.id))
       callback(LibraryAction.Analyze)
     }
   }
@@ -295,7 +306,7 @@ export function useLibraryActions(
   const { mutate: mutateScan } = useScanLibrary()
 
   function scanLibrary() {
-    mutateScan({ libraryId: toValue(library).id })
+    targetLibraries().forEach((target) => mutateScan({ libraryId: target.id }))
     callback(LibraryAction.Scan)
   }
 
@@ -333,7 +344,7 @@ export function useLibraryActions(
       props: {},
     }
     dialogConfirm.value.callback = () => {
-      mutateScan({ libraryId: toValue(library).id, deep: true })
+      targetLibraries().forEach((target) => mutateScan({ libraryId: target.id, deep: true }))
       callback(LibraryAction.ScanDeep)
     }
   }

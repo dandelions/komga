@@ -41,7 +41,12 @@ export function useGetLibrariesByViewId(libraryViewId: MaybeRefOrGetter<LibraryV
         break
       default:
         const lib = all.value?.find((it) => it.id === toValue(libraryViewId))
-        if (lib) libs = getLibraryWithDescendants(lib, all.value || [])
+        if (lib) {
+          const includeChildren =
+            typeof localStorage === 'undefined' ||
+            localStorage.getItem(`komga.showChildLibraries.${lib.id}`) !== 'false'
+          libs = includeChildren ? getLibraryWithDescendants(lib, all.value || []) : [lib]
+        }
         break
     }
     return libs

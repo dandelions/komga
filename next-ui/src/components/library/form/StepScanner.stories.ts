@@ -33,6 +33,8 @@ export const Default: Story = {
       scanCbx: true,
       scanDirectoryExclusions: ['#recycle', '@eaDir', '@Recycle'],
       scanEpub: true,
+      scanBypassDailyFileLimit: false,
+      scanOnlyNewBooks: false,
       scanForceModifiedTime: false,
       scanInterval: 'DAILY',
       scanOnStartup: false,

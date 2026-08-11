@@ -20,6 +20,7 @@ export function getLibraryDefaults(): LibraryCreationDto {
     importMylarSeries: true,
     name: '',
     oneshotsDirectory: '_oneshots',
+    parentId: undefined,
     repairExtensions: false,
     root: '',
     scanCbx: true,
@@ -28,6 +29,8 @@ export function getLibraryDefaults(): LibraryCreationDto {
     scanForceModifiedTime: false,
     scanInterval: 'EVERY_6H',
     scanOnStartup: false,
+    scanBypassDailyFileLimit: false,
+    scanOnlyNewBooks: false,
     scanPdf: true,
     seriesCover: 'FIRST',
   }

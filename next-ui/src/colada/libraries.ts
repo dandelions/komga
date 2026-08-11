@@ -26,6 +26,23 @@ export interface LibraryNavigationNode {
   children: LibraryNavigationNode[]
 }
 
+export function getLibraryDescendants(
+  library: LibraryDto,
+  libraries: LibraryDto[],
+  visited = new Set<string>(),
+): LibraryDto[] {
+  if (visited.has(library.id)) return []
+
+  const nextVisited = new Set(visited)
+  nextVisited.add(library.id)
+  return [
+    library,
+    ...libraries
+      .filter((candidate) => candidate.parentId === library.id)
+      .flatMap((child) => getLibraryDescendants(child, libraries, nextVisited)),
+  ]
+}
+
 /**
  * Build a tree of library navigation nodes based on the parent/child relationships.
  */

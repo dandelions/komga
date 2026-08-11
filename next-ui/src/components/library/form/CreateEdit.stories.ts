@@ -60,6 +60,8 @@ export const Edit: Story = {
       scanCbx: true,
       scanDirectoryExclusions: [],
       scanEpub: true,
+      scanBypassDailyFileLimit: false,
+      scanOnlyNewBooks: false,
       scanForceModifiedTime: false,
       scanInterval: 'DAILY',
       scanOnStartup: false,
