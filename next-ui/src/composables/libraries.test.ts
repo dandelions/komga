@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } fr
 import { server } from '@/mocks/api/node'
 import { createMockColada } from '@/mocks/pinia-colada'
 import { enableAutoUnmount } from '@vue/test-utils'
-import { useGetLibrariesByViewId } from '@/composables/libraries'
+import { getLibraryWithDescendants, useGetLibrariesByViewId } from '@/composables/libraries'
 
 import { mockLibraries } from '@/mocks/api/handlers/libraries'
 
@@ -78,6 +78,26 @@ describe('libraries composable', () => {
 
   test('when getting non-existent ID then values are correct', async () => {
     await doTest('ABC', [])
+  })
+
+  test('when getting a parent library then descendants are included', () => {
+    const parent = { ...mockLibraries[0], id: 'parent' } as LibraryDto
+    const child = { ...mockLibraries[0], id: 'child', parentId: parent.id } as LibraryDto
+    const grandchild = { ...mockLibraries[0], id: 'grandchild', parentId: child.id } as LibraryDto
+    const unrelated = { ...mockLibraries[0], id: 'unrelated' } as LibraryDto
+
+    expect(getLibraryWithDescendants(parent, [parent, child, grandchild, unrelated])).toEqual([
+      parent,
+      child,
+      grandchild,
+    ])
+  })
+
+  test('when library relationships contain a cycle then descendants are not duplicated', () => {
+    const parent = { ...mockLibraries[0], id: 'parent', parentId: 'child' } as LibraryDto
+    const child = { ...mockLibraries[0], id: 'child', parentId: parent.id } as LibraryDto
+
+    expect(getLibraryWithDescendants(parent, [parent, child])).toEqual([parent, child])
   })
 })
 

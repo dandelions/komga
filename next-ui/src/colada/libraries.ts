@@ -21,6 +21,50 @@ export const QUERY_KEYS_LIBRARIES = {
   root: ['libraries'] as const,
 }
 
+export interface LibraryNavigationNode {
+  library: LibraryDto
+  children: LibraryNavigationNode[]
+}
+
+/**
+ * Build a tree of library navigation nodes based on the parent/child relationships.
+ */
+export function buildLibraryNavigationNodes(libraries: LibraryDto[]): LibraryNavigationNode[] {
+  const nodesById = new Map<string, LibraryNavigationNode>()
+  libraries.forEach((library) => {
+    nodesById.set(library.id, { library, children: [] })
+  })
+
+  const roots: LibraryNavigationNode[] = []
+  libraries.forEach((library) => {
+    const node = nodesById.get(library.id)!
+    if (library.parentId && nodesById.has(library.parentId)) {
+      nodesById.get(library.parentId)!.children.push(node)
+    } else {
+      roots.push(node)
+    }
+  })
+
+  return roots
+}
+
+export function findLibraryNavigationPath(
+  libraryId: string | undefined,
+  nodes: LibraryNavigationNode[],
+  parents: LibraryNavigationNode[] = [],
+): LibraryNavigationNode[] {
+  if (!libraryId) return []
+
+  for (const node of nodes) {
+    const path = [...parents, node]
+    if (node.library.id === libraryId) return path
+    const childPath = findLibraryNavigationPath(libraryId, node.children, path)
+    if (childPath.length > 0) return childPath
+  }
+
+  return []
+}
+
 export const useLibraries = defineQuery(() => {
   const {
     data,
@@ -61,6 +105,15 @@ export const useLibraries = defineQuery(() => {
   const pinned = computed(
     () => ordered.value?.filter((it) => !userLibraries.value?.[it.id]?.unpinned) || [],
   )
+
+  const navigationNodes = computed(() => buildLibraryNavigationNodes(ordered.value || []))
+  const pinnedNavigationNodes = computed(() =>
+    navigationNodes.value.filter((it) => !userLibraries.value?.[it.library.id]?.unpinned),
+  )
+  const unpinnedNavigationNodes = computed(() =>
+    navigationNodes.value.filter((it) => userLibraries.value?.[it.library.id]?.unpinned),
+  )
+
   const anyPinned = computed(() => pinned.value.length > 0)
   const anyUnpinned = computed(() => unpinned.value.length > 0)
   const noLibraries = computed(() => data.value?.length === 0)
@@ -73,6 +126,9 @@ export const useLibraries = defineQuery(() => {
     anyPinned,
     anyUnpinned,
     noLibraries,
+    navigationNodes,
+    pinnedNavigationNodes,
+    unpinnedNavigationNodes,
     refresh,
     refetch,
     ...rest,

@@ -10688,6 +10688,9 @@
           "oneshotsDirectory": {
             "type": "string"
           },
+          "parentId": {
+            "type": "string"
+          },
           "repairExtensions": {
             "type": "boolean"
           },
@@ -10826,6 +10829,9 @@
             "type": "string"
           },
           "oneshotsDirectory": {
+            "type": "string"
+          },
+          "parentId": {
             "type": "string"
           },
           "repairExtensions": {
@@ -10968,6 +10974,9 @@
             "type": "string"
           },
           "oneshotsDirectory": {
+            "type": "string"
+          },
+          "parentId": {
             "type": "string"
           },
           "repairExtensions": {

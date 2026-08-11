@@ -320,6 +320,7 @@ export type LibraryCreationDto = {
     importMylarSeries: boolean;
     name: string;
     oneshotsDirectory?: string;
+    parentId?: string;
     repairExtensions: boolean;
     root: string;
     scanCbx: boolean;
@@ -352,6 +353,7 @@ export type LibraryDto = {
     importMylarSeries: boolean;
     name: string;
     oneshotsDirectory?: string;
+    parentId?: string;
     repairExtensions: boolean;
     root: string;
     scanCbx: boolean;
@@ -387,6 +389,7 @@ export type LibraryUpdateDto = {
     importMylarSeries?: boolean;
     name?: string;
     oneshotsDirectory?: string;
+    parentId?: string;
     repairExtensions?: boolean;
     root?: string;
     scanCbx?: boolean;

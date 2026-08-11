@@ -2,6 +2,22 @@ import { useLibraries } from '@/colada/libraries'
 import type { LibraryViewId } from '@/types/libraries'
 import type { LibraryDto } from '@/generated/openapi'
 
+export function getLibraryWithDescendants(
+  library: LibraryDto,
+  libraries: LibraryDto[],
+  visited = new Set<string>(),
+): LibraryDto[] {
+  if (visited.has(library.id)) return []
+
+  const nextVisited = new Set(visited)
+  nextVisited.add(library.id)
+  const children = libraries
+    .filter((candidate) => candidate.parentId === library.id)
+    .flatMap((child) => getLibraryWithDescendants(child, libraries, nextVisited))
+
+  return [library, ...children]
+}
+
 /**
  * A composable that returns libraries filtered by a LibraryViewId.
  * @param libraryViewId the library ID or group to get
@@ -25,7 +41,7 @@ export function useGetLibrariesByViewId(libraryViewId: MaybeRefOrGetter<LibraryV
         break
       default:
         const lib = all.value?.find((it) => it.id === toValue(libraryViewId))
-        if (lib) libs = [lib]
+        if (lib) libs = getLibraryWithDescendants(lib, all.value || [])
         break
     }
     return libs

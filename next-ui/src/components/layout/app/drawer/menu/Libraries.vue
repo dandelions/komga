@@ -53,14 +53,18 @@
   </v-list-item>
 
   <LayoutAppDrawerMenuLibraryItem
-    v-for="library in pinned"
-    :key="library.id"
-    :library="library"
+    v-for="node in pinnedNavigationNodes"
+    :key="node.library.id"
+    :node="node"
+    :expanded-libraries="expandedLibraries"
+    @toggle="setLibraryExpanded"
   />
 
   <v-list-group
-    v-if="unpinned.length > 0"
+    v-if="unpinnedNavigationNodes.length > 0"
     value="Unpinned"
+    :model-value="expandUnpinned"
+    @update:model-value="expandUnpinned = $event"
   >
     <template #activator="{ props }">
       <v-list-item
@@ -77,23 +81,44 @@
     </template>
 
     <LayoutAppDrawerMenuLibraryItem
-      v-for="library in unpinned"
-      :key="library.id"
-      :library="library"
+      v-for="node in unpinnedNavigationNodes"
+      :key="node.library.id"
+      :node="node"
+      :expanded-libraries="expandedLibraries"
+      @toggle="setLibraryExpanded"
     />
   </v-list-group>
 </template>
 
 <script setup lang="ts">
-import { useLibraries } from '@/colada/libraries'
+import { findLibraryNavigationPath, useLibraries } from '@/colada/libraries'
 import { useCurrentUser } from '@/colada/users'
 import { useCreateLibraryDialog } from '@/composables/library/useCreateLibraryDialog'
 
-const { unpinned, pinned, refresh } = useLibraries()
+const { navigationNodes, pinnedNavigationNodes, unpinnedNavigationNodes, refresh } = useLibraries()
 const { isAdmin } = useCurrentUser()
+const route = useRoute()
 
 const id = useId()
 const bottomSheet = ref(false)
+const expandUnpinned = ref(false)
+const expandedLibraries = reactive<Record<string, boolean>>({})
+
+function setLibraryExpanded(libraryId: string, expanded: boolean) {
+  expandedLibraries[libraryId] = expanded
+}
+
+watchEffect(() => {
+  const { viewId } = route.params as { viewId?: string }
+  const libraryId = typeof viewId === 'string' ? viewId : undefined
+  const libraryPath = findLibraryNavigationPath(libraryId, navigationNodes.value)
+  if (libraryPath.length === 0) return
+
+  libraryPath.slice(0, -1).forEach((node) => setLibraryExpanded(node.library.id, true))
+  expandUnpinned.value = unpinnedNavigationNodes.value.some(
+    (node) => node.library.id === libraryPath[0]?.library.id,
+  )
+})
 
 // ensure freshness, especially if libraries have been reordered
 void refresh()
