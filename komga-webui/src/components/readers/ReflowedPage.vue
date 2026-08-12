@@ -6853,7 +6853,11 @@ export default Vue.extend({
         event.preventDefault()
         return
       }
-      if (this.cropPanMode) return
+      if (this.cropPanMode) {
+        this.drawingCrop = false
+        this.cropPreviousRoi = undefined
+        return
+      }
       const target = event.currentTarget as HTMLElement
       target.setPointerCapture(event.pointerId)
       this.drawingCrop = true
@@ -7008,6 +7012,7 @@ export default Vue.extend({
     setCropPanMode(enabled: boolean) {
       this.cropPanMode = enabled
       this.drawingCrop = false
+      this.cropPreviousRoi = undefined
       this.clearCropAdjustment()
     },
     focusCropViewport(roi?: Roi) {
