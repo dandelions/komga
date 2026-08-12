@@ -126,6 +126,16 @@ const SSETaskQueueSchema = v.object({
   data: v.object({
     count: v.number(),
     countByType: v.record(v.string(), v.number()),
+    readyCountByType: v.record(v.string(), v.number()),
+    runningCountByType: v.record(v.string(), v.number()),
+    libraryScanDailyFileLimitUsage: v.nullable(
+      v.object({
+        date: v.string(),
+        limit: v.number(),
+        used: v.number(),
+        remaining: v.number(),
+      }),
+    ),
   }),
 })
 
@@ -422,6 +432,9 @@ export const useSSE = createGlobalState(() => {
       case 'TaskQueueStatus':
         taskStore.count = event.data.count
         taskStore.countByType = event.data.countByType
+        taskStore.readyCountByType = event.data.readyCountByType
+        taskStore.runningCountByType = event.data.runningCountByType
+        taskStore.libraryScanDailyFileLimitUsage = event.data.libraryScanDailyFileLimitUsage ?? undefined
         break
       case 'ThumbnailBookAdded':
       case 'ThumbnailBookDeleted':

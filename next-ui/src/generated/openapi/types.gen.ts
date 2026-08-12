@@ -5933,3 +5933,19 @@ export type UpdatePasswordByUserIdResponses = {
 };
 
 export type UpdatePasswordByUserIdResponse = UpdatePasswordByUserIdResponses[keyof UpdatePasswordByUserIdResponses];
+
+export type ResetLibraryScanDailyFileLimitUsageData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/settings/library-scan-daily-file-limit/reset';
+};
+
+export type ResetLibraryScanDailyFileLimitUsageResponses = {
+    /**
+     * No Content
+     */
+    204: void;
+};
+
+export type ResetLibraryScanDailyFileLimitUsageResponse = ResetLibraryScanDailyFileLimitUsageResponses[keyof ResetLibraryScanDailyFileLimitUsageResponses];

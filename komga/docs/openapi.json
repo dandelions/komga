@@ -9690,6 +9690,21 @@
           "Users"
         ]
       }
+    },
+    "/api/v1/settings/library-scan-daily-file-limit/reset": {
+      "post": {
+        "description": "Required role: **ADMIN**",
+        "operationId": "resetLibraryScanDailyFileLimitUsage",
+        "responses": {
+          "204": {
+            "description": "No Content"
+          }
+        },
+        "summary": "Reset today\u0027s library scan file limit usage",
+        "tags": [
+          "Server settings"
+        ]
+      }
     }
   },
   "components": {

@@ -3,6 +3,7 @@
     <v-list-item
       :to="`/libraries/${node.library.id}`"
       :style="itemStyle"
+      @click="onItemClick"
     >
       <template #prepend>
         <v-btn
@@ -105,6 +106,10 @@ const itemStyle = computed(() => ({
 }))
 
 const bottomSheet = ref(false)
+
+function onItemClick() {
+  if (hasChildren.value) toggle()
+}
 
 function toggle() {
   emit('toggle', props.node.library.id, !expanded.value)

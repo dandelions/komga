@@ -40,6 +40,37 @@
           :rows="rows"
           :uppercase-headers="false"
         />
+        <div v-if="taskStore.libraryScanDailyFileLimitUsage" class="mt-3 text-caption">
+          <div class="font-weight-medium">
+            {{
+              $formatMessage({
+                description: 'Task Indicator menu: daily scan quota',
+                defaultMessage: 'Daily scan quota',
+                id: 'hSxPws',
+              })
+            }}
+          </div>
+          <div>
+            {{ taskStore.libraryScanDailyFileLimitUsage.remaining }} /
+            {{ taskStore.libraryScanDailyFileLimitUsage.limit }}
+          </div>
+          <v-btn
+            v-if="isAdmin"
+            size="small"
+            variant="text"
+            class="px-0"
+            :loading="resetting"
+            @click="resetQuota"
+          >
+            {{
+              $formatMessage({
+                description: 'Task Indicator menu: reset daily scan quota',
+                defaultMessage: "Reset today's usage",
+                id: 'Ofx1RO',
+              })
+            }}
+          </v-btn>
+        </div>
         <div v-else>
           {{
             $formatMessage({
@@ -58,9 +89,14 @@
 import { useTaskQueueStore } from '@/stores/task-queue'
 import { useIntl } from 'vue-intl'
 import { taskNameMessage } from '@/utils/i18n/enum/task'
+import { useCurrentUser } from '@/colada/users'
+import { useResetLibraryScanDailyFileLimitUsage } from '@/colada/settings'
 
 const intl = useIntl()
 const taskStore = useTaskQueueStore()
+const { isAdmin } = useCurrentUser()
+const { mutateAsync: resetLibraryScanDailyFileLimitUsage } = useResetLibraryScanDailyFileLimitUsage()
+const resetting = ref(false)
 
 const rows = computed(() =>
   Object.entries(taskStore.countByType).map(([task, count]) => ({
@@ -68,8 +104,23 @@ const rows = computed(() =>
     data: count + '',
   })),
 )
+async function resetQuota() {
+  resetting.value = true
+  try {
+    await resetLibraryScanDailyFileLimitUsage()
+  } finally {
+    resetting.value = false
+  }
+}
 </script>
 
-<script lang="ts"></script>
-
 <style scoped></style>
+
+async function resetQuota() {
+  resetting.value = true
+  try {
+    await resetLibraryScanDailyFileLimitUsage()
+  } finally {
+    resetting.value = false
+  }
+}

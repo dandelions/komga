@@ -2,6 +2,7 @@ import { defineMutation, defineQuery, useMutation, useQuery, useQueryCache } fro
 import {
   komgaGetServerSettings,
   komgaUpdateServerSettings,
+  komgaResetLibraryScanDailyFileLimitUsage,
   type SettingsUpdateDto,
 } from '@/generated/openapi'
 
@@ -31,3 +32,9 @@ export const useUpdateSettings = defineMutation(() => {
     },
   })
 })
+
+export const useResetLibraryScanDailyFileLimitUsage = defineMutation(() =>
+  useMutation({
+    mutation: () => komgaResetLibraryScanDailyFileLimitUsage(),
+  }),
+)
