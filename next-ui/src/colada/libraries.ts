@@ -124,11 +124,14 @@ export const useLibraries = defineQuery(() => {
   )
 
   const navigationNodes = computed(() => buildLibraryNavigationNodes(ordered.value || []))
+  const isNodeUnpinned = (node: LibraryNavigationNode) =>
+    userLibraries.value?.[node.library.id]?.unpinned === true
+
   const pinnedNavigationNodes = computed(() =>
-    navigationNodes.value.filter((it) => !userLibraries.value?.[it.library.id]?.unpinned),
+    navigationNodes.value.filter((node) => !isNodeUnpinned(node)),
   )
   const unpinnedNavigationNodes = computed(() =>
-    navigationNodes.value.filter((it) => userLibraries.value?.[it.library.id]?.unpinned),
+    navigationNodes.value.filter(isNodeUnpinned),
   )
 
   const anyPinned = computed(() => pinned.value.length > 0)

@@ -107,8 +107,11 @@ const itemStyle = computed(() => ({
 
 const bottomSheet = ref(false)
 
-function onItemClick() {
-  if (hasChildren.value) toggle()
+function onItemClick(event: MouseEvent | KeyboardEvent) {
+  if (!hasChildren.value) return
+
+  event.preventDefault()
+  toggle()
 }
 
 function toggle() {
