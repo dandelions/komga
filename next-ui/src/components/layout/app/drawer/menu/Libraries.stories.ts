@@ -173,14 +173,17 @@ export const ParentChild: Story = {
     // children should NOT be visible before expansion
     await waitFor(() => expect(canvas.queryByText('Child')).not.toBeVisible())
 
-    // click the parent to expand
-    await waitFor(() => userEvent.click(canvas.getByText('Parent')))
+    // click the parent's expand button
+    await waitFor(() => userEvent.click(canvas.getByRole('button', { name: 'Expand library' })))
 
     // child should become visible
     await waitFor(() => expect(canvas.queryByText('Child')).toBeVisible())
 
-    // click the child to expand it
-    await waitFor(() => userEvent.click(canvas.getByText('Child')))
+    // the parent name remains a route link
+    await expect(canvas.getByText('Parent').closest('a')).toHaveAttribute('href', '/libraries/parent')
+
+    // click the child's expand button
+    await waitFor(() => userEvent.click(canvas.getByRole('button', { name: 'Expand library' })))
 
     // grandchild should become visible
     await waitFor(() => expect(canvas.queryByText('Grandchild')).toBeVisible())

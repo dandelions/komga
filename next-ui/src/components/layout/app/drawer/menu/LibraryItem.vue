@@ -1,9 +1,8 @@
 <template>
   <div>
     <v-list-item
-      :to="hasChildren ? undefined : `/libraries/${node.library.id}`"
+      :to="`/libraries/${node.library.id}`"
       :style="itemStyle"
-      @click="onItemClick"
     >
       <template #prepend>
         <v-btn
@@ -12,6 +11,19 @@
           size="x-small"
           variant="text"
           class="library-drawer-item__toggle"
+          :aria-label="
+            expanded
+              ? $formatMessage({
+                  description: 'Library tree toggle button: aria label',
+                  defaultMessage: 'Collapse library',
+                  id: 'nHEcZS',
+                })
+              : $formatMessage({
+                  description: 'Library tree toggle button: aria label',
+                  defaultMessage: 'Expand library',
+                  id: 'ZmRiH4',
+                })
+          "
           @click.stop.prevent="toggle"
         >
           <v-icon>{{ toggleIcon }}</v-icon>
@@ -108,13 +120,6 @@ const itemStyle = computed(() => ({
 }))
 
 const bottomSheet = ref(false)
-
-function onItemClick(event: MouseEvent | KeyboardEvent) {
-  if (!hasChildren.value) return
-
-  event.preventDefault()
-  toggle()
-}
 
 function toggle() {
   emit('toggle', props.node.library.id, !expanded.value)
