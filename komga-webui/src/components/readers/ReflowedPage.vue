@@ -6773,19 +6773,7 @@ export default Vue.extend({
       }
     },
     finishCropMode() {
-      const sourcePageNumber = this.selectionPageNumber
-      const cropTarget = this.cropTarget
-      let cropChanged = false
-      if (this.draftRoi && this.draftRoi.w > MIN_CROP_SIZE && this.draftRoi.h > MIN_CROP_SIZE) {
-        if (cropTarget === 'image') {
-          this.setCurrentManualImageRoi(this.draftRoi)
-        } else if (cropTarget === 'deskew') {
-          this.setCurrentDeskewAnalysisRoi(this.draftRoi)
-        } else {
-          this.setCurrentCropRoi(this.draftRoi)
-        }
-        cropChanged = true
-      }
+      if (!this.draftCropMatchesCurrentSelection()) this.commitCurrentCropDraft()
       this.cropMode = false
       this.draftRoi = undefined
       this.drawingCrop = false
@@ -6793,10 +6781,35 @@ export default Vue.extend({
       this.cropPanMode = false
       this.clearCropSource()
       this.$emit('crop-mode-change', false)
-      if (cropChanged) {
-        this.emitCropSettingsChange(cropTarget)
-        this.$emit('force-reflow', sourcePageNumber)
+    },
+    commitCurrentCropDraft() {
+      const draft = this.draftRoi
+      if (!draft || draft.w <= MIN_CROP_SIZE || draft.h <= MIN_CROP_SIZE) return false
+      const sourcePageNumber = this.selectionPageNumber
+      const cropTarget = this.cropTarget
+      if (cropTarget === 'image') {
+        this.setCurrentManualImageRoi(draft)
+      } else if (cropTarget === 'deskew') {
+        this.setCurrentDeskewAnalysisRoi(draft)
+      } else {
+        this.setCurrentCropRoi(draft)
       }
+      this.emitCropSettingsChange(cropTarget)
+      this.$emit('force-reflow', sourcePageNumber)
+      return true
+    },
+    draftCropMatchesCurrentSelection(): boolean {
+      const draft = this.draftRoi
+      if (!draft) return true
+      let current: Roi | undefined
+      if (this.cropTarget === 'image') current = this.manualImageRoi
+      else if (this.cropTarget === 'deskew') current = this.deskewAnalysisRoi
+      else current = this.cropRoi
+      return !!current &&
+        current.x === draft.x &&
+        current.y === draft.y &&
+        current.w === draft.w &&
+        current.h === draft.h
     },
     resetCrop() {
       const sourcePageNumber = this.selectionPageNumber
@@ -6918,7 +6931,8 @@ export default Vue.extend({
         this.cropAdjustPointerActive = false
         if (this.cropAdjustMoved) {
           this.clearCropAdjustment()
-          this.cropWarning = '选区已调整，确认后点击完成'
+          this.commitCurrentCropDraft()
+          this.cropWarning = '选区已更新，可继续调整或点击完成'
         } else {
           this.cropWarning = `${this.cropResizeEdgeLabel(this.cropAdjustMode)}已选中，请点击目标位置`
         }
@@ -6930,7 +6944,8 @@ export default Vue.extend({
       const roi = this.normalizedRoi(this.cropStart, this.cropPoint(event))
       if (roi.w > MIN_CROP_SIZE && roi.h > MIN_CROP_SIZE) {
         this.draftRoi = roi
-        this.cropWarning = '框选已保留，可放大检查或重新框选，确认后点击完成'
+        this.commitCurrentCropDraft()
+        this.cropWarning = '框选已更新，可放大检查或重新框选'
       } else {
         this.draftRoi = this.cropPreviousRoi ? {...this.cropPreviousRoi} : undefined
         this.cropWarning = this.cropPreviousRoi ? '点击未改变现有选区，可继续调整或重新框选' : '框选范围太小，请重新框选'
