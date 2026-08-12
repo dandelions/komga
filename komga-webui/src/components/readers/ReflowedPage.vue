@@ -6773,7 +6773,8 @@ export default Vue.extend({
       }
     },
     finishCropMode() {
-      if (!this.draftCropMatchesCurrentSelection()) this.commitCurrentCropDraft()
+      const sourcePageNumber = this.selectionPageNumber
+      const cropChanged = this.persistCurrentCropDraft()
       this.cropMode = false
       this.draftRoi = undefined
       this.drawingCrop = false
@@ -6781,11 +6782,12 @@ export default Vue.extend({
       this.cropPanMode = false
       this.clearCropSource()
       this.$emit('crop-mode-change', false)
+      if (cropChanged) this.$emit('force-reflow', sourcePageNumber)
     },
-    commitCurrentCropDraft() {
+    persistCurrentCropDraft() {
       const draft = this.draftRoi
       if (!draft || draft.w <= MIN_CROP_SIZE || draft.h <= MIN_CROP_SIZE) return false
-      const sourcePageNumber = this.selectionPageNumber
+      if (this.draftCropMatchesCurrentSelection()) return false
       const cropTarget = this.cropTarget
       if (cropTarget === 'image') {
         this.setCurrentManualImageRoi(draft)
@@ -6795,7 +6797,6 @@ export default Vue.extend({
         this.setCurrentCropRoi(draft)
       }
       this.emitCropSettingsChange(cropTarget)
-      this.$emit('force-reflow', sourcePageNumber)
       return true
     },
     draftCropMatchesCurrentSelection(): boolean {
@@ -6931,8 +6932,8 @@ export default Vue.extend({
         this.cropAdjustPointerActive = false
         if (this.cropAdjustMoved) {
           this.clearCropAdjustment()
-          this.commitCurrentCropDraft()
-          this.cropWarning = '选区已更新，可继续调整或点击完成'
+          this.persistCurrentCropDraft()
+          this.cropWarning = '选区已保存，可继续调整或点击完成'
         } else {
           this.cropWarning = `${this.cropResizeEdgeLabel(this.cropAdjustMode)}已选中，请点击目标位置`
         }
@@ -6944,8 +6945,8 @@ export default Vue.extend({
       const roi = this.normalizedRoi(this.cropStart, this.cropPoint(event))
       if (roi.w > MIN_CROP_SIZE && roi.h > MIN_CROP_SIZE) {
         this.draftRoi = roi
-        this.commitCurrentCropDraft()
-        this.cropWarning = '框选已更新，可放大检查或重新框选'
+        this.persistCurrentCropDraft()
+        this.cropWarning = '框选已保存，可放大检查或重新框选'
       } else {
         this.draftRoi = this.cropPreviousRoi ? {...this.cropPreviousRoi} : undefined
         this.cropWarning = this.cropPreviousRoi ? '点击未改变现有选区，可继续调整或重新框选' : '框选范围太小，请重新框选'
