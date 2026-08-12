@@ -687,11 +687,15 @@
               <settings-switch v-model="readerCropEnabled" label="截取区域"/>
             </v-list-item>
             <v-list-item v-if="!activeReflowMode && readerCropEnabled">
+              <settings-select
+                :items="readerCropRegionCountOptions"
+                :value="readerCropRegionCount"
+                label="截取区域数量"
+                @input="setReaderCropRegionCount"
+              />
+            </v-list-item>
+            <v-list-item v-if="!activeReflowMode && readerCropEnabled">
               <span class="mr-2">{{ readerCropPageParityLabel }}</span>
-              <span class="mr-1 text-caption">区域数</span>
-              <select class="reader-crop-region-count mr-2" :value="readerCropRegionCount" @change="setReaderCropRegionCount">
-                <option v-for="count in readerCropRegionCountOptions" :key="count" :value="count">{{ count }}</option>
-              </select>
               <v-btn
                 v-for="region in readerCropRegionIndexes"
                 :key="`reader-crop-region-${region}`"
@@ -1301,6 +1305,10 @@ export default Vue.extend({
         text: `${value}%`,
         value,
       })),
+      readerCropRegionCountOptions: Array.from({length: MAX_REFLOW_CROP_REGIONS}, (_, index) => ({
+        text: `${index + 1}`,
+        value: index + 1,
+      })),
       reflowAlgorithmModes: [
         {text: '原始算法', value: 'original'},
         {text: 'KOReader 风格优化', value: 'koreader'},
@@ -1530,9 +1538,6 @@ export default Vue.extend({
     readerCropRegionCount(): number {
       const count = Number(this.readerCropRegionsByParity?.regionCount)
       return Number.isFinite(count) ? Math.max(1, Math.min(MAX_REFLOW_CROP_REGIONS, Math.round(count))) : 2
-    },
-    readerCropRegionCountOptions(): number[] {
-      return Array.from({length: MAX_REFLOW_CROP_REGIONS}, (_, index) => index + 1)
     },
     readerCropRegionIndexes(): number[] {
       return Array.from({length: this.readerCropRegionCount}, (_, index) => index)
@@ -2083,9 +2088,8 @@ export default Vue.extend({
       this.readerCropPreviousDraft = undefined
       this.readerCropDrawing = false
     },
-    setReaderCropRegionCount(event: Event) {
-      const target = event.target as HTMLSelectElement
-      const regionCount = this.normalizedReaderCropRegionCount(target.value)
+    setReaderCropRegionCount(value: number) {
+      const regionCount = this.normalizedReaderCropRegionCount(value)
       const current = this.readerCropRegionsByParity
       this.readerCropRegionsByParity = {...current, regionCount}
       if (this.readerActiveCropRegion >= regionCount) this.setReaderActiveCropRegion(regionCount - 1)
