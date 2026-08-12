@@ -119,7 +119,10 @@ type CropRegionsByParity = {
   odd?: CropRegion | null,
   even?: CropRegion | null,
   regions?: Partial<Record<PageParity, Array<CropRegion | null | undefined>>>,
+  regionCount?: number,
 }
+
+const MAX_CROP_REGIONS = 8
 
 type CropSegment = {
   crop: CropRegion,
@@ -317,7 +320,7 @@ export default Vue.extend({
       const crops = this.cropRegionsByParity
       if (!crops?.enabled) return false
       return (['odd', 'even'] as PageParity[]).some(parity =>
-        [0, 1].some(index =>
+        this.cropRegionIndexesForSettings().some(index =>
           !!this.normalizedCropRegion(crops.regions?.[parity]?.[index] || (index === 0 ? crops[parity] : undefined)),
         ),
       )
@@ -430,13 +433,13 @@ export default Vue.extend({
       const crops = this.cropRegionsByParity
       if (!crops?.enabled) return undefined
       const parity = pageNumber % 2 === 0 ? 'even' : 'odd'
-      const index = regionIndex === 1 ? 1 : 0
+      const index = this.normalizedCropRegionIndex(regionIndex)
       return this.normalizedCropRegion(crops.regions?.[parity]?.[index] || (index === 0 ? crops[parity] : undefined)) ||
         this.normalizedCropRegion(crops.regions?.[parity === 'odd' ? 'even' : 'odd']?.[index])
     },
     cropRegionIndexes(pageNumber: number): number[] {
       if (!this.cropRegionsByParity?.enabled) return []
-      return [0, 1].filter(index => !!this.effectiveCropRegion(pageNumber, index))
+      return this.cropRegionIndexesForSettings().filter(index => !!this.effectiveCropRegion(pageNumber, index))
     },
     pageByNumber(pageNumber: number): PageDtoWithUrl | undefined {
       return this.pages.find(x => x.number === pageNumber)
@@ -648,9 +651,18 @@ export default Vue.extend({
       return this.cropRegionIndexes(pageNumber).reverse().find(index => index < this.activeCropRegion)
     },
     setActiveCropRegion(regionIndex: number, segmentIndex: number = 0) {
-      const normalized = regionIndex === 1 ? 1 : 0
+      const normalized = this.normalizedCropRegionIndex(regionIndex)
       this.activeCropSegment = Math.max(0, segmentIndex)
       if (normalized !== this.activeCropRegion) this.$emit('update:active-crop-region', normalized)
+    },
+    cropRegionIndexesForSettings(): number[] {
+      const count = Number(this.cropRegionsByParity?.regionCount)
+      const normalizedCount = Number.isFinite(count) ? Math.max(1, Math.min(MAX_CROP_REGIONS, Math.round(count))) : 2
+      return Array.from({length: normalizedCount}, (_, index) => index)
+    },
+    normalizedCropRegionIndex(index: number): number {
+      const count = this.cropRegionIndexesForSettings().length
+      return Math.max(0, Math.min(count - 1, Math.round(Number(index) || 0)))
     },
     setActiveCropSegment(segmentIndex: number) {
       this.activeCropSegment = Math.max(0, segmentIndex)

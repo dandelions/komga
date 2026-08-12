@@ -887,6 +887,7 @@ export default Vue.extend({
       cropZoom: 1,
       cropPanMode: false,
       cropStart: {x: 0, y: 0},
+      cropPreviousRoi: undefined as Roi | undefined,
       cropRoisByParity: {
         odd: Array(MAX_CROP_REGIONS).fill(undefined),
         even: Array(MAX_CROP_REGIONS).fill(undefined),
@@ -6719,6 +6720,7 @@ export default Vue.extend({
       target.setPointerCapture(event.pointerId)
       this.drawingCrop = true
       this.cropStart = this.cropPoint(event)
+      this.cropPreviousRoi = this.activeRoi ? {...this.activeRoi} : undefined
       this.draftRoi = {x: this.cropStart.x, y: this.cropStart.y, w: 1, h: 1}
       event.preventDefault()
     },
@@ -6783,9 +6785,10 @@ export default Vue.extend({
         this.draftRoi = roi
         this.cropWarning = '框选已保留，可放大检查或重新框选，确认后点击完成'
       } else {
-        this.draftRoi = undefined
-        this.cropWarning = '框选范围太小，请重新框选'
+        this.draftRoi = this.cropPreviousRoi ? {...this.cropPreviousRoi} : undefined
+        this.cropWarning = this.cropPreviousRoi ? '点击未改变现有选区，可继续调整或重新框选' : '框选范围太小，请重新框选'
       }
+      this.cropPreviousRoi = undefined
       event.preventDefault()
     },
     cancelDraftCrop() {
@@ -6793,8 +6796,9 @@ export default Vue.extend({
       if (this.cropAdjustMode && this.cropAdjustStartRoi) {
         this.draftRoi = {...this.cropAdjustStartRoi}
       } else {
-        this.draftRoi = undefined
+        this.draftRoi = this.cropPreviousRoi ? {...this.cropPreviousRoi} : undefined
       }
+      this.cropPreviousRoi = undefined
       this.clearCropAdjustment()
     },
     clearCropAdjustment() {

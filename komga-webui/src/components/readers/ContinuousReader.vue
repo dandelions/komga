@@ -63,6 +63,7 @@ type CropRegionsByParity = {
   odd?: CropRegion | null,
   even?: CropRegion | null,
   regions?: Partial<Record<PageParity, Array<CropRegion | null | undefined>>>,
+  regionCount?: number,
 }
 
 export default Vue.extend({
@@ -299,7 +300,9 @@ export default Vue.extend({
       const crops = this.cropRegionsByParity
       if (!crops?.enabled) return undefined
       const parity = pageNumber % 2 === 0 ? 'even' : 'odd'
-      const index = this.activeCropRegion === 1 ? 1 : 0
+      const configuredCount = Number(crops.regionCount)
+      const count = Number.isFinite(configuredCount) ? Math.max(1, Math.min(8, Math.round(configuredCount))) : 2
+      const index = Math.max(0, Math.min(count - 1, Math.round(Number(this.activeCropRegion) || 0)))
       return this.normalizedCropRegion(crops.regions?.[parity]?.[index] || (index === 0 ? crops[parity] : undefined)) ||
         this.normalizedCropRegion(crops.regions?.[parity === 'odd' ? 'even' : 'odd']?.[index])
     },
