@@ -324,6 +324,7 @@
           @vertical-direction-change="setReflowVerticalDirection"
           @stroke-strength-change="setReflowStrokeStrength"
           @image-quality-change="setReflowImageQuality"
+          @algorithm-mode-change="setReflowAlgorithmMode"
           @contrast-enhancement-change="setReflowContrastEnhancement"
           @match-background-change="setReflowMatchBackground"
           @match-background-mode-change="setReflowMatchBackgroundMode"
@@ -792,6 +793,13 @@
                   />
                 </v-list-item>
                 <v-list-item>
+                  <settings-select
+                    :items="reflowAlgorithmModes"
+                    v-model="reflowSettings.algorithmMode"
+                    label="图片/文字算法"
+                  />
+                </v-list-item>
+                <v-list-item>
                   <settings-switch v-model="reflowSettings.verticalText" label="Vertical text"/>
                 </v-list-item>
                 <v-list-item v-if="reflowSettings.verticalText">
@@ -1081,6 +1089,7 @@ function defaultReflowSettings(): any {
     matchBackground: false,
     matchBackgroundMode: 'grayscale',
     imageQuality: 80,
+    algorithmMode: 'original',
     blockSpacing: 6,
     verticalText: false,
     verticalDirection: 'rtl',
@@ -1292,6 +1301,10 @@ export default Vue.extend({
         text: `${value}%`,
         value,
       })),
+      reflowAlgorithmModes: [
+        {text: '原始算法', value: 'original'},
+        {text: 'KOReader 风格优化', value: 'koreader'},
+      ],
       paddingPercentages: Object.values(PaddingPercentage).map(x => ({
         text: x === 0 ? this.$i18n.t('bookreader.settings.side_padding_none').toString() : `${x}%`,
         value: x,
@@ -1607,6 +1620,7 @@ export default Vue.extend({
         matchBackground: this.reflowSettings.matchBackground,
         matchBackgroundMode: this.reflowSettings.matchBackgroundMode,
         imageQuality: this.reflowSettings.imageQuality,
+        algorithmMode: this.reflowSettings.algorithmMode,
         verticalText: this.reflowSettings.verticalText,
         verticalDirection: this.reflowSettings.verticalDirection,
         marginTop: this.reflowSettings.marginTop,
@@ -2802,6 +2816,7 @@ export default Vue.extend({
           ? 'original'
           : settings.matchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale',
         imageQuality: this.normalizedReflowImageQuality(settings.imageQuality),
+        algorithmMode: settings.algorithmMode === 'koreader' ? 'koreader' : 'original',
         blockSpacing: Math.round(this.clampReflowNumber(settings.blockSpacing, 0, 24, this.reflowSettings.blockSpacing)),
         verticalText: typeof settings.verticalText === 'boolean' ? settings.verticalText : this.reflowSettings.verticalText,
         verticalDirection: settings.verticalDirection === 'ltr' ? 'ltr' : 'rtl',
@@ -3114,6 +3129,9 @@ export default Vue.extend({
     },
     setReflowImageQuality(imageQuality: number) {
       this.reflowSettings.imageQuality = this.normalizedReflowImageQuality(imageQuality)
+    },
+    setReflowAlgorithmMode(algorithmMode: string) {
+      this.reflowSettings.algorithmMode = algorithmMode === 'koreader' ? 'koreader' : 'original'
     },
     setReflowContrastEnhancement(contrastEnhancement: boolean) {
       this.reflowSettings.contrastEnhancement = contrastEnhancement === true

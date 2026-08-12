@@ -175,6 +175,13 @@
             <option v-for="quality in imageQualityOptions" :key="quality" :value="quality">{{ quality }}%</option>
           </select>
         </label>
+        <label class="reflow-column-control">
+          <span>图片/文字算法</span>
+          <select :value="reflowAlgorithmMode()" @change="setAlgorithmMode">
+            <option value="original">原始算法</option>
+            <option value="koreader">KOReader 风格优化</option>
+          </select>
+        </label>
         <label class="reflow-stroke-control">
           <span>字体宽度</span>
           <button type="button" class="reflow-step-control" @click="adjustStrokeStrength(-0.1)">-</button>
@@ -532,6 +539,7 @@ import {
 } from '@/functions/reflow-stream'
 
 type ReflowOptions = {
+  algorithmMode?: ReflowAlgorithmMode,
   autoCropBorder: boolean,
   textScale: number,
   columnCount: number,
@@ -574,6 +582,7 @@ type Roi = {
 
 type PageParity = 'odd' | 'even'
 type MatchBackgroundMode = 'original' | 'monochrome' | 'grayscale'
+type ReflowAlgorithmMode = 'original' | 'koreader'
 type VerticalDirection = 'ltr' | 'rtl'
 type CropRegionIndex = number
 type CropTarget = 'text' | 'image' | 'deskew'
@@ -704,6 +713,7 @@ type DetectionCanvasSource = {
 }
 
 type ReflowOptionsSnapshot = {
+  algorithmMode: ReflowAlgorithmMode,
   textScale: number,
   columnCount: number,
   skewCorrection: number,
@@ -1511,6 +1521,7 @@ export default Vue.extend({
           ? 'original'
           : this.options.matchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale',
         imageQuality: this.normalizedImageQuality(this.options.imageQuality),
+        algorithmMode: this.reflowAlgorithmMode(),
         blockSpacing: this.clampNumber(this.options.blockSpacing, 0, 24, 6),
         cropRoisKey: JSON.stringify(this.options.cropRoisByParity || {}),
         manualImageRoisKey: JSON.stringify(this.options.manualImageRoisByPage || {}),
@@ -2117,6 +2128,9 @@ export default Vue.extend({
       const numberValue = Number(value)
       return Number.isFinite(numberValue) ? numberValue : fallback
     },
+    reflowAlgorithmMode(): ReflowAlgorithmMode {
+      return this.options.algorithmMode === 'koreader' ? 'koreader' : 'original'
+    },
     reflowDetectionKey(): string {
       return JSON.stringify({
         page: this.page.number,
@@ -2137,6 +2151,7 @@ export default Vue.extend({
         matchBackground: this.options.matchBackground,
         matchBackgroundMode: this.matchBackgroundMode,
         imageQuality: this.imageQuality,
+        algorithmMode: this.reflowAlgorithmMode(),
         verticalText: this.options.verticalText,
         verticalDirection: this.options.verticalDirection,
         marginTop: this.options.marginTop,
@@ -2146,9 +2161,9 @@ export default Vue.extend({
         cropRois: this.currentReflowCropRois(this.pageParity),
         darkDisplay: this.darkDisplay,
         deskewDetectionVersion: 9,
-        imageExclusionVersion: 3,
-        detectionScaleVersion: 3,
-        darkWordRenderVersion: 5,
+        imageExclusionVersion: 4,
+        detectionScaleVersion: 4,
+        darkWordRenderVersion: 6,
       })
     },
     emitReflowed(networkTransferBytes?: number) {
@@ -3009,8 +3024,11 @@ export default Vue.extend({
           const dense = metrics.inkRatio >= 0.24 && metrics.coveredRatio >= 0.20 && metrics.lumaStdDev >= 12
           const textured = metrics.inkRatio >= 0.08 && metrics.coveredRatio >= 0.18 && metrics.lumaStdDev >= 38
           const lineArt = metrics.horizontalRunRatio >= 0.62 || metrics.verticalRunRatio >= 0.62
+          const score = this.imageTileScore(metrics, colored, dense, textured, lineArt)
+          const strongCandidate = score >= 2
+          const weakCandidate = score >= 1.2 && this.hasStrongImageTileNeighbor(tileX, tileY, tileColumns, tileRows, candidates)
 
-          if (colored || dense || textured || lineArt) candidates[index] = 1
+          if (this.reflowAlgorithmMode() === 'koreader' ? strongCandidate || weakCandidate : colored || dense || textured || lineArt) candidates[index] = 1
           if (colored) coloredTiles[index] = 1
           if (dense) denseTiles[index] = 1
           if (textured) texturedTiles[index] = 1
@@ -3111,6 +3129,28 @@ export default Vue.extend({
         horizontalRunRatio: longestHorizontalRun / tileWidth,
         verticalRunRatio: Math.max(...longestVerticalRuns) / tileHeight,
       }
+    },
+    imageTileScore(
+      metrics: {inkRatio: number, coloredRatio: number, coveredRatio: number, lumaStdDev: number, horizontalRunRatio: number, verticalRunRatio: number},
+      colored: boolean,
+      dense: boolean,
+      textured: boolean,
+      lineArt: boolean,
+    ): number {
+      let score = 0
+      if (colored) score += 2.4
+      if (textured) score += 1.8
+      if (dense) score += 1.4
+      if (lineArt) score += 1.1
+      if (metrics.lumaStdDev >= 24) score += 0.35
+      if (metrics.coveredRatio >= 0.42) score += 0.2
+      const textLikeRuns = metrics.horizontalRunRatio >= 0.30 && metrics.horizontalRunRatio < 0.62 &&
+        metrics.verticalRunRatio < 0.42 && metrics.inkRatio < 0.30
+      if (textLikeRuns) score -= 0.9
+      return score
+    },
+    hasStrongImageTileNeighbor(tileX: number, tileY: number, tileColumns: number, tileRows: number, candidates: Uint8Array): boolean {
+      return this.neighborImageTiles(tileX, tileY, tileColumns, tileRows).some(index => candidates[index] === 1)
     },
     collectImageRegions(
       pixels: Uint8ClampedArray,
@@ -4093,16 +4133,24 @@ export default Vue.extend({
       return merged
     },
     imageRegionsTouch(a: ImageRegion, b: ImageRegion): boolean {
-      const gap = Math.max(8, Math.min(120, Math.round(Math.max(a.w, b.w, a.h, b.h) * 0.20)))
+      if (this.reflowAlgorithmMode() !== 'koreader') {
+        const gap = Math.max(8, Math.min(120, Math.round(Math.max(a.w, b.w, a.h, b.h) * 0.20)))
+        const horizontalGap = this.horizontalBlockGap(a, b)
+        const verticalGap = this.verticalBlockGap(a, b)
+        const horizontalAligned = this.horizontalOverlap(a, b) >= Math.min(a.w, b.w) * 0.18
+        const verticalAligned = this.verticalOverlap(a, b) >= Math.min(a.h, b.h) * 0.18
+        const nearCorner = horizontalGap <= gap / 2 && verticalGap <= gap / 2
+        return (verticalGap <= gap && horizontalAligned) ||
+          (horizontalGap <= gap && verticalAligned) ||
+          nearCorner
+      }
+      const gap = Math.max(4, Math.min(48, Math.round(Math.max(a.w, b.w, a.h, b.h) * 0.08)))
       const horizontalGap = this.horizontalBlockGap(a, b)
       const verticalGap = this.verticalBlockGap(a, b)
-      const horizontalAligned = this.horizontalOverlap(a, b) >= Math.min(a.w, b.w) * 0.18
-      const verticalAligned = this.verticalOverlap(a, b) >= Math.min(a.h, b.h) * 0.18
-      const nearCorner = horizontalGap <= gap / 2 && verticalGap <= gap / 2
-
+      const horizontalAligned = this.horizontalOverlap(a, b) >= Math.min(a.w, b.w) * 0.30
+      const verticalAligned = this.verticalOverlap(a, b) >= Math.min(a.h, b.h) * 0.30
       return (verticalGap <= gap && horizontalAligned) ||
-        (horizontalGap <= gap && verticalAligned) ||
-        nearCorner
+        (horizontalGap <= gap && verticalAligned)
     },
     expandImageRegions(regions: ImageRegion[], padding: number, roi: Roi, width: number, height: number): ImageRegion[] {
       if (regions.length === 0) return regions
@@ -4192,6 +4240,8 @@ export default Vue.extend({
         const luma = 0.299 * pixels[offset] + 0.587 * pixels[offset + 1] + 0.114 * pixels[offset + 2]
         if (luma < threshold) ink[i] = 1
       }
+
+      if (this.reflowAlgorithmMode() === 'koreader') return ink
 
       const radius = this.detectionStrokeRadius()
       if (radius <= 0) return ink
@@ -6205,6 +6255,10 @@ export default Vue.extend({
       return Math.min(maxIndent, sourceHeight * this.textScale())
     },
     boldenSourceCanvas(targetContext: CanvasRenderingContext2D, width: number, height: number) {
+      if (this.reflowAlgorithmMode() === 'koreader') {
+        this.boldenSourceCanvasKoreader(targetContext, width, height)
+        return
+      }
       const strength = this.strokeStrength
       if (strength <= 0) return
 
@@ -6241,6 +6295,87 @@ export default Vue.extend({
       }
 
       targetContext.putImageData(imageData, 0, 0)
+    },
+    boldenSourceCanvasKoreader(targetContext: CanvasRenderingContext2D, width: number, height: number) {
+      const strength = this.strokeStrength
+      if (strength <= 0) return
+
+      const threshold = Math.min(245, this.clampNumber(this.options.threshold, 50, 230, THRESHOLD) + 18)
+      const imageData = targetContext.getImageData(0, 0, width, height)
+      const data = imageData.data
+      const original = new Uint8ClampedArray(data)
+      const foreground = this.textForegroundMask(original, width, height, threshold)
+      const expansion = new Float32Array(width * height)
+      const fullPasses = Math.floor(strength)
+      const fractional = strength - fullPasses
+
+      for (let i = 0; i < foreground.length; i++) {
+        if (!foreground[i]) continue
+        expansion[i] = Math.max(expansion[i], Math.min(1, 0.45 + fractional * 0.35))
+        const y = Math.floor(i / width)
+        const x = i - y * width
+        for (let dy = -fullPasses; dy <= fullPasses; dy++) {
+          const ny = y + dy
+          if (ny < 0 || ny >= height) continue
+          for (let dx = -fullPasses; dx <= fullPasses; dx++) {
+            const distance = Math.abs(dx) + Math.abs(dy)
+            if (distance === 0 || distance > fullPasses) continue
+            const nx = x + dx
+            if (nx < 0 || nx >= width) continue
+            const influence = Math.max(0, 1 - distance / (fullPasses + 1)) * 0.72
+            const index = ny * width + nx
+            expansion[index] = Math.max(expansion[index], influence)
+          }
+        }
+        if (fractional > 0) {
+          for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as Array<[number, number]>) {
+            const nx = x + dx
+            const ny = y + dy
+            if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue
+            const index = ny * width + nx
+            expansion[index] = Math.max(expansion[index], fractional * 0.32)
+          }
+        }
+      }
+
+      for (let i = 0; i < expansion.length; i++) {
+        const influence = expansion[i]
+        if (influence <= 0) continue
+        this.darkenPixel(data, i * 4, influence)
+      }
+      targetContext.putImageData(imageData, 0, 0)
+    },
+    textForegroundMask(data: Uint8ClampedArray, width: number, height: number, threshold: number): Uint8Array {
+      const foreground = new Uint8Array(width * height)
+      const strongThreshold = Math.max(18, threshold - 42)
+      for (let i = 0; i < foreground.length; i++) {
+        const offset = i * 4
+        if (data[offset + 3] === 0) continue
+        if (this.pixelLuma(data, offset) <= strongThreshold) foreground[i] = 1
+      }
+
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const index = y * width + x
+          if (foreground[index]) continue
+          const offset = index * 4
+          if (data[offset + 3] === 0 || this.pixelLuma(data, offset) >= threshold) continue
+          if (this.hasTextMaskNeighbor(foreground, width, height, x, y)) foreground[index] = 1
+        }
+      }
+      return foreground
+    },
+    hasTextMaskNeighbor(mask: Uint8Array, width: number, height: number, x: number, y: number): boolean {
+      for (let dy = -1; dy <= 1; dy++) {
+        const ny = y + dy
+        if (ny < 0 || ny >= height) continue
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dx === 0 && dy === 0) continue
+          const nx = x + dx
+          if (nx >= 0 && nx < width && mask[ny * width + nx]) return true
+        }
+      }
+      return false
     },
     expandedInkMask(mask: Uint8Array, sourceIndexes: number[], width: number, height: number): {mask: Uint8Array, indexes: number[]} {
       const expanded = new Uint8Array(mask)
@@ -6296,7 +6431,6 @@ export default Vue.extend({
       data[offset] = Math.round(data[offset] * (1 - clampedInfluence))
       data[offset + 1] = Math.round(data[offset + 1] * (1 - clampedInfluence))
       data[offset + 2] = Math.round(data[offset + 2] * (1 - clampedInfluence))
-      data[offset + 3] = Math.max(data[offset + 3], Math.round(255 * clampedInfluence))
     },
     isParagraphStart(line: WordLine, previousLine: WordLine | undefined, ignoreColumnChange: boolean = false): boolean {
       if (!previousLine) return true
@@ -6483,6 +6617,10 @@ export default Vue.extend({
     setImageQuality(event: Event) {
       const target = event.target as HTMLSelectElement
       this.pendingImageQuality = this.normalizedImageQuality(Number(target.value))
+    },
+    setAlgorithmMode(event: Event) {
+      const target = event.target as HTMLSelectElement
+      this.$emit('algorithm-mode-change', target.value === 'koreader' ? 'koreader' : 'original')
     },
     setContrastEnhancement(event: Event) {
       const target = event.target as HTMLInputElement
