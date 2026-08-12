@@ -4348,7 +4348,12 @@ export default Vue.extend({
         rois[this.activeCropRegion] = this.draftRoi
       }
       const activeStoredRoi = this.cropRoisByParity[parity]?.[this.activeCropRegion]
-      if (parity === this.pageParity && activeStoredRoi && this.explicitCropRoisByParity[parity]?.[this.activeCropRegion]) {
+      if (
+        parity === this.pageParity &&
+        !this.draftRoi &&
+        activeStoredRoi &&
+        this.explicitCropRoisByParity[parity]?.[this.activeCropRegion]
+      ) {
         rois[this.activeCropRegion] = activeStoredRoi
       }
       return this.adjustOverlappingCropRois(rois)
