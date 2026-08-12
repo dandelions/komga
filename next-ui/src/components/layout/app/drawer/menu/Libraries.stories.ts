@@ -12,7 +12,7 @@ import DialogConfirmInstance from '@/components/dialog/ConfirmInstance.vue'
 import SnackQueue from '@/components/SnackQueue.vue'
 import { delay, http } from 'msw'
 import { mockLibraries } from '@/mocks/api/handlers/libraries'
-import type { ClientSettingUserUpdateDto } from '@/generated/openapi'
+import type { ClientSettingUserUpdateDto, LibraryDto } from '@/generated/openapi'
 import {
   handleGetCurrentUser,
   handleGetLibraries,
@@ -142,6 +142,48 @@ export const Ordered: Story = {
         return response200OK(settings)
       }),
     )
+  },
+}
+
+export const ParentChild: Story = {
+  beforeEach({ msw }) {
+    msw.use(
+      handleGetLibraries(() => {
+        const parent = { ...mockLibraries[0], id: 'parent', name: 'Parent' } as LibraryDto
+        const child = {
+          ...mockLibraries[0],
+          id: 'child',
+          name: 'Child',
+          parentId: parent.id,
+        } as LibraryDto
+        const grandchild = {
+          ...mockLibraries[0],
+          id: 'grandchild',
+          name: 'Grandchild',
+          parentId: child.id,
+        } as LibraryDto
+        return response200OK([parent, child, grandchild])
+      }),
+    )
+  },
+
+  play: async ({ canvas, userEvent }) => {
+    // parent should be visible initially
+    await waitFor(() => expect(canvas.queryByText(/parent/i)).toBeVisible())
+    // children should NOT be visible before expansion
+    await waitFor(() => expect(canvas.queryByText('Child')).not.toBeVisible())
+
+    // click the parent to expand
+    await waitFor(() => userEvent.click(canvas.getByText('Parent')))
+
+    // child should become visible
+    await waitFor(() => expect(canvas.queryByText('Child')).toBeVisible())
+
+    // click the child to expand it
+    await waitFor(() => userEvent.click(canvas.getByText('Child')))
+
+    // grandchild should become visible
+    await waitFor(() => expect(canvas.queryByText('Grandchild')).toBeVisible())
   },
 }
 

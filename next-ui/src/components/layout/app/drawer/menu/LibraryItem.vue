@@ -1,7 +1,7 @@
 <template>
   <div>
     <v-list-item
-      :to="`/libraries/${node.library.id}`"
+      :to="hasChildren ? undefined : `/libraries/${node.library.id}`"
       :style="itemStyle"
       @click="onItemClick"
     >
@@ -78,6 +78,8 @@
 
 <script setup lang="ts">
 import { useCurrentUser } from '@/colada/users'
+
+defineOptions({ name: 'LayoutAppDrawerMenuLibraryItem' })
 import type { LibraryNavigationNode } from '@/colada/libraries'
 
 const props = withDefaults(
