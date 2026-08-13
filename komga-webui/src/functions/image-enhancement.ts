@@ -64,10 +64,12 @@ export function enhanceTextContrastData(
     const delta = stats.sourceDark ? luma - stats.background : stats.background - luma
 
     if (outputMode === 'original') {
-      // Background following replaces only the block background. Preserve
-      // source RGB values unless contrast processing was explicitly enabled.
+      // Background following replaces the block background. Preserve source
+      // RGB only when its polarity already matches the target display; dark
+      // source slices on a light display must invert the detected glyph.
       if (options.matchBackground && !options.enabled) {
-        setOpaquePixel(data, offset)
+        const outputLuma = invertForeground ? 255 - luma : luma
+        setColorPixelWithLuma(data, offset, outputLuma)
         continue
       }
 

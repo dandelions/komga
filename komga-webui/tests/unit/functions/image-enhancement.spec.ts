@@ -29,10 +29,30 @@ describe('image enhancement', () => {
     expect(data[0]).toBe(255)
     expect(data[4]).toBe(255)
     expect(data[8]).toBe(255)
-    expect(data[12]).toBe(220)
-    expect(data[16]).toBe(15)
-    expect(data[20]).toBe(220)
+    expect(data[12]).toBe(15)
+    expect(data[16]).toBe(220)
+    expect(data[20]).toBe(15)
     expect(data[24]).toBe(255)
+  })
+
+  test('match background removes a dark source block around light glyphs on a light display', () => {
+    const data = grayPixels(
+      20, 20, 20,
+      20, 240, 20,
+      20, 20, 20,
+    )
+
+    enhanceTextContrastData(data, 3, 3, {
+      matchBackground: true,
+      matchBackgroundMode: 'original',
+      backgroundLuma: 20,
+    })
+
+    expect(Array.from(data.filter((_, index) => index % 4 === 0))).toEqual([
+      255, 255, 255,
+      255, 15, 255,
+      255, 255, 255,
+    ])
   })
 
   test('match background preserves antialiasing when rendering on a dark background', () => {
