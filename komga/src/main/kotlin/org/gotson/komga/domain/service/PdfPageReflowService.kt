@@ -41,7 +41,7 @@ private const val VERTICAL_PARAGRAPH_BLANK_BLOCKS = 2.0
 private const val EDGE_INK_THRESHOLD = 245
 private const val MAX_EDGE_TRIM = 6
 private const val MAX_EDGE_EXPANSION = 10
-private const val REFLOW_ALGORITHM_VERSION = 6
+private const val REFLOW_ALGORITHM_VERSION = 7
 
 data class PdfPageReflowOptions(
   val targetWidth: Int,
@@ -4151,7 +4151,7 @@ class PdfPageReflowService(
     if (fullPasses > 0) applyStrokeMask(image, maskIndexes, foreground)
 
     val fractional = strength - fullPasses
-    if (fractional > 0.0) applyFractionalStroke(image, maskIndexes, fractional, foreground)
+    if (fractional > 0.0) applyFractionalStroke(image, maskIndexes, fractional, foreground, exterior)
   }
 
   private fun isStrokeInk(
@@ -4257,6 +4257,7 @@ class PdfPageReflowService(
     indexes: List<Int>,
     strength: Double,
     foreground: Color,
+    exterior: BooleanArray,
   ) {
     indexes.forEach { index ->
       val y = index / image.width
@@ -4270,6 +4271,7 @@ class PdfPageReflowService(
           if (dx == 0 && dy == 0) continue
           val nx = x + dx
           if (nx !in 0 until image.width) continue
+          if (!exterior[ny * image.width + nx]) continue
           val influence = strength * if (abs(dx) + abs(dy) == 1) 0.7 else 0.45
           blendPixelToForeground(image, nx, ny, influence, foreground)
         }
