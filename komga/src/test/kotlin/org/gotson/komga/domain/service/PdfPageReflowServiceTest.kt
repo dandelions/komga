@@ -234,7 +234,7 @@ class PdfPageReflowServiceTest {
   }
 
   @Test
-  fun `given an enclosed CJK-like counter when fractional server stroke expansion runs then the counter stays light`() {
+  fun `given a diagonally open CJK-like counter when server stroke expansion runs then the counter stays light`() {
     val image = BufferedImage(7, 7, BufferedImage.TYPE_INT_ARGB)
     val graphics = image.createGraphics()
     graphics.color = Color.WHITE
@@ -243,6 +243,7 @@ class PdfPageReflowServiceTest {
     graphics.fillRect(1, 1, 5, 5)
     graphics.color = Color.WHITE
     graphics.fillRect(3, 3, 1, 1)
+    graphics.fillRect(2, 2, 1, 1)
     graphics.dispose()
 
     val method = PdfPageReflowService::class.java.getDeclaredMethod(

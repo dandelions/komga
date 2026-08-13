@@ -41,7 +41,7 @@ private const val VERTICAL_PARAGRAPH_BLANK_BLOCKS = 2.0
 private const val EDGE_INK_THRESHOLD = 245
 private const val MAX_EDGE_TRIM = 6
 private const val MAX_EDGE_EXPANSION = 10
-private const val REFLOW_ALGORITHM_VERSION = 9
+private const val REFLOW_ALGORITHM_VERSION = 10
 
 data class PdfPageReflowOptions(
   val targetWidth: Int,
@@ -3964,10 +3964,12 @@ class PdfPageReflowService(
       val index = queue.removeFirst()
       val x = index % width
       val y = index / width
-      enqueue(x - 1, y)
-      enqueue(x + 1, y)
-      enqueue(x, y - 1)
-      enqueue(x, y + 1)
+      for (dy in -1..1) {
+        for (dx in -1..1) {
+          if (dx == 0 && dy == 0) continue
+          enqueue(x + dx, y + dy)
+        }
+      }
     }
 
     return mask
@@ -4289,10 +4291,12 @@ class PdfPageReflowService(
       val index = queue.removeFirst()
       val x = index % width
       val y = index / width
-      enqueue(x - 1, y)
-      enqueue(x + 1, y)
-      enqueue(x, y - 1)
-      enqueue(x, y + 1)
+      for (dy in -1..1) {
+        for (dx in -1..1) {
+          if (dx == 0 && dy == 0) continue
+          enqueue(x + dx, y + dy)
+        }
+      }
     }
 
     return exterior
