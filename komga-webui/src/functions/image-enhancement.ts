@@ -133,27 +133,31 @@ function matchedForegroundMask(data: Uint8ClampedArray, width: number, height: n
     if (delta > strongDelta || (colored && delta > Math.max(2, weakDelta * 0.5))) strong[i] = 1
   }
 
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const index = y * width + x
-      if (strong[index]) {
-        foreground[index] = 1
-        continue
-      }
-      if (deltas[index] <= weakDelta) continue
-      if (hasStrongNeighbor(strong, width, height, x, y)) foreground[index] = 1
-    }
+  // Grow from strong ink through all connected antialiased pixels. A single
+  // neighbor pass leaves the center of a clipped glyph classified as paper,
+  // which produces a white character surrounded by a dark outline.
+  const queue = [] as number[]
+  for (let index = 0; index < pixels; index++) {
+    if (!strong[index]) continue
+    foreground[index] = 1
+    queue.push(index)
   }
-  return foreground
-}
 
-function hasStrongNeighbor(mask: Uint8Array, width: number, height: number, x: number, y: number): boolean {
-  for (let yy = Math.max(0, y - 1); yy <= Math.min(height - 1, y + 1); yy++) {
-    for (let xx = Math.max(0, x - 1); xx <= Math.min(width - 1, x + 1); xx++) {
-      if (mask[yy * width + xx]) return true
+  for (let cursor = 0; cursor < queue.length; cursor++) {
+    const index = queue[cursor]
+    const y = Math.floor(index / width)
+    const x = index - y * width
+    for (let yy = Math.max(0, y - 1); yy <= Math.min(height - 1, y + 1); yy++) {
+      for (let xx = Math.max(0, x - 1); xx <= Math.min(width - 1, x + 1); xx++) {
+        const neighbor = yy * width + xx
+        if (foreground[neighbor] || deltas[neighbor] <= weakDelta) continue
+        foreground[neighbor] = 1
+        queue.push(neighbor)
+      }
     }
   }
-  return false
+
+  return foreground
 }
 
 function estimateLumaStats(data: Uint8ClampedArray, width: number, height: number, backgroundLuma?: number): LumaStats | undefined {

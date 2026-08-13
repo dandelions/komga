@@ -13,6 +13,14 @@ describe('image enhancement', () => {
     expect(Array.from(data.filter((_, index) => index % 4 === 0))).toEqual([255, 255, 255, 240, 20, 240, 255])
   })
 
+  test('match background retains an antialiased glyph interior connected to ink', () => {
+    const data = grayPixels(255, 240, 20, 240, 240, 240, 255)
+
+    enhanceTextContrastData(data, 7, 1, {matchBackground: true, backgroundLuma: 255})
+
+    expect(Array.from(data.filter((_, index) => index % 4 === 0))).toEqual([255, 240, 20, 240, 240, 240, 255])
+  })
+
   test('match background preserves light text on a dark source', () => {
     const data = grayPixels(20, 35, 20, 35, 240, 35, 20)
 
