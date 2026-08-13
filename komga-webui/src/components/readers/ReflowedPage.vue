@@ -3030,7 +3030,11 @@ export default Vue.extend({
           const strongCandidate = score >= 2
           const weakCandidate = score >= 1.2 && this.hasStrongImageTileNeighbor(tileX, tileY, tileColumns, tileRows, candidates)
 
-          if (this.reflowAlgorithmMode() === 'koreader' ? strongCandidate || weakCandidate : colored || dense || textured || lineArt) candidates[index] = 1
+          // Monochrome dense tiles are common in CJK glyphs. In the original
+          // mode, only let them grow an image region when adjacent evidence is
+          // already strong; color remains an immediate image signal.
+          const originalCandidate = colored || (textured && score >= 1.8) || (dense && score >= 1.8) || (lineArt && score >= 1.8)
+          if (this.reflowAlgorithmMode() === 'koreader' ? strongCandidate || weakCandidate : originalCandidate) candidates[index] = 1
           if (colored) coloredTiles[index] = 1
           if (dense) denseTiles[index] = 1
           if (textured) texturedTiles[index] = 1
@@ -3058,6 +3062,7 @@ export default Vue.extend({
       const imageRegions = this.mergeImageRegions(tightenedRegions)
         .filter(region => !this.isUnderlinedTextRegion(pixels, width, region, threshold))
         .filter(region => !this.isMergedHorizontalTextRegion(pixels, width, region, threshold))
+        .filter(region => !this.isMonochromeTextRegion(pixels, width, region, threshold))
       const expanded = this.expandImageRegions(imageRegions, Math.max(2, Math.round(tileSize * 0.6)), roi, width, height)
       return this.protectImageRegionEdges(pixels, width, height, expanded, threshold, roi)
     },
@@ -3981,13 +3986,17 @@ export default Vue.extend({
 
       return sampled === 0 ? 0 : colored / sampled
     },
+    isMonochromeTextRegion(pixels: Uint8ClampedArray, width: number, region: ImageRegion, threshold: number): boolean {
+      const stepX = Math.max(1, Math.round(region.w / 700))
+      return this.colorCoverage(pixels, width, region, stepX) < 0.06 && this.hasAlignedTextRows(pixels, width, region, threshold)
+    },
     isMergedHorizontalTextRegion(pixels: Uint8ClampedArray, width: number, region: ImageRegion, threshold: number): boolean {
       if (region.w < region.h * 2.2) return false
       const stepX = Math.max(1, Math.round(region.w / 700))
       return this.colorCoverage(pixels, width, region, stepX) < 0.06 && this.hasAlignedTextRows(pixels, width, region, threshold)
     },
     hasAlignedTextRows(pixels: Uint8ClampedArray, width: number, region: ImageRegion, threshold: number): boolean {
-      if (region.w < 120 || region.h < 40) return false
+      if (region.w < 32 || region.h < 24) return false
       const horizontalLimit = Math.max(96, Math.round(region.w * 0.22))
       const minimumRowInk = Math.max(2, Math.round(region.w * 0.015))
       const maximumTextLineHeight = Math.max(8, Math.round(region.h * 0.12))

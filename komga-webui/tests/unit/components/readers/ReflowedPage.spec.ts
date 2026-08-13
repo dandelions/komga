@@ -52,6 +52,32 @@ function adjust(source: ImageData, block: WordBlock): WordBlock {
   return methods.adjustBlockEdges.call(edgeAnalyzer, source, block).block
 }
 
+describe('ReflowedPage image exclusion', () => {
+  test('does not classify a monochrome CJK-like text tile as an image in original mode', () => {
+    const width = 160
+    const height = 100
+    const image = createImageData(width, height)
+
+    for (let y = 28; y < 72; y++) {
+      for (let x = 42; x < 118; x++) {
+        if ((x - 42) % 12 < 7 && (y - 28) % 12 < 8) drawInk(image, x, y, x + 1, y + 1)
+      }
+    }
+
+    const analyzer = Object.assign({}, methods, {
+      options: {threshold: 185},
+      reflowAlgorithmMode: () => 'original',
+      imageTileScore: methods.imageTileScore,
+      hasStrongImageTileNeighbor: methods.hasStrongImageTileNeighbor,
+      neighborImageTiles: methods.neighborImageTiles,
+    })
+
+    const regions = methods.detectImageRegions.call(analyzer, image.data, width, height, {x: 0, y: 0, w: width, h: height}, 185)
+
+    expect(regions).toEqual([])
+  })
+})
+
 describe('ReflowedPage word block edge analysis', () => {
   test('normalizes image backgrounds for dark display in original image mode', () => {
     const context = {
