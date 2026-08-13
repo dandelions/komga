@@ -527,6 +527,8 @@ import {
   PageImageLoadSource,
 } from '@/functions/page-image-cache'
 import {mergeVerticalColumnBands} from '@/functions/vertical-reflow'
+import type {ReflowAnalysisWorkerResponse, ReflowWorkerRoi} from '@/functions/reflow-analysis-worker'
+import {createReflowAnalysisWorker} from '@/functions/reflow-analysis-worker-factory'
 import {
   contiguousReflowPageCount,
   fitReflowImageDimensions,
@@ -749,7 +751,7 @@ const DETECTION_FULL_RES_MAX_PIXELS = 6000000
 const DETECTION_MAX_SIDE = 2800
 const DETECTION_MAX_PIXELS = 5000000
 const DETECTION_MIN_SCALE = 0.4
-const REFLOW_RESPONSE_VERSION = 11
+const REFLOW_RESPONSE_VERSION = 12
 
 export default Vue.extend({
   name: 'ReflowedPage',
@@ -865,6 +867,7 @@ export default Vue.extend({
       cropImageRequestId: 0,
       cropImagePreparationTimer: undefined as number | undefined,
       serverRequestController: undefined as AbortController | undefined,
+      localAnalysisWorker: undefined as Worker | undefined,
       requestId: 0,
       reflowRunning: false,
       reflowPending: false,
@@ -1346,6 +1349,7 @@ export default Vue.extend({
     this.removeControlsDragListeners()
     this.requestId += 1
     this.cancelServerReflowRequest()
+    this.terminateLocalAnalysisWorker()
     this.clearCropImagePreparationTimer()
     this.revokeObjectUrl()
   },
@@ -1621,13 +1625,16 @@ export default Vue.extend({
           const detectionRoi = regionSource.detectionRoi
             ? this.scaleRoi(regionSource.detectionRoi, detectionSource.scale, detectionSource.canvas.width, detectionSource.canvas.height)
             : undefined
+          const workerRoi = await this.detectLocalAnalysisRoi(imageData, requestId)
+          if (requestId !== this.requestId) return
+          const effectiveDetectionRoi = detectionRoi || workerRoi
           await this.yieldLocalReflowFrame(requestId)
           if (requestId !== this.requestId) return
           const detectedContent = this.detectWordLines(
             imageData,
             detectionSource.canvas.width,
             detectionSource.canvas.height,
-            detectionRoi,
+            effectiveDetectionRoi,
             detectionManualImageRegions,
           )
           await this.yieldLocalReflowFrame(requestId)
@@ -1666,6 +1673,51 @@ export default Vue.extend({
           window.setTimeout(resolve, 0)
         }
       })
+    },
+    supportsLocalAnalysisWorker(): boolean {
+      return typeof Worker !== 'undefined' && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function'
+    },
+    terminateLocalAnalysisWorker() {
+      if (!this.localAnalysisWorker) return
+      this.localAnalysisWorker.terminate()
+      this.localAnalysisWorker = undefined
+    },
+    async detectLocalAnalysisRoi(imageData: ImageData, requestId: number): Promise<Roi | undefined> {
+      if (!this.supportsLocalAnalysisWorker()) return undefined
+      this.terminateLocalAnalysisWorker()
+      try {
+        const worker = createReflowAnalysisWorker()
+        this.localAnalysisWorker = worker
+        const pixels = new Uint8ClampedArray(imageData.data)
+        return await new Promise<Roi | undefined>((resolve, reject) => {
+          const finish = () => {
+            if (this.localAnalysisWorker === worker) this.localAnalysisWorker = undefined
+            worker.terminate()
+          }
+          worker.onmessage = (event: MessageEvent<ReflowAnalysisWorkerResponse>) => {
+            const response = event.data
+            if (response.requestId !== requestId) return
+            finish()
+            if (response.type === 'error') reject(new Error(response.message || 'Local analysis worker failed'))
+            else resolve(response.roi as ReflowWorkerRoi | undefined)
+          }
+          worker.onerror = () => {
+            finish()
+            reject(new Error('Local analysis worker failed'))
+          }
+          worker.postMessage({
+            type: 'analyze',
+            requestId,
+            pixels,
+            width: imageData.width,
+            height: imageData.height,
+            threshold: this.clampNumber(this.options.threshold, 50, 230, THRESHOLD),
+          }, [pixels.buffer])
+        })
+      } catch (_) {
+        this.terminateLocalAnalysisWorker()
+        return undefined
+      }
     },
     async runServerReflow(requestId: number, detectionKey: string, forceReflow: boolean) {
       if (!this.serverReflowUrl) throw new Error('Server reflow URL is unavailable')
