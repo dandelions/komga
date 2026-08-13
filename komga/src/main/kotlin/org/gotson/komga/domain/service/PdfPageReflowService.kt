@@ -41,7 +41,7 @@ private const val VERTICAL_PARAGRAPH_BLANK_BLOCKS = 2.0
 private const val EDGE_INK_THRESHOLD = 245
 private const val MAX_EDGE_TRIM = 6
 private const val MAX_EDGE_EXPANSION = 10
-private const val REFLOW_ALGORITHM_VERSION = 7
+private const val REFLOW_ALGORITHM_VERSION = 8
 
 data class PdfPageReflowOptions(
   val targetWidth: Int,
@@ -4076,7 +4076,7 @@ class PdfPageReflowService(
         null,
       )
       graphics.dispose()
-      applyStrokeStrength(output, options)
+      applyStrokeStrength(output, options, sourceExteriorPaperMask(image, source, outputWidth, outputHeight, offsetX, offsetY, options))
       return output
     }
 
@@ -4112,13 +4112,52 @@ class PdfPageReflowService(
       }
     }
 
-    applyStrokeStrength(output, options)
+    applyStrokeStrength(output, options, sourceExteriorPaperMask(image, source, outputWidth, outputHeight, offsetX, offsetY, options))
     return output
+  }
+
+  private fun sourceExteriorPaperMask(
+    image: BufferedImage,
+    source: Roi,
+    outputWidth: Int,
+    outputHeight: Int,
+    offsetX: Int,
+    offsetY: Int,
+    options: PdfPageReflowOptions,
+  ): BooleanArray {
+    val sourceMask = ByteArray(source.w * source.h)
+    val threshold = min(245, clamp(options.threshold, 50, 230) + 18)
+    for (y in 0 until source.h) {
+      for (x in 0 until source.w) {
+        if (isStrokeInk(image.getRGB(source.x + x, source.y + y), threshold, options.darkDisplay)) {
+          sourceMask[y * source.w + x] = 1
+        }
+      }
+    }
+
+    val sourceExterior = exteriorPaperMask(sourceMask, source.w, source.h)
+    val outputExterior = BooleanArray(outputWidth * outputHeight)
+    for (y in 0 until outputHeight) {
+      for (x in 0 until outputWidth) {
+        val sourceX = x - offsetX
+        val sourceY = y - offsetY
+        if (sourceX !in 0 until source.w || sourceY !in 0 until source.h || sourceExterior[sourceY * source.w + sourceX]) {
+          outputExterior[y * outputWidth + x] = true
+        }
+      }
+    }
+    return outputExterior
   }
 
   private fun applyStrokeStrength(
     image: BufferedImage,
     options: PdfPageReflowOptions,
+  ) = applyStrokeStrength(image, options, null)
+
+  private fun applyStrokeStrength(
+    image: BufferedImage,
+    options: PdfPageReflowOptions,
+    sourceExterior: BooleanArray?,
   ) {
     val strength = clamp(options.strokeStrength, 0.0, 3.0)
     if (strength <= 0.0) return
@@ -4140,9 +4179,15 @@ class PdfPageReflowService(
     // Stroke can grow into exterior paper, but must not fill a sealed glyph
     // counter. Dense CJK glyphs make those filled interiors very visible.
     val exterior = exteriorPaperMask(mask, image.width, image.height)
+    val allowedExterior =
+      if (sourceExterior == null) {
+        exterior
+      } else {
+        BooleanArray(exterior.size) { index -> exterior[index] && sourceExterior[index] }
+      }
     val fullPasses = floor(strength).toInt()
     repeat(fullPasses) {
-      val expanded = expandedStrokeMask(mask, maskIndexes, image.width, image.height, exterior)
+      val expanded = expandedStrokeMask(mask, maskIndexes, image.width, image.height, allowedExterior)
       mask = expanded.first
       maskIndexes = expanded.second
     }
@@ -4151,7 +4196,7 @@ class PdfPageReflowService(
     if (fullPasses > 0) applyStrokeMask(image, maskIndexes, foreground)
 
     val fractional = strength - fullPasses
-    if (fractional > 0.0) applyFractionalStroke(image, maskIndexes, fractional, foreground, exterior)
+    if (fractional > 0.0) applyFractionalStroke(image, maskIndexes, fractional, foreground, allowedExterior)
   }
 
   private fun isStrokeInk(
