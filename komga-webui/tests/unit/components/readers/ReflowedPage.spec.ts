@@ -78,6 +78,32 @@ describe('ReflowedPage image exclusion', () => {
   })
 })
 
+describe('ReflowedPage source boldening', () => {
+  test('preserves an enclosed CJK glyph counter during a full original boldening pass', () => {
+    const image = createImageData(7, 7)
+    drawInk(image, 1, 1, 6, 6)
+    image.data[(3 * 7 + 3) * 4] = 255
+    image.data[(3 * 7 + 3) * 4 + 1] = 255
+    image.data[(3 * 7 + 3) * 4 + 2] = 255
+
+    const context = {
+      getImageData: () => image,
+      putImageData: jest.fn(),
+    }
+    const boldener = Object.assign({}, methods, {
+      options: {threshold: 185},
+      strokeStrength: 1,
+      reflowAlgorithmMode: () => 'original',
+    })
+
+    methods.boldenSourceCanvas.call(boldener, context, 7, 7)
+
+    const output = context.putImageData.mock.calls[0][0].data
+    expect(output[(3 * 7 + 3) * 4]).toBe(255)
+    expect(output[(0 * 7 + 0) * 4]).toBe(255)
+  })
+})
+
 describe('ReflowedPage word block edge analysis', () => {
   test('normalizes image backgrounds for dark display in original image mode', () => {
     const context = {

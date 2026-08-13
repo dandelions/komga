@@ -6296,10 +6296,13 @@ export default Vue.extend({
         }
       }
 
+      // Ink can expand into exterior paper, but not into a sealed glyph counter.
+      // Filling those counters is especially visible in dense CJK characters.
+      const exterior = this.exteriorPaperMask(mask, width, height)
       const fullPasses = Math.floor(strength)
       const fractional = strength - fullPasses
       for (let pass = 0; pass < fullPasses; pass++) {
-        const expanded = this.expandedInkMask(mask, maskIndexes, width, height)
+        const expanded = this.expandedInkMask(mask, maskIndexes, width, height, exterior)
         mask = expanded.mask
         maskIndexes = expanded.indexes
       }
@@ -6393,7 +6396,38 @@ export default Vue.extend({
       }
       return false
     },
-    expandedInkMask(mask: Uint8Array, sourceIndexes: number[], width: number, height: number): {mask: Uint8Array, indexes: number[]} {
+    exteriorPaperMask(mask: Uint8Array, width: number, height: number): Uint8Array {
+      const exterior = new Uint8Array(width * height)
+      const queue = [] as number[]
+      const add = (x: number, y: number) => {
+        if (x < 0 || x >= width || y < 0 || y >= height) return
+        const index = y * width + x
+        if (mask[index] || exterior[index]) return
+        exterior[index] = 1
+        queue.push(index)
+      }
+
+      for (let x = 0; x < width; x++) {
+        add(x, 0)
+        add(x, height - 1)
+      }
+      for (let y = 1; y < height - 1; y++) {
+        add(0, y)
+        add(width - 1, y)
+      }
+
+      for (let cursor = 0; cursor < queue.length; cursor++) {
+        const index = queue[cursor]
+        const y = Math.floor(index / width)
+        const x = index - y * width
+        add(x - 1, y)
+        add(x + 1, y)
+        add(x, y - 1)
+        add(x, y + 1)
+      }
+      return exterior
+    },
+    expandedInkMask(mask: Uint8Array, sourceIndexes: number[], width: number, height: number, exterior?: Uint8Array): {mask: Uint8Array, indexes: number[]} {
       const expanded = new Uint8Array(mask)
       const indexes = sourceIndexes.slice()
       for (const i of sourceIndexes) {
@@ -6406,7 +6440,7 @@ export default Vue.extend({
             const nx = x + dx
             if (nx < 0 || nx >= width) continue
             const ni = ny * width + nx
-            if (expanded[ni]) continue
+            if (expanded[ni] || (exterior && !exterior[ni])) continue
             expanded[ni] = 1
             indexes.push(ni)
           }
