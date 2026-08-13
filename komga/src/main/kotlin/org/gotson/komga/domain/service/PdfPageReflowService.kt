@@ -41,7 +41,7 @@ private const val VERTICAL_PARAGRAPH_BLANK_BLOCKS = 2.0
 private const val EDGE_INK_THRESHOLD = 245
 private const val MAX_EDGE_TRIM = 6
 private const val MAX_EDGE_EXPANSION = 10
-private const val REFLOW_ALGORITHM_VERSION = 5
+private const val REFLOW_ALGORITHM_VERSION = 6
 
 data class PdfPageReflowOptions(
   val targetWidth: Int,
@@ -4137,9 +4137,12 @@ class PdfPageReflowService(
       }
     }
 
+    // Stroke can grow into exterior paper, but must not fill a sealed glyph
+    // counter. Dense CJK glyphs make those filled interiors very visible.
+    val exterior = exteriorPaperMask(mask, image.width, image.height)
     val fullPasses = floor(strength).toInt()
     repeat(fullPasses) {
-      val expanded = expandedStrokeMask(mask, maskIndexes, image.width, image.height)
+      val expanded = expandedStrokeMask(mask, maskIndexes, image.width, image.height, exterior)
       mask = expanded.first
       maskIndexes = expanded.second
     }
@@ -4165,11 +4168,53 @@ class PdfPageReflowService(
     return if (lightForeground) luma > 255 - threshold else luma < threshold
   }
 
+  private fun exteriorPaperMask(
+    mask: ByteArray,
+    width: Int,
+    height: Int,
+  ): BooleanArray {
+    val exterior = BooleanArray(width * height)
+    val queue = ArrayDeque<Int>()
+
+    fun enqueue(
+      x: Int,
+      y: Int,
+    ) {
+      if (x !in 0 until width || y !in 0 until height) return
+      val index = y * width + x
+      if (mask[index].toInt() != 0 || exterior[index]) return
+      exterior[index] = true
+      queue += index
+    }
+
+    for (x in 0 until width) {
+      enqueue(x, 0)
+      enqueue(x, height - 1)
+    }
+    for (y in 1 until height - 1) {
+      enqueue(0, y)
+      enqueue(width - 1, y)
+    }
+
+    while (queue.isNotEmpty()) {
+      val index = queue.removeFirst()
+      val x = index % width
+      val y = index / width
+      enqueue(x - 1, y)
+      enqueue(x + 1, y)
+      enqueue(x, y - 1)
+      enqueue(x, y + 1)
+    }
+
+    return exterior
+  }
+
   private fun expandedStrokeMask(
     mask: ByteArray,
     sourceIndexes: List<Int>,
     width: Int,
     height: Int,
+    exterior: BooleanArray? = null,
   ): Pair<ByteArray, MutableList<Int>> {
     val expanded = mask.copyOf()
     val indexes = sourceIndexes.toMutableList()
@@ -4184,7 +4229,7 @@ class PdfPageReflowService(
           val nx = x + dx
           if (nx !in 0 until width) continue
           val nextIndex = ny * width + nx
-          if (expanded[nextIndex].toInt() != 0) continue
+          if (expanded[nextIndex].toInt() != 0 || (exterior != null && !exterior[nextIndex])) continue
           expanded[nextIndex] = 1
           indexes += nextIndex
         }

@@ -208,6 +208,32 @@ class PdfPageReflowServiceTest {
   }
 
   @Test
+  fun `given an enclosed CJK-like counter when server stroke expansion runs then the counter stays light`() {
+    val image = BufferedImage(7, 7, BufferedImage.TYPE_INT_ARGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, image.width, image.height)
+    graphics.color = Color.BLACK
+    graphics.fillRect(1, 1, 5, 5)
+    graphics.color = Color.WHITE
+    graphics.fillRect(3, 3, 1, 1)
+    graphics.dispose()
+
+    val method = PdfPageReflowService::class.java.getDeclaredMethod(
+      "applyStrokeStrength",
+      BufferedImage::class.java,
+      PdfPageReflowOptions::class.java,
+    )
+    method.isAccessible = true
+    method.invoke(pdfPageReflowService, image, defaultOptions().copy(strokeStrength = 1.0))
+
+    val center = image.getRGB(3, 3)
+    val centerLuma = 0.299 * (center ushr 16 and 0xff) + 0.587 * (center ushr 8 and 0xff) + 0.114 * (center and 0xff)
+
+    assertThat(centerLuma).isGreaterThan(220.0)
+  }
+
+  @Test
   fun `given stronger stroke when reflowing page then returned word image is bolder`() {
     val pageBytes = horizontalShortGlyphPage()
     val book = makeBook("book")

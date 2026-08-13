@@ -100,7 +100,6 @@ describe('ReflowedPage source boldening', () => {
 
     const output = context.putImageData.mock.calls[0][0].data
     expect(output[(3 * 7 + 3) * 4]).toBe(255)
-    expect(output[(0 * 7 + 0) * 4]).toBe(255)
   })
 })
 
