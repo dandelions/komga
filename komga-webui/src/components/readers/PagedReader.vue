@@ -47,15 +47,6 @@
       </v-carousel-item>
     </v-carousel>
 
-    <!--  crop segment overlap markers  -->
-    <div
-      v-for="overlay in cropSegmentOverlapOverlays"
-      :key="overlay.key"
-      class="crop-segment-overlap"
-      :class="overlay.className"
-      :style="overlay.style"
-    />
-
     <!--  clickable zone: left  -->
     <div v-if="!vertical"
          @click="navigateLeftSide()"
@@ -347,31 +338,6 @@ export default Vue.extend({
     topAlignedPage(): boolean {
       return [ScaleType.ORIGINAL, ScaleType.WIDTH, ScaleType.WIDTH_SHRINK_ONLY].includes(this.scale)
     },
-    cropSegmentOverlapOverlays(): Array<{key: string, className: string, style: Record<string, string>}> {
-      const pageNumber = this.currentSpreadPageNumber()
-      const page = pageNumber ? this.pageByNumber(pageNumber) : undefined
-      if (!page) return []
-
-      const segment = this.effectiveCropSegment(page)
-      if (!segment || segment.count <= 1) return []
-
-      const overlays = [] as Array<{key: string, className: string, style: Record<string, string>}>
-      if (segment.previousOverlapEdge && segment.previousOverlapPercent > 0) {
-        overlays.push({
-          key: 'previous-overlap',
-          className: `crop-segment-overlap-${segment.previousOverlapEdge}`,
-          style: this.cropSegmentOverlapStyle(segment.previousOverlapEdge, segment.previousOverlapPercent),
-        })
-      }
-      if (segment.nextOverlapEdge && segment.nextOverlapPercent > 0) {
-        overlays.push({
-          key: 'next-overlap',
-          className: `crop-segment-overlap-${segment.nextOverlapEdge}`,
-          style: this.cropSegmentOverlapStyle(segment.nextOverlapEdge, segment.nextOverlapPercent),
-        })
-      }
-      return overlays
-    },
   },
   methods: {
     keyPressed(e: KeyboardEvent) {
@@ -586,19 +552,6 @@ export default Vue.extend({
     nextCropSegmentOverlapEdge(axis: CropSegmentAxis, forwardLeftToRight: boolean): CropSegmentEdge {
       if (axis === 'vertical') return 'bottom'
       return forwardLeftToRight ? 'right' : 'left'
-    },
-    cropSegmentOverlapStyle(edge: CropSegmentEdge, percent: number): Record<string, string> {
-      const size = `${Math.max(3, Math.min(18, percent)).toFixed(2)}%`
-      switch (edge) {
-        case 'top':
-          return {top: '0', left: '0', right: '0', height: size}
-        case 'right':
-          return {top: '0', right: '0', bottom: '0', width: size}
-        case 'bottom':
-          return {left: '0', right: '0', bottom: '0', height: size}
-        case 'left':
-          return {top: '0', left: '0', bottom: '0', width: size}
-      }
     },
     cropSegmentCount(pageNumber: number | undefined, regionIndex: number = this.activeCropRegion): number {
       if (!pageNumber) return 0
@@ -1033,36 +986,6 @@ export default Vue.extend({
   height: 50%;
   width: 100%;
   position: absolute;
-}
-
-.crop-segment-overlap {
-  position: fixed;
-  z-index: 2;
-  pointer-events: none;
-  background: repeating-linear-gradient(
-    45deg,
-    rgba(144, 202, 249, 0.28) 0,
-    rgba(144, 202, 249, 0.28) 6px,
-    rgba(144, 202, 249, 0.08) 6px,
-    rgba(144, 202, 249, 0.08) 12px
-  );
-  box-shadow: inset 0 0 0 1px rgba(144, 202, 249, 0.42);
-}
-
-.crop-segment-overlap-top {
-  border-top: 2px solid rgba(33, 150, 243, 0.9);
-}
-
-.crop-segment-overlap-right {
-  border-right: 2px solid rgba(33, 150, 243, 0.9);
-}
-
-.crop-segment-overlap-bottom {
-  border-bottom: 2px solid rgba(33, 150, 243, 0.9);
-}
-
-.crop-segment-overlap-left {
-  border-left: 2px solid rgba(33, 150, 243, 0.9);
 }
 
 .img-fit-all {
