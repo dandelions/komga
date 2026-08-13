@@ -2423,7 +2423,9 @@ export default Vue.extend({
       const imageData = context.getImageData(0, 0, width, height)
       const data = imageData.data
       const threshold = Math.min(245, this.clampNumber(this.options.threshold, 50, 230, THRESHOLD) + 18)
-      const sourceDark = this.estimateSliceBackgroundLuma(data, width, height) < 128
+      // A word slice can be almost entirely ink (especially for dense CJK glyphs),
+      // so its local histogram is not a reliable page-background polarity signal.
+      const sourceDark = this.sourceBackgroundLuma() < 128
       const edgeRows = this.lineLikeEdgeRows(data, width, height, threshold, sourceDark)
       const edgeColumns = this.lineLikeEdgeColumns(data, width, height, threshold, sourceDark)
 

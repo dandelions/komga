@@ -89,6 +89,32 @@ describe('ReflowedPage word block edge analysis', () => {
     expect(imageData.data[(1 * 4 + 1) * 4]).toBe(255)
   })
 
+  test('uses the page background polarity for ink-heavy dark-display word slices', () => {
+    const width = 12
+    const height = 12
+    const image = createImageData(width, height)
+    drawInk(image, 1, 1, 11, 11)
+    drawInk(image, 4, 4, 8, 8)
+    const context = {
+      getImageData: () => image,
+      putImageData: jest.fn(),
+    }
+    const wordAnalyzer = Object.assign({}, methods, {
+      contrastEnhancement: false,
+      matchBackground: false,
+      matchBackgroundMode: 'original',
+      darkDisplay: true,
+      options: {threshold: 185},
+      pageBackground: '#fff',
+    })
+
+    methods.finishWordSlice.call(wordAnalyzer, context, width, height)
+
+    const rendered = context.putImageData.mock.calls[0][0].data
+    expect(rendered[(0 * width + 0) * 4]).toBe(0)
+    expect(rendered[(2 * width + 2) * 4]).toBeGreaterThan(0)
+  })
+
   test('moves an edge inward past a separated neighboring text remnant', () => {
     const source = createImageData(24, 16)
     drawInk(source, 3, 5, 4, 9)
