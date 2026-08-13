@@ -41,7 +41,7 @@ private const val VERTICAL_PARAGRAPH_BLANK_BLOCKS = 2.0
 private const val EDGE_INK_THRESHOLD = 245
 private const val MAX_EDGE_TRIM = 6
 private const val MAX_EDGE_EXPANSION = 10
-private const val REFLOW_ALGORITHM_VERSION = 8
+private const val REFLOW_ALGORITHM_VERSION = 9
 
 data class PdfPageReflowOptions(
   val targetWidth: Int,
@@ -4077,6 +4077,7 @@ class PdfPageReflowService(
       )
       graphics.dispose()
       applyStrokeStrength(output, options, sourceExteriorPaperMask(image, source, outputWidth, outputHeight, offsetX, offsetY, options))
+      clearInvertedForegroundComponents(output, options)
       return output
     }
 
@@ -4113,7 +4114,50 @@ class PdfPageReflowService(
     }
 
     applyStrokeStrength(output, options, sourceExteriorPaperMask(image, source, outputWidth, outputHeight, offsetX, offsetY, options))
+    clearInvertedForegroundComponents(output, options)
     return output
+  }
+
+  private fun clearInvertedForegroundComponents(
+    image: BufferedImage,
+    options: PdfPageReflowOptions,
+  ) {
+    if (options.darkDisplay || image.width < 3 || image.height < 3) return
+    val threshold = min(245, clamp(options.threshold, 50, 230) + 18)
+    val foreground = ByteArray(image.width * image.height)
+    for (y in 0 until image.height) {
+      for (x in 0 until image.width) {
+        val index = y * image.width + x
+        if (isStrokeInk(image.getRGB(x, y), threshold, false)) foreground[index] = 1
+      }
+    }
+
+    val exterior = exteriorPaperMask(foreground, image.width, image.height)
+    val visited = BooleanArray(foreground.size)
+    val background = Color.WHITE.rgb
+    for (start in foreground.indices) {
+      if (foreground[start].toInt() != 0 || exterior[start] || visited[start]) continue
+      val queue = ArrayDeque<Int>()
+      val component = mutableListOf<Int>()
+      queue += start
+      visited[start] = true
+      var darkestLuma = 255.0
+      while (queue.isNotEmpty()) {
+        val index = queue.removeFirst()
+        component += index
+        darkestLuma = min(darkestLuma, pixelLuma(image.getRGB(index % image.width, index / image.width)))
+        val x = index % image.width
+        val y = index / image.width
+        listOf(x - 1 to y, x + 1 to y, x to y - 1, x to y + 1).forEach { (nextX, nextY) ->
+          if (nextX !in 0 until image.width || nextY !in 0 until image.height) return@forEach
+          val next = nextY * image.width + nextX
+          if (foreground[next].toInt() != 0 || exterior[next] || visited[next]) return@forEach
+          visited[next] = true
+          queue += next
+        }
+      }
+      if (darkestLuma < threshold) component.forEach { index -> image.setRGB(index % image.width, index / image.width, background) }
+    }
   }
 
   private fun sourceExteriorPaperMask(

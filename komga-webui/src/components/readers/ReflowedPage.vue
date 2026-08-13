@@ -749,7 +749,7 @@ const DETECTION_FULL_RES_MAX_PIXELS = 6000000
 const DETECTION_MAX_SIDE = 2800
 const DETECTION_MAX_PIXELS = 5000000
 const DETECTION_MIN_SCALE = 0.4
-const REFLOW_RESPONSE_VERSION = 10
+const REFLOW_RESPONSE_VERSION = 11
 
 export default Vue.extend({
   name: 'ReflowedPage',
@@ -1586,6 +1586,8 @@ export default Vue.extend({
 
         const image = await this.loadPageImage(this.page.url, requestId)
         if (requestId !== this.requestId) return
+        await this.yieldLocalReflowFrame(requestId)
+        if (requestId !== this.requestId) return
         this.imageSize = {w: image.naturalWidth, h: image.naturalHeight}
         const canvas = document.createElement('canvas')
         canvas.width = image.naturalWidth
@@ -1599,6 +1601,8 @@ export default Vue.extend({
           : 0
         this.detectedAutoSkewCorrection = autoSkewCorrection
         this.enhanceSourceCanvas(context, canvas.width, canvas.height)
+        await this.yieldLocalReflowFrame(requestId)
+        if (requestId !== this.requestId) return
         const skewCorrection = this.effectiveSkewCorrection(autoSkewCorrection, this.skewCorrection)
         const deskewedCanvas = skewCorrection === 0 ? canvas : this.skewCorrectedCanvas(canvas, skewCorrection)
         const cropRois = this.reflowCropRois()
@@ -1617,6 +1621,8 @@ export default Vue.extend({
           const detectionRoi = regionSource.detectionRoi
             ? this.scaleRoi(regionSource.detectionRoi, detectionSource.scale, detectionSource.canvas.width, detectionSource.canvas.height)
             : undefined
+          await this.yieldLocalReflowFrame(requestId)
+          if (requestId !== this.requestId) return
           const detectedContent = this.detectWordLines(
             imageData,
             detectionSource.canvas.width,
@@ -1624,6 +1630,8 @@ export default Vue.extend({
             detectionRoi,
             detectionManualImageRegions,
           )
+          await this.yieldLocalReflowFrame(requestId)
+          if (requestId !== this.requestId) return
           const detectedLines = this.scaleWordLines(detectedContent.lines, detectionSource.scale, sourceCanvas.width, sourceCanvas.height)
           const detectedImageRegions = this.scaleImageRegions(detectedContent.imageRegions, detectionSource.scale, sourceCanvas.width, sourceCanvas.height)
           const lines = this.mergeManualImageHorizontalLineFragments(
@@ -1632,6 +1640,8 @@ export default Vue.extend({
           )
           const imageRegions = this.applyManualImageRegions(detectedImageRegions, manualImageRegions)
           regionItems.push(this.renderReflowItems(sourceCanvas, lines, imageRegions, manualImageRegions))
+          await this.yieldLocalReflowFrame(requestId)
+          if (requestId !== this.requestId) return
         }
         if (requestId !== this.requestId) return
         this.transferStats = this.localTransferStats()
@@ -1646,6 +1656,16 @@ export default Vue.extend({
       } finally {
         if (requestId === this.requestId) this.loading = false
       }
+    },
+    async yieldLocalReflowFrame(requestId: number): Promise<void> {
+      if (requestId !== this.requestId) return
+      await new Promise<void>(resolve => {
+        if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+          window.requestAnimationFrame(() => resolve())
+        } else {
+          window.setTimeout(resolve, 0)
+        }
+      })
     },
     async runServerReflow(requestId: number, detectionKey: string, forceReflow: boolean) {
       if (!this.serverReflowUrl) throw new Error('Server reflow URL is unavailable')
