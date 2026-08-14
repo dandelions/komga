@@ -41,7 +41,7 @@ private const val VERTICAL_PARAGRAPH_BLANK_BLOCKS = 2.0
 private const val EDGE_INK_THRESHOLD = 245
 private const val MAX_EDGE_TRIM = 6
 private const val MAX_EDGE_EXPANSION = 10
-private const val REFLOW_ALGORITHM_VERSION = 11
+private const val REFLOW_ALGORITHM_VERSION = 12
 
 data class PdfPageReflowOptions(
   val targetWidth: Int,
@@ -252,6 +252,10 @@ class PdfPageReflowService(
     reflowExecutor.shutdownNow()
     reflowPageCache.invalidateAll()
     inFlightReflows.clear()
+  }
+
+  fun clearReflowCache(bookId: String) {
+    reflowPageCache.asMap().keys.removeIf { it.bookId == bookId }
   }
 
   fun reflowPage(
@@ -4085,7 +4089,7 @@ class PdfPageReflowService(
 
     graphics.dispose()
     val threshold = clamp(options.threshold, 50, 230)
-    val backgroundLuma = estimateBackgroundLuma(image, source)
+    val backgroundLuma = estimateBackgroundLuma(image, Roi(0, 0, image.width, image.height))
     val inkThreshold = adaptiveInkThreshold(threshold, backgroundLuma)
     val matchedForeground =
       if (options.matchBackground || options.matchBackgroundMode == "original") matchBackgroundMask(image, source, backgroundLuma) else null

@@ -540,6 +540,19 @@ class BookController(
       usePdfPageCache = !contentNegotiation && convertTo == null,
     )
 
+  @Operation(summary = "Clear server reflow cache for a book", tags = [OpenApiConfiguration.TagNames.BOOK_PAGES])
+  @DeleteMapping("api/v1/books/{bookId}/reflow-cache")
+  @PreAuthorize("hasRole('PAGE_STREAMING')")
+  @ResponseStatus(HttpStatus.NO_CONTENT)
+  fun clearBookReflowCache(
+    @AuthenticationPrincipal principal: KomgaPrincipal,
+    @PathVariable bookId: String,
+  ) {
+    val book = bookRepository.findByIdOrNull(bookId) ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+    contentRestrictionChecker.checkContentRestrictionBook(principal.user, book)
+    pdfPageReflowService.clearReflowCache(bookId)
+  }
+
   @Operation(summary = "Get server reflowed PDF page", tags = [OpenApiConfiguration.TagNames.BOOK_PAGES])
   @GetMapping(
     value = ["api/v1/books/{bookId}/pages/{pageNumber}/reflow"],

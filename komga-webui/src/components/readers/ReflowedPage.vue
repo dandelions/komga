@@ -89,6 +89,15 @@
             <v-icon small>{{ magnifierActive ? 'mdi-magnify-close' : 'mdi-magnify-plus-outline' }}</v-icon>
           </button>
           <div class="reflow-navigation-controls">
+            <button
+              type="button"
+              class="reflow-control reflow-icon-control"
+              title="清理本书重排缓存"
+              aria-label="清理本书重排缓存"
+              @click="$emit('clear-reflow-cache')"
+            >
+              <v-icon small>mdi-broom</v-icon>
+            </button>
             <button type="button" class="reflow-control reflow-nav-control reflow-exit-control" @click="exitReflow">
               <v-icon small>mdi-exit-to-app</v-icon>
               <span>退出重排</span>
@@ -751,7 +760,7 @@ const DETECTION_FULL_RES_MAX_PIXELS = 6000000
 const DETECTION_MAX_SIDE = 2800
 const DETECTION_MAX_PIXELS = 5000000
 const DETECTION_MIN_SCALE = 0.4
-const REFLOW_RESPONSE_VERSION = 14
+const REFLOW_RESPONSE_VERSION = 15
 
 export default Vue.extend({
   name: 'ReflowedPage',

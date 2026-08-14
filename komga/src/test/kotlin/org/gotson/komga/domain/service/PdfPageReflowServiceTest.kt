@@ -261,6 +261,35 @@ class PdfPageReflowServiceTest {
   }
 
   @Test
+  fun `given a dense source word block when normalizing colors then page background is not inferred from its ink majority`() {
+    val page = BufferedImage(9, 9, BufferedImage.TYPE_INT_ARGB)
+    val graphics = page.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, page.width, page.height)
+    graphics.color = Color.BLACK
+    graphics.fillRect(2, 2, 5, 5)
+    graphics.dispose()
+
+    val copyMethod = PdfPageReflowService::class.java.declaredMethods.first { it.name == "copyPaddedSlice" }
+    val roiType = copyMethod.parameterTypes[1]
+    val roi = roiType.getDeclaredConstructor(Int::class.java, Int::class.java, Int::class.java, Int::class.java).apply { isAccessible = true }.newInstance(2, 2, 5, 5)
+    copyMethod.isAccessible = true
+    val output =
+      copyMethod.invoke(
+        pdfPageReflowService,
+        page,
+        roi,
+        5,
+        5,
+        0,
+        0,
+        defaultOptions().copy(strokeStrength = 0.0, contrastEnhancement = true, matchBackground = true, matchBackgroundMode = "monochrome"),
+      ) as BufferedImage
+
+    assertThat(darkPixelCount(output)).isEqualTo(25)
+  }
+
+  @Test
   fun `given source ink replaced by an enclosed opposite-polarity block then server repair restores current foreground`() {
     listOf(false, true).forEach { darkDisplay ->
       val source = BufferedImage(7, 7, BufferedImage.TYPE_INT_ARGB)

@@ -336,6 +336,7 @@
           @deskew-analysis-rois-change="setReflowDeskewAnalysisRois"
           @start-reflow="startReflowMode"
           @force-reflow="forceCurrentReflow"
+          @clear-reflow-cache="clearCurrentBookReflowCache"
           @exit-reflow="exitReflowMode"
           @reflowed="cacheReflowPage"
           @page-image-transfer="recordReflowAssetTransfer"
@@ -1606,7 +1607,7 @@ export default Vue.extend({
     },
     reflowCacheKey(): string {
       return JSON.stringify({
-        renderVersion: 14,
+        renderVersion: 15,
         bookId: this.bookId,
         width: this.reflowTargetWidth,
         processingMode: this.reflowSettings.processingMode,
@@ -3255,6 +3256,18 @@ export default Vue.extend({
       const roundedBytes = Math.round(bytes)
       this.reflowSessionOriginalTransferBytes += roundedBytes
       this.reflowSessionTransferBytes += roundedBytes
+    },
+    async clearCurrentBookReflowCache() {
+      if (!this.bookId) return
+      this.clearReflowPrefetch()
+      this.reflowPrefetchPages = []
+      this.reflowCache = {}
+      this.resetReflowTransferSession()
+      try {
+        await this.$komgaBooks.clearReflowCache(this.bookId)
+      } catch (_) {
+      }
+      this.forceCurrentReflow()
     },
     forceCurrentReflow(pageNumber?: number) {
       this.clearReflowPrefetch()

@@ -73,6 +73,18 @@ export default class KomgaBooksService {
     }
   }
 
+  async clearReflowCache(bookId: string): Promise<void> {
+    try {
+      await this.http.delete(`${API_BOOKS}/${bookId}/reflow-cache`)
+    } catch (e) {
+      let msg = 'An error occurred while trying to clear the reflow cache'
+      if (e.response.data.message) {
+        msg += `: ${e.response.data.message}`
+      }
+      throw new Error(msg)
+    }
+  }
+
   async getBook(bookId: string): Promise<BookDto> {
     try {
       return (await this.http.get(`${API_BOOKS}/${bookId}`)).data
