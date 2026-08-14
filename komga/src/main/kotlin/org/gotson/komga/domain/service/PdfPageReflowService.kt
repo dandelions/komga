@@ -41,7 +41,7 @@ private const val VERTICAL_PARAGRAPH_BLANK_BLOCKS = 2.0
 private const val EDGE_INK_THRESHOLD = 245
 private const val MAX_EDGE_TRIM = 6
 private const val MAX_EDGE_EXPANSION = 10
-private const val REFLOW_ALGORITHM_VERSION = 10
+private const val REFLOW_ALGORITHM_VERSION = 11
 
 data class PdfPageReflowOptions(
   val targetWidth: Int,
@@ -4079,7 +4079,7 @@ class PdfPageReflowService(
       )
       graphics.dispose()
       applyStrokeStrength(output, options, sourceExteriorPaperMask(image, source, outputWidth, outputHeight, offsetX, offsetY, options))
-      clearInvertedForegroundComponents(output, options)
+      repairInvertedGlyphComponents(output, image, source, offsetX, offsetY, estimateBackgroundLuma(image, source), options)
       return output
     }
 
@@ -4116,40 +4116,58 @@ class PdfPageReflowService(
     }
 
     applyStrokeStrength(output, options, sourceExteriorPaperMask(image, source, outputWidth, outputHeight, offsetX, offsetY, options))
-    clearInvertedForegroundComponents(output, options)
+    repairInvertedGlyphComponents(output, image, source, offsetX, offsetY, estimateBackgroundLuma(image, source), options)
     return output
   }
 
-  private fun clearInvertedForegroundComponents(
+  private fun repairInvertedGlyphComponents(
     image: BufferedImage,
+    sourceImage: BufferedImage,
+    source: Roi,
+    offsetX: Int,
+    offsetY: Int,
+    sourceBackgroundLuma: Double,
     options: PdfPageReflowOptions,
   ) {
-    if (options.darkDisplay || image.width < 3 || image.height < 3) return
+    if (image.width < 3 || image.height < 3) return
+
     val threshold = min(245, clamp(options.threshold, 50, 230) + 18)
     val foreground = ByteArray(image.width * image.height)
     for (y in 0 until image.height) {
       for (x in 0 until image.width) {
         val index = y * image.width + x
-        if (isStrokeInk(image.getRGB(x, y), threshold, false)) foreground[index] = 1
+        if (isStrokeInk(image.getRGB(x, y), threshold, options.darkDisplay)) foreground[index] = 1
       }
     }
 
     val exterior = exteriorPaperMask(foreground, image.width, image.height)
     val visited = BooleanArray(foreground.size)
-    val background = Color.WHITE.rgb
+    val sourceDark = sourceBackgroundLuma < 128.0
+    val maxSourceDelta = if (sourceDark) 255.0 - sourceBackgroundLuma else sourceBackgroundLuma
+    val sourceInkDelta = min(48.0, max(18.0, maxSourceDelta * 0.12))
+    val outputForeground = if (options.darkDisplay) Color.WHITE.rgb else Color.BLACK.rgb
+
     for (start in foreground.indices) {
       if (foreground[start].toInt() != 0 || exterior[start] || visited[start]) continue
       val queue = ArrayDeque<Int>()
       val component = mutableListOf<Int>()
       queue += start
       visited[start] = true
-      var darkestLuma = 255.0
+      var sourcePixels = 0
+      var sourceInkPixels = 0
       while (queue.isNotEmpty()) {
         val index = queue.removeFirst()
         component += index
-        darkestLuma = min(darkestLuma, pixelLuma(image.getRGB(index % image.width, index / image.width)))
         val x = index % image.width
         val y = index / image.width
+        val sourceX = x - offsetX
+        val sourceY = y - offsetY
+        if (sourceX in 0 until source.w && sourceY in 0 until source.h) {
+          sourcePixels++
+          val sourceLuma = pixelLuma(sourceImage.getRGB(source.x + sourceX, source.y + sourceY))
+          val sourceDelta = if (sourceDark) sourceLuma - sourceBackgroundLuma else sourceBackgroundLuma - sourceLuma
+          if (sourceDelta > sourceInkDelta) sourceInkPixels++
+        }
         listOf(x - 1 to y, x + 1 to y, x to y - 1, x to y + 1).forEach { (nextX, nextY) ->
           if (nextX !in 0 until image.width || nextY !in 0 until image.height) return@forEach
           val next = nextY * image.width + nextX
@@ -4158,7 +4176,9 @@ class PdfPageReflowService(
           queue += next
         }
       }
-      if (darkestLuma < threshold) component.forEach { index -> image.setRGB(index % image.width, index / image.width, background) }
+      if (sourcePixels > 0 && sourceInkPixels.toDouble() / sourcePixels >= 0.72) {
+        component.forEach { index -> image.setRGB(index % image.width, index / image.width, outputForeground) }
+      }
     }
   }
 

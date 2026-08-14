@@ -1606,7 +1606,7 @@ export default Vue.extend({
     },
     reflowCacheKey(): string {
       return JSON.stringify({
-        renderVersion: 13,
+        renderVersion: 14,
         bookId: this.bookId,
         width: this.reflowTargetWidth,
         processingMode: this.reflowSettings.processingMode,

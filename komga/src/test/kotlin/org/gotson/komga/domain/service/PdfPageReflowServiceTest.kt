@@ -261,6 +261,38 @@ class PdfPageReflowServiceTest {
   }
 
   @Test
+  fun `given source ink replaced by an enclosed opposite-polarity block then server repair restores current foreground`() {
+    listOf(false, true).forEach { darkDisplay ->
+      val source = BufferedImage(7, 7, BufferedImage.TYPE_INT_ARGB)
+      val output = BufferedImage(7, 7, BufferedImage.TYPE_INT_ARGB)
+      val sourceGraphics = source.createGraphics()
+      val outputGraphics = output.createGraphics()
+      val background = if (darkDisplay) Color.BLACK else Color.WHITE
+      val foreground = if (darkDisplay) Color.WHITE else Color.BLACK
+      sourceGraphics.color = background
+      sourceGraphics.fillRect(0, 0, 7, 7)
+      sourceGraphics.color = foreground
+      sourceGraphics.fillRect(1, 1, 5, 5)
+      outputGraphics.color = background
+      outputGraphics.fillRect(0, 0, 7, 7)
+      outputGraphics.color = foreground
+      outputGraphics.fillRect(1, 1, 5, 5)
+      outputGraphics.color = background
+      outputGraphics.fillRect(3, 3, 1, 1)
+      sourceGraphics.dispose()
+      outputGraphics.dispose()
+
+      val method = PdfPageReflowService::class.java.declaredMethods.first { it.name == "repairInvertedGlyphComponents" }
+      val roiType = method.parameterTypes[2]
+      val roi = roiType.getDeclaredConstructor(Int::class.java, Int::class.java, Int::class.java, Int::class.java).apply { isAccessible = true }.newInstance(0, 0, 7, 7)
+      method.isAccessible = true
+      method.invoke(pdfPageReflowService, output, source, roi, 0, 0, if (darkDisplay) 0.0 else 255.0, defaultOptions().copy(darkDisplay = darkDisplay))
+
+      assertThat(output.getRGB(3, 3)).isEqualTo(foreground.rgb)
+    }
+  }
+
+  @Test
   fun `given stronger stroke when reflowing page then returned word image is bolder`() {
     val pageBytes = horizontalShortGlyphPage()
     val book = makeBook("book")
