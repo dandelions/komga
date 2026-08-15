@@ -63,7 +63,7 @@ class MultilingualAnalyzerTest {
     val tokens = analyzer.getTokens(text)
 
     // then
-    assertThat(tokens).containsExactly("不道", "道德", "德公", "公會", "河添", "添太", "太一", "東立", "vol", "04", "搬运")
+    assertThat(tokens).containsExactly("不道", "道德", "德公", "公会", "河添", "添太", "太一", "东立", "vol", "04", "搬运")
   }
 
   @Test
@@ -75,7 +75,13 @@ class MultilingualAnalyzerTest {
     val tokens = analyzer.getTokens(text)
 
     // then
-    assertThat(tokens).containsExactly("不道", "道德", "德公", "公會", "會河", "河添", "添太", "太一", "一東", "東立", "立搬", "搬运")
+    assertThat(tokens).containsExactly("不道", "道德", "德公", "公会", "会河", "河添", "添太", "太一", "一东", "东立", "立搬", "搬运")
+  }
+
+  @Test
+  fun `simplified and traditional Chinese produce identical tokens`() {
+    assertThat(analyzer.getTokens("汉字漫画")).containsExactly("汉字", "字漫", "漫画")
+    assertThat(analyzer.getTokens("漢字漫畫")).containsExactly("汉字", "字漫", "漫画")
   }
 
   @Test

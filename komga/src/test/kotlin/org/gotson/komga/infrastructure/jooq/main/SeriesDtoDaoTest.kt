@@ -362,6 +362,53 @@ class SeriesDtoDaoTest(
     }
 
     @Test
+    fun `given traditional Chinese title when searching with simplified Chinese then series is returned`() {
+      // given
+      seriesLifecycle.createSeries(makeSeries("漢字漫畫", library.id))
+      searchIndexLifecycle.rebuildIndex()
+
+      // when
+      val found =
+        seriesDtoDao
+          .findAll(
+            SeriesSearch(fullTextSearch = "汉字漫画"),
+            SearchContext(user),
+            UnpagedSorted(Sort.by("relevance")),
+          ).content
+
+      // then
+      assertThat(found.map { it.metadata.title }).containsExactly("漢字漫畫")
+    }
+
+    @Test
+    fun `given matching series with reading progress when searching then they are shown before unread series`() {
+      // given
+      val inProgress = seriesLifecycle.createSeries(makeSeries("Result in progress", library.id))
+      val read = seriesLifecycle.createSeries(makeSeries("Result read", library.id))
+      seriesLifecycle.createSeries(makeSeries("Result unread", library.id))
+      listOf(inProgress, read).forEach { series ->
+        seriesLifecycle.addBooks(series, listOf(makeBook("1", libraryId = library.id, seriesId = series.id)))
+      }
+      readProgressRepository.save(ReadProgress(bookRepository.findAllBySeriesId(inProgress.id).single().id, user.id, 5, false))
+      readProgressRepository.save(ReadProgress(bookRepository.findAllBySeriesId(read.id).single().id, user.id, 5, true))
+
+      searchIndexLifecycle.rebuildIndex()
+
+      // when
+      val found =
+        seriesDtoDao
+          .findAll(
+            SeriesSearch(fullTextSearch = "result"),
+            SearchContext(user),
+            UnpagedSorted(Sort.by("relevance")),
+          ).content
+
+      // then
+      assertThat(found.take(2).map { it.name }).containsExactlyInAnyOrder("Result in progress", "Result read")
+      assertThat(found.last().name).isEqualTo("Result unread")
+    }
+
+    @Test
     fun `given series when searching by publisher then results are matched`() {
       // given
       val series = seriesLifecycle.createSeries(makeSeries("Batman", library.id))

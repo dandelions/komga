@@ -33,6 +33,7 @@ import org.jooq.DSLContext
 import org.jooq.Record
 import org.jooq.ResultQuery
 import org.jooq.SelectOnConditionStep
+import org.jooq.SortField
 import org.jooq.impl.DSL
 import org.jooq.impl.DSL.count
 import org.jooq.impl.DSL.countDistinct
@@ -289,16 +290,20 @@ class SeriesDtoDao(
       }
 
     val orderBy =
-      pageable.sort.mapNotNull {
-        if (it.property == "relevance" && !seriesIds.isNullOrEmpty()) {
-          s.ID.sortByValues(seriesIds, it.isAscending)
-        } else {
-          if (it.property == "collection.number") {
-            val collectionId = joins.filterIsInstance<RequiredJoin.Collection>().firstOrNull()?.collectionId ?: return@mapNotNull null
-            val f = csAlias(collectionId).NUMBER
-            if (it.isAscending) f.asc() else f.desc()
+      buildList<SortField<*>> {
+        pageable.sort.forEach {
+          if (it.property == "relevance" && !seriesIds.isNullOrEmpty()) {
+            // Keep titles with an existing reading progress ahead of entirely unread search results.
+            add(DSL.case_().`when`(rs.READ_COUNT.isNull, 1).otherwise(0).asc())
+            add(s.ID.sortByValues(seriesIds, it.isAscending))
+          } else if (it.property == "collection.number") {
+            val collectionId = joins.filterIsInstance<RequiredJoin.Collection>().firstOrNull()?.collectionId
+            if (collectionId != null) {
+              val f = csAlias(collectionId).NUMBER
+              add(if (it.isAscending) f.asc() else f.desc())
+            }
           } else {
-            it.toSortField(sorts)
+            it.toSortField(sorts)?.let(::add)
           }
         }
       }
