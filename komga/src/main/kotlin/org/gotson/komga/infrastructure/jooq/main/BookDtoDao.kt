@@ -34,6 +34,7 @@ import org.gotson.komga.jooq.main.tables.records.ReadProgressRecord
 import org.gotson.komga.language.toUTC
 import org.jooq.Condition
 import org.jooq.DSLContext
+import org.jooq.OrderField
 import org.jooq.Record
 import org.jooq.ResultQuery
 import org.jooq.SelectOnConditionStep
@@ -137,16 +138,20 @@ class BookDtoDao(
     val bookIds = luceneHelper.searchEntitiesIds(searchTerm, LuceneEntity.Book)
 
     val orderBy =
-      pageable.sort.mapNotNull {
-        if (it.property == "relevance" && !bookIds.isNullOrEmpty()) {
-          b.ID.sortByValues(bookIds, it.isAscending)
-        } else {
-          if (it.property == "readList.number") {
-            val readListId = joins.filterIsInstance<RequiredJoin.ReadList>().firstOrNull()?.readListId ?: return@mapNotNull null
-            val f = rlbAlias(readListId).NUMBER
-            if (it.isAscending) f.asc() else f.desc()
+      buildList<OrderField<*>> {
+        pageable.sort.forEach {
+          if (it.property == "relevance" && !bookIds.isNullOrEmpty()) {
+            // Keep books with reading progress ahead of entirely unread search results.
+            add(DSL.case_().`when`(r.COMPLETED.isNull, 1).otherwise(0).asc())
+            add(b.ID.sortByValues(bookIds, it.isAscending))
+          } else if (it.property == "readList.number") {
+            val readListId = joins.filterIsInstance<RequiredJoin.ReadList>().firstOrNull()?.readListId
+            if (readListId != null) {
+              val f = rlbAlias(readListId).NUMBER
+              add(if (it.isAscending) f.asc() else f.desc())
+            }
           } else {
-            it.toSortField(sorts)
+            it.toSortField(sorts)?.let(::add)
           }
         }
       }

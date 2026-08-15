@@ -463,6 +463,38 @@ class BookDtoDaoTest(
     }
 
     @Test
+    fun `given matching books with reading progress when searching then they appear before unread books across pages`() {
+      // given
+      seriesLifecycle.addBooks(
+        series,
+        listOf(
+          makeBook("Result in progress", seriesId = series.id, libraryId = library.id),
+          makeBook("Result read", seriesId = series.id, libraryId = library.id),
+          makeBook("Result unread", seriesId = series.id, libraryId = library.id),
+        ),
+      )
+      val books = bookRepository.findAll().associateBy { it.name }
+      readProgressRepository.save(ReadProgress(books.getValue("Result in progress").id, user.id, 5, false))
+      readProgressRepository.save(ReadProgress(books.getValue("Result read").id, user.id, 5, true))
+      searchIndexLifecycle.rebuildIndex()
+
+      // when
+      val pages =
+        (0..2).map {
+          bookDtoDao.findAll(
+            BookSearch(fullTextSearch = "result"),
+            SearchContext(user),
+            PageRequest.of(it, 1, Sort.by("relevance")),
+          )
+        }
+
+      // then
+      assertThat(pages.take(2).flatMap { it.content }.map { it.name })
+        .containsExactlyInAnyOrder("Result in progress", "Result read")
+      assertThat(pages.last().content.map { it.name }).containsExactly("Result unread")
+    }
+
+    @Test
     fun `given books when searching by term and sort order then results are ordered by sort order`() {
       // given
       seriesLifecycle.addBooks(
