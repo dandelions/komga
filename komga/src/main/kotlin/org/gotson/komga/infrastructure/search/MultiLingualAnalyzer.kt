@@ -13,7 +13,7 @@ open class MultiLingualAnalyzer : Analyzer() {
   override fun initReader(
     fieldName: String,
     reader: java.io.Reader,
-  ): java.io.Reader = HanNormalizingCharFilter(reader)
+  ): java.io.Reader = HanTextNormalizer.normalize(reader)
 
   override fun createComponents(fieldName: String): TokenStreamComponents {
     val source: Tokenizer = StandardTokenizer()
