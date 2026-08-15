@@ -50,6 +50,9 @@ export const persistedModule: Module<any, any> = {
     readList: {
       filter: {},
     },
+    series: {
+      sortBooks: {},
+    },
     library: {
       // DEPRECATED: this is the old filter, before criteria-dsl was introduced
       filter: {},
@@ -92,6 +95,9 @@ export const persistedModule: Module<any, any> = {
     },
     getReadListFilter: (state) => (id: string) => {
       return state.readList.filter[id]
+    },
+    getSeriesSortBooks: (state) => (id: string) => {
+      return state.series.sortBooks[id]
     },
     getLibraryFilter: (state) => (id: string) => {
       return state.library.filterDsl[id]
@@ -186,6 +192,9 @@ export const persistedModule: Module<any, any> = {
     },
     setReadListFilter(state, {id, filter}) {
       state.readList.filter[id] = filter
+    },
+    setSeriesSortBooks(state, {id, sort}) {
+      state.series.sortBooks[id] = sort
     },
     setLibraryFilter(state, {id, filter}) {
       state.library.filterDsl[id] = filter

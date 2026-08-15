@@ -987,10 +987,14 @@ export default Vue.extend({
         this.$set(this.filters, prop, [])
       }
       this.sortActive = this.sortDefault
+      this.$store.commit('setSeriesSortBooks', {id: this.seriesId, sort: this.sortActive})
       this.updateRouteAndReload()
     },
     async resetParams(route: any, seriesId: string) {
-      this.sortActive = this.parseQuerySortOrDefault(route.query.sort)
+      this.sortActive =
+        parseQuerySort(route.query.sort, this.sortOptions) ||
+        this.$store.getters.getSeriesSortBooks(seriesId) ||
+        this.$_.clone(this.sortDefault)
 
       // load dynamic filters
       this.$set(this.filterOptions, 'tag', toNameValueCondition(await this.$komgaReferential.getBookTags(seriesId), x => new SearchConditionTag(new SearchOperatorIs(x)), x => new SearchConditionTag(new SearchOperatorIsNot(x))))
@@ -1037,7 +1041,10 @@ export default Vue.extend({
       return validFilterMode
     },
     setWatches() {
-      this.sortUnwatch = this.$watch('sortActive', this.updateRouteAndReload)
+      this.sortUnwatch = this.$watch('sortActive', (val) => {
+        this.$store.commit('setSeriesSortBooks', {id: this.seriesId, sort: val})
+        this.updateRouteAndReload()
+      })
       this.filterUnwatch = this.$watch('filters', this.updateRouteAndReload)
       this.filterModeUnwatch = this.$watch('filtersMode', this.updateRouteAndReload)
       this.pageSizeUnwatch = this.$watch('pageSize', (val) => {
@@ -1132,9 +1139,6 @@ export default Vue.extend({
       }
 
       await this.loadPage(seriesId, this.page, this.sortActive)
-    },
-    parseQuerySortOrDefault(querySort: any): SortActive {
-      return parseQuerySort(querySort, this.sortOptions) || this.$_.clone(this.sortDefault)
     },
     parseQueryFilterStatus(queryStatus: any): string[] {
       return queryStatus ? queryStatus.toString().split(',').filter((x: string) => Object.keys(ReadStatus).includes(x)) : []
