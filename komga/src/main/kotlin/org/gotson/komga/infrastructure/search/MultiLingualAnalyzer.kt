@@ -10,11 +10,6 @@ import org.apache.lucene.analysis.miscellaneous.ASCIIFoldingFilter
 import org.apache.lucene.analysis.standard.StandardTokenizer
 
 open class MultiLingualAnalyzer : Analyzer() {
-  override fun initReader(
-    fieldName: String,
-    reader: java.io.Reader,
-  ): java.io.Reader = HanTextNormalizer.normalize(reader)
-
   override fun createComponents(fieldName: String): TokenStreamComponents {
     val source: Tokenizer = StandardTokenizer()
     // run the widthfilter first before bigramming, it sometimes combines characters.

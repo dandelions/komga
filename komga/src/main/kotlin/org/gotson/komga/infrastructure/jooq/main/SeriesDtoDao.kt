@@ -30,10 +30,10 @@ import org.gotson.komga.jooq.main.tables.records.SeriesMetadataRecord
 import org.gotson.komga.jooq.main.tables.records.SeriesRecord
 import org.jooq.Condition
 import org.jooq.DSLContext
+import org.jooq.OrderField
 import org.jooq.Record
 import org.jooq.ResultQuery
 import org.jooq.SelectOnConditionStep
-import org.jooq.SortField
 import org.jooq.impl.DSL
 import org.jooq.impl.DSL.count
 import org.jooq.impl.DSL.countDistinct
@@ -290,7 +290,7 @@ class SeriesDtoDao(
       }
 
     val orderBy =
-      buildList<SortField<*>> {
+      buildList<OrderField<*>> {
         pageable.sort.forEach {
           if (it.property == "relevance" && !seriesIds.isNullOrEmpty()) {
             // Keep titles with an existing reading progress ahead of entirely unread search results.

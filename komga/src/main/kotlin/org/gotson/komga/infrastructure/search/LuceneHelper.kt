@@ -60,11 +60,25 @@ class LuceneHelper(
   ): List<String>? =
     if (!searchTerm.isNullOrBlank()) {
       try {
-        val fieldsQuery =
+        val parser =
           MultiFieldQueryParser(entity.defaultFields, searchAnalyzer)
             .apply {
               defaultOperator = QueryParser.Operator.AND
-            }.parse("$searchTerm *:*")
+            }
+        val fieldsQuery =
+          HanTextNormalizer
+            .searchVariants(searchTerm)
+            .map { parser.parse("$it *:*") }
+            .let { queries ->
+              if (queries.size == 1) {
+                queries.single()
+              } else {
+                BooleanQuery
+                  .Builder()
+                  .apply { queries.forEach { add(it, BooleanClause.Occur.SHOULD) } }
+                  .build()
+              }
+            }
 
         val typeQuery = TermQuery(Term(LuceneEntity.TYPE, entity.type))
 

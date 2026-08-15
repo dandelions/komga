@@ -1,20 +1,23 @@
 package org.gotson.komga.infrastructure.search
 
 import com.ibm.icu.text.Transliterator
-import java.io.Reader
-import java.io.StringReader
 
 /**
- * Normalizes Traditional Chinese characters to Simplified Chinese before tokenization.
- *
- * It is applied to both the index and search analyzers, so a full-text search for either
- * variant matches titles and names stored in either script.
+ * Produces Simplified and Traditional Chinese query variants without changing indexed text.
+ * This preserves tokenization for other languages that share Han characters, such as Japanese.
  */
 object HanTextNormalizer {
   private val traditionalToSimplified = ThreadLocal.withInitial {
     Transliterator.getInstance("Traditional-Simplified")
   }
+  private val simplifiedToTraditional = ThreadLocal.withInitial {
+    Transliterator.getInstance("Simplified-Traditional")
+  }
 
-  fun normalize(reader: Reader): Reader =
-    StringReader(traditionalToSimplified.get().transliterate(reader.readText()))
+  fun searchVariants(searchTerm: String): Set<String> =
+    setOf(
+      searchTerm,
+      traditionalToSimplified.get().transliterate(searchTerm),
+      simplifiedToTraditional.get().transliterate(searchTerm),
+    )
 }
