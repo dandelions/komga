@@ -1,7 +1,7 @@
 package org.gotson.komga.infrastructure.search
 
 import com.ibm.icu.text.Transliterator
-import org.apache.lucene.analysis.charfilter.CharFilter
+import org.apache.lucene.analysis.CharFilter
 import java.io.Reader
 import java.io.StringReader
 
