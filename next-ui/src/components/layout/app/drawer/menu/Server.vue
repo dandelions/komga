@@ -47,6 +47,17 @@
     />
 
     <v-list-item
+      to="/server/management"
+      :title="
+        $formatMessage({
+          description: 'Drawer menu for Server > Maintenance',
+          defaultMessage: 'Maintenance',
+          id: 'QsF6T/',
+        })
+      "
+    />
+
+    <v-list-item
       to="/server/settings"
       :title="
         $formatMessage({

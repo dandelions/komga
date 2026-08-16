@@ -121,6 +121,26 @@
               "
               hide-details
             />
+            <v-number-input
+              v-model="proxyModel.value.libraryScanDailyFileLimit"
+              :label="
+                $formatMessage({
+                  description: 'Server settings: input field for daily library scan file limit',
+                  defaultMessage: 'Daily library scan file limit',
+                  id: 'XhgqVo',
+                })
+              "
+              :hint="
+                $formatMessage({
+                  description: 'Server settings: input field hint for daily library scan file limit',
+                  defaultMessage: 'Leave empty for no daily limit',
+                  id: 'JsUecg',
+                })
+              "
+              :min="1"
+              clearable
+              persistent-hint
+            />
           </v-col>
         </v-row>
 
@@ -377,14 +397,13 @@ import { useIntl } from 'vue-intl'
 
 import { watchImmediate } from '@vueuse/core'
 import { useRules } from 'vuetify/labs/rules'
-import type { SettingsDto } from '@/generated/openapi'
-import type { SettingsUpdateDtoExtended } from '@/types/ThumbnailRegenerate'
+import type { SettingsDtoExtended, SettingsUpdateDtoExtended } from '@/types/ThumbnailRegenerate'
 
 const intl = useIntl()
 const rules = useRules()
 
 const { settings, loading = false } = defineProps<{
-  settings?: SettingsDto
+  settings?: SettingsDtoExtended
   loading?: boolean
 }>()
 
@@ -396,6 +415,7 @@ const settingsUpdate = ref<SettingsUpdateDtoExtended>({
   thumbnailSize: 'DEFAULT',
   deleteEmptyCollections: false,
   deleteEmptyReadLists: false,
+  libraryScanDailyFileLimit: undefined,
   taskPoolSize: 1,
   rememberMeDurationDays: 365,
   renewRememberMeKey: false,
@@ -414,6 +434,7 @@ watchImmediate(
         thumbnailSize: settings.thumbnailSize,
         deleteEmptyCollections: settings.deleteEmptyCollections,
         deleteEmptyReadLists: settings.deleteEmptyReadLists,
+        libraryScanDailyFileLimit: settings.libraryScanDailyFileLimit,
         taskPoolSize: settings.taskPoolSize,
         rememberMeDurationDays: settings.rememberMeDurationDays,
         renewRememberMeKey: false,
