@@ -9,6 +9,13 @@
 
     <PosterSizeSlider />
 
+    <PresentationSelector
+      v-if="display.smAndUp.value"
+      v-model="presentationMode"
+      :modes="['grid', 'list']"
+      toggle
+    />
+
     <PageSizeSelector
       v-if="appStore.isBrowsingPaged"
       v-model="appStore.browsingPageSize"
@@ -139,13 +146,14 @@
     v-model:page1="page1"
     :paging="appStore.browsingPaging"
     :items="dataItems"
-    presentation-mode="grid"
+    :presentation-mode="presentationModeEffective"
     :has-next-page="hasNextPage"
     :page-count="pageCount"
     @load-next-page="loadNextPage()"
   >
     <template #default="{ item, isSelected, preSelect, toggleSelect }">
       <BookCard
+        v-if="presentationModeEffective === 'grid'"
         show-series
         stretch-poster
         :book="item"
@@ -154,12 +162,24 @@
         :width="display.xs.value ? 'auto' : appStore.gridCardWidth"
         @selection="(_val, event) => toggleSelect(event as MouseEvent)"
       />
+
+      <BookCardWide
+        v-if="presentationModeEffective === 'list'"
+        show-series
+        stretch-poster
+        :book="item"
+        :selected="isSelected"
+        :pre-select="preSelect"
+        :width="appStore.gridCardWidth"
+        @selection="(_val, event) => toggleSelect(event as MouseEvent)"
+      />
     </template>
   </ItemBrowser>
 </template>
 
 <script lang="ts" setup>
 import PosterSizeSlider from '@/components/PosterSizeSlider.vue'
+import BookCardWide from '@/components/book/card/BookCardWide.vue'
 import FilterButton from '@/components/filter/FilterButton.vue'
 import { useDisplay } from 'vuetify'
 import { useGetLibrariesByViewId } from '@/composables/libraries'
@@ -186,6 +206,7 @@ import { useFilterContributors, useFilters } from '@/composables/filter'
 import ChipCount from '@/components/ChipCount.vue'
 import { contributorsRolesMessages } from '@/types/referential'
 import { useSelectionContextualActions } from '@/composables/selection'
+import { usePresentationMode } from '@/composables/presentationMode'
 import type { SearchConditionBook } from '@/generated/openapi'
 
 const route = useRoute('/libraries/[viewId]/books')
@@ -197,6 +218,7 @@ const appStore = useAppStore()
 const { isBrowsingScroll, isBrowsingPaged } = storeToRefs(appStore)
 
 const viewName = computed(() => `${libraryViewId}_books`)
+const { presentationMode, presentationModeEffective } = usePresentationMode(viewName)
 
 const { page0, page1, pageCount } = usePagination()
 

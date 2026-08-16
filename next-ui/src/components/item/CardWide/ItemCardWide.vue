@@ -8,10 +8,9 @@
       v-bind="props"
       elevation="1"
       hover-elevation="2"
+      :link="!!cardTo"
       :class="isPreSelect || selected ? 'cursor-pointer' : 'cursor-default'"
-      @click="
-        (event: Event) => (isPreSelect || selected ? emit('selection', !selected, event) : {})
-      "
+      @click="onCardClick"
     >
       <v-card-text>
         <div class="d-flex flex-row ga-4">
@@ -126,9 +125,16 @@ import type { ItemCardEmits, ItemCardProps } from '@/types/ItemCard'
 import { vOnLongPress } from '@vueuse/components'
 import { usePrimaryInput } from '@/composables/device'
 import { useDisplay } from 'vuetify'
+import type { RouteLocation } from 'vue-router'
 
 const display = useDisplay()
 const { isTouchPrimary } = usePrimaryInput()
+const router = useRouter()
+
+function onCardClick(event: Event) {
+  if (isPreSelect.value || selected) emit('selection', !selected, event)
+  else if (cardTo) void router.push(cardTo)
+}
 
 function onCardLongPress() {
   if (isTouchPrimary.value) emit('cardLongPress')
@@ -143,6 +149,7 @@ const {
   quickActionIcon,
   quickActionProps = {},
   menuIcon,
+  cardTo,
 } = defineProps<
   ItemCardProps & {
     /**
@@ -182,6 +189,7 @@ const {
      */
     menuProps?: object
     progressPercent?: number
+    cardTo?: RouteLocation | string
   }
 >()
 

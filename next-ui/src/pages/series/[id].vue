@@ -185,12 +185,24 @@
       >
         <template #default="{ item, isSelected, preSelect, toggleSelect }">
           <BookCard
+            v-if="presentationModeEffective === 'grid'"
             stretch-poster
             :show-series="false"
             :book="item"
             :selected="isSelected"
             :pre-select="preSelect"
             :width="display.xs.value ? 'auto' : appStore.gridCardWidth"
+            @selection="(_val, event) => toggleSelect(event as MouseEvent)"
+          />
+
+          <BookCardWide
+            v-if="presentationModeEffective === 'list'"
+            stretch-poster
+            :show-series="false"
+            :book="item"
+            :selected="isSelected"
+            :pre-select="preSelect"
+            :width="appStore.gridCardWidth"
             @selection="(_val, event) => toggleSelect(event as MouseEvent)"
           />
         </template>
@@ -201,6 +213,7 @@
 
 <script lang="ts" setup>
 import { useInfiniteQuery, useQuery } from '@pinia/colada'
+import BookCardWide from '@/components/book/card/BookCardWide.vue'
 import { seriesDetailQuery } from '@/colada/series'
 import EmptyStateNetworkError from '@/components/EmptyStateNetworkError.vue'
 import { useBooks } from '@/composables/book/useBooks'
