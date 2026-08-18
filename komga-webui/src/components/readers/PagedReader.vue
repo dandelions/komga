@@ -47,6 +47,15 @@
       </v-carousel-item>
     </v-carousel>
 
+    <!--  Previously read overlap from the preceding crop segment. -->
+    <div
+      v-for="overlay in cropSegmentOverlapOverlays"
+      :key="overlay.key"
+      class="crop-segment-overlap"
+      :class="overlay.className"
+      :style="overlay.style"
+    />
+
     <!--  clickable zone: left  -->
     <div v-if="!vertical"
          @click="navigateLeftSide()"
@@ -338,6 +347,20 @@ export default Vue.extend({
     topAlignedPage(): boolean {
       return [ScaleType.ORIGINAL, ScaleType.WIDTH, ScaleType.WIDTH_SHRINK_ONLY].includes(this.scale)
     },
+    cropSegmentOverlapOverlays(): Array<{key: string, className: string, style: Record<string, string>}> {
+      const pageNumber = this.currentSpreadPageNumber()
+      const page = pageNumber ? this.pageByNumber(pageNumber) : undefined
+      if (!page) return []
+
+      const segment = this.effectiveCropSegment(page)
+      if (!segment?.previousOverlapEdge || segment.previousOverlapPercent <= 0) return []
+
+      return [{
+        key: 'previous-overlap',
+        className: `crop-segment-overlap-${segment.previousOverlapEdge}`,
+        style: this.cropSegmentOverlapStyle(segment.previousOverlapEdge, segment.previousOverlapPercent),
+      }]
+    },
   },
   methods: {
     keyPressed(e: KeyboardEvent) {
@@ -565,6 +588,19 @@ export default Vue.extend({
     },
     lastCropSegmentIndex(pageNumber: number | undefined, regionIndex: number): number {
       return Math.max(0, this.cropSegmentCount(pageNumber, regionIndex) - 1)
+    },
+    cropSegmentOverlapStyle(edge: CropSegmentEdge, percent: number): Record<string, string> {
+      const size = `${Math.max(3, Math.min(18, percent)).toFixed(2)}%`
+      switch (edge) {
+        case 'top':
+          return {top: '0', left: '0', right: '0', height: size}
+        case 'right':
+          return {top: '0', right: '0', bottom: '0', width: size}
+        case 'bottom':
+          return {left: '0', right: '0', bottom: '0', height: size}
+        case 'left':
+          return {top: '0', left: '0', bottom: '0', width: size}
+      }
     },
     nextCropSegmentIndex(pageNumber: number | undefined, regionIndex: number = this.activeCropRegion): number | undefined {
       const count = this.cropSegmentCount(pageNumber, regionIndex)
@@ -986,6 +1022,13 @@ export default Vue.extend({
   height: 50%;
   width: 100%;
   position: absolute;
+}
+
+.crop-segment-overlap {
+  position: fixed;
+  z-index: 2;
+  pointer-events: none;
+  background: rgba(128, 128, 128, 0.32);
 }
 
 .img-fit-all {
