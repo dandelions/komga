@@ -569,11 +569,11 @@ export default Vue.extend({
       return this.readingDirection !== ReadingDirection.RIGHT_TO_LEFT
     },
     previousCropSegmentOverlapEdge(axis: CropSegmentAxis, forwardLeftToRight: boolean): CropSegmentEdge {
-      if (axis === 'vertical') return 'top'
+      if (this.readingDirection === ReadingDirection.VERTICAL) return axis === 'vertical' ? 'top' : 'left'
       return forwardLeftToRight ? 'left' : 'right'
     },
     nextCropSegmentOverlapEdge(axis: CropSegmentAxis, forwardLeftToRight: boolean): CropSegmentEdge {
-      if (axis === 'vertical') return 'bottom'
+      if (this.readingDirection === ReadingDirection.VERTICAL) return axis === 'vertical' ? 'bottom' : 'right'
       return forwardLeftToRight ? 'right' : 'left'
     },
     cropSegmentCount(pageNumber: number | undefined, regionIndex: number = this.activeCropRegion): number {
