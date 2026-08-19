@@ -1789,7 +1789,8 @@ export default Vue.extend({
       this.epubCustomStyleDisableOriginalStyle = preset.disableOriginalStyle || false
       this.epubCustomStyleChineseConversion = preset.chineseConversion || 'none'
       this.epubCustomStyleCss = preset.css
-      this.epubCustomStylePresetName = preset.name
+      this.epubCustomStylePresetId = 'custom'
+      this.epubCustomStylePresetName = ''
       this.publishEpubCustomStyle()
     },
     async saveEpubCustomStylePreset() {
