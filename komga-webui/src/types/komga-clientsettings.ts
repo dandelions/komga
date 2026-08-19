@@ -33,6 +33,16 @@ export interface ClientSettingsEpubCustomStyle {
   chineseConversion?: ClientSettingsEpubChineseConversion,
 }
 
+export interface ClientSettingsEpubCustomStylePreset extends ClientSettingsEpubCustomStyle {
+  id: string,
+  name: string,
+}
+
+export interface ClientSettingsEpubCustomStyles {
+  presets: ClientSettingsEpubCustomStylePreset[],
+  books: Record<string, ClientSettingsEpubCustomStyle>,
+}
+
 export type ClientSettingsEpubChineseConversion = 'none' | 'simplified' | 'traditional'
 
 export interface ClientSettingsEpubBackgroundImages {

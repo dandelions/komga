@@ -329,6 +329,48 @@
             <v-subheader class="font-weight-black text-h6">{{ $t('epubreader.settings.custom_style') }}</v-subheader>
 
             <v-list-item>
+              <v-select
+                v-model="epubCustomStylePresetId"
+                :items="epubCustomStylePresetOptions"
+                :label="$t('epubreader.settings.custom_style_preset')"
+                outlined
+                dense
+                hide-details
+                @change="selectEpubCustomStylePreset"
+              />
+            </v-list-item>
+
+            <v-list-item>
+              <v-text-field
+                v-model="epubCustomStylePresetName"
+                :label="$t('epubreader.settings.custom_style_preset_name')"
+                outlined
+                dense
+                hide-details
+              />
+            </v-list-item>
+
+            <v-list-item class="justify-end">
+              <v-btn
+                text
+                small
+                :disabled="!epubCustomStylePresetName.trim()"
+                @click="saveEpubCustomStylePreset"
+              >
+                {{ $t('epubreader.settings.custom_style_save_preset') }}
+              </v-btn>
+              <v-btn
+                text
+                small
+                color="error"
+                :disabled="!isCustomEpubStylePreset"
+                @click="deleteEpubCustomStylePreset"
+              >
+                {{ $t('epubreader.settings.custom_style_delete_preset') }}
+              </v-btn>
+            </v-list-item>
+
+            <v-list-item>
               <settings-switch
                 v-model="epubCustomStyleEnabled"
                 :label="$t('epubreader.settings.custom_style_enabled')"
@@ -550,6 +592,8 @@ import {
   ClientSettingsEpubBackgroundImageSelection,
   ClientSettingsEpubChineseConversion,
   ClientSettingsEpubCustomStyle,
+  ClientSettingsEpubCustomStylePreset,
+  ClientSettingsEpubCustomStyles,
 } from '@/types/komga-clientsettings'
 
 const EPUB_CUSTOM_STYLE_WINDOW_KEY = '__KOMGA_EPUB_CUSTOM_STYLE__'
@@ -609,6 +653,44 @@ const EPUB_READER_STYLE_URLS = [
   R2D2BC_POPOVER_CSS_URL,
   R2D2BC_STYLE_CSS_URL,
 ]
+const createDefaultEpubCustomStylePresets = (): ClientSettingsEpubCustomStylePreset[] => [
+  {
+    id: 'komga-comfortable',
+    name: 'Comfortable',
+    enabled: true,
+    disableOriginalStyle: true,
+    chineseConversion: 'none',
+    css: 'body { font-family: sans-serif !important; line-height: 1.8 !important; }\\np { margin: 0 0 1em !important; }',
+  },
+  {
+    id: 'komga-sepia',
+    name: 'Sepia',
+    enabled: true,
+    disableOriginalStyle: true,
+    chineseConversion: 'none',
+    css: 'html, body { background: #f4ecd8 !important; color: #5b4636 !important; }\\na { color: #7b4f2c !important; }',
+  },
+  {
+    id: 'komga-night',
+    name: 'Night',
+    enabled: true,
+    disableOriginalStyle: true,
+    chineseConversion: 'none',
+    css: 'html, body { background: #1e1e1e !important; color: #dddddd !important; }\\na { color: #9ecbff !important; }',
+  },
+]
+
+const createEmptyEpubCustomStyles = (): ClientSettingsEpubCustomStyles => ({
+  presets: createDefaultEpubCustomStylePresets(),
+  books: {},
+})
+
+const isEpubCustomStyles = (value: unknown): value is ClientSettingsEpubCustomStyles => {
+  if (!value || typeof value !== 'object') return false
+  const styles = value as ClientSettingsEpubCustomStyles
+  return Array.isArray(styles.presets) && !!styles.books && typeof styles.books === 'object' && !Array.isArray(styles.books)
+}
+
 const createEmptyEpubBackgroundImages = (): ClientSettingsEpubBackgroundImages => ({
   enabled: false,
   selectedLightId: '',
@@ -787,6 +869,9 @@ export default Vue.extend({
       epubCustomStyleDisableOriginalStyle: false,
       epubCustomStyleChineseConversion: 'none' as ClientSettingsEpubChineseConversion,
       epubCustomStyleCss: '',
+      epubCustomStylePresets: [] as ClientSettingsEpubCustomStylePreset[],
+      epubCustomStylePresetId: 'custom',
+      epubCustomStylePresetName: '',
       epubCustomStyleSaving: false,
       epubIframeEnhancementObserver: undefined as MutationObserver | undefined,
       epubIframeEnhancementTimers: [] as number[],
@@ -1080,6 +1165,16 @@ export default Vue.extend({
         this.d2Reader.applyUserSettings({fontFamily: value})
         this.$store.commit('setEpubreaderSettings', this.settings)
       },
+    },
+    epubCustomStylePresetOptions(): Array<{text: string, value: string}> {
+      return [
+        {text: this.$t('epubreader.settings.custom_style_custom').toString(), value: 'custom'},
+        ...this.epubCustomStylePresets.map(preset => ({text: preset.name, value: preset.id})),
+      ]
+    },
+    isCustomEpubStylePreset(): boolean {
+      return this.epubCustomStylePresetId !== 'custom'
+        && !this.epubCustomStylePresets.some(preset => preset.id === this.epubCustomStylePresetId && preset.id.startsWith('komga-'))
     },
   },
   methods: {
@@ -1627,22 +1722,51 @@ export default Vue.extend({
       element.style.removeProperty('background-repeat')
       element.style.removeProperty('background-attachment')
     },
-    getEpubCustomStyles(): Record<string, ClientSettingsEpubCustomStyle> {
+    getEpubCustomStyles(): ClientSettingsEpubCustomStyles {
       try {
-        return JSON.parse(this.$store.state.komgaSettings.clientSettingsUser[CLIENT_SETTING.WEBUI_EPUB_CUSTOM_STYLES]?.value) || {}
+        const parsed: unknown = JSON.parse(this.$store.state.komgaSettings.clientSettingsUser[CLIENT_SETTING.WEBUI_EPUB_CUSTOM_STYLES]?.value)
+        if (isEpubCustomStyles(parsed)) {
+          return {
+            presets: parsed.presets,
+            books: parsed.books,
+          }
+        }
+        return {
+          presets: createDefaultEpubCustomStylePresets(),
+          books: parsed || {},
+        }
       } catch (e) {
-        return {}
+        return createEmptyEpubCustomStyles()
       }
     },
     async loadEpubCustomStyle(bookId: string) {
       await this.$store.dispatch('getClientSettingsUser')
       this.loadEpubBackgroundImages()
       await this.migrateLocalEpubBackgroundImages()
-      const config = this.getEpubCustomStyles()[bookId]
+      const storedValue = this.$store.state.komgaSettings.clientSettingsUser[CLIENT_SETTING.WEBUI_EPUB_CUSTOM_STYLES]?.value
+      let storedConfig: unknown
+      try {
+        storedConfig = storedValue ? JSON.parse(storedValue) : undefined
+      } catch (e) {
+        storedConfig = undefined
+      }
+      const styles = this.getEpubCustomStyles()
+      this.epubCustomStylePresets = styles.presets
+      if (!isEpubCustomStyles(storedConfig)) await this.persistEpubCustomStyles(styles)
+      const config = styles.books[bookId]
       this.epubCustomStyleEnabled = config?.enabled || false
       this.epubCustomStyleDisableOriginalStyle = config?.disableOriginalStyle || false
       this.epubCustomStyleChineseConversion = config?.chineseConversion || 'none'
       this.epubCustomStyleCss = config?.css || ''
+      this.epubCustomStylePresetId = this.epubCustomStylePresets.find(preset =>
+        preset.css === this.epubCustomStyleCss
+        && preset.enabled === this.epubCustomStyleEnabled
+        && preset.disableOriginalStyle === this.epubCustomStyleDisableOriginalStyle
+        && preset.chineseConversion === this.epubCustomStyleChineseConversion,
+      )?.id || 'custom'
+      this.epubCustomStylePresetName = this.epubCustomStylePresetId === 'custom'
+        ? ''
+        : this.epubCustomStylePresets.find(preset => preset.id === this.epubCustomStylePresetId)?.name || ''
       this.publishEpubCustomStyle()
     },
     publishEpubCustomStyle() {
@@ -1654,11 +1778,71 @@ export default Vue.extend({
         css: this.epubCustomStyleCss,
       } as ClientSettingsEpubCustomStyle
     },
+    selectEpubCustomStylePreset(presetId: string) {
+      if (presetId === 'custom') {
+        this.epubCustomStylePresetName = ''
+        return
+      }
+      const preset = this.epubCustomStylePresets.find(item => item.id === presetId)
+      if (!preset) return
+      this.epubCustomStyleEnabled = preset.enabled
+      this.epubCustomStyleDisableOriginalStyle = preset.disableOriginalStyle || false
+      this.epubCustomStyleChineseConversion = preset.chineseConversion || 'none'
+      this.epubCustomStyleCss = preset.css
+      this.epubCustomStylePresetName = preset.name
+      this.publishEpubCustomStyle()
+    },
+    async saveEpubCustomStylePreset() {
+      const name = this.epubCustomStylePresetName.trim()
+      if (!name) return
+      const styles = this.getEpubCustomStyles()
+      const existing = this.isCustomEpubStylePreset
+        ? this.epubCustomStylePresets.find(preset => preset.id === this.epubCustomStylePresetId)
+        : undefined
+      const preset: ClientSettingsEpubCustomStylePreset = {
+        id: existing?.id || `custom-${Date.now()}`,
+        name,
+        enabled: this.epubCustomStyleEnabled,
+        disableOriginalStyle: this.epubCustomStyleDisableOriginalStyle,
+        chineseConversion: this.epubCustomStyleChineseConversion,
+        css: this.epubCustomStyleCss,
+      }
+      this.epubCustomStylePresets = existing
+        ? this.epubCustomStylePresets.map(item => item.id === existing.id ? preset : item)
+        : [...this.epubCustomStylePresets, preset]
+      this.epubCustomStylePresetId = preset.id
+      styles.presets = this.epubCustomStylePresets
+      styles.books[this.bookId] = {
+        enabled: this.epubCustomStyleEnabled,
+        disableOriginalStyle: this.epubCustomStyleDisableOriginalStyle,
+        chineseConversion: this.epubCustomStyleChineseConversion,
+        css: this.epubCustomStyleCss,
+      }
+      await this.persistEpubCustomStyles(styles)
+      this.sendNotification(this.$t('epubreader.settings.custom_style_preset_saved').toString())
+    },
+    async deleteEpubCustomStylePreset() {
+      if (!this.isCustomEpubStylePreset) return
+      const styles = this.getEpubCustomStyles()
+      this.epubCustomStylePresets = this.epubCustomStylePresets.filter(preset => preset.id !== this.epubCustomStylePresetId)
+      this.epubCustomStylePresetId = 'custom'
+      this.epubCustomStylePresetName = ''
+      styles.presets = this.epubCustomStylePresets
+      await this.persistEpubCustomStyles(styles)
+      this.sendNotification(this.$t('epubreader.settings.custom_style_preset_deleted').toString())
+    },
+    async persistEpubCustomStyles(styles: ClientSettingsEpubCustomStyles) {
+      const update = {} as Record<string, ClientSettingUserUpdateDto>
+      update[CLIENT_SETTING.WEBUI_EPUB_CUSTOM_STYLES] = {value: JSON.stringify(styles)}
+      await this.$komgaSettings.updateClientSettingUser(update)
+      await this.$store.dispatch('getClientSettingsUser')
+    },
     async saveEpubCustomStyle() {
       this.epubCustomStyleSaving = true
       try {
-        const all = this.getEpubCustomStyles()
-        all[this.bookId] = {
+        const styles = this.getEpubCustomStyles()
+        styles.presets = this.epubCustomStylePresets
+        styles.books[this.bookId] = {
           enabled: this.epubCustomStyleEnabled,
           disableOriginalStyle: this.epubCustomStyleDisableOriginalStyle,
           chineseConversion: this.epubCustomStyleChineseConversion,
@@ -1667,7 +1851,7 @@ export default Vue.extend({
 
         const update = {} as Record<string, ClientSettingUserUpdateDto>
         update[CLIENT_SETTING.WEBUI_EPUB_CUSTOM_STYLES] = {
-          value: JSON.stringify(all),
+          value: JSON.stringify(styles),
         }
         update[CLIENT_SETTING.WEBUI_EPUB_BACKGROUND_IMAGES] = {
           value: JSON.stringify(this.epubBackgroundImages),
