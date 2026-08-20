@@ -250,9 +250,6 @@
           <button type="button" class="reflow-control" @click="toggleCropMode">
             {{ selectAreaLabel }}
           </button>
-          <button type="button" class="reflow-control" @click="toggleManualImageRegionMode">
-            {{ manualImageAreaLabel }}
-          </button>
         </div>
       </template>
     </div>
@@ -266,24 +263,24 @@
         <button type="button" class="reflow-control" @click="finishCropMode">完成</button>
         <span class="crop-toolbar-label">{{ cropToolbarLabel }}</span>
         <div v-if="cropTarget !== 'deskew'" class="crop-region-selectors" role="group" aria-label="选择截取区域">
-          <template v-if="cropTarget === 'text'">
+          <div class="crop-region-group">
             <label class="crop-region-count-control">
               <span>区域数</span>
               <select :value="cropRegionCount" @change="setCropRegionCount">
                 <option v-for="count in cropRegionCountOptions" :key="count" :value="count">{{ count }}</option>
               </select>
             </label>
-            <button v-for="region in cropRegionIndexes" :key="`crop-text-${region}`" type="button" class="reflow-control reflow-region-control" :class="{ 'reflow-region-active': activeCropRegion === region }" @click="setActiveCropRegion(region)">区域 {{ region + 1 }}</button>
-          </template>
-          <template v-else>
+            <button v-for="region in cropRegionIndexes" :key="`crop-text-${region}`" type="button" class="reflow-control reflow-region-control" :class="{ 'reflow-region-active': cropTarget === 'text' && activeCropRegion === region }" @click="setActiveCropRegion(region)">区域 {{ region + 1 }}</button>
+          </div>
+          <div class="crop-region-group">
             <label class="crop-region-count-control">
               <span>图片区</span>
               <select :value="manualImageRegionCount" @change="setManualImageRegionCount">
                 <option v-for="count in manualImageRegionCountOptions" :key="count" :value="count">{{ count }}</option>
               </select>
             </label>
-            <button v-for="region in manualImageRegionIndexes" :key="`crop-image-${region}`" type="button" class="reflow-control reflow-region-control" :class="{ 'reflow-region-active': activeManualImageRegion === region }" @click="setActiveManualImageRegion(region)">图 {{ region + 1 }}</button>
-          </template>
+            <button v-for="region in manualImageRegionIndexes" :key="`crop-image-${region}`" type="button" class="reflow-control reflow-region-control" :class="{ 'reflow-region-active': cropTarget === 'image' && activeManualImageRegion === region }" @click="setActiveManualImageRegion(region)">图 {{ region + 1 }}</button>
+          </div>
         </div>
         <button
           v-if="cropTarget === 'deskew'"
@@ -1106,10 +1103,7 @@ export default Vue.extend({
       return Array.from({length: this.manualImageRegionCount}, (_, index) => index)
     },
     selectAreaLabel(): string {
-      return this.cropMode && this.cropTarget === 'text' ? '完成' : `截取${this.pageParityShortLabel}区域${this.activeCropRegion + 1}`
-    },
-    manualImageAreaLabel(): string {
-      return this.cropMode && this.cropTarget === 'image' ? '完成' : `截取图片区域${this.activeManualImageRegion + 1}`
+      return this.cropMode ? '完成' : '截取区域'
     },
     deskewAnalysisAreaLabel(): string {
       return this.cropMode && this.cropTarget === 'deskew' ? '完成' : `设置${this.pageParityShortLabel}纠斜文字区`
@@ -7889,13 +7883,23 @@ export default Vue.extend({
 }
 
 .crop-region-selectors {
+  display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: min(320px, 100%);
+}
+
+.crop-region-group {
   display: inline-flex;
-  flex: 1 1 auto;
+  flex: 1 1 320px;
   flex-wrap: wrap;
   align-items: center;
   justify-content: center;
   gap: 5px;
-  min-width: min(220px, 100%);
+  min-width: min(280px, 100%);
 }
 
 .crop-skew-control {
