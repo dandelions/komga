@@ -255,24 +255,6 @@
           >
             重置{{ pageParityShortLabel }}纠斜区
           </button>
-          <div class="reflow-region-controls">
-            <label class="reflow-region-count-control">
-              <span>区域数</span>
-              <select :value="cropRegionCount" @change="setCropRegionCount">
-                <option v-for="count in cropRegionCountOptions" :key="count" :value="count">{{ count }}</option>
-              </select>
-            </label>
-            <button
-              v-for="region in cropRegionIndexes"
-              :key="region"
-              type="button"
-              class="reflow-control reflow-region-control"
-              :class="{'reflow-region-active': activeCropRegion === region}"
-              @click="setActiveCropRegion(region)"
-            >
-              区域 {{ region + 1 }}
-            </button>
-          </div>
           <button type="button" class="reflow-control" @click="toggleCropMode">
             {{ selectAreaLabel }}
           </button>
@@ -284,24 +266,6 @@
           >
             重置{{ pageParityShortLabel }}区域{{ activeCropRegion + 1 }}
           </button>
-          <div class="reflow-region-controls reflow-manual-image-region-controls">
-            <label class="reflow-region-count-control">
-              <span>图片区</span>
-              <select :value="manualImageRegionCount" @change="setManualImageRegionCount">
-                <option v-for="count in manualImageRegionCountOptions" :key="count" :value="count">{{ count }}</option>
-              </select>
-            </label>
-            <button
-              v-for="region in manualImageRegionIndexes"
-              :key="`image-${region}`"
-              type="button"
-              class="reflow-control reflow-region-control"
-              :class="{'reflow-region-active': cropTarget === 'image' && activeManualImageRegion === region}"
-              @click="setActiveManualImageRegion(region)"
-            >
-              图 {{ region + 1 }}
-            </button>
-          </div>
           <button type="button" class="reflow-control" @click="toggleManualImageRegionMode">
             {{ manualImageAreaLabel }}
           </button>
@@ -327,9 +291,21 @@
         <span class="crop-toolbar-label">{{ cropToolbarLabel }}</span>
         <div v-if="cropTarget !== 'deskew'" class="crop-region-selectors" role="group" aria-label="选择截取区域">
           <template v-if="cropTarget === 'text'">
+            <label class="crop-region-count-control">
+              <span>区域数</span>
+              <select :value="cropRegionCount" @change="setCropRegionCount">
+                <option v-for="count in cropRegionCountOptions" :key="count" :value="count">{{ count }}</option>
+              </select>
+            </label>
             <button v-for="region in cropRegionIndexes" :key="`crop-text-${region}`" type="button" class="reflow-control reflow-region-control" :class="{ 'reflow-region-active': activeCropRegion === region }" @click="setActiveCropRegion(region)">区域 {{ region + 1 }}</button>
           </template>
           <template v-else>
+            <label class="crop-region-count-control">
+              <span>图片区</span>
+              <select :value="manualImageRegionCount" @change="setManualImageRegionCount">
+                <option v-for="count in manualImageRegionCountOptions" :key="count" :value="count">{{ count }}</option>
+              </select>
+            </label>
             <button v-for="region in manualImageRegionIndexes" :key="`crop-image-${region}`" type="button" class="reflow-control reflow-region-control" :class="{ 'reflow-region-active': activeManualImageRegion === region }" @click="setActiveManualImageRegion(region)">图 {{ region + 1 }}</button>
           </template>
         </div>
@@ -6829,8 +6805,13 @@ export default Vue.extend({
     setCropRegionCount(event: Event) {
       const target = event.target as HTMLSelectElement
       const count = this.normalizedCropRegionCount(target.value)
+      if (this.cropMode) this.persistCurrentCropDraft()
       this.cropRegionCount = count
       if (this.activeCropRegion >= count) this.activeCropRegion = count - 1
+      this.draftRoi = undefined
+      this.drawingCrop = false
+      this.clearCropAdjustment()
+      this.emitCropSettingsChange('text')
       this.cropWarning = ''
     },
     setActiveCropRegion(region: CropRegionIndex) {
@@ -6846,8 +6827,13 @@ export default Vue.extend({
     setManualImageRegionCount(event: Event) {
       const target = event.target as HTMLSelectElement
       const count = this.normalizedCropRegionCount(target.value)
+      if (this.cropMode) this.persistCurrentCropDraft()
       this.manualImageRegionCount = count
       if (this.activeManualImageRegion >= count) this.activeManualImageRegion = count - 1
+      this.draftRoi = undefined
+      this.drawingCrop = false
+      this.clearCropAdjustment()
+      this.emitCropSettingsChange('image')
       this.cropWarning = ''
     },
     setActiveManualImageRegion(region: CropRegionIndex) {
@@ -7888,6 +7874,14 @@ export default Vue.extend({
 .crop-toolbar-label {
   font-size: 13px;
   font-weight: 700;
+}
+
+.crop-region-count-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .crop-region-selectors {
