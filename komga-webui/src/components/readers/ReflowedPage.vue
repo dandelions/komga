@@ -6907,7 +6907,8 @@ export default Vue.extend({
       this.cropPanMode = false
       this.clearCropSource()
       this.$emit('crop-mode-change', false)
-      if (cropChanged) this.$emit('force-reflow', sourcePageNumber)
+      if (this.deferReflow) this.$emit('start-reflow')
+      else this.$emit('force-reflow', sourcePageNumber)
     },
     persistCurrentCropDraft() {
       const draft = this.draftRoi
