@@ -284,7 +284,7 @@
           >
             重置{{ pageParityShortLabel }}区域{{ activeCropRegion + 1 }}
           </button>
-          <div class="reflow-region-controls">
+          <div class="reflow-region-controls reflow-manual-image-region-controls">
             <label class="reflow-region-count-control">
               <span>图片区</span>
               <select :value="manualImageRegionCount" @change="setManualImageRegionCount">
@@ -325,6 +325,14 @@
       <div class="crop-toolbar">
         <button type="button" class="reflow-control" @click="finishCropMode">完成</button>
         <span class="crop-toolbar-label">{{ cropToolbarLabel }}</span>
+        <div v-if="cropTarget !== 'deskew'" class="crop-region-selectors" role="group" aria-label="选择截取区域">
+          <template v-if="cropTarget === 'text'">
+            <button v-for="region in cropRegionIndexes" :key="`crop-text-${region}`" type="button" class="reflow-control reflow-region-control" :class="{ 'reflow-region-active': activeCropRegion === region }" @click="setActiveCropRegion(region)">区域 {{ region + 1 }}</button>
+          </template>
+          <template v-else>
+            <button v-for="region in manualImageRegionIndexes" :key="`crop-image-${region}`" type="button" class="reflow-control reflow-region-control" :class="{ 'reflow-region-active': activeManualImageRegion === region }" @click="setActiveManualImageRegion(region)">图 {{ region + 1 }}</button>
+          </template>
+        </div>
         <div class="crop-zoom-controls">
           <button
             type="button"
@@ -6827,6 +6835,7 @@ export default Vue.extend({
     },
     setActiveCropRegion(region: CropRegionIndex) {
       if (region < 0 || region >= this.cropRegionCount) return
+      if (this.cropMode) this.persistCurrentCropDraft()
       this.cropTarget = 'text'
       this.activeCropRegion = region
       this.draftRoi = undefined
@@ -6843,6 +6852,7 @@ export default Vue.extend({
     },
     setActiveManualImageRegion(region: CropRegionIndex) {
       if (region < 0 || region >= this.manualImageRegionCount) return
+      if (this.cropMode) this.persistCurrentCropDraft()
       this.cropTarget = 'image'
       this.activeManualImageRegion = region
       this.draftRoi = undefined
@@ -7545,6 +7555,19 @@ export default Vue.extend({
   gap: 4px;
 }
 
+.reflow-manual-image-region-controls {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.reflow-manual-image-region-controls .reflow-region-count-control {
+  grid-column: 1 / -1;
+}
+
+.reflow-manual-image-region-controls .reflow-region-control {
+  min-width: 0;
+}
+
 .reflow-region-count-control {
   display: inline-flex;
   align-items: center;
@@ -7867,6 +7890,16 @@ export default Vue.extend({
   font-weight: 700;
 }
 
+.crop-region-selectors {
+  display: inline-flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: min(220px, 100%);
+}
+
 .crop-skew-control {
   flex: 0 1 320px;
   min-width: min(320px, 100%);
@@ -8037,6 +8070,9 @@ export default Vue.extend({
 }
 
 @media (max-width: 600px) {
+  .reflow-manual-image-region-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .crop-panel {
     padding: 4px;
     gap: 4px;
@@ -8049,6 +8085,10 @@ export default Vue.extend({
   .crop-toolbar-label {
     flex: 0 0 100%;
     text-align: center;
+  }
+
+  .crop-region-selectors {
+    flex-basis: 100%;
   }
 
   .crop-skew-control {
