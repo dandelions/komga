@@ -247,35 +247,11 @@
           >
             {{ deskewAnalysisAreaLabel }}
           </button>
-          <button
-            type="button"
-            class="reflow-control"
-            :disabled="!deskewAnalysisRoi && !(cropMode && cropTarget === 'deskew')"
-            @click="resetDeskewAnalysisRegion"
-          >
-            重置{{ pageParityShortLabel }}纠斜区
-          </button>
           <button type="button" class="reflow-control" @click="toggleCropMode">
             {{ selectAreaLabel }}
           </button>
-          <button
-            type="button"
-            class="reflow-control"
-            :disabled="!cropRoi && !cropMode"
-            @click="resetCrop"
-          >
-            重置{{ pageParityShortLabel }}区域{{ activeCropRegion + 1 }}
-          </button>
           <button type="button" class="reflow-control" @click="toggleManualImageRegionMode">
             {{ manualImageAreaLabel }}
-          </button>
-          <button
-            type="button"
-            class="reflow-control"
-            :disabled="!manualImageRoi && !(cropMode && cropTarget === 'image')"
-            @click="resetManualImageRegion"
-          >
-            重置图片区{{ activeManualImageRegion + 1 }}
           </button>
         </div>
       </template>
@@ -309,6 +285,33 @@
             <button v-for="region in manualImageRegionIndexes" :key="`crop-image-${region}`" type="button" class="reflow-control reflow-region-control" :class="{ 'reflow-region-active': activeManualImageRegion === region }" @click="setActiveManualImageRegion(region)">图 {{ region + 1 }}</button>
           </template>
         </div>
+        <button
+          v-if="cropTarget === 'deskew'"
+          type="button"
+          class="reflow-control"
+          :disabled="!deskewAnalysisRoi && !(cropMode && cropTarget === 'deskew')"
+          @click="resetDeskewAnalysisRegion"
+        >
+          重置{{ pageParityShortLabel }}纠斜区
+        </button>
+        <button
+          v-else-if="cropTarget === 'text'"
+          type="button"
+          class="reflow-control"
+          :disabled="!cropRoi && !cropMode"
+          @click="resetCrop"
+        >
+          重置{{ pageParityShortLabel }}区域{{ activeCropRegion + 1 }}
+        </button>
+        <button
+          v-else
+          type="button"
+          class="reflow-control"
+          :disabled="!manualImageRoi && !(cropMode && cropTarget === 'image')"
+          @click="resetManualImageRegion"
+        >
+          重置图片区{{ activeManualImageRegion + 1 }}
+        </button>
         <div class="crop-zoom-controls">
           <button
             type="button"
