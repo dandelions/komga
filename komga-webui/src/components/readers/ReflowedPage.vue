@@ -883,7 +883,7 @@ export default Vue.extend({
       activeCropRegion: 0 as CropRegionIndex,
       cropRegionCount: 2,
       activeManualImageRegion: 0 as CropRegionIndex,
-      manualImageRegionCount: 1,
+      manualImageRegionCount: 2,
       drawingCrop: false,
       cropAdjustMode: undefined as CropAdjustMode | undefined,
       cropAdjustMoved: false,
@@ -7880,6 +7880,13 @@ export default Vue.extend({
   gap: 4px;
   font-size: 12px;
   font-weight: 600;
+  min-width: 0;
+}
+
+.crop-region-count-control select {
+  flex: 0 0 auto;
+  min-width: 48px;
+  height: 28px;
 }
 
 .crop-region-selectors {
@@ -7893,13 +7900,20 @@ export default Vue.extend({
 }
 
 .crop-region-group {
-  display: inline-flex;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   flex: 1 1 320px;
-  flex-wrap: wrap;
   align-items: center;
-  justify-content: center;
   gap: 5px;
   min-width: min(280px, 100%);
+}
+
+.crop-region-group .crop-region-count-control {
+  grid-column: 1 / -1;
+}
+
+.crop-region-group .reflow-region-control {
+  min-width: 0;
 }
 
 .crop-skew-control {
@@ -8073,6 +8087,10 @@ export default Vue.extend({
 
 @media (max-width: 600px) {
   .reflow-manual-image-region-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .crop-region-group {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .crop-panel {
