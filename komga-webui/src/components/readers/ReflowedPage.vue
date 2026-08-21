@@ -270,7 +270,12 @@
                 <option v-for="count in cropRegionCountOptions" :key="count" :value="count">{{ count }}</option>
               </select>
             </label>
-            <button v-for="region in cropRegionIndexes" :key="`crop-text-${region}`" type="button" class="reflow-control reflow-region-control" :class="{ 'reflow-region-active': cropTarget === 'text' && activeCropRegion === region }" @click="setActiveCropRegion(region)">区域 {{ region + 1 }}</button>
+            <label class="crop-region-target-control">
+              <span>截取区域</span>
+              <select :value="activeCropRegion" aria-label="截取区域" @change="setActiveCropRegion(Number(($event.target as HTMLSelectElement).value))">
+                <option v-for="region in cropRegionIndexes" :key="`crop-text-${region}`" :value="region">区域 {{ region + 1 }}</option>
+              </select>
+            </label>
           </div>
           <div class="crop-region-group">
             <label class="crop-region-count-control">
@@ -279,7 +284,12 @@
                 <option v-for="count in manualImageRegionCountOptions" :key="count" :value="count">{{ count }}</option>
               </select>
             </label>
-            <button v-for="region in manualImageRegionIndexes" :key="`crop-image-${region}`" type="button" class="reflow-control reflow-region-control" :class="{ 'reflow-region-active': cropTarget === 'image' && activeManualImageRegion === region }" @click="setActiveManualImageRegion(region)">图 {{ region + 1 }}</button>
+            <label class="crop-region-target-control">
+              <span>截取图片</span>
+              <select :value="activeManualImageRegion" aria-label="截取图片" @change="setActiveManualImageRegion(Number(($event.target as HTMLSelectElement).value))">
+                <option v-for="region in manualImageRegionIndexes" :key="`crop-image-${region}`" :value="region">图 {{ region + 1 }}</option>
+              </select>
+            </label>
           </div>
         </div>
         <button
@@ -7874,7 +7884,8 @@ export default Vue.extend({
   font-weight: 700;
 }
 
-.crop-region-count-control {
+.crop-region-count-control,
+.crop-region-target-control {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -7883,7 +7894,8 @@ export default Vue.extend({
   min-width: 0;
 }
 
-.crop-region-count-control select {
+.crop-region-count-control select,
+.crop-region-target-control select {
   flex: 0 0 auto;
   min-width: 48px;
   height: 28px;
@@ -7901,18 +7913,16 @@ export default Vue.extend({
 
 .crop-region-group {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, max-content));
   flex: 1 1 320px;
   align-items: center;
-  gap: 5px;
+  justify-content: center;
+  gap: 5px 10px;
   min-width: min(280px, 100%);
 }
 
-.crop-region-group .crop-region-count-control {
-  grid-column: 1 / -1;
-}
-
-.crop-region-group .reflow-region-control {
+.crop-region-group .crop-region-count-control,
+.crop-region-group .crop-region-target-control {
   min-width: 0;
 }
 
@@ -8087,10 +8097,6 @@ export default Vue.extend({
 
 @media (max-width: 600px) {
   .reflow-manual-image-region-controls {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .crop-region-group {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .crop-panel {
