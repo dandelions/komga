@@ -220,6 +220,9 @@
           <span class="reflow-font-value">{{ controlBlockSpacing }}</span>
         </label>
         <div class="reflow-action-controls">
+          <button type="button" class="reflow-control" @click="toggleCropMode">
+            {{ selectAreaLabel }}
+          </button>
           <span class="reflow-parity-label">{{ pageParityLabel }}</span>
           <label class="reflow-skew-control">
             <span>手动纠斜</span>
@@ -246,9 +249,6 @@
             @click="toggleDeskewAnalysisRegionMode"
           >
             {{ deskewAnalysisAreaLabel }}
-          </button>
-          <button type="button" class="reflow-control" @click="toggleCropMode">
-            {{ selectAreaLabel }}
           </button>
         </div>
       </template>
@@ -7909,6 +7909,7 @@ export default Vue.extend({
   justify-content: center;
   gap: 6px;
   min-width: min(320px, 100%);
+  order: -1;
 }
 
 .crop-region-group {
@@ -7919,6 +7920,16 @@ export default Vue.extend({
   justify-content: center;
   gap: 5px 10px;
   min-width: min(280px, 100%);
+}
+
+.crop-region-group .crop-region-target-control {
+  grid-column: 1 / -1;
+  justify-self: center;
+}
+
+.crop-region-target-control select {
+  min-width: 120px;
+  height: 32px;
 }
 
 .crop-region-group .crop-region-count-control,
