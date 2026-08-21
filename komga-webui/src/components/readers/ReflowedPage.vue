@@ -7950,24 +7950,32 @@ export default Vue.extend({
 }
 
 .crop-image-region-group {
-  grid-template-columns: max-content minmax(0, 1fr) max-content;
-  flex-basis: 100%;
-  gap: 5px 6px;
+  display: inline-flex;
+  flex: 0 1 auto;
+  flex-basis: auto;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
   min-width: 0;
+  max-width: 100%;
+  white-space: nowrap;
 }
 
+.crop-image-region-group .crop-region-count-control,
 .crop-image-region-group .crop-region-target-control {
+  flex: 0 1 auto;
   min-width: 0;
+  white-space: nowrap;
 }
 
 .crop-image-region-group .crop-region-target-control select {
-  flex: 1 1 76px;
+  flex: 0 1 76px;
   width: 76px;
-  min-width: 76px;
+  min-width: 64px;
 }
 
 .crop-finish-control {
-  justify-self: start;
+  flex: 0 0 auto;
   padding-left: 6px;
   padding-right: 6px;
 }
