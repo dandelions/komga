@@ -33,6 +33,9 @@
       </div>
       <template v-else>
         <div class="reflow-top-controls">
+          <button type="button" class="reflow-control reflow-crop-entry-control" @click="toggleCropMode">
+            {{ selectAreaLabel }}
+          </button>
           <button
             type="button"
             class="reflow-control reflow-icon-control reflow-drag-handle"
@@ -220,9 +223,6 @@
           <span class="reflow-font-value">{{ controlBlockSpacing }}</span>
         </label>
         <div class="reflow-action-controls">
-          <button type="button" class="reflow-control" @click="toggleCropMode">
-            {{ selectAreaLabel }}
-          </button>
           <span class="reflow-parity-label">{{ pageParityLabel }}</span>
           <label class="reflow-skew-control">
             <span>手动纠斜</span>
