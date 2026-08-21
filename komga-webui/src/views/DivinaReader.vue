@@ -1429,7 +1429,7 @@ export default Vue.extend({
     },
     reflowCacheKey() {
       this.clearReflowPrefetch()
-      if (this.reflowMode) {
+      if (this.reflowMode && !this.reflowCropMode) {
         this.reflowRootPage = this.page
         this.scheduleNextReflowPrefetch()
       }

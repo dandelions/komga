@@ -6,6 +6,26 @@ import DivinaReader from '@/views/DivinaReader.vue'
 
 const methods = (DivinaReader as any).options.methods
 const computed = (DivinaReader as any).options.computed
+const watchers = (DivinaReader as any).options.watch
+
+describe('DivinaReader reflow cache changes', () => {
+  test('does not replace the reflow page while selecting a crop region', () => {
+    const reader = {
+      reflowMode: true,
+      reflowCropMode: true,
+      page: 8,
+      reflowRootPage: 3,
+      clearReflowPrefetch: jest.fn(),
+      scheduleNextReflowPrefetch: jest.fn(),
+    }
+
+    watchers.reflowCacheKey.call(reader)
+
+    expect(reader.clearReflowPrefetch).toHaveBeenCalledTimes(1)
+    expect(reader.reflowRootPage).toBe(3)
+    expect(reader.scheduleNextReflowPrefetch).not.toHaveBeenCalled()
+  })
+})
 
 describe('DivinaReader image magnifier', () => {
   test('selects a light background during the day and a dark background at night', () => {
