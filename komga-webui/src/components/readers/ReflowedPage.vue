@@ -272,7 +272,7 @@
             </label>
             <label class="crop-region-target-control">
               <span>截取区域</span>
-              <select :value="activeCropRegion" aria-label="截取区域" @change="setActiveCropRegion(Number(($event.target as HTMLSelectElement).value))">
+              <select :value="activeCropRegion" aria-label="截取区域" @change="setActiveCropRegionFromEvent">
                 <option v-for="region in cropRegionIndexes" :key="`crop-text-${region}`" :value="region">区域 {{ region + 1 }}</option>
               </select>
             </label>
@@ -286,7 +286,7 @@
             </label>
             <label class="crop-region-target-control">
               <span>截取图片</span>
-              <select :value="activeManualImageRegion" aria-label="截取图片" @change="setActiveManualImageRegion(Number(($event.target as HTMLSelectElement).value))">
+              <select :value="activeManualImageRegion" aria-label="截取图片" @change="setActiveManualImageRegionFromEvent">
                 <option v-for="region in manualImageRegionIndexes" :key="`crop-image-${region}`" :value="region">图 {{ region + 1 }}</option>
               </select>
             </label>
@@ -6821,6 +6821,10 @@ export default Vue.extend({
       this.emitCropSettingsChange('text')
       this.cropWarning = ''
     },
+    setActiveCropRegionFromEvent(event: Event) {
+      const target = event.target as HTMLSelectElement
+      this.setActiveCropRegion(Number(target.value))
+    },
     setActiveCropRegion(region: CropRegionIndex) {
       if (region < 0 || region >= this.cropRegionCount) return
       if (this.cropMode) this.persistCurrentCropDraft()
@@ -6842,6 +6846,10 @@ export default Vue.extend({
       this.clearCropAdjustment()
       this.emitCropSettingsChange('image')
       this.cropWarning = ''
+    },
+    setActiveManualImageRegionFromEvent(event: Event) {
+      const target = event.target as HTMLSelectElement
+      this.setActiveManualImageRegion(Number(target.value))
     },
     setActiveManualImageRegion(region: CropRegionIndex) {
       if (region < 0 || region >= this.manualImageRegionCount) return
