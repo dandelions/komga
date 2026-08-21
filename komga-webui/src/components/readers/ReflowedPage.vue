@@ -276,7 +276,7 @@
               </select>
             </label>
           </div>
-          <div class="crop-region-group">
+          <div class="crop-region-group crop-image-region-group">
             <label class="crop-region-count-control">
               <span>图片区</span>
               <select :value="manualImageRegionCount" @change="setManualImageRegionCount">
@@ -7947,6 +7947,29 @@ export default Vue.extend({
 .crop-region-target-control select {
   min-width: 120px;
   height: 32px;
+}
+
+.crop-image-region-group {
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
+  flex-basis: 100%;
+  gap: 5px 6px;
+  min-width: 0;
+}
+
+.crop-image-region-group .crop-region-target-control {
+  min-width: 0;
+}
+
+.crop-image-region-group .crop-region-target-control select {
+  flex: 1 1 76px;
+  width: 76px;
+  min-width: 76px;
+}
+
+.crop-finish-control {
+  justify-self: start;
+  padding-left: 6px;
+  padding-right: 6px;
 }
 
 .crop-region-group .crop-region-count-control,
