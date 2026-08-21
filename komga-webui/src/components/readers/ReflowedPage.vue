@@ -7928,11 +7928,11 @@ export default Vue.extend({
   justify-content: center;
   gap: 5px 10px;
   min-width: min(280px, 100%);
-}
 
-.crop-region-group .crop-region-target-control {
-  grid-column: 1 / -1;
-  justify-self: center;
+  .crop-region-count-control,
+  .crop-region-target-control {
+    justify-self: center;
+  }
 }
 
 .crop-region-target-control select {
