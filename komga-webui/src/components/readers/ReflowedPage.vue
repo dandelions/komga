@@ -260,7 +260,6 @@
       @click.stop
     >
       <div class="crop-toolbar">
-        <button type="button" class="reflow-control" @click="finishCropMode">完成</button>
         <span class="crop-toolbar-label">{{ cropToolbarLabel }}</span>
         <div v-if="cropTarget !== 'deskew'" class="crop-region-selectors" role="group" aria-label="选择截取区域">
           <div class="crop-region-group">
@@ -286,10 +285,11 @@
             </label>
             <label class="crop-region-target-control">
               <span>截取图片</span>
-              <select :value="activeManualImageRegion" aria-label="截取图片" @change="setActiveManualImageRegionFromEvent">
+              <select :value="activeManualImageRegion" aria-label="截取图片" @click="activateManualImageCropTarget" @change="setActiveManualImageRegionFromEvent">
                 <option v-for="region in manualImageRegionIndexes" :key="`crop-image-${region}`" :value="region">图 {{ region + 1 }}</option>
               </select>
             </label>
+            <button type="button" class="reflow-control crop-finish-control" @click="finishCropMode">完成</button>
           </div>
         </div>
         <button
@@ -6845,6 +6845,15 @@ export default Vue.extend({
       this.drawingCrop = false
       this.clearCropAdjustment()
       this.emitCropSettingsChange('image')
+      this.cropWarning = ''
+    },
+    activateManualImageCropTarget() {
+      if (!this.cropMode || this.cropTarget === 'image') return
+      this.persistCurrentCropDraft()
+      this.cropTarget = 'image'
+      this.draftRoi = undefined
+      this.drawingCrop = false
+      this.clearCropAdjustment()
       this.cropWarning = ''
     },
     setActiveManualImageRegionFromEvent(event: Event) {
