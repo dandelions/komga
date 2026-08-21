@@ -33,9 +33,6 @@
       </div>
       <template v-else>
         <div class="reflow-top-controls">
-          <button type="button" class="reflow-control reflow-crop-entry-control" @click="toggleCropMode">
-            {{ selectAreaLabel }}
-          </button>
           <button
             type="button"
             class="reflow-control reflow-icon-control reflow-drag-handle"
@@ -108,6 +105,9 @@
             <button type="button" class="reflow-control reflow-nav-control reflow-apply-control" @click="applyReflowSettings">
               <v-icon small>mdi-refresh</v-icon>
               <span>重排</span>
+            </button>
+            <button type="button" class="reflow-control reflow-crop-entry-control" @click="toggleCropMode">
+              {{ selectAreaLabel }}
             </button>
           </div>
           <label class="reflow-processing-control">
