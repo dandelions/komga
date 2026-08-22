@@ -27,6 +27,18 @@ describe('DivinaReader reflow cache changes', () => {
   })
 })
 
+describe('DivinaReader crop adjustment', () => {
+  test('moves and resizes the active crop region within image bounds', () => {
+    const reader = {}
+    const start = {x: 20, y: 25, w: 40, h: 30}
+    const moved = methods.adjustedReaderCropRegion.call(reader, start, {x: 40, y: 40}, {x: 75, y: 10}, 'move')
+    const resized = methods.adjustedReaderCropRegion.call(reader, start, {x: 40, y: 40}, {x: 5, y: 80}, 'left')
+
+    expect(moved).toEqual({x: 55, y: 0, w: 40, h: 30})
+    expect(resized).toEqual({x: 5, y: 25, w: 55, h: 30})
+  })
+})
+
 describe('DivinaReader image magnifier', () => {
   test('selects a light background during the day and a dark background at night', () => {
     const reader = {}

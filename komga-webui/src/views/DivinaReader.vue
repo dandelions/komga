@@ -533,6 +533,32 @@
             :class="{'reader-crop-rect-active': rect.active, 'reader-crop-rect-secondary': !rect.active}"
             :style="rect.style"
           />
+          <div
+            v-if="readerCropActiveRect"
+            class="reader-crop-selection-controls"
+            :style="readerCropActiveRect"
+          >
+            <button
+              type="button"
+              class="reader-crop-move-handle"
+              :class="{'reader-crop-move-handle-active': readerCropAdjustMode === 'move'}"
+              title="移动选区"
+              aria-label="移动选区"
+              @pointerdown.stop="startReaderCropAdjustment($event, 'move')"
+            >
+              <v-icon x-small>mdi-cursor-move</v-icon>
+            </button>
+            <button
+              v-for="edge in readerCropResizeEdges"
+              :key="edge"
+              type="button"
+              class="reader-crop-resize-handle"
+              :class="[`reader-crop-resize-${edge}`, {'reader-crop-resize-handle-active': readerCropAdjustMode === edge}]"
+              :title="readerCropResizeEdgeLabel(edge)"
+              :aria-label="readerCropResizeEdgeLabel(edge)"
+              @pointerdown.stop="startReaderCropAdjustment($event, edge)"
+            />
+          </div>
         </div>
       </div>
     </div>
@@ -1252,6 +1278,11 @@ export default Vue.extend({
       readerCropDraft: undefined as undefined | {x: number, y: number, w: number, h: number},
       readerCropZoom: 1,
       readerCropPanMode: false,
+      readerCropAdjustMode: undefined as undefined | 'move' | 'top' | 'right' | 'bottom' | 'left',
+      readerCropAdjustMoved: false,
+      readerCropAdjustPointerActive: false,
+      readerCropAdjustStartPoint: {x: 0, y: 0},
+      readerCropAdjustStartRegion: undefined as undefined | {x: number, y: number, w: number, h: number},
       readerCropImageUrl: '',
       readerCropImageRequestId: 0,
       readerCropImagePreparationTimer: undefined as number | undefined,
@@ -1565,6 +1596,9 @@ export default Vue.extend({
     },
     readerCropCanComplete(): boolean {
       return !!(this.readerCropDraft || this.effectiveReaderCropRegion(this.readerCropPageParity, this.readerActiveCropRegion))
+    },
+    readerCropResizeEdges(): string[] {
+      return ['top', 'right', 'bottom', 'left']
     },
     normalReaderImageFilter(): string {
       const filters = []
@@ -2088,6 +2122,7 @@ export default Vue.extend({
       this.readerCropDraft = undefined
       this.readerCropPreviousDraft = undefined
       this.readerCropDrawing = false
+      this.clearReaderCropAdjustment()
     },
     setReaderCropRegionCount(value: number) {
       const regionCount = this.normalizedReaderCropRegionCount(value)
@@ -2103,6 +2138,7 @@ export default Vue.extend({
       this.readerCropDrawing = false
       this.readerCropZoom = 1
       this.readerCropPanMode = false
+      this.clearReaderCropAdjustment()
       const current = this.effectiveReaderCropRegion(this.readerCropPageParity, this.readerActiveCropRegion)
       this.readerCropDraft = current ? {...current} : undefined
     },
@@ -2112,6 +2148,7 @@ export default Vue.extend({
       this.readerCropDraft = undefined
       this.readerCropPreviousDraft = undefined
       this.readerCropPanMode = false
+      this.clearReaderCropAdjustment()
       if (!this.promoteReaderCropImageUrl()) this.revokeReaderCropImageUrl()
     },
     completeReaderCropMode() {
@@ -2123,6 +2160,7 @@ export default Vue.extend({
       this.readerCropDraft = undefined
       this.readerCropPreviousDraft = undefined
       this.readerCropPanMode = false
+      this.clearReaderCropAdjustment()
       if (!this.promoteReaderCropImageUrl()) this.revokeReaderCropImageUrl()
       this.resetReaderCropNavigation(pageNumber)
       this.refreshReaderView()
@@ -2134,6 +2172,7 @@ export default Vue.extend({
       this.readerCropDraft = undefined
       this.readerCropPreviousDraft = undefined
       this.readerCropPanMode = false
+      this.clearReaderCropAdjustment()
       if (!this.promoteReaderCropImageUrl()) this.revokeReaderCropImageUrl()
     },
     startReaderCrop(event: PointerEvent) {
@@ -2148,11 +2187,19 @@ export default Vue.extend({
       event.preventDefault()
     },
     moveReaderCrop(event: PointerEvent) {
+      if (this.readerCropAdjustMode && this.readerCropAdjustPointerActive) {
+        this.moveReaderCropAdjustment(event)
+        return
+      }
       if (!this.readerCropDrawing) return
       this.readerCropDraft = this.normalizedReaderCropRect(this.readerCropStart, this.readerCropPoint(event))
       event.preventDefault()
     },
     finishReaderCrop(event: PointerEvent) {
+      if (this.readerCropAdjustMode && this.readerCropAdjustPointerActive) {
+        this.finishReaderCropAdjustment(event)
+        return
+      }
       if (!this.readerCropDrawing) return
       this.readerCropDrawing = false
       const region = this.normalizedReaderCropRect(this.readerCropStart, this.readerCropPoint(event))
@@ -2165,6 +2212,10 @@ export default Vue.extend({
       event.preventDefault()
     },
     cancelReaderCropDraft() {
+      if (this.readerCropAdjustMode && this.readerCropAdjustPointerActive) {
+        this.cancelReaderCropAdjustment()
+        return
+      }
       this.readerCropDrawing = false
       this.readerCropDraft = this.readerCropPreviousDraft ? {...this.readerCropPreviousDraft} : undefined
       this.readerCropPreviousDraft = undefined
@@ -2188,6 +2239,97 @@ export default Vue.extend({
       this.readerCropPanMode = enabled
       this.readerCropDrawing = false
       this.readerCropPreviousDraft = undefined
+      this.clearReaderCropAdjustment()
+    },
+    startReaderCropAdjustment(event: PointerEvent, mode: 'move' | 'top' | 'right' | 'bottom' | 'left') {
+      if (!this.readerCropMode || !this.readerCropActiveRect) return
+      if (event.pointerType === 'mouse' && event.button !== 0) return
+      const region = this.readerCropDraft || this.effectiveReaderCropRegion(this.readerCropPageParity, this.readerActiveCropRegion)
+      if (!region) return
+      const target = event.currentTarget as HTMLElement
+      target.setPointerCapture?.(event.pointerId)
+      this.readerCropDrawing = false
+      this.readerCropAdjustMode = mode
+      this.readerCropAdjustMoved = false
+      this.readerCropAdjustPointerActive = true
+      this.readerCropAdjustStartPoint = this.readerCropPoint(event)
+      this.readerCropAdjustStartRegion = {...region}
+      this.readerCropDraft = {...region}
+      event.preventDefault()
+    },
+    moveReaderCropAdjustment(event: PointerEvent) {
+      if (!this.readerCropAdjustMode || !this.readerCropAdjustPointerActive || !this.readerCropAdjustStartRegion) return
+      const point = this.readerCropPoint(event)
+      if (!this.readerCropAdjustMoved) {
+        const distance = Math.max(
+          Math.abs(point.x - this.readerCropAdjustStartPoint.x),
+          Math.abs(point.y - this.readerCropAdjustStartPoint.y),
+        )
+        if (distance < 0.3) {
+          event.preventDefault()
+          return
+        }
+        this.readerCropAdjustMoved = true
+      }
+      this.readerCropDraft = this.adjustedReaderCropRegion(
+        this.readerCropAdjustStartRegion,
+        this.readerCropAdjustStartPoint,
+        point,
+        this.readerCropAdjustMode,
+      )
+      event.preventDefault()
+    },
+    finishReaderCropAdjustment(event: PointerEvent) {
+      if (!this.readerCropAdjustMode || !this.readerCropAdjustPointerActive) return
+      this.readerCropAdjustPointerActive = false
+      this.clearReaderCropAdjustment()
+      event.preventDefault()
+    },
+    cancelReaderCropAdjustment() {
+      if (!this.readerCropAdjustMode && !this.readerCropAdjustStartRegion) return
+      if (this.readerCropAdjustStartRegion) this.readerCropDraft = {...this.readerCropAdjustStartRegion}
+      this.clearReaderCropAdjustment()
+    },
+    clearReaderCropAdjustment() {
+      this.readerCropAdjustMode = undefined
+      this.readerCropAdjustMoved = false
+      this.readerCropAdjustPointerActive = false
+      this.readerCropAdjustStartRegion = undefined
+    },
+    adjustedReaderCropRegion(
+      startRegion: {x: number, y: number, w: number, h: number},
+      startPoint: {x: number, y: number},
+      point: {x: number, y: number},
+      mode: 'move' | 'top' | 'right' | 'bottom' | 'left',
+    ): {x: number, y: number, w: number, h: number} {
+      const minimumSize = 5
+      const right = startRegion.x + startRegion.w
+      const bottom = startRegion.y + startRegion.h
+      if (mode === 'move') {
+        return {
+          ...startRegion,
+          x: Math.max(0, Math.min(100 - startRegion.w, startRegion.x + point.x - startPoint.x)),
+          y: Math.max(0, Math.min(100 - startRegion.h, startRegion.y + point.y - startPoint.y)),
+        }
+      }
+      if (mode === 'left') {
+        const x = Math.max(0, Math.min(right - minimumSize, point.x))
+        return {...startRegion, x, w: right - x}
+      }
+      if (mode === 'right') {
+        const nextRight = Math.max(startRegion.x + minimumSize, Math.min(100, point.x))
+        return {...startRegion, w: nextRight - startRegion.x}
+      }
+      if (mode === 'top') {
+        const y = Math.max(0, Math.min(bottom - minimumSize, point.y))
+        return {...startRegion, y, h: bottom - y}
+      }
+      const nextBottom = Math.max(startRegion.y + minimumSize, Math.min(100, point.y))
+      return {...startRegion, h: nextBottom - startRegion.y}
+    },
+    readerCropResizeEdgeLabel(edge: 'move' | 'top' | 'right' | 'bottom' | 'left'): string {
+      const labels = {move: '移动选区', top: '调整上边框', right: '调整右边框', bottom: '调整下边框', left: '调整左边框'}
+      return labels[edge]
     },
     readerCropRectStyle(region: any): object {
       return {left: `${region.x}%`, top: `${region.y}%`, width: `${region.w}%`, height: `${region.h}%`}
@@ -3724,6 +3866,100 @@ export default Vue.extend({
   position: absolute;
   box-sizing: border-box;
   pointer-events: none;
+}
+
+.reader-crop-selection-controls {
+  position: absolute;
+  z-index: 3;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.reader-crop-resize-handle,
+.reader-crop-move-handle {
+  position: absolute;
+  appearance: none;
+  border: 0;
+  padding: 0;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.reader-crop-resize-handle {
+  background: rgba(251, 146, 60, 0.10);
+}
+
+.reader-crop-resize-handle::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 28px;
+  height: 5px;
+  border: 1px solid #fff;
+  border-radius: 2px;
+  background: #fb923c;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+}
+
+.reader-crop-resize-top,
+.reader-crop-resize-bottom {
+  left: 12px;
+  width: calc(100% - 24px);
+  height: 24px;
+  cursor: ns-resize;
+}
+
+.reader-crop-resize-top {
+  top: -12px;
+}
+
+.reader-crop-resize-bottom {
+  bottom: -12px;
+}
+
+.reader-crop-resize-left,
+.reader-crop-resize-right {
+  top: 12px;
+  width: 24px;
+  height: calc(100% - 24px);
+  cursor: ew-resize;
+}
+
+.reader-crop-resize-left {
+  left: -12px;
+}
+
+.reader-crop-resize-right {
+  right: -12px;
+}
+
+.reader-crop-resize-left::after,
+.reader-crop-resize-right::after {
+  width: 5px;
+  height: 28px;
+}
+
+.reader-crop-move-handle {
+  left: 50%;
+  top: 50%;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #fb923c;
+  color: #fff;
+  cursor: move;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.45);
+}
+
+.reader-crop-resize-handle-active::after,
+.reader-crop-move-handle-active {
+  background: #2563eb;
 }
 
 .reader-crop-rect-active {
