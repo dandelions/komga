@@ -2,6 +2,7 @@ package org.gotson.komga.infrastructure.hash
 
 import com.appmattus.crypto.Algorithm
 import io.github.oshai.kotlinlogging.KotlinLogging
+import org.gotson.komga.infrastructure.files.FileAccessCoordinator
 import org.springframework.stereotype.Component
 import java.io.InputStream
 import java.nio.file.Path
@@ -13,7 +14,9 @@ private const val DEFAULT_BUFFER_SIZE = 8192
 private const val SEED = 0
 
 @Component
-class Hasher {
+class Hasher(
+  private val fileAccessCoordinator: FileAccessCoordinator,
+) {
   fun computeHash(path: Path): String {
     logger.debug { "Hashing: $path" }
 
@@ -30,7 +33,7 @@ class Hasher {
       var len: Int
 
       do {
-        len = it.read(buffer)
+        len = fileAccessCoordinator.withBackgroundAccess { it.read(buffer) }
         if (len >= 0) hash.update(buffer, 0, len)
       } while (len >= 0)
     }

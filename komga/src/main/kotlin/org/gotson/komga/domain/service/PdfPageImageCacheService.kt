@@ -5,6 +5,7 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import jakarta.annotation.PreDestroy
 import org.gotson.komga.domain.model.Book
 import org.gotson.komga.domain.model.TypedBytes
+import org.gotson.komga.infrastructure.files.FileAccessCoordinator
 import org.springframework.stereotype.Service
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
@@ -29,6 +30,7 @@ private data class PdfPageImageCacheKey(
 @Service
 class PdfPageImageCacheService(
   private val bookLifecycle: BookLifecycle,
+  private val fileAccessCoordinator: FileAccessCoordinator,
 ) {
   private val prefetchThreadNumber = AtomicInteger()
   private val prefetchExecutor =
@@ -45,6 +47,14 @@ class PdfPageImageCacheService(
   private val prefetching = ConcurrentHashMap.newKeySet<PdfPageImageCacheKey>()
 
   fun getOriginalPage(
+    book: Book,
+    pageNumber: Int,
+  ): TypedBytes =
+    fileAccessCoordinator.withInteractiveAccess {
+      getOriginalPageUncoordinated(book, pageNumber)
+    }
+
+  private fun getOriginalPageUncoordinated(
     book: Book,
     pageNumber: Int,
   ): TypedBytes =
@@ -93,7 +103,9 @@ class PdfPageImageCacheService(
     try {
       prefetchExecutor.execute {
         try {
-          getOriginalPage(book, pageNumber)
+          fileAccessCoordinator.withBackgroundAccess {
+            getOriginalPageUncoordinated(book, pageNumber)
+          }
         } catch (e: Exception) {
           logger.debug(e) { "Could not prefetch PDF page $pageNumber for book ${book.id}" }
         } finally {

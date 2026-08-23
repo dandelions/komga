@@ -62,7 +62,7 @@ class TaskHandler(
                   taskEmitter.scanLibraryTomorrow(task.libraryId, task.scanDeep, task.priority)
                 }
                 if (it.hashFiles && scanSummary.bookIdsToAnalyze.isNotEmpty()) {
-                  taskEmitter.hashBooks(scanSummary.bookIdsToAnalyze, HIGHEST_PRIORITY)
+                  taskEmitter.hashBooks(scanSummary.bookIdsToAnalyze, SCAN_HASH_PRIORITY)
                 }
                 if (scanSummary.recoveredFromUnavailable) {
                   if (scanSummary.bookIdsToAnalyze.isEmpty())
