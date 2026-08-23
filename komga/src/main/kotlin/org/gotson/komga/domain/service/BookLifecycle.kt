@@ -508,12 +508,16 @@ class BookLifecycle(
       return
     }
 
-    val linkedBookIds = bookContentRepository.findLinkedBookIds(bookId).filterNot { deletingBookIds.contains(it) }
-    if (linkedBookIds.isEmpty()) return
+    val linkedBookIds = bookContentRepository.findLinkedBookIds(bookId)
+    val validLinkedBookIds =
+      linkedBookIds.filter { linkedBookId ->
+        linkedBookId !in deletingBookIds &&
+          bookRepository.findByIdOrNull(linkedBookId)?.let { it.deletedDate == null } == true
+      }
 
-    val newContentBookId =
-      linkedBookIds.firstOrNull { bookRepository.findByIdOrNull(it)?.deletedDate == null }
-        ?: linkedBookIds.first()
+    linkedBookIds.filterNot(validLinkedBookIds::contains).forEach(bookContentRepository::unlink)
+    val newContentBookId = validLinkedBookIds.firstOrNull() ?: return
+
     mediaRepository.copy(bookId, newContentBookId)
     bookContentRepository.reassignContentOwner(bookId, newContentBookId)
   }

@@ -19,6 +19,7 @@ import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
+import java.time.LocalDateTime
 
 @SpringBootTest
 class BookContentDaoTest(
@@ -101,5 +102,29 @@ class BookContentDaoTest(
     assertThat(bookContentDao.findContentBookIdOrNull(secondReference.id)).isEqualTo(firstReference.id)
     assertThat(mediaRepository.findById(firstReference.id).status).isEqualTo(Media.Status.READY)
     assertThat(mediaRepository.findById(secondReference.id).pages).hasSize(1)
+  }
+
+  @Test
+  fun `deleting a content owner with only deleted references clears its analysis`() {
+    val source = makeBook("deleted-owner", libraryId = library.id, seriesId = series.id).copy(fileSize = 5, fileHash = "same-hash-deleted")
+    val deletedReference = makeBook("deleted-reference", libraryId = library.id, seriesId = series.id).copy(fileSize = 5, fileHash = "same-hash-deleted")
+    seriesLifecycle.addBooks(series, listOf(source, deletedReference))
+
+    mediaRepository.update(
+      Media(
+        status = Media.Status.READY,
+        mediaType = "application/zip",
+        pages = listOf(BookPage("1.jpg", "image/jpeg", Dimension(10, 10))),
+        bookId = source.id,
+      ),
+    )
+    bookContentDao.link(deletedReference.id, source.id)
+    bookRepository.update(deletedReference.copy(deletedDate = LocalDateTime.now()))
+
+    bookLifecycle.deleteOne(source)
+
+    assertThat(bookRepository.findByIdOrNull(source.id)).isNull()
+    assertThat(mediaRepository.findByIdOrNull(source.id)).isNull()
+    assertThat(bookContentDao.findContentBookIdOrNull(deletedReference.id)).isNull()
   }
 }
