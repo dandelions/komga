@@ -215,22 +215,6 @@
                     <v-col cols="auto">
                       <span class="text-subtitle-1 text--primary">{{ $t('dialog.edit_library.label_analysis') }}</span>
                       <v-checkbox
-                        v-model="form.hashFiles"
-                        :label="$t('dialog.edit_library.field_analysis_hash_files')"
-                        hide-details
-                        class="mx-4 align-center"
-                      >
-                        <template v-slot:append>
-                          <v-tooltip bottom>
-                            <template v-slot:activator="{ on }">
-                              <v-icon v-on="on" color="warning">mdi-alert-circle-outline</v-icon>
-                            </template>
-                            {{ $t('dialog.edit_library.tooltip_use_resources') }}
-                          </v-tooltip>
-                        </template>
-                      </v-checkbox>
-
-                      <v-checkbox
                         v-model="form.hashPages"
                         :label="$t('dialog.edit_library.field_analysis_hash_pages')"
                         hide-details
@@ -512,7 +496,7 @@ export default Vue.extend({
         convertToCbz: false,
         emptyTrashAfterScan: false,
         seriesCover: SeriesCoverDto.FIRST as SeriesCoverDto,
-        hashFiles: true,
+        hashFiles: false,
         hashPages: false,
         hashKoreader: false,
         analyzeDimensions: true,
@@ -687,7 +671,7 @@ export default Vue.extend({
       this.form.convertToCbz = library ? library.convertToCbz : false
       this.form.emptyTrashAfterScan = library ? library.emptyTrashAfterScan : false
       this.form.seriesCover = library ? library.seriesCover : SeriesCoverDto.FIRST
-      this.form.hashFiles = library ? library.hashFiles : true
+      this.form.hashFiles = false
       this.form.hashPages = library ? library.hashPages : false
       this.form.hashKoreader = library ? library.hashKoreader : false
       this.form.analyzeDimensions = library ? library.analyzeDimensions : true

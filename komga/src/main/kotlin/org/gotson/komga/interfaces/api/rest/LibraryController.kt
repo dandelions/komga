@@ -273,21 +273,11 @@ class LibraryController(
   @PostMapping("{libraryId}/hash")
   @PreAuthorize("hasRole('ADMIN')")
   @ResponseStatus(HttpStatus.ACCEPTED)
-  @Operation(summary = "Update file hashes for a library")
+  @Operation(summary = "Update file hashes for a library (temporarily disabled)")
   fun libraryHash(
     @PathVariable libraryId: String,
   ) {
-    findLeafLibrariesOrNull(libraryId)?.forEach { library ->
-      val bookIds =
-        bookRepository
-          .findAll(
-            SearchCondition.LibraryId(SearchOperator.Is(library.id)),
-            SearchContext.empty(),
-            Pageable.unpaged(),
-          ).content
-          .map { it.id }
-      taskEmitter.hashBooks(bookIds, HIGH_PRIORITY, force = true)
-    } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+    throw ResponseStatusException(HttpStatus.GONE, "File hash computation is temporarily disabled")
   }
 
   @PostMapping("{libraryId}/metadata/refresh")

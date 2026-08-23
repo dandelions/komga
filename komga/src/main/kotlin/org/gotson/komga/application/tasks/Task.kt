@@ -8,7 +8,6 @@ import org.gotson.komga.infrastructure.search.LuceneEntity
 const val HIGHEST_PRIORITY = 8
 const val HIGH_PRIORITY = 6
 const val DEFAULT_PRIORITY = 4
-const val SCAN_HASH_PRIORITY = DEFAULT_PRIORITY + 1
 const val LOW_PRIORITY = 2
 const val LOWEST_PRIORITY = 0
 

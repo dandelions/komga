@@ -13,9 +13,6 @@
         <v-list-item @click="refreshMetadata" v-if="isAdmin">
           <v-list-item-title>{{ $t('menu.refresh_metadata') }}</v-list-item-title>
         </v-list-item>
-        <v-list-item @click="hashBook" v-if="isAdmin">
-          <v-list-item-title>{{ $t('menu.update_hash') }}</v-list-item-title>
-        </v-list-item>
         <v-list-item @click="addToReadList" v-if="isAdmin">
           <v-list-item-title>{{ $t('menu.add_to_readlist') }}</v-list-item-title>
         </v-list-item>
@@ -73,14 +70,6 @@ export default Vue.extend({
     },
   },
   methods: {
-    async hashBook () {
-      try {
-        await this.$komgaBooks.hashBook(this.book)
-        this.$eventHub.$emit(NOTIFICATION, {message: this.$t('notification.hash_task_submitted').toString()} as NotificationEvent)
-      } catch (e) {
-        this.$eventHub.$emit(ERROR, {message: e.message} as ErrorEvent)
-      }
-    },
     async analyze () {
       try {
         await this.$komgaBooks.analyzeBook(this.book)

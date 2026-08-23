@@ -67,8 +67,6 @@ class LibraryLifecycle(
     if (checkLibraryShouldRescan(current, toUpdate))
       taskEmitter.scanLibrary(toUpdate.id)
 
-    if (toUpdate.hashFiles && !current.hashFiles)
-      taskEmitter.hashBooksWithoutHash(toUpdate)
     if (toUpdate.hashKoreader && !current.hashKoreader)
       taskEmitter.hashBooksWithoutHashKoreader(toUpdate)
     if (toUpdate.hashPages && !current.hashPages)

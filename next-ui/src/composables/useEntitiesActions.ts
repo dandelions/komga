@@ -7,7 +7,6 @@ import EntitiesDeletionWarning from '@/components/entities/DeletionWarning.vue'
 import {
   useAnalyzeBook,
   useDeleteBook,
-  useHashBook,
   useMarkBookRead,
   useMarkBookUnread,
   useRefreshMetadataBook,
@@ -18,7 +17,6 @@ import { isBook, isSeries, resolveEntityKind } from '@/functions/entity'
 import {
   useAnalyzeSeries,
   useDeleteSeries,
-  useHashSeries,
   useMarkSeriesRead,
   useMarkSeriesUnread,
   useRefreshMetadataSeries,
@@ -59,9 +57,6 @@ export function useEntitiesActions(
     },
     [ActionName.Analyze]: {
       onClick: () => analyze(),
-    },
-    [ActionName.Hash]: {
-      onClick: () => hash(),
     },
     [ActionName.RefreshMetadata]: {
       onClick: () => refreshMetadata(),
@@ -115,17 +110,6 @@ export function useEntitiesActions(
     })
 
     callback(ActionName.Analyze)
-  }
-  //endregion
-
-  //region Hash
-  function hash() {
-    toValue(entities).forEach((item) => {
-      if (isBook(item)) useHashBook().mutate(item.id)
-      if (isSeries(item)) useHashSeries().mutate(item.id)
-    })
-
-    callback(ActionName.Hash)
   }
   //endregion
 

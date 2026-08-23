@@ -27,7 +27,6 @@ export const ActionName = {
   Download: 'DOWNLOAD',
   RefreshMetadata: 'REFRESH_METADATA',
   Analyze: 'ANALYZE',
-  Hash: 'HASH',
   OpenReader: 'OPEN_READER',
   OpenReaderIncognito: 'OPEN_READER_INCOGNITO',
 } as const
@@ -42,7 +41,6 @@ export const selectionActions: Record<EntityKind, ActionName[]> = {
     ActionName.AddToReadList,
     ActionName.RefreshMetadata,
     ActionName.Analyze,
-    ActionName.Hash,
     ActionName.EditBook,
     ActionName.Delete,
   ],
@@ -53,7 +51,6 @@ export const selectionActions: Record<EntityKind, ActionName[]> = {
     ActionName.AddToCollection,
     ActionName.RefreshMetadata,
     ActionName.Analyze,
-    ActionName.Hash,
     ActionName.EditSeries,
     ActionName.Delete,
   ],
@@ -145,14 +142,6 @@ export const actionDetails: Record<ActionName, { message: MessageDescriptor; ico
       id: 'lFGLru',
     },
     icon: 'i-mdi:file-refresh',
-  },
-  [ActionName.Hash]: {
-    message: {
-      description: 'Generic action: update file hash',
-      defaultMessage: 'Update file hash',
-      id: 'hash-file',
-    },
-    icon: 'i-mdi:fingerprint',
   },
   [ActionName.OpenReader]: {
     message: {

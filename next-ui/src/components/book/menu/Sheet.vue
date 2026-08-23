@@ -42,7 +42,6 @@ const management = [
   ActionName.EditBook,
   ActionName.RefreshMetadata,
   ActionName.Analyze,
-  ActionName.Hash,
   ActionName.Delete,
 ] as ActionName[]
 

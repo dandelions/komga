@@ -16,9 +16,6 @@
         <v-list-item @click="confirmAnalyzeModal = true" v-if="isAdmin">
           <v-list-item-title>{{ $t('menu.analyze') }}</v-list-item-title>
         </v-list-item>
-        <v-list-item @click="hash" v-if="isAdmin">
-          <v-list-item-title>{{ $t('menu.update_hash') }}</v-list-item-title>
-        </v-list-item>
         <v-list-item v-if="isAdmin" @click="toggleIncludeChildren">
           <v-list-item-action><v-checkbox :input-value="includeChildren" hide-details @click.stop="toggleIncludeChildren"/></v-list-item-action>
           <v-list-item-title>{{ $t('menu.include_child_libraries') }}</v-list-item-title>
@@ -125,15 +122,6 @@ export default Vue.extend({
     scan(scanDeep: boolean) {
       const libraries = this.includeChildren ? [this.library, ...this.childLibraries()] : [this.library]
       libraries.forEach(library => this.$komgaLibraries.scanLibrary(library, scanDeep))
-    },
-    async hash() {
-      const libraries = this.includeChildren ? [this.library, ...this.childLibraries()] : [this.library]
-      try {
-        await Promise.all(libraries.map(library => this.$komgaLibraries.hashLibrary(library)))
-        this.$eventHub.$emit(NOTIFICATION, {message: this.$t('notification.hash_task_submitted').toString()} as NotificationEvent)
-      } catch (e) {
-        this.$eventHub.$emit(ERROR, {message: e.message} as ErrorEvent)
-      }
     },
     analyze() {
       const libraries = this.includeChildren ? [this.library, ...this.childLibraries()] : [this.library]

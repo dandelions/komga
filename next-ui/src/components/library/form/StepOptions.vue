@@ -21,31 +21,6 @@
         </div>
 
         <v-checkbox
-          v-model="model.hashFiles"
-          :label="
-            $formatMessage({
-              description: 'Form add/edit library: Options - hash files',
-              defaultMessage: 'Compute hash for files',
-              id: 'wJaip6',
-            })
-          "
-          hide-details
-        >
-          <template #append>
-            <v-icon
-              v-tooltip:bottom="
-                $formatMessage({
-                  description: 'Form add/edit library: Options - hash files - information tooltip',
-                  defaultMessage: 'Required to restore from trash and detect duplicate files',
-                  id: '/8sSxS',
-                })
-              "
-              icon="i-mdi:information-outline"
-            ></v-icon>
-          </template>
-        </v-checkbox>
-
-        <v-checkbox
           v-model="model.hashPages"
           :label="
             $formatMessage({

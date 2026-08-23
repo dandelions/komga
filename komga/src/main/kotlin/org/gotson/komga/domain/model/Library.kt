@@ -32,7 +32,7 @@ data class Library(
   val convertToCbz: Boolean = false,
   val emptyTrashAfterScan: Boolean = false,
   val seriesCover: SeriesCover = SeriesCover.FIRST,
-  val hashFiles: Boolean = true,
+  val hashFiles: Boolean = false,
   val hashPages: Boolean = false,
   val hashKoreader: Boolean = false,
   val analyzeDimensions: Boolean = true,

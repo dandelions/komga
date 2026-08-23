@@ -125,7 +125,6 @@ class TaskHandlerTest {
 
     // then
     verify(exactly = 1) { taskEmitter.scanLibraryTomorrow(library.id, false, 7) }
-    verify(exactly = 1) { taskEmitter.hashBooks(setOf("book1"), SCAN_HASH_PRIORITY) }
     verify(exactly = 1) { taskEmitter.analyzeUnknownAndOutdatedBooks(setOf("book1")) }
   }
 

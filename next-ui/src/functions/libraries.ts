@@ -5,7 +5,7 @@ export function getLibraryDefaults(): LibraryCreationDto {
     analyzeDimensions: true,
     convertToCbz: false,
     emptyTrashAfterScan: false,
-    hashFiles: true,
+    hashFiles: false,
     hashKoreader: false,
     hashPages: false,
     importBarcodeIsbn: false,

@@ -5,7 +5,7 @@ import { useDialogsStore } from '@/stores/dialogs'
 import { useDisplay } from 'vuetify/framework'
 import { commonMessages } from '@/utils/i18n/common-messages'
 import { type Action } from '@/types/action/action'
-import { useEmptyTrashLibrary, useHashLibrary, useLibraries, useScanLibrary } from '@/colada/libraries'
+import { useEmptyTrashLibrary, useLibraries, useScanLibrary } from '@/colada/libraries'
 import { useAppStore } from '@/stores/app'
 import { LibrariesAction } from '@/types/action/libraries'
 
@@ -49,17 +49,6 @@ export function useLibrariesActions(callback: (action: LibrariesAction) => void 
       ? [
           {
             title: intl.formatMessage({
-              description: 'Libraries menu: update file hash',
-              defaultMessage: 'Update file hashes',
-              id: 'UvOYQ6',
-            }),
-            action: LibrariesAction.HashAll,
-            onClick: () => {
-              hashAll()
-            },
-          },
-          {
-            title: intl.formatMessage({
               description: 'Libraries menu: empty trash',
               defaultMessage: 'Empty trash for all libraries',
               id: 'CwteMk',
@@ -81,15 +70,6 @@ export function useLibrariesActions(callback: (action: LibrariesAction) => void 
   function scanAll() {
     libraries.value?.forEach((it) => mutateScan({ libraryId: it.id }))
     callback(LibrariesAction.ScanAll)
-  }
-  //endregion
-
-  //region Hash
-  const { mutate: mutateHash } = useHashLibrary()
-
-  function hashAll() {
-    libraries.value?.forEach((it) => mutateHash(it.id))
-    callback(LibrariesAction.HashAll)
   }
   //endregion
 

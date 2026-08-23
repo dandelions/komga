@@ -20,7 +20,6 @@ defineProps<{
 const main = [LibrariesAction.Reorder] as LibrariesAction[]
 const management = [
   LibrariesAction.ScanAll,
-  LibrariesAction.HashAll,
   LibrariesAction.EmptyTrashAll,
 ] as LibrariesAction[]
 

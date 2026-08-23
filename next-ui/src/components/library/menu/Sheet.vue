@@ -28,7 +28,6 @@ const management = [
   LibraryAction.RefreshMetadata,
   LibraryAction.EmptyTrash,
   LibraryAction.Analyze,
-  LibraryAction.Hash,
   LibraryAction.Delete,
 ] as LibraryAction[]
 

@@ -44,7 +44,6 @@ const management = [
   ActionName.EditSeries,
   ActionName.RefreshMetadata,
   ActionName.Analyze,
-  ActionName.Hash,
   ActionName.Delete,
 ] as ActionName[]
 

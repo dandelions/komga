@@ -150,30 +150,24 @@ class TaskEmitter(
       .let { submitTasks(it) }
   }
 
+  // File hash processing is temporarily disabled. Keep these entry points so the feature can be restored later.
   fun hashBooks(
     bookIds: Collection<String>,
     priority: Int = HIGHEST_PRIORITY,
     force: Boolean = false,
   ) {
-    bookIds
-      .map { Task.HashBook(it, priority, force) }
-      .let { submitTasks(it) }
+    logger.info { "Skipping disabled file hash tasks for ${bookIds.size} books" }
   }
 
   fun hashBook(book: Book, priority: Int = HIGH_PRIORITY, force: Boolean = true) {
-    submitTask(Task.HashBook(book.id, priority, force))
+    logger.info { "Skipping disabled file hash task for book ${book.id}" }
   }
 
   fun hashBooksWithoutHash(
     library: Library,
     excludeBookIds: Collection<String> = emptySet(),
   ) {
-    if (library.hashFiles)
-      bookRepository
-        .findAllByLibraryIdAndWithEmptyHash(library.id)
-        .filterNot { it.id in excludeBookIds }
-        .map { Task.HashBook(it.id, LOWEST_PRIORITY) }
-        .let { submitTasks(it) }
+    logger.info { "Skipping disabled file hash discovery for library ${library.id}" }
   }
 
   fun hashBooksWithoutHashKoreader(library: Library) {
