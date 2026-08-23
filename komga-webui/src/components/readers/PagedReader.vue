@@ -883,7 +883,7 @@ export default Vue.extend({
       if (this.canPrev) {
         const previousPageNumber = this.spreadPageNumber(this.spreads[this.carouselPage - 1])
         const previousPageRegion = this.lastCropRegionIndex(previousPageNumber)
-        this.pendingScrollPosition = 'top'
+        this.pendingScrollPosition = 'bottom'
         this.setActiveCropRegion(previousPageRegion, this.lastCropSegmentIndex(previousPageNumber, previousPageRegion))
         this.carouselPage--
       } else {
