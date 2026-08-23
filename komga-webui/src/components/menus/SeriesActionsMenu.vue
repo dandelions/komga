@@ -13,6 +13,9 @@
         <v-list-item @click="refreshMetadata" v-if="isAdmin">
           <v-list-item-title>{{ $t('menu.refresh_metadata') }}</v-list-item-title>
         </v-list-item>
+        <v-list-item @click="hashSeries" v-if="isAdmin">
+          <v-list-item-title>{{ $t('menu.update_hash') }}</v-list-item-title>
+        </v-list-item>
         <v-list-item @click="addToCollection" v-if="isAdmin">
           <v-list-item-title>{{ $t('menu.add_to_collection') }}</v-list-item-title>
         </v-list-item>
@@ -36,6 +39,7 @@
 import Vue from 'vue'
 import {SeriesDto} from '@/types/komga-series'
 import {BookSearch, SearchConditionSeriesId, SearchOperatorIs} from '@/types/komga-search'
+import {ERROR, ErrorEvent, NOTIFICATION, NotificationEvent} from '@/types/events'
 
 export default Vue.extend({
   name: 'SeriesActionsMenu',
@@ -71,6 +75,14 @@ export default Vue.extend({
     },
   },
   methods: {
+    async hashSeries() {
+      try {
+        await this.$komgaSeries.hashSeries(this.series)
+        this.$eventHub.$emit(NOTIFICATION, {message: this.$t('notification.hash_task_submitted').toString()} as NotificationEvent)
+      } catch (e) {
+        this.$eventHub.$emit(ERROR, {message: e.message} as ErrorEvent)
+      }
+    },
     analyze() {
       this.$komgaSeries.analyzeSeries(this.series)
     },

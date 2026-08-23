@@ -112,6 +112,18 @@ export default class KomgaSeriesService {
     }
   }
 
+  async hashSeries(series: SeriesDto) {
+    try {
+      await this.http.post(`${API_SERIES}/${series.id}/hash`)
+    } catch (e) {
+      let msg = `An error occurred while trying to update the file hashes for series '${series.name}'`
+      if (e.response.data.message) {
+        msg += `: ${e.response.data.message}`
+      }
+      throw new Error(msg)
+    }
+  }
+
   async refreshMetadata(series: SeriesDto) {
     try {
       await this.http.post(`${API_SERIES}/${series.id}/metadata/refresh`)

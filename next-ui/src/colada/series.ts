@@ -4,6 +4,7 @@ import {
   defineQueryOptions,
   useMutation,
 } from '@pinia/colada'
+import { client } from '@/generated/openapi/client.gen'
 import { PageRequest, type Sort, sortToString } from '@/types/PageRequest'
 import { seriesMetadataToDto } from '@/functions/series'
 import { entityChanged } from '@/colada/cache'
@@ -108,6 +109,18 @@ export const useAnalyzeSeries = defineMutation(() =>
         path: {
           seriesId: seriesId,
         },
+      }),
+  }),
+)
+
+export const useHashSeries = defineMutation(() =>
+  useMutation({
+    mutation: (seriesId: string) =>
+      client.post({
+        responseStyle: 'data',
+        security: [{ scheme: 'basic', type: 'http' }, { name: 'X-API-Key', type: 'apiKey' }],
+        url: '/api/v1/series/{seriesId}/hash',
+        path: { seriesId },
       }),
   }),
 )

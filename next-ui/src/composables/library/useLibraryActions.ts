@@ -12,6 +12,7 @@ import {
   getLibraryDescendants,
   useAnalyzeLibrary,
   useDeleteLibrary,
+  useHashLibrary,
   useEmptyTrashLibrary,
   useLibraries,
   useRefreshMetadataLibrary,
@@ -110,6 +111,17 @@ export function useLibraryActions(
               (dialogConfirm.value.activator = event.currentTarget as Element),
             onClick: () => {
               analyzeLibrary()
+            },
+          },
+          {
+            title: intl.formatMessage({
+              description: 'Library menu: manage > update file hash',
+              defaultMessage: 'Update file hash',
+              id: '//viaq',
+            }),
+            action: LibraryAction.Hash,
+            onClick: () => {
+              hashLibrary()
             },
           },
           {
@@ -347,6 +359,15 @@ export function useLibraryActions(
       targetLibraries().forEach((target) => mutateScan({ libraryId: target.id, deep: true }))
       callback(LibraryAction.ScanDeep)
     }
+  }
+  //endregion
+
+  //region Hash
+  const { mutate: mutateHash } = useHashLibrary()
+
+  function hashLibrary() {
+    targetLibraries().forEach((target) => mutateHash(target.id))
+    callback(LibraryAction.Hash)
   }
   //endregion
 

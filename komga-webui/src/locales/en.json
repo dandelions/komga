@@ -957,7 +957,8 @@
     "url": "URL"
   },
   "notification": {
-    "analysis_task_submitted": "Analysis task submitted"
+    "analysis_task_submitted": "Analysis task submitted",
+    "hash_task_submitted": "File hash update task submitted"
   },
   "menu": {
     "add_to_collection": "Add to collection",
@@ -977,6 +978,7 @@
     "include_child_libraries": "Include child libraries",
     "pin": "Pin",
     "refresh_metadata": "Refresh metadata",
+    "update_hash": "Update file hash",
     "scan_library_files": "Scan library files",
     "scan_library_files_deep": "Scan library files (deep)",
     "select_all": "Select all",

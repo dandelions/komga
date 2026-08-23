@@ -40,6 +40,7 @@ describe('selection actions', () => {
       ActionName.AddToReadList,
       ActionName.RefreshMetadata,
       ActionName.Analyze,
+      ActionName.Hash,
       ActionName.Delete,
     ]
 

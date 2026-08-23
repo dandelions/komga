@@ -7,6 +7,7 @@ import { useMessagesStore } from '@/stores/messages'
 import {
   useAnalyzeSeries,
   useDeleteSeries,
+  useHashSeries,
   useMarkSeriesRead,
   useMarkSeriesUnread,
   useRefreshMetadataSeries,
@@ -134,6 +135,18 @@ export function useSeriesActions(
     ...(isAdmin.value
       ? [
           {
+            title: intl.formatMessage(actionDetails[ActionName.Hash].message),
+            icon: actionDetails[ActionName.Hash].icon,
+            action: ActionName.Hash,
+            onClick: () => {
+              hashSeries()
+            },
+          },
+        ]
+      : []),
+    ...(isAdmin.value
+      ? [
+          {
             title: intl.formatMessage({
               description: 'Series menu: manage > delete file',
               defaultMessage: 'Delete files',
@@ -203,6 +216,15 @@ export function useSeriesActions(
   function analyzeSeries() {
     mutateAnalyze(toValue(series).id)
     callback(ActionName.Analyze)
+  }
+  //endregion
+
+  //region Hash
+  const { mutate: mutateHash } = useHashSeries()
+
+  function hashSeries() {
+    mutateHash(toValue(series).id)
+    callback(ActionName.Hash)
   }
   //endregion
 

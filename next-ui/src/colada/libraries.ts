@@ -1,4 +1,5 @@
 import { defineMutation, defineQuery, useMutation, useQuery } from '@pinia/colada'
+import { client } from '@/generated/openapi/client.gen'
 import { ClientSettingUser } from '@/types/ClientSettingsUser'
 import { useClientSettingsUser } from '@/colada/client-settings'
 import { combinePromises } from '@/colada/utils'
@@ -240,6 +241,18 @@ export const useAnalyzeLibrary = defineMutation(() =>
         path: {
           libraryId: libraryId,
         },
+      }),
+  }),
+)
+
+export const useHashLibrary = defineMutation(() =>
+  useMutation({
+    mutation: (libraryId: string) =>
+      client.post({
+        responseStyle: 'data',
+        security: [{ scheme: 'basic', type: 'http' }, { name: 'X-API-Key', type: 'apiKey' }],
+        url: '/api/v1/libraries/{libraryId}/hash',
+        path: { libraryId },
       }),
   }),
 )

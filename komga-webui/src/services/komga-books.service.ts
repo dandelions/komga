@@ -169,6 +169,18 @@ export default class KomgaBooksService {
     }
   }
 
+  async hashBook(book: BookDto) {
+    try {
+      await this.http.post(`${API_BOOKS}/${book.id}/hash`)
+    } catch (e) {
+      let msg = `An error occurred while trying to update the file hash for book '${book.name}'`
+      if (e.response.data.message) {
+        msg += `: ${e.response.data.message}`
+      }
+      throw new Error(msg)
+    }
+  }
+
   async refreshMetadata(book: BookDto) {
     try {
       await this.http.post(`${API_BOOKS}/${book.id}/metadata/refresh`)

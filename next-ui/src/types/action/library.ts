@@ -4,6 +4,7 @@ export const LibraryAction = {
   Edit: 'EDIT',
   RefreshMetadata: 'REFRESH_METADATA',
   Analyze: 'ANALYZE',
+  Hash: 'HASH',
   Delete: 'DELETE',
   EmptyTrash: 'EMPTY_TRASH',
 } as const

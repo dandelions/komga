@@ -270,6 +270,26 @@ class LibraryController(
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
   }
 
+  @PostMapping("{libraryId}/hash")
+  @PreAuthorize("hasRole('ADMIN')")
+  @ResponseStatus(HttpStatus.ACCEPTED)
+  @Operation(summary = "Update file hashes for a library")
+  fun libraryHash(
+    @PathVariable libraryId: String,
+  ) {
+    findLeafLibrariesOrNull(libraryId)?.forEach { library ->
+      val bookIds =
+        bookRepository
+          .findAll(
+            SearchCondition.LibraryId(SearchOperator.Is(library.id)),
+            SearchContext.empty(),
+            Pageable.unpaged(),
+          ).content
+          .map { it.id }
+      taskEmitter.hashBooks(bookIds, HIGH_PRIORITY, force = true)
+    } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+  }
+
   @PostMapping("{libraryId}/metadata/refresh")
   @PreAuthorize("hasRole('ADMIN')")
   @ResponseStatus(HttpStatus.ACCEPTED)

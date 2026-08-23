@@ -4,6 +4,7 @@ import {
   defineQueryOptions,
   useMutation,
 } from '@pinia/colada'
+import { client } from '@/generated/openapi/client.gen'
 import { PageRequest, type Sort, sortToString } from '@/types/PageRequest'
 import { entityChanged } from '@/colada/cache'
 import { useAppStore } from '@/stores/app'
@@ -105,6 +106,18 @@ export const useAnalyzeBook = defineMutation(() =>
         path: {
           bookId: bookId,
         },
+      }),
+  }),
+)
+
+export const useHashBook = defineMutation(() =>
+  useMutation({
+    mutation: (bookId: string) =>
+      client.post({
+        responseStyle: 'data',
+        security: [{ scheme: 'basic', type: 'http' }, { name: 'X-API-Key', type: 'apiKey' }],
+        url: '/api/v1/books/{bookId}/hash',
+        path: { bookId },
       }),
   }),
 )

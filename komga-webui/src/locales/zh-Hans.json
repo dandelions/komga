@@ -957,7 +957,8 @@
     "url": "地址"
   },
   "notification": {
-    "analysis_task_submitted": "分析任务已提交"
+    "analysis_task_submitted": "分析任务已提交",
+    "hash_task_submitted": "文件哈希更新任务已提交"
   },
   "menu": {
     "add_to_collection": "添加到收藏",
@@ -977,6 +978,7 @@
     "include_child_libraries": "包含子库",
     "pin": "固定",
     "refresh_metadata": "刷新元数据",
+    "update_hash": "更新文件哈希",
     "scan_library_files": "扫描库文件",
     "scan_library_files_deep": "扫描库文件（深度）",
     "select_all": "选择所有",

@@ -150,9 +150,13 @@ class TaskEmitter(
       .let { submitTasks(it) }
   }
 
-  fun hashBooks(bookIds: Collection<String>, priority: Int = HIGHEST_PRIORITY) {
+  fun hashBooks(
+    bookIds: Collection<String>,
+    priority: Int = HIGHEST_PRIORITY,
+    force: Boolean = false,
+  ) {
     bookIds
-      .map { Task.HashBook(it, priority) }
+      .map { Task.HashBook(it, priority, force) }
       .let { submitTasks(it) }
   }
 

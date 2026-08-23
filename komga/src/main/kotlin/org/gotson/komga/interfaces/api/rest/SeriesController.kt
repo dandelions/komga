@@ -664,6 +664,16 @@ class SeriesController(
     taskEmitter.analyzeUnknownOutdatedAndErrorBooks(bookRepository.findAllBySeriesId(seriesId).map { it.id }, HIGH_PRIORITY)
   }
 
+  @Operation(summary = "Update series file hashes", tags = [OpenApiConfiguration.TagNames.SERIES])
+  @PostMapping("v1/series/{seriesId}/hash")
+  @PreAuthorize("hasRole('ADMIN')")
+  @ResponseStatus(HttpStatus.ACCEPTED)
+  fun seriesHash(
+    @PathVariable seriesId: String,
+  ) {
+    taskEmitter.hashBooks(bookRepository.findAllBySeriesId(seriesId).map { it.id }, HIGH_PRIORITY, force = true)
+  }
+
   @Operation(summary = "Refresh series metadata", tags = [OpenApiConfiguration.TagNames.SERIES])
   @PostMapping("v1/series/{seriesId}/metadata/refresh")
   @PreAuthorize("hasRole('ADMIN')")

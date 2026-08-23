@@ -18,7 +18,11 @@ defineProps<{
 }>()
 
 const main = [LibrariesAction.Reorder] as LibrariesAction[]
-const management = [LibrariesAction.ScanAll, LibrariesAction.EmptyTrashAll] as LibrariesAction[]
+const management = [
+  LibrariesAction.ScanAll,
+  LibrariesAction.HashAll,
+  LibrariesAction.EmptyTrashAll,
+] as LibrariesAction[]
 
 function afterClick() {
   isShown.value = false

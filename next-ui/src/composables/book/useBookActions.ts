@@ -9,6 +9,7 @@ import { commonMessages } from '@/utils/i18n/common-messages'
 import {
   useAnalyzeBook,
   useDeleteBook,
+  useHashBook,
   useMarkBookRead,
   useMarkBookUnread,
   useRefreshMetadataBook,
@@ -136,6 +137,18 @@ export function useBookActions(
     ...(isAdmin.value
       ? [
           {
+            title: intl.formatMessage(actionDetails[ActionName.Hash].message),
+            icon: actionDetails[ActionName.Hash].icon,
+            action: ActionName.Hash,
+            onClick: () => {
+              hashBook()
+            },
+          },
+        ]
+      : []),
+    ...(isAdmin.value
+      ? [
+          {
             title: intl.formatMessage({
               description: 'Book menu: manage > delete file',
               defaultMessage: 'Delete file',
@@ -206,6 +219,15 @@ export function useBookActions(
   function analyzeBook() {
     mutateAnalyze(toValue(book).id)
     callback(ActionName.Analyze)
+  }
+  //endregion
+
+  //region Hash
+  const { mutate: mutateHash } = useHashBook()
+
+  function hashBook() {
+    mutateHash(toValue(book).id)
+    callback(ActionName.Hash)
   }
   //endregion
 
