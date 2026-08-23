@@ -10,7 +10,7 @@ import kotlin.io.path.inputStream
 
 private val logger = KotlinLogging.logger {}
 
-private const val DEFAULT_BUFFER_SIZE = 8192
+private const val DEFAULT_BUFFER_SIZE = 1024 * 1024
 private const val SEED = 0
 
 @Component
