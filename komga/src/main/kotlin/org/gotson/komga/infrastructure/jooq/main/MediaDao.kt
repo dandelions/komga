@@ -8,6 +8,7 @@ import org.gotson.komga.domain.model.Media
 import org.gotson.komga.domain.model.MediaExtension
 import org.gotson.komga.domain.model.MediaFile
 import org.gotson.komga.domain.model.ProxyExtension
+import org.gotson.komga.domain.persistence.BookContentRepository
 import org.gotson.komga.domain.persistence.MediaRepository
 import org.gotson.komga.infrastructure.jooq.SplitDslDaoBase
 import org.gotson.komga.infrastructure.jooq.TempTable.Companion.withTempTable
@@ -35,12 +36,14 @@ class MediaDao(
   @Qualifier("dslContextRO") dslRO: DSLContext,
   @param:Value("#{@komgaProperties.database.batchChunkSize}") private val batchSize: Int,
   private val mapper: ObjectMapper,
+  private val bookContentRepository: BookContentRepository,
 ) : SplitDslDaoBase(dslRW, dslRO),
   MediaRepository {
+  private val b = Tables.BOOK
+  private val bc = Tables.BOOK_CONTENT
   private val m = Tables.MEDIA
   private val p = Tables.MEDIA_PAGE
   private val f = Tables.MEDIA_FILE
-  private val b = Tables.BOOK
 
   private val groupFields =
     arrayOf(
@@ -57,17 +60,21 @@ class MediaDao(
       *p.fields(),
     )
 
-  override fun findById(bookId: String): Media = dslRO.find(bookId)!!
+  override fun findById(bookId: String): Media = findByContentBookId(bookId)!!.copy(bookId = bookId)
 
-  override fun findByIdOrNull(bookId: String): Media? = dslRO.find(bookId)
+  override fun findByIdOrNull(bookId: String): Media? = findByContentBookId(bookId)?.copy(bookId = bookId)
 
-  override fun findExtensionByIdOrNull(bookId: String): MediaExtension? =
-    dslRO
+  private fun findByContentBookId(bookId: String): Media? = dslRO.find(bookContentRepository.resolveContentBookId(bookId))
+
+  override fun findExtensionByIdOrNull(bookId: String): MediaExtension? {
+    val contentBookId = bookContentRepository.resolveContentBookId(bookId)
+    return dslRO
       .select(m.EXTENSION_CLASS, m.EXTENSION_VALUE_BLOB)
       .from(m)
-      .where(m.BOOK_ID.eq(bookId))
+      .where(m.BOOK_ID.eq(contentBookId))
       .fetchOne()
       ?.map { mapper.deserializeMediaExtension(it.get(m.EXTENSION_CLASS), it.get(m.EXTENSION_VALUE_BLOB)) }
+  }
 
   override fun findAllBookIdsByLibraryIdAndMediaTypeAndWithMissingPageHash(
     libraryId: String,
@@ -79,13 +86,16 @@ class MediaDao(
     val neededHash = pageHashing * 2
     val neededHashForBook = DSL.`when`(pagesCount.lt(neededHash), pagesCount).otherwise(neededHash)
 
+    val contentBookId = DSL.coalesce(bc.CONTENT_BOOK_ID, b.ID)
     return dslRO
       .select(b.ID)
       .from(b)
+      .leftJoin(bc)
+      .on(bc.BOOK_ID.eq(b.ID))
       .leftJoin(p)
-      .on(b.ID.eq(p.BOOK_ID))
+      .on(contentBookId.eq(p.BOOK_ID))
       .leftJoin(m)
-      .on(b.ID.eq(m.BOOK_ID))
+      .on(contentBookId.eq(m.BOOK_ID))
       .where(b.LIBRARY_ID.eq(libraryId))
       .and(m.STATUS.eq(Media.Status.READY.name))
       .and(m.MEDIA_TYPE.`in`(mediaTypes))
@@ -95,13 +105,19 @@ class MediaDao(
       .map { it.value1() }
   }
 
-  override fun getPagesSizes(bookIds: Collection<String>): Collection<Pair<String, Int>> =
-    dslRO
-      .select(m.BOOK_ID, m.PAGE_COUNT)
-      .from(m)
-      .where(m.BOOK_ID.`in`(bookIds))
+  override fun getPagesSizes(bookIds: Collection<String>): Collection<Pair<String, Int>> {
+    val contentBookId = DSL.coalesce(bc.CONTENT_BOOK_ID, b.ID)
+    return dslRO
+      .select(b.ID, m.PAGE_COUNT)
+      .from(b)
+      .leftJoin(bc)
+      .on(bc.BOOK_ID.eq(b.ID))
+      .innerJoin(m)
+      .on(contentBookId.eq(m.BOOK_ID))
+      .where(b.ID.`in`(bookIds))
       .fetch()
-      .map { Pair(it[m.BOOK_ID], it[m.PAGE_COUNT]) }
+      .map { Pair(it[b.ID], it[m.PAGE_COUNT]) }
+  }
 
   private fun DSLContext.find(
     bookId: String,
@@ -250,6 +266,13 @@ class MediaDao(
 
   @Transactional
   override fun update(media: Media) {
+    if (bookContentRepository.findContentBookIdOrNull(media.bookId) != null) {
+      bookContentRepository.unlink(media.bookId)
+    }
+    updateRaw(media)
+  }
+
+  private fun updateRaw(media: Media) {
     dslRW
       .update(m)
       .set(m.STATUS, media.status.toString())
@@ -290,11 +313,11 @@ class MediaDao(
     fromBookId: String,
     toBookId: String,
   ) {
-    val source = findById(fromBookId)
+    val source = findByContentBookId(fromBookId) ?: error("Media not found for book $fromBookId")
     val sourceExtension = findExtensionByIdOrNull(fromBookId)
 
     val copy = source.copy(bookId = toBookId, extension = sourceExtension)
-    update(copy)
+    updateRaw(copy)
   }
 
   @Transactional

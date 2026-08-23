@@ -24,6 +24,7 @@ class BookCommonDao(
   @Qualifier("dslContextRO") dslRO: DSLContext,
 ) : SplitDslDaoBase(dslRW, dslRO) {
   private val b = Tables.BOOK
+  private val bc = Tables.BOOK_CONTENT
   private val m = Tables.MEDIA
   private val d = Tables.BOOK_METADATA
   private val r = Tables.READ_PROGRESS
@@ -108,8 +109,10 @@ class BookCommonDao(
             ),
         ).innerJoin(b)
         .on(b1.field(cteBooksFieldBookId)!!.eq(b.ID))
+        .leftJoin(bc)
+        .on(bc.BOOK_ID.eq(b.ID))
         .innerJoin(m)
-        .on(b.ID.eq(m.BOOK_ID))
+        .on(org.jooq.impl.DSL.coalesce(bc.CONTENT_BOOK_ID, b.ID).eq(m.BOOK_ID))
         .innerJoin(d)
         .on(b.ID.eq(d.BOOK_ID))
         .innerJoin(sd)

@@ -150,6 +150,16 @@ class TaskEmitter(
       .let { submitTasks(it) }
   }
 
+  fun hashBooks(bookIds: Collection<String>, priority: Int = HIGHEST_PRIORITY) {
+    bookIds
+      .map { Task.HashBook(it, priority) }
+      .let { submitTasks(it) }
+  }
+
+  fun hashBook(book: Book, priority: Int = HIGH_PRIORITY, force: Boolean = true) {
+    submitTask(Task.HashBook(book.id, priority, force))
+  }
+
   fun hashBooksWithoutHash(library: Library) {
     if (library.hashFiles)
       bookRepository

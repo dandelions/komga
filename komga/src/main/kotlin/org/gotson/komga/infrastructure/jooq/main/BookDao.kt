@@ -37,6 +37,7 @@ class BookDao(
 ) : SplitDslDaoBase(dslRW, dslRO),
   BookRepository {
   private val b = Tables.BOOK
+  private val bc = Tables.BOOK_CONTENT
   private val m = Tables.MEDIA
   private val d = Tables.BOOK_METADATA
   private val sd = Tables.SERIES_METADATA
@@ -150,7 +151,10 @@ class BookDao(
             when (join) {
               RequiredJoin.BookMetadata -> innerJoin(d).on(b.ID.eq(d.BOOK_ID))
               RequiredJoin.SeriesMetadata -> innerJoin(sd).on(b.SERIES_ID.eq(sd.SERIES_ID))
-              RequiredJoin.Media -> innerJoin(m).on(b.ID.eq(m.BOOK_ID))
+              RequiredJoin.Media -> {
+                leftJoin(bc).on(bc.BOOK_ID.eq(b.ID))
+                innerJoin(m).on(org.jooq.impl.DSL.coalesce(bc.CONTENT_BOOK_ID, b.ID).eq(m.BOOK_ID))
+              }
               is RequiredJoin.ReadProgress -> leftJoin(r).on(b.ID.eq(r.BOOK_ID)).and(r.USER_ID.eq(join.userId))
               is RequiredJoin.ReadList -> {
                 val rlbAlias = rlbAlias(join.readListId)
@@ -175,7 +179,10 @@ class BookDao(
             when (join) {
               RequiredJoin.BookMetadata -> innerJoin(d).on(b.ID.eq(d.BOOK_ID))
               RequiredJoin.SeriesMetadata -> innerJoin(sd).on(b.SERIES_ID.eq(sd.SERIES_ID))
-              RequiredJoin.Media -> innerJoin(m).on(b.ID.eq(m.BOOK_ID))
+              RequiredJoin.Media -> {
+                leftJoin(bc).on(bc.BOOK_ID.eq(b.ID))
+                innerJoin(m).on(org.jooq.impl.DSL.coalesce(bc.CONTENT_BOOK_ID, b.ID).eq(m.BOOK_ID))
+              }
               is RequiredJoin.ReadProgress -> leftJoin(r).on(b.ID.eq(r.BOOK_ID)).and(r.USER_ID.eq(join.userId))
               is RequiredJoin.ReadList -> {
                 val rlbAlias = rlbAlias(join.readListId)
@@ -280,8 +287,10 @@ class BookDao(
     dslRO
       .select(*b.fields())
       .from(b)
+      .leftJoin(bc)
+      .on(bc.BOOK_ID.eq(b.ID))
       .leftJoin(m)
-      .on(b.ID.eq(m.BOOK_ID))
+      .on(org.jooq.impl.DSL.coalesce(bc.CONTENT_BOOK_ID, b.ID).eq(m.BOOK_ID))
       .where(b.LIBRARY_ID.eq(libraryId))
       .and(m.MEDIA_TYPE.`in`(mediaTypes))
       .fetchInto(b)
@@ -295,8 +304,10 @@ class BookDao(
     dslRO
       .select(*b.fields())
       .from(b)
+      .leftJoin(bc)
+      .on(bc.BOOK_ID.eq(b.ID))
       .leftJoin(m)
-      .on(b.ID.eq(m.BOOK_ID))
+      .on(org.jooq.impl.DSL.coalesce(bc.CONTENT_BOOK_ID, b.ID).eq(m.BOOK_ID))
       .where(b.LIBRARY_ID.eq(libraryId))
       .and(m.MEDIA_TYPE.eq(mediaType))
       .and(b.URL.notLike("%.$extension"))

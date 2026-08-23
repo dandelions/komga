@@ -61,6 +61,7 @@ class BookDtoDao(
 ) : SplitDslDaoBase(dslRW, dslRO),
   BookDtoRepository {
   private val b = Tables.BOOK
+  private val bc = Tables.BOOK_CONTENT
   private val m = Tables.MEDIA
   private val d = Tables.BOOK_METADATA
   private val r = Tables.READ_PROGRESS
@@ -176,8 +177,10 @@ class BookDtoDao(
             dslRO
               .select(b.ID)
               .from(b)
+              .leftJoin(bc)
+              .on(bc.BOOK_ID.eq(b.ID))
               .leftJoin(m)
-              .on(b.ID.eq(m.BOOK_ID))
+              .on(org.jooq.impl.DSL.coalesce(bc.CONTENT_BOOK_ID, b.ID).eq(m.BOOK_ID))
               .leftJoin(d)
               .on(b.ID.eq(d.BOOK_ID))
               .leftJoin(r)
@@ -461,8 +464,10 @@ class BookDtoDao(
     return this
       .select(selectFields)
       .from(b)
+      .leftJoin(bc)
+      .on(bc.BOOK_ID.eq(b.ID))
       .leftJoin(m)
-      .on(b.ID.eq(m.BOOK_ID))
+      .on(org.jooq.impl.DSL.coalesce(bc.CONTENT_BOOK_ID, b.ID).eq(m.BOOK_ID))
       .leftJoin(d)
       .on(b.ID.eq(d.BOOK_ID))
       .leftJoin(r)

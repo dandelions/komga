@@ -23,6 +23,7 @@ class KoboDtoDao(
 ) : SplitDslDaoBase(dslRW, dslRO),
   KoboDtoRepository {
   private val b = Tables.BOOK
+  private val bc = Tables.BOOK_CONTENT
   private val m = Tables.MEDIA
   private val d = Tables.BOOK_METADATA
   private val a = Tables.BOOK_METADATA_AUTHOR
@@ -58,8 +59,10 @@ class KoboDtoDao(
         .on(b.ID.eq(d.BOOK_ID))
         .leftJoin(sd)
         .on(b.SERIES_ID.eq(sd.SERIES_ID))
+        .leftJoin(bc)
+        .on(bc.BOOK_ID.eq(b.ID))
         .leftJoin(m)
-        .on(b.ID.eq(m.BOOK_ID))
+        .on(org.jooq.impl.DSL.coalesce(bc.CONTENT_BOOK_ID, b.ID).eq(m.BOOK_ID))
         .leftJoin(bt)
         .on(b.ID.eq(bt.BOOK_ID))
         .and(bt.SELECTED.isTrue)

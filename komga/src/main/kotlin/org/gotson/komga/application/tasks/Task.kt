@@ -97,10 +97,11 @@ sealed class Task(
   class HashBook(
     val bookId: String,
     priority: Int = DEFAULT_PRIORITY,
+    val force: Boolean = false,
   ) : Task(priority) {
-    override val uniqueId = "HASH_BOOK_$bookId"
+    override val uniqueId = "HASH_BOOK_$bookId${if (force) "_FORCE" else ""}"
 
-    override fun toString(): String = "HashBook(bookId='$bookId', priority='$priority')"
+    override fun toString(): String = "HashBook(bookId='$bookId', force='$force', priority='$priority')"
   }
 
   class HashBookPages(

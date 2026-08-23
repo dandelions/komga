@@ -21,6 +21,7 @@ import org.gotson.komga.domain.model.SearchContext
 import org.gotson.komga.domain.model.SearchOperator
 import org.gotson.komga.domain.model.ThumbnailBook
 import org.gotson.komga.domain.model.TypedBytes
+import org.gotson.komga.domain.persistence.BookContentRepository
 import org.gotson.komga.domain.persistence.BookMetadataRepository
 import org.gotson.komga.domain.persistence.BookRepository
 import org.gotson.komga.domain.persistence.HistoricalEventRepository
@@ -62,6 +63,7 @@ private const val ANALYSIS_ERROR_COMMENT_MAX_LENGTH = 1000
 @Service
 class BookLifecycle(
   private val bookRepository: BookRepository,
+  private val bookContentRepository: BookContentRepository,
   private val mediaRepository: MediaRepository,
   private val bookMetadataRepository: BookMetadataRepository,
   private val readProgressRepository: ReadProgressRepository,
@@ -85,6 +87,10 @@ class BookLifecycle(
 
   fun analyzeAndPersist(book: Book): Set<BookAction> {
     logger.info { "Analyze and persist book: $book" }
+    if (bookContentRepository.findContentBookIdOrNull(book.id) != null) {
+      logger.info { "Skip analysis for book with shared content: $book" }
+      return emptySet()
+    }
     val media = analyzeWithTimeout(book, libraryRepository.findById(book.libraryId).analyzeDimensions)
 
     transactionTemplate.executeWithoutResult {
@@ -105,6 +111,7 @@ class BookLifecycle(
       mediaRepository.update(media)
     }
 
+    if (media.status == Media.Status.READY) shareMatchingBooks(book)
     eventPublisher.publishEvent(DomainEvent.BookUpdated(book))
 
     return if (media.status == Media.Status.READY) setOf(BookAction.GENERATE_THUMBNAIL, BookAction.REFRESH_METADATA) else emptySet()
@@ -162,11 +169,86 @@ class BookLifecycle(
       return logger.info { "File hashing is disabled for the library, it may have changed since the task was submitted, skipping" }
 
     logger.info { "Hash and persist book: $book" }
-    if (book.fileHash.isBlank()) {
-      val hash = hasher.computeHash(book.path)
-      bookRepository.update(book.copy(fileHash = hash))
-    } else {
-      logger.info { "Book already has a hash, skipping" }
+    val hashedBook =
+      if (book.fileHash.isBlank()) {
+        book.copy(fileHash = hasher.computeHash(book.path)).also { bookRepository.update(it) }
+      } else {
+        logger.info { "Book already has a hash, reusing it for content matching" }
+        book
+      }
+    shareAnalyzedContent(hashedBook)
+  }
+
+  fun forceHashAndPersist(book: Book) {
+    logger.info { "Force hash and persist book: $book" }
+    detachSharedContent(book.id)
+    val hashedBook = book.copy(fileHash = hasher.computeHash(book.path))
+    bookRepository.update(hashedBook)
+    val shared = shareAnalyzedContent(hashedBook)
+    if (!shared && book.fileHash.isNotBlank() && book.fileHash != hashedBook.fileHash) {
+      transactionTemplate.executeWithoutResult {
+        mediaRepository.update(mediaRepository.findById(book.id).copy(status = Media.Status.OUTDATED))
+      }
+    }
+  }
+
+  private fun linkAnalyzedContent(bookId: String, contentBookId: String) {
+    transactionTemplate.executeWithoutResult {
+      bookContentRepository.link(bookId, contentBookId)
+
+      bookMetadataRepository.findByIdOrNull(contentBookId)?.let { sourceMetadata ->
+        bookMetadataRepository.findByIdOrNull(bookId)?.let {
+          bookMetadataRepository.update(sourceMetadata.copy(bookId = bookId))
+        }
+      }
+
+      val selectedThumbnailExists = thumbnailBookRepository.findSelectedByBookIdOrNull(bookId) != null
+      thumbnailBookRepository.deleteByBookIdAndType(bookId, ThumbnailBook.Type.GENERATED)
+      thumbnailBookRepository
+        .findAllByBookIdAndType(contentBookId, setOf(ThumbnailBook.Type.GENERATED))
+        .forEach { sourceThumbnail ->
+          thumbnailBookRepository.insert(
+            ThumbnailBook(
+              thumbnail = sourceThumbnail.thumbnail,
+              url = sourceThumbnail.url,
+              selected = !selectedThumbnailExists && sourceThumbnail.selected,
+              type = sourceThumbnail.type,
+              mediaType = sourceThumbnail.mediaType,
+              fileSize = sourceThumbnail.fileSize,
+              dimension = sourceThumbnail.dimension,
+              bookId = bookId,
+            ),
+          )
+        }
+    }
+  }
+
+  fun shareAnalyzedContent(book: Book): Boolean {
+    if (book.fileHash.isBlank()) return false
+    val contentBookId = bookContentRepository.findReadyContentBookId(book.fileHash, book.fileSize, book.id) ?: return false
+    if (contentBookId == book.id) return false
+    linkAnalyzedContent(book.id, contentBookId)
+    logger.info { "Reuse analyzed content $contentBookId for book ${book.id}" }
+    return true
+  }
+
+  private fun shareMatchingBooks(book: Book) {
+    if (book.fileHash.isBlank()) return
+    bookContentRepository.findNotDeletedBookIdsByFileHash(book.fileHash, book.fileSize, book.id).forEach { bookId ->
+      if (bookContentRepository.findContentBookIdOrNull(bookId) == null) {
+        linkAnalyzedContent(bookId, book.id)
+        logger.info { "Reuse analyzed content ${book.id} for book $bookId" }
+      }
+    }
+  }
+
+  fun detachSharedContent(bookId: String) {
+    if (bookContentRepository.findContentBookIdOrNull(bookId) == null) return
+
+    val media = mediaRepository.findById(bookId)
+    transactionTemplate.executeWithoutResult {
+      bookContentRepository.unlink(bookId)
+      mediaRepository.update(media.copy(bookId = bookId))
     }
   }
 
@@ -184,6 +266,10 @@ class BookLifecycle(
   }
 
   fun hashPagesAndPersist(book: Book) {
+    if (bookContentRepository.findContentBookIdOrNull(book.id) != null) {
+      logger.info { "Skip page hashing for book with shared content: $book" }
+      return
+    }
     if (!libraryRepository.findById(book.libraryId).hashPages)
       return logger.info { "Page hashing is disabled for the library, it may have changed since the task was submitted, skipping" }
 
@@ -415,6 +501,23 @@ class BookLifecycle(
     }
   }
 
+  private fun releaseSharedContent(bookId: String, deletingBookIds: Set<String> = emptySet()) {
+    val contentBookId = bookContentRepository.findContentBookIdOrNull(bookId)
+    if (contentBookId != null) {
+      bookContentRepository.unlink(bookId)
+      return
+    }
+
+    val linkedBookIds = bookContentRepository.findLinkedBookIds(bookId).filterNot { deletingBookIds.contains(it) }
+    if (linkedBookIds.isEmpty()) return
+
+    val newContentBookId =
+      linkedBookIds.firstOrNull { bookRepository.findByIdOrNull(it)?.deletedDate == null }
+        ?: linkedBookIds.first()
+    mediaRepository.copy(bookId, newContentBookId)
+    bookContentRepository.reassignContentOwner(bookId, newContentBookId)
+  }
+
   fun deleteOne(book: Book) {
     logger.info { "Delete book id: ${book.id}" }
 
@@ -422,6 +525,7 @@ class BookLifecycle(
       readProgressRepository.deleteByBookId(book.id)
       readListRepository.removeBookFromAll(book.id)
 
+      releaseSharedContent(book.id)
       mediaRepository.delete(book.id)
       thumbnailBookRepository.deleteByBookId(book.id)
       bookMetadataRepository.delete(book.id)
@@ -435,7 +539,11 @@ class BookLifecycle(
   fun softDeleteMany(books: Collection<Book>) {
     logger.info { "Soft delete books: $books" }
     val deletedDate = LocalDateTime.now()
-    bookRepository.update(books.map { it.copy(deletedDate = deletedDate) })
+    val deletingBookIds = books.map { it.id }.toSet()
+    transactionTemplate.executeWithoutResult {
+      books.forEach { releaseSharedContent(it.id, deletingBookIds) }
+      bookRepository.update(books.map { it.copy(deletedDate = deletedDate) })
+    }
 
     books.forEach { eventPublisher.publishEvent(DomainEvent.BookUpdated(it)) }
   }
@@ -448,6 +556,8 @@ class BookLifecycle(
       readProgressRepository.deleteByBookIds(bookIds)
       readListRepository.removeBooksFromAll(bookIds)
 
+      val deletingBookIdSet = bookIds.toSet()
+      bookIds.forEach { releaseSharedContent(it, deletingBookIdSet) }
       mediaRepository.delete(bookIds)
       thumbnailBookRepository.deleteByBookIds(bookIds)
       bookMetadataRepository.delete(bookIds)

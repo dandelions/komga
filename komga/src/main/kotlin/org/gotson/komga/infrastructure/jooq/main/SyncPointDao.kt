@@ -35,6 +35,7 @@ class SyncPointDao(
 ) : SplitDslDaoBase(dslRW, dslRO),
   SyncPointRepository {
   private val b = Tables.BOOK
+  private val bc = Tables.BOOK_CONTENT
   private val m = Tables.MEDIA
   private val d = Tables.BOOK_METADATA
   private val bt = Tables.THUMBNAIL_BOOK
@@ -115,8 +116,10 @@ class SyncPointDao(
                 is RequiredJoin.Collection -> Unit
               }
             }
-          }.join(m)
-          .on(b.ID.eq(m.BOOK_ID))
+          }.leftJoin(bc)
+          .on(bc.BOOK_ID.eq(b.ID))
+          .join(m)
+          .on(org.jooq.impl.DSL.coalesce(bc.CONTENT_BOOK_ID, b.ID).eq(m.BOOK_ID))
           .join(d)
           .on(b.ID.eq(d.BOOK_ID))
           .join(sd)

@@ -61,6 +61,9 @@ class TaskHandler(
                   logger.info { "Daily scan file limit reached for library '${it.name}', scheduling continuation tomorrow" }
                   taskEmitter.scanLibraryTomorrow(task.libraryId, task.scanDeep, task.priority)
                 }
+                if (it.hashFiles && scanSummary.bookIdsToAnalyze.isNotEmpty()) {
+                  taskEmitter.hashBooks(scanSummary.bookIdsToAnalyze, HIGHEST_PRIORITY)
+                }
                 if (scanSummary.recoveredFromUnavailable) {
                   if (scanSummary.bookIdsToAnalyze.isEmpty())
                     taskEmitter.analyzeUnknownOutdatedAndErrorBooks(it)
@@ -181,7 +184,7 @@ class TaskHandler(
 
           is Task.HashBook ->
             bookRepository.findByIdOrNull(task.bookId)?.let { book ->
-              bookLifecycle.hashAndPersist(book)
+              if (task.force) bookLifecycle.forceHashAndPersist(book) else bookLifecycle.hashAndPersist(book)
             } ?: logger.warn { "Cannot execute task $task: Book does not exist" }
 
           is Task.HashBookKoreader ->

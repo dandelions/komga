@@ -974,6 +974,18 @@ class BookController(
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
   }
 
+  @Operation(summary = "Update book file hash", description = "Recomputes the full file hash and refreshes shared analyzed content matching.", tags = [OpenApiConfiguration.TagNames.BOOKS])
+  @PostMapping("api/v1/books/{bookId}/hash")
+  @PreAuthorize("hasRole('ADMIN')")
+  @ResponseStatus(HttpStatus.ACCEPTED)
+  fun bookHash(
+    @PathVariable bookId: String,
+  ) {
+    bookRepository.findByIdOrNull(bookId)?.let { book ->
+      taskEmitter.hashBook(book, HIGH_PRIORITY, force = true)
+    } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+  }
+
   @Operation(summary = "Refresh book metadata", tags = [OpenApiConfiguration.TagNames.BOOKS])
   @PostMapping("api/v1/books/{bookId}/metadata/refresh")
   @PreAuthorize("hasRole('ADMIN')")

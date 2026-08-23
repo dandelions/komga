@@ -126,19 +126,38 @@ class BookSearchHelper(
           } to setOf(ReadProgress(context.userId))
         }
 
-      is SearchCondition.MediaStatus ->
-        searchCondition.operator.toCondition(Tables.MEDIA.STATUS, Media.Status::name) to
-          setOf(
-            RequiredJoin.Media,
+      is SearchCondition.MediaStatus -> {
+        val contentBookId =
+          DSL.coalesce(
+            DSL.select(Tables.BOOK_CONTENT.CONTENT_BOOK_ID)
+              .from(Tables.BOOK_CONTENT)
+              .where(Tables.BOOK_CONTENT.BOOK_ID.eq(Tables.BOOK.ID)),
+            Tables.BOOK.ID,
           )
+        contentBookId.`in`(
+          DSL.select(Tables.MEDIA.BOOK_ID)
+            .from(Tables.MEDIA)
+            .where(searchCondition.operator.toCondition(Tables.MEDIA.STATUS, Media.Status::name)),
+        ) to setOf(RequiredJoin.Media)
+      }
 
-      is SearchCondition.MediaProfile ->
-        Tables.MEDIA.MEDIA_TYPE.let { field ->
-          when (searchCondition.operator) {
-            is SearchOperator.Is -> field.`in`(MediaType.matchingMediaProfile(searchCondition.operator.value).map { it.type }.toSet())
-            is SearchOperator.IsNot -> field.notIn(MediaType.matchingMediaProfile(searchCondition.operator.value).map { it.type }.toSet())
+      is SearchCondition.MediaProfile -> {
+        val contentBookId =
+          DSL.coalesce(
+            DSL.select(Tables.BOOK_CONTENT.CONTENT_BOOK_ID)
+              .from(Tables.BOOK_CONTENT)
+              .where(Tables.BOOK_CONTENT.BOOK_ID.eq(Tables.BOOK.ID)),
+            Tables.BOOK.ID,
+          )
+        val mediaCondition =
+          Tables.MEDIA.MEDIA_TYPE.let { field ->
+            when (searchCondition.operator) {
+              is SearchOperator.Is -> field.`in`(MediaType.matchingMediaProfile(searchCondition.operator.value).map { it.type }.toSet())
+              is SearchOperator.IsNot -> field.notIn(MediaType.matchingMediaProfile(searchCondition.operator.value).map { it.type }.toSet())
+            }
           }
-        } to setOf(RequiredJoin.Media)
+        contentBookId.`in`(DSL.select(Tables.MEDIA.BOOK_ID).from(Tables.MEDIA).where(mediaCondition)) to setOf(RequiredJoin.Media)
+      }
 
       is SearchCondition.Tag ->
         Tables.BOOK.ID.let { field ->

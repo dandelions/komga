@@ -312,6 +312,7 @@ class LibraryContentLifecycle(
                           fileHash = hash,
                         )
                       bookRepository.update(updatedBook)
+                      bookLifecycle.shareAnalyzedContent(updatedBook)
                     } else {
                       logger.info { "Book changed on disk, update and reset media status: $existingBook" }
                       val updatedBook =
@@ -320,6 +321,7 @@ class LibraryContentLifecycle(
                           fileSize = newBook.fileSize,
                           fileHash = hash ?: "",
                         )
+                      bookLifecycle.detachSharedContent(existingBook.id)
                       transactionTemplate.executeWithoutResult {
                         mediaRepository.findById(existingBook.id).let {
                           mediaRepository.update(it.copy(status = Media.Status.OUTDATED))
