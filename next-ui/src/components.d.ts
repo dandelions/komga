@@ -18,6 +18,7 @@ declare module 'vue' {
     ApikeyTable: typeof import('./components/apikey/Table.vue')['default']
     AutocompleteMandatory: typeof import('./components/AutocompleteMandatory.vue')['default']
     BookCard: typeof import('./components/book/card/BookCard.vue')['default']
+    BookCardWide: typeof import('./components/book/card/BookCardWide.vue')['default']
     BookDeletionWarning: typeof import('./components/book/DeletionWarning.vue')['default']
     BookMenuSheet: typeof import('./components/book/menu/Sheet.vue')['default']
     BookView: typeof import('./components/book/view/BookView.vue')['default']
