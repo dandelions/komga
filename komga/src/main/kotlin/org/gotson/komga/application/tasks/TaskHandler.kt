@@ -85,7 +85,7 @@ class TaskHandler(
                   taskEmitter.findBooksToConvert(it, LOWEST_PRIORITY)
                   taskEmitter.findBooksWithMissingPageHash(it, LOWEST_PRIORITY)
                   taskEmitter.findDuplicatePagesToDelete(it, LOWEST_PRIORITY)
-                  taskEmitter.hashBooksWithoutHash(it)
+                  taskEmitter.hashBooksWithoutHash(it, scanSummary.bookIdsToAnalyze)
                   taskEmitter.hashBooksWithoutHashKoreader(it)
                 }
               }

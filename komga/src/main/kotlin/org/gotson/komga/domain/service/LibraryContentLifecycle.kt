@@ -17,6 +17,7 @@ import org.gotson.komga.domain.model.Sidecar
 import org.gotson.komga.domain.model.ThumbnailBook
 import org.gotson.komga.domain.model.ThumbnailSeries
 import org.gotson.komga.domain.persistence.BookMetadataRepository
+import org.gotson.komga.domain.persistence.BookQuickHashRepository
 import org.gotson.komga.domain.persistence.BookRepository
 import org.gotson.komga.domain.persistence.LibraryRepository
 import org.gotson.komga.domain.persistence.MediaRepository
@@ -57,6 +58,7 @@ class LibraryContentLifecycle(
   private val fileSystemScanner: FileSystemScanner,
   private val seriesRepository: SeriesRepository,
   private val bookRepository: BookRepository,
+  private val bookQuickHashRepository: BookQuickHashRepository,
   private val libraryRepository: LibraryRepository,
   private val bookLifecycle: BookLifecycle,
   private val mediaRepository: MediaRepository,
@@ -299,7 +301,10 @@ class LibraryContentLifecycle(
                   if (isBookModifiedForQuota(newBook, existingBook)) {
                     val hash =
                       if (existingBook.fileSize == newBook.fileSize && existingBook.fileHash.isNotBlank()) {
-                        hasher.computeHash(newBook.path)
+                        val quickHash = hasher.computeQuickHash(newBook.path)
+                        val previousQuickHash = bookQuickHashRepository.findByBookIdOrNull(existingBook.id)
+                        bookQuickHashRepository.save(existingBook.id, quickHash)
+                        if (previousQuickHash != null && previousQuickHash != quickHash) null else hasher.computeHash(newBook.path)
                       } else {
                         null
                       }

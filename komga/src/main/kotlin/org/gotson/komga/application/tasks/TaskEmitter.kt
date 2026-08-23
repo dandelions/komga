@@ -164,10 +164,14 @@ class TaskEmitter(
     submitTask(Task.HashBook(book.id, priority, force))
   }
 
-  fun hashBooksWithoutHash(library: Library) {
+  fun hashBooksWithoutHash(
+    library: Library,
+    excludeBookIds: Collection<String> = emptySet(),
+  ) {
     if (library.hashFiles)
       bookRepository
         .findAllByLibraryIdAndWithEmptyHash(library.id)
+        .filterNot { it.id in excludeBookIds }
         .map { Task.HashBook(it.id, LOWEST_PRIORITY) }
         .let { submitTasks(it) }
   }

@@ -23,6 +23,7 @@ import org.gotson.komga.domain.model.ThumbnailBook
 import org.gotson.komga.domain.model.TypedBytes
 import org.gotson.komga.domain.persistence.BookContentRepository
 import org.gotson.komga.domain.persistence.BookMetadataRepository
+import org.gotson.komga.domain.persistence.BookQuickHashRepository
 import org.gotson.komga.domain.persistence.BookRepository
 import org.gotson.komga.domain.persistence.HistoricalEventRepository
 import org.gotson.komga.domain.persistence.LibraryRepository
@@ -64,6 +65,7 @@ private const val ANALYSIS_ERROR_COMMENT_MAX_LENGTH = 1000
 class BookLifecycle(
   private val bookRepository: BookRepository,
   private val bookContentRepository: BookContentRepository,
+  private val bookQuickHashRepository: BookQuickHashRepository,
   private val mediaRepository: MediaRepository,
   private val bookMetadataRepository: BookMetadataRepository,
   private val readProgressRepository: ReadProgressRepository,
@@ -168,20 +170,45 @@ class BookLifecycle(
     if (!libraryRepository.findById(book.libraryId).hashFiles)
       return logger.info { "File hashing is disabled for the library, it may have changed since the task was submitted, skipping" }
 
-    logger.info { "Hash and persist book: $book" }
-    val hashedBook =
-      if (book.fileHash.isBlank()) {
-        book.copy(fileHash = hasher.computeHash(book.path)).also { bookRepository.update(it) }
-      } else {
-        logger.info { "Book already has a hash, reusing it for content matching" }
-        book
-      }
+    logger.info { "Quick hash and persist book: $book" }
+    val quickHash = hasher.computeQuickHash(book.path)
+    bookQuickHashRepository.save(book.id, quickHash)
+
+    if (book.fileHash.isNotBlank()) {
+      logger.info { "Book already has a full hash, reusing it for content matching" }
+      shareAnalyzedContent(book)
+      return
+    }
+
+    val quickMatches =
+      bookQuickHashRepository
+        .findReadyCandidateBookIds(book.fileSize, book.id)
+        .mapNotNull { candidateId ->
+          bookRepository.findByIdOrNull(candidateId)?.let { candidate ->
+            val candidateQuickHash =
+              bookQuickHashRepository.findByBookIdOrNull(candidate.id)
+                ?: hasher.computeQuickHash(candidate.path).also { bookQuickHashRepository.save(candidate.id, it) }
+            candidate.takeIf { candidateQuickHash == quickHash }
+          }
+        }
+
+    if (quickMatches.isEmpty()) {
+      logger.info { "No quick hash match found for book, postponing full hash: $book" }
+      return
+    }
+
+    val hashedBook = book.copy(fileHash = hasher.computeHash(book.path)).also { bookRepository.update(it) }
+    quickMatches.forEach { candidate ->
+      val candidateHash = hasher.computeHash(candidate.path)
+      if (candidate.fileHash != candidateHash) bookRepository.update(candidate.copy(fileHash = candidateHash))
+    }
     shareAnalyzedContent(hashedBook)
   }
 
   fun forceHashAndPersist(book: Book) {
     logger.info { "Force hash and persist book: $book" }
     detachSharedContent(book.id)
+    bookQuickHashRepository.save(book.id, hasher.computeQuickHash(book.path))
     val hashedBook = book.copy(fileHash = hasher.computeHash(book.path))
     bookRepository.update(hashedBook)
     val shared = shareAnalyzedContent(hashedBook)

@@ -37,6 +37,8 @@ class BookDao(
 ) : SplitDslDaoBase(dslRW, dslRO),
   BookRepository {
   private val b = Tables.BOOK
+  private val bq = DSL.table(DSL.name("BOOK_QUICK_HASH"))
+  private val bqBookId = DSL.field(DSL.name("BOOK_ID"), String::class.java)
   private val bc = Tables.BOOK_CONTENT
   private val m = Tables.MEDIA
   private val d = Tables.BOOK_METADATA
@@ -316,9 +318,13 @@ class BookDao(
 
   override fun findAllByLibraryIdAndWithEmptyHash(libraryId: String): Collection<Book> =
     dslRO
-      .selectFrom(b)
+      .select(*b.fields())
+      .from(b)
+      .leftJoin(bq)
+      .on(bqBookId.eq(b.ID))
       .where(b.LIBRARY_ID.eq(libraryId))
       .and(b.FILE_HASH.eq(""))
+      .and(bqBookId.isNull)
       .fetchInto(b)
       .map { it.toDomain() }
 
