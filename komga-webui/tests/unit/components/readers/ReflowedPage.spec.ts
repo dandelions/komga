@@ -503,6 +503,27 @@ test('vertical reflow reserves the flex gap around each forced column break', ()
   expect(pages).toHaveLength(2)
 })
 
+test('vertical reflow uses the remaining width before starting another page', () => {
+  const context = {
+    targetWidth: 260,
+    blockSpacing: 6,
+    pageContentHeight: () => 132,
+    horizontalContentPadding: () => 24,
+    reflowItemDisplayWidth: (item: WordBlock) => item.w,
+    reflowItemDisplayHeight: (item: WordBlock) => item.h,
+  }
+  const items = [
+    {type: 'word', w: 44, h: 80},
+    {type: 'word', w: 44, h: 80},
+    {type: 'word', w: 44, h: 80},
+    {type: 'word', w: 44, h: 80},
+  ]
+
+  const pages = methods.paginateVerticalItemsEstimated.call(context, items)
+
+  expect(pages).toHaveLength(1)
+})
+
 test('K2 reflow does not reserve bottom space for its side toolbar', () => {
   const context = {pageContentHeight: () => 700}
   const items = [

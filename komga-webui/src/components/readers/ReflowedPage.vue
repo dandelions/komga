@@ -2077,8 +2077,8 @@ export default Vue.extend({
 
       const baseColumnGap = Math.max(0, this.blockSpacing)
       // A vertical break occupies its own zero-width flex line, leaving a gap on
-      // either side before the next text column. Reserve its trailing gap too.
-      const contentWidth = Math.max(120, this.targetWidth - this.horizontalContentPadding() * 2 - baseColumnGap)
+      // either side before the next text column.
+      const contentWidth = Math.max(120, this.targetWidth - this.horizontalContentPadding() * 2)
       const contentHeight = Math.max(120, this.pageContentHeight() - 32)
       const columnGap = baseColumnGap * 2
       const rowGap = Math.max(0, Math.round(this.blockSpacing * 1.5))
