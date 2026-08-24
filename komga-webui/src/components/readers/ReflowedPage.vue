@@ -2075,9 +2075,12 @@ export default Vue.extend({
     paginateVerticalItemsEstimated(items: ReflowItem[]): ReflowItem[][] {
       if (items.length === 0) return []
 
-      const contentWidth = Math.max(120, this.targetWidth - this.horizontalContentPadding() * 2)
+      const baseColumnGap = Math.max(0, this.blockSpacing)
+      // A vertical break occupies its own zero-width flex line, leaving a gap on
+      // either side before the next text column. Reserve its trailing gap too.
+      const contentWidth = Math.max(120, this.targetWidth - this.horizontalContentPadding() * 2 - baseColumnGap)
       const contentHeight = Math.max(120, this.pageContentHeight() - 32)
-      const columnGap = Math.max(0, this.blockSpacing)
+      const columnGap = baseColumnGap * 2
       const rowGap = Math.max(0, Math.round(this.blockSpacing * 1.5))
       const pages = [] as ReflowItem[][]
       let currentPage = [] as ReflowItem[]
