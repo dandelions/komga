@@ -482,7 +482,7 @@ test('standard reflow does not reserve bottom space for its side toolbar', () =>
   expect(pages).toHaveLength(1)
 })
 
-test('vertical reflow reserves the flex gap around each forced column break', () => {
+test('vertical reflow fits the next column with the configured gap', () => {
   const context = {
     targetWidth: 260,
     blockSpacing: 6,
@@ -496,32 +496,32 @@ test('vertical reflow reserves the flex gap around each forced column break', ()
     {type: 'word', w: 45, h: 80},
     {type: 'word', w: 45, h: 80},
     {type: 'word', w: 45, h: 80},
-  ]
-
-  const pages = methods.paginateVerticalItemsEstimated.call(context, items)
-
-  expect(pages).toHaveLength(2)
-})
-
-test('vertical reflow uses the remaining width before starting another page', () => {
-  const context = {
-    targetWidth: 260,
-    blockSpacing: 6,
-    pageContentHeight: () => 132,
-    horizontalContentPadding: () => 24,
-    reflowItemDisplayWidth: (item: WordBlock) => item.w,
-    reflowItemDisplayHeight: (item: WordBlock) => item.h,
-  }
-  const items = [
-    {type: 'word', w: 44, h: 80},
-    {type: 'word', w: 44, h: 80},
-    {type: 'word', w: 44, h: 80},
-    {type: 'word', w: 44, h: 80},
   ]
 
   const pages = methods.paginateVerticalItemsEstimated.call(context, items)
 
   expect(pages).toHaveLength(1)
+})
+
+test('vertical reflow starts a new page when columns exceed the available width', () => {
+  const context = {
+    targetWidth: 260,
+    blockSpacing: 6,
+    pageContentHeight: () => 132,
+    horizontalContentPadding: () => 24,
+    reflowItemDisplayWidth: (item: WordBlock) => item.w,
+    reflowItemDisplayHeight: (item: WordBlock) => item.h,
+  }
+  const items = [
+    {type: 'word', w: 52, h: 80},
+    {type: 'word', w: 52, h: 80},
+    {type: 'word', w: 52, h: 80},
+    {type: 'word', w: 52, h: 80},
+  ]
+
+  const pages = methods.paginateVerticalItemsEstimated.call(context, items)
+
+  expect(pages).toHaveLength(2)
 })
 
 test('K2 reflow does not reserve bottom space for its side toolbar', () => {

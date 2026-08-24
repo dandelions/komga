@@ -2076,11 +2076,11 @@ export default Vue.extend({
       if (items.length === 0) return []
 
       const baseColumnGap = Math.max(0, this.blockSpacing)
-      // A vertical break occupies its own zero-width flex line, leaving a gap on
-      // either side before the next text column.
+      // Keep pagination aligned with the wrapper gap so a fitting column is not
+      // pushed onto the next virtual page.
       const contentWidth = Math.max(120, this.targetWidth - this.horizontalContentPadding() * 2)
       const contentHeight = Math.max(120, this.pageContentHeight() - 32)
-      const columnGap = baseColumnGap * 2
+      const columnGap = baseColumnGap
       const rowGap = Math.max(0, Math.round(this.blockSpacing * 1.5))
       const pages = [] as ReflowItem[][]
       let currentPage = [] as ReflowItem[]
