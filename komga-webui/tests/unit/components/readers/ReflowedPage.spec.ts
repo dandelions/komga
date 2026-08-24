@@ -9,6 +9,7 @@ type WordBlock = {
 }
 
 const methods = (ReflowedPage as any).options.methods
+const computed = (ReflowedPage as any).options.computed
 const k2Methods = (K2ReflowedPage as any).options.methods
 const edgeAnalyzer = Object.assign({}, methods)
 const lineAnalyzer = Object.assign({}, methods, {verticalText: false})
@@ -480,6 +481,28 @@ test('standard reflow does not reserve bottom space for its side toolbar', () =>
   const pages = methods.paginateItemsEstimated.call(context, items)
 
   expect(pages).toHaveLength(1)
+})
+
+test('vertical reflow uses each forced break as the single column gap', () => {
+  const context = {
+    verticalText: true,
+    verticalDirection: 'rtl',
+    blockSpacing: 6,
+    targetWidth: 260,
+    pageContentHeight: () => 132,
+    horizontalContentPadding: () => 24,
+    wordOutputBackground: () => '#fff',
+  }
+
+  expect(computed.reflowWrapperStyle.call(context)).toMatchObject({
+    columnGap: '0px',
+    flexWrap: 'wrap-reverse',
+  })
+  expect(computed.measureWrapperStyle.call(context)).toMatchObject({
+    columnGap: '0px',
+    flexWrap: 'wrap-reverse',
+  })
+  expect(computed.lineBreakStyle.call(context)).toEqual({width: '6px'})
 })
 
 test('vertical reflow fits the next column with the configured gap', () => {

@@ -451,6 +451,7 @@
           v-if="item.type === 'break'"
           :key="`break-${i}`"
           class="line-break"
+          :style="lineBreakStyle"
         />
         <span
           v-else-if="item.type === 'indent'"
@@ -490,6 +491,7 @@
           v-if="item.type === 'break'"
           :key="`measure-break-${i}`"
           class="line-break"
+          :style="lineBreakStyle"
         />
         <span
           v-else-if="item.type === 'indent'"
@@ -1052,6 +1054,7 @@ export default Vue.extend({
       if (!this.verticalText) return style
       return {
         ...style,
+        columnGap: '0px',
         flexDirection: 'column',
         flexWrap: this.verticalDirection === 'rtl' ? 'wrap-reverse' : 'wrap',
         alignItems: 'center',
@@ -1069,6 +1072,7 @@ export default Vue.extend({
       if (!this.verticalText) return style
       return {
         ...style,
+        columnGap: '0px',
         height: `${this.pageContentHeight()}px`,
         flexDirection: 'column',
         flexWrap: this.verticalDirection === 'rtl' ? 'wrap-reverse' : 'wrap',
@@ -1077,6 +1081,10 @@ export default Vue.extend({
         paddingLeft: `${this.horizontalContentPadding()}px`,
         paddingRight: `${this.horizontalContentPadding()}px`,
       }
+    },
+    lineBreakStyle(): object | undefined {
+      if (!this.verticalText) return undefined
+      return {width: `${this.blockSpacing}px`}
     },
     pageParity(): PageParity {
       return this.page.number % 2 === 0 ? 'even' : 'odd'
@@ -2076,8 +2084,8 @@ export default Vue.extend({
       if (items.length === 0) return []
 
       const baseColumnGap = Math.max(0, this.blockSpacing)
-      // Keep pagination aligned with the wrapper gap so a fitting column is not
-      // pushed onto the next virtual page.
+      // Each forced break carries the configured gap as its flex-line width, so
+      // pagination only needs to reserve that gap once between text columns.
       const contentWidth = Math.max(120, this.targetWidth - this.horizontalContentPadding() * 2)
       const contentHeight = Math.max(120, this.pageContentHeight() - 32)
       const columnGap = baseColumnGap
