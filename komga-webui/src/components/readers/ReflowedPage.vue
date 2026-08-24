@@ -222,6 +222,20 @@
           <button type="button" class="reflow-step-control" @click="adjustBlockSpacing(1)">+</button>
           <span class="reflow-font-value">{{ controlBlockSpacing }}</span>
         </label>
+        <label class="reflow-spacing-control">
+          <span>{{ controlVerticalText ? '列间距' : '行间距' }}</span>
+          <button type="button" class="reflow-step-control" @click="adjustLineSpacing(-1)">-</button>
+          <input
+            type="range"
+            min="0"
+            max="48"
+            step="1"
+            :value="controlLineSpacing"
+            @input="setLineSpacing"
+          />
+          <button type="button" class="reflow-step-control" @click="adjustLineSpacing(1)">+</button>
+          <span class="reflow-font-value">{{ controlLineSpacing }}</span>
+        </label>
         <div class="reflow-action-controls">
           <span class="reflow-parity-label">{{ pageParityLabel }}</span>
           <label class="reflow-skew-control">
@@ -561,6 +575,7 @@ type ReflowOptions = {
   matchBackgroundMode: MatchBackgroundMode,
   imageQuality: number,
   blockSpacing: number,
+  lineSpacing: number,
   verticalText: boolean,
   verticalDirection: VerticalDirection,
   marginTop: number,
@@ -733,6 +748,7 @@ type ReflowOptionsSnapshot = {
   matchBackgroundMode: MatchBackgroundMode,
   imageQuality: number,
   blockSpacing: number,
+  lineSpacing: number,
   cropRoisKey: string,
   manualImageRoisKey: string,
   deskewAnalysisRoisKey: string,
@@ -850,6 +866,7 @@ export default Vue.extend({
       reflowItems: [] as ReflowItem[],
       pages: [] as ReflowItem[][],
       virtualPageIndex: 0,
+      viewportWidth: 0,
       viewportHeight: 0,
       pageBackground: '#fff',
       lastDetectionKey: '',
@@ -932,6 +949,7 @@ export default Vue.extend({
       pendingMatchBackgroundMode: 'grayscale' as MatchBackgroundMode,
       pendingImageQuality: DEFAULT_REFLOW_IMAGE_QUALITY,
       pendingBlockSpacing: 6,
+      pendingLineSpacing: 9,
       optionsSnapshot: undefined as ReflowOptionsSnapshot | undefined,
       forceReflowOnce: false,
     }
@@ -990,6 +1008,9 @@ export default Vue.extend({
     blockSpacing(): number {
       return this.clampNumber(this.options.blockSpacing, 0, 24, 6)
     },
+    lineSpacing(): number {
+      return this.clampNumber(this.options.lineSpacing, 0, 48, 9)
+    },
     controlColumnCount(): number {
       return Math.round(this.clampNumber(this.pendingColumnCount, 1, 4, 1))
     },
@@ -1035,6 +1056,9 @@ export default Vue.extend({
     controlBlockSpacing(): number {
       return this.clampNumber(this.pendingBlockSpacing, 0, 24, 6)
     },
+    controlLineSpacing(): number {
+      return this.clampNumber(this.pendingLineSpacing, 0, 48, 9)
+    },
     reflowControlsStyle(): object {
       const viewportHeight = this.viewportHeight || Math.floor(window.visualViewport?.height || window.innerHeight || 720)
       return {
@@ -1045,8 +1069,9 @@ export default Vue.extend({
     },
     reflowWrapperStyle(): object {
       const style = {
+        width: `${this.pageContentWidth()}px`,
         columnGap: `${this.blockSpacing}px`,
-        rowGap: `${Math.round(this.blockSpacing * 1.5)}px`,
+        rowGap: '0px',
         height: `${this.pageContentHeight()}px`,
         minHeight: `${this.pageContentHeight()}px`,
         backgroundColor: this.wordOutputBackground(),
@@ -1055,6 +1080,7 @@ export default Vue.extend({
       return {
         ...style,
         columnGap: '0px',
+        rowGap: `${this.blockSpacing}px`,
         flexDirection: 'column',
         flexWrap: this.verticalDirection === 'rtl' ? 'wrap-reverse' : 'wrap',
         alignItems: 'center',
@@ -1065,14 +1091,15 @@ export default Vue.extend({
     },
     measureWrapperStyle(): object {
       const style = {
-        width: `${this.targetWidth}px`,
+        width: `${this.pageContentWidth()}px`,
         columnGap: `${this.blockSpacing}px`,
-        rowGap: `${Math.round(this.blockSpacing * 1.5)}px`,
+        rowGap: '0px',
       }
       if (!this.verticalText) return style
       return {
         ...style,
         columnGap: '0px',
+        rowGap: `${this.blockSpacing}px`,
         height: `${this.pageContentHeight()}px`,
         flexDirection: 'column',
         flexWrap: this.verticalDirection === 'rtl' ? 'wrap-reverse' : 'wrap',
@@ -1082,9 +1109,8 @@ export default Vue.extend({
         paddingRight: `${this.horizontalContentPadding()}px`,
       }
     },
-    lineBreakStyle(): object | undefined {
-      if (!this.verticalText) return undefined
-      return {width: `${this.blockSpacing}px`}
+    lineBreakStyle(): object {
+      return this.verticalText ? {width: `${this.lineSpacing}px`} : {height: `${this.lineSpacing}px`}
     },
     pageParity(): PageParity {
       return this.page.number % 2 === 0 ? 'even' : 'odd'
@@ -1274,6 +1300,14 @@ export default Vue.extend({
     targetWidth() {
       if (this.deferReflow) return
       this.reflow()
+    },
+    blockSpacing() {
+      if (this.deferReflow || this.cropMode) return
+      this.repaginate(false)
+    },
+    lineSpacing() {
+      if (this.deferReflow || this.cropMode) return
+      this.repaginate(false)
     },
     startAtEnd() {
       this.setInitialVirtualPage()
@@ -1513,6 +1547,7 @@ export default Vue.extend({
       if (force || !previous || snapshot.matchBackgroundMode !== previous.matchBackgroundMode) this.pendingMatchBackgroundMode = snapshot.matchBackgroundMode
       if (force || !previous || snapshot.imageQuality !== previous.imageQuality) this.pendingImageQuality = snapshot.imageQuality
       if (force || !previous || snapshot.blockSpacing !== previous.blockSpacing) this.pendingBlockSpacing = snapshot.blockSpacing
+      if (force || !previous || snapshot.lineSpacing !== previous.lineSpacing) this.pendingLineSpacing = snapshot.lineSpacing
       if (force || !previous || snapshot.cropRoisKey !== previous.cropRoisKey) this.syncCropRoisFromOptions()
       if (force || !previous || snapshot.manualImageRoisKey !== previous.manualImageRoisKey) this.syncManualImageRoisFromOptions()
       if (force || !previous || snapshot.deskewAnalysisRoisKey !== previous.deskewAnalysisRoisKey) this.syncDeskewAnalysisRoisFromOptions()
@@ -1535,6 +1570,7 @@ export default Vue.extend({
         imageQuality: this.normalizedImageQuality(this.options.imageQuality),
         algorithmMode: this.reflowAlgorithmMode(),
         blockSpacing: this.clampNumber(this.options.blockSpacing, 0, 24, 6),
+        lineSpacing: this.clampNumber(this.options.lineSpacing, 0, 48, 9),
         cropRoisKey: JSON.stringify(this.options.cropRoisByParity || {}),
         manualImageRoisKey: JSON.stringify(this.options.manualImageRoisByPage || {}),
         deskewAnalysisRoisKey: JSON.stringify(this.options.deskewAnalysisRoisByParity || {}),
@@ -1879,15 +1915,20 @@ export default Vue.extend({
       this.repaginate(false)
     },
     updateViewportMetrics() {
+      this.viewportWidth = Math.floor(window.visualViewport?.width || window.innerWidth || document.documentElement.clientWidth || this.targetWidth || 0)
       this.viewportHeight = Math.floor(window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight || 0)
+    },
+    pageContentWidth(): number {
+      const width = this.viewportWidth || Math.floor(window.visualViewport?.width || window.innerWidth || document.documentElement.clientWidth || this.targetWidth || 0)
+      return Math.max(1, width)
     },
     pageContentHeight(): number {
       const height = this.viewportHeight || Math.floor(window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight || 0)
-      return Math.max(240, height)
+      return Math.max(1, height)
     },
     horizontalContentPadding(): number {
       if (!this.verticalText) return 16
-      return Math.max(24, Math.min(36, Math.round(this.targetWidth * 0.08)))
+      return Math.max(24, Math.min(36, Math.round(this.pageContentWidth() * 0.08)))
     },
     repaginate(resetPage: boolean = true) {
       this.updateViewportMetrics()
@@ -2027,9 +2068,9 @@ export default Vue.extend({
     paginateItemsEstimated(items: ReflowItem[]): ReflowItem[][] {
       if (items.length === 0) return []
 
-      const contentWidth = Math.max(120, this.targetWidth - this.horizontalContentPadding() * 2)
+      const contentWidth = Math.max(120, this.pageContentWidth() - this.horizontalContentPadding() * 2)
       const pageHeight = Math.max(120, this.pageContentHeight() - 32)
-      const rowGap = Math.max(0, Math.round(this.blockSpacing * 1.5))
+      const rowGap = Math.max(0, this.lineSpacing)
       const columnGap = this.blockSpacing
       const pages = [] as ReflowItem[][]
       let currentPage = [] as ReflowItem[]
@@ -2083,13 +2124,13 @@ export default Vue.extend({
     paginateVerticalItemsEstimated(items: ReflowItem[]): ReflowItem[][] {
       if (items.length === 0) return []
 
-      const baseColumnGap = Math.max(0, this.blockSpacing)
+      const baseColumnGap = Math.max(0, this.lineSpacing)
       // Each forced break carries the configured gap as its flex-line width, so
       // pagination only needs to reserve that gap once between text columns.
-      const contentWidth = Math.max(120, this.targetWidth - this.horizontalContentPadding() * 2)
+      const contentWidth = Math.max(120, this.pageContentWidth() - this.horizontalContentPadding() * 2)
       const contentHeight = Math.max(120, this.pageContentHeight() - 32)
       const columnGap = baseColumnGap
-      const rowGap = Math.max(0, Math.round(this.blockSpacing * 1.5))
+      const rowGap = Math.max(0, this.blockSpacing)
       const pages = [] as ReflowItem[][]
       let currentPage = [] as ReflowItem[]
       let currentPageWidth = 0
@@ -2164,7 +2205,7 @@ export default Vue.extend({
     wordBlockDisplayDimensions(item: RenderedWordBlock): {width: number, height: number} {
       const sourceWidth = Math.max(1, item.w)
       const sourceHeight = Math.max(1, item.h)
-      const maxWidth = Math.max(1, this.targetWidth - this.horizontalContentPadding() * 2)
+      const maxWidth = Math.max(1, this.pageContentWidth() - this.horizontalContentPadding() * 2)
       const scale = Math.min(this.textScale(), maxWidth / sourceWidth)
       return {
         width: Math.max(1, Math.round(sourceWidth * scale)),
@@ -6167,7 +6208,7 @@ export default Vue.extend({
       return max - min <= 32 && this.pixelLuma(data, offset) <= threshold
     },
     scaledImageDimensions(sourceWidth: number, sourceHeight: number): {width: number, height: number} {
-      const maxWidth = Math.max(1, this.targetWidth - this.horizontalContentPadding() * 2)
+      const maxWidth = Math.max(1, this.pageContentWidth() - this.horizontalContentPadding() * 2)
       const maxHeight = Math.max(80, this.pageContentHeight() - 32)
       return fitReflowImageDimensions(sourceWidth, sourceHeight, maxWidth, maxHeight, this.textScale())
     },
@@ -6682,7 +6723,7 @@ export default Vue.extend({
       })
     },
     scaledIndentWidth(sourceWidth: number): number {
-      const maxIndent = Math.max(0, (this.targetWidth - 32) * 0.45)
+      const maxIndent = Math.max(0, (this.pageContentWidth() - 32) * 0.45)
       return Math.min(maxIndent, sourceWidth * this.textScale())
     },
     textScale(): number {
@@ -6776,6 +6817,13 @@ export default Vue.extend({
     adjustBlockSpacing(delta: number) {
       this.pendingBlockSpacing = this.clampNumber(this.controlBlockSpacing + delta, 0, 24, 6)
     },
+    setLineSpacing(event: Event) {
+      const target = event.target as HTMLInputElement
+      this.pendingLineSpacing = this.clampNumber(Number(target.value), 0, 48, 9)
+    },
+    adjustLineSpacing(delta: number) {
+      this.pendingLineSpacing = this.clampNumber(this.controlLineSpacing + delta, 0, 48, 9)
+    },
     applyReflowSettings() {
       this.$emit('column-count-change', this.controlColumnCount)
       this.$emit('skew-correction-change', this.controlSkewCorrection)
@@ -6788,6 +6836,7 @@ export default Vue.extend({
       this.$emit('match-background-mode-change', this.controlMatchBackgroundMode)
       this.$emit('image-quality-change', this.controlImageQuality)
       this.$emit('block-spacing-change', this.controlBlockSpacing)
+      this.$emit('line-spacing-change', this.controlLineSpacing)
       this.$emit('crop-rois-change', this.cropRoisPayload())
       this.$emit('manual-image-rois-change', this.manualImageRoisPayload())
       this.$emit('deskew-analysis-rois-change', this.deskewAnalysisRoisPayload())

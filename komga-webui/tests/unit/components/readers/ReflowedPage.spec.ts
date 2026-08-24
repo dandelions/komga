@@ -466,8 +466,9 @@ describe.each([
 
 test('standard reflow does not reserve bottom space for its side toolbar', () => {
   const context = {
-    targetWidth: 200,
     blockSpacing: 0,
+    lineSpacing: 0,
+    pageContentWidth: () => 200,
     pageContentHeight: () => 700,
     horizontalContentPadding: () => 16,
     reflowItemDisplayWidth: () => 180,
@@ -483,32 +484,60 @@ test('standard reflow does not reserve bottom space for its side toolbar', () =>
   expect(pages).toHaveLength(1)
 })
 
-test('vertical reflow uses each forced break as the single column gap', () => {
+test('reflow containers use the viewport dimensions', () => {
+  expect(methods.pageContentWidth.call({viewportWidth: 360, targetWidth: 420})).toBe(360)
+  expect(methods.pageContentHeight.call({viewportHeight: 180})).toBe(180)
+})
+
+test('horizontal reflow uses independent character and line spacing', () => {
+  const context = {
+    verticalText: false,
+    blockSpacing: 6,
+    lineSpacing: 12,
+    pageContentWidth: () => 260,
+    pageContentHeight: () => 132,
+    wordOutputBackground: () => '#fff',
+  }
+
+  expect(computed.reflowWrapperStyle.call(context)).toMatchObject({
+    width: '260px',
+    columnGap: '6px',
+    rowGap: '0px',
+  })
+  expect(computed.lineBreakStyle.call(context)).toEqual({height: '12px'})
+})
+
+test('vertical reflow uses line spacing as the single column gap', () => {
   const context = {
     verticalText: true,
     verticalDirection: 'rtl',
     blockSpacing: 6,
-    targetWidth: 260,
+    lineSpacing: 12,
+    pageContentWidth: () => 260,
     pageContentHeight: () => 132,
     horizontalContentPadding: () => 24,
     wordOutputBackground: () => '#fff',
   }
 
   expect(computed.reflowWrapperStyle.call(context)).toMatchObject({
+    width: '260px',
     columnGap: '0px',
+    rowGap: '6px',
     flexWrap: 'wrap-reverse',
   })
   expect(computed.measureWrapperStyle.call(context)).toMatchObject({
     columnGap: '0px',
+    rowGap: '6px',
     flexWrap: 'wrap-reverse',
   })
-  expect(computed.lineBreakStyle.call(context)).toEqual({width: '6px'})
+  expect(computed.lineBreakStyle.call(context)).toEqual({width: '12px'})
 })
 
 test('vertical reflow fits the next column with the configured gap', () => {
   const context = {
-    targetWidth: 260,
     blockSpacing: 6,
+    lineSpacing: 6,
+    pageContentWidth: () => 260,
     pageContentHeight: () => 132,
     horizontalContentPadding: () => 24,
     reflowItemDisplayWidth: (item: WordBlock) => item.w,
@@ -528,18 +557,19 @@ test('vertical reflow fits the next column with the configured gap', () => {
 
 test('vertical reflow starts a new page when columns exceed the available width', () => {
   const context = {
-    targetWidth: 260,
     blockSpacing: 6,
+    lineSpacing: 20,
+    pageContentWidth: () => 260,
     pageContentHeight: () => 132,
     horizontalContentPadding: () => 24,
     reflowItemDisplayWidth: (item: WordBlock) => item.w,
     reflowItemDisplayHeight: (item: WordBlock) => item.h,
   }
   const items = [
-    {type: 'word', w: 52, h: 80},
-    {type: 'word', w: 52, h: 80},
-    {type: 'word', w: 52, h: 80},
-    {type: 'word', w: 52, h: 80},
+    {type: 'word', w: 45, h: 80},
+    {type: 'word', w: 45, h: 80},
+    {type: 'word', w: 45, h: 80},
+    {type: 'word', w: 45, h: 80},
   ]
 
   const pages = methods.paginateVerticalItemsEstimated.call(context, items)
