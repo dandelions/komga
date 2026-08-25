@@ -2148,9 +2148,11 @@ export default Vue.extend({
       const pushColumn = () => {
         if (currentColumn.length === 0) return
         const columnWidth = Math.max(1, currentColumnWidth)
-        const nextWidth = currentPage.length > 0 ? currentPageWidth + columnGap + columnWidth : columnWidth
-        if (currentPage.length > 0 && nextWidth > contentWidth) pushPage()
-        currentPage.push(...currentColumn, {type: 'break'})
+        const hasPreviousColumn = currentPage.length > 0
+        const nextWidth = hasPreviousColumn ? currentPageWidth + columnGap + columnWidth : columnWidth
+        if (hasPreviousColumn && nextWidth > contentWidth) pushPage()
+        else if (hasPreviousColumn) currentPage.push({type: 'break'})
+        currentPage.push(...currentColumn)
         currentPageWidth = currentPageWidth > 0 ? currentPageWidth + columnGap + columnWidth : columnWidth
         currentColumn = []
         currentColumnWidth = 0

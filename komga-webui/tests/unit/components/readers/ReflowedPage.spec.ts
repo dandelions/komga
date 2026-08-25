@@ -555,6 +555,30 @@ test('vertical reflow fits the next column with the configured gap', () => {
   expect(pages).toHaveLength(1)
 })
 
+test('vertical reflow keeps an exact-fit final column visible without a trailing separator', () => {
+  const context = {
+    blockSpacing: 6,
+    lineSpacing: 6,
+    pageContentWidth: () => 246,
+    pageContentHeight: () => 132,
+    horizontalContentPadding: () => 24,
+    reflowItemDisplayWidth: (item: WordBlock) => item.w,
+    reflowItemDisplayHeight: (item: WordBlock) => item.h,
+  }
+  const items = [
+    {type: 'word', w: 45, h: 80},
+    {type: 'word', w: 45, h: 80},
+    {type: 'word', w: 45, h: 80},
+    {type: 'word', w: 45, h: 80},
+  ]
+
+  const pages = methods.paginateVerticalItemsEstimated.call(context, items)
+
+  expect(pages).toHaveLength(1)
+  expect(pages[0].filter((item: any) => item.type === 'break')).toHaveLength(3)
+  expect(pages[0][pages[0].length - 1].type).toBe('word')
+})
+
 test('vertical reflow starts a new page when columns exceed the available width', () => {
   const context = {
     blockSpacing: 6,
