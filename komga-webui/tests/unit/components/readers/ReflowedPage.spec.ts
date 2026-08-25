@@ -524,11 +524,15 @@ test('vertical reflow uses line spacing as the single column gap', () => {
     columnGap: '0px',
     rowGap: '6px',
     flexWrap: 'wrap-reverse',
+    paddingLeft: '0px',
+    paddingRight: '0px',
   })
   expect(computed.measureWrapperStyle.call(context)).toMatchObject({
     columnGap: '0px',
     rowGap: '6px',
     flexWrap: 'wrap-reverse',
+    paddingLeft: '0px',
+    paddingRight: '0px',
   })
   expect(computed.lineBreakStyle.call(context)).toEqual({width: '12px'})
 })
@@ -579,10 +583,32 @@ test('vertical reflow keeps an exact-fit final column visible without a trailing
   expect(pages[0][pages[0].length - 1].type).toBe('word')
 })
 
+test('vertical reflow uses the full viewport width instead of horizontal page margins', () => {
+  const context = {
+    blockSpacing: 6,
+    lineSpacing: 6,
+    pageContentWidth: () => 300,
+    pageContentHeight: () => 132,
+    horizontalContentPadding: () => 24,
+    reflowItemDisplayWidth: (item: WordBlock) => item.w,
+    reflowItemDisplayHeight: (item: WordBlock) => item.h,
+  }
+  const items = [
+    {type: 'word', w: 70, h: 80},
+    {type: 'word', w: 70, h: 80},
+    {type: 'word', w: 70, h: 80},
+    {type: 'word', w: 70, h: 80},
+  ]
+
+  const pages = methods.paginateVerticalItemsEstimated.call(context, items)
+
+  expect(pages).toHaveLength(1)
+})
+
 test('vertical reflow starts a new page when columns exceed the available width', () => {
   const context = {
     blockSpacing: 6,
-    lineSpacing: 20,
+    lineSpacing: 30,
     pageContentWidth: () => 260,
     pageContentHeight: () => 132,
     horizontalContentPadding: () => 24,

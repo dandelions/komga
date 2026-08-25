@@ -1085,8 +1085,8 @@ export default Vue.extend({
         flexWrap: this.verticalDirection === 'rtl' ? 'wrap-reverse' : 'wrap',
         alignItems: 'center',
         alignContent: 'flex-start',
-        paddingLeft: `${this.horizontalContentPadding()}px`,
-        paddingRight: `${this.horizontalContentPadding()}px`,
+        paddingLeft: '0px',
+        paddingRight: '0px',
       }
     },
     measureWrapperStyle(): object {
@@ -1105,8 +1105,8 @@ export default Vue.extend({
         flexWrap: this.verticalDirection === 'rtl' ? 'wrap-reverse' : 'wrap',
         alignItems: 'center',
         alignContent: 'flex-start',
-        paddingLeft: `${this.horizontalContentPadding()}px`,
-        paddingRight: `${this.horizontalContentPadding()}px`,
+        paddingLeft: '0px',
+        paddingRight: '0px',
       }
     },
     lineBreakStyle(): object {
@@ -2127,7 +2127,7 @@ export default Vue.extend({
       const baseColumnGap = Math.max(0, this.lineSpacing)
       // Each forced break carries the configured gap as its flex-line width, so
       // pagination only needs to reserve that gap once between text columns.
-      const contentWidth = Math.max(120, this.pageContentWidth() - this.horizontalContentPadding() * 2)
+      const contentWidth = Math.max(120, this.pageContentWidth())
       const contentHeight = Math.max(120, this.pageContentHeight() - 32)
       const columnGap = baseColumnGap
       const rowGap = Math.max(0, this.blockSpacing)
@@ -2207,7 +2207,7 @@ export default Vue.extend({
     wordBlockDisplayDimensions(item: RenderedWordBlock): {width: number, height: number} {
       const sourceWidth = Math.max(1, item.w)
       const sourceHeight = Math.max(1, item.h)
-      const maxWidth = Math.max(1, this.pageContentWidth() - this.horizontalContentPadding() * 2)
+      const maxWidth = Math.max(1, this.verticalText ? this.pageContentWidth() : this.pageContentWidth() - this.horizontalContentPadding() * 2)
       const scale = Math.min(this.textScale(), maxWidth / sourceWidth)
       return {
         width: Math.max(1, Math.round(sourceWidth * scale)),
@@ -6210,7 +6210,7 @@ export default Vue.extend({
       return max - min <= 32 && this.pixelLuma(data, offset) <= threshold
     },
     scaledImageDimensions(sourceWidth: number, sourceHeight: number): {width: number, height: number} {
-      const maxWidth = Math.max(1, this.pageContentWidth() - this.horizontalContentPadding() * 2)
+      const maxWidth = Math.max(1, this.verticalText ? this.pageContentWidth() : this.pageContentWidth() - this.horizontalContentPadding() * 2)
       const maxHeight = Math.max(80, this.pageContentHeight() - 32)
       return fitReflowImageDimensions(sourceWidth, sourceHeight, maxWidth, maxHeight, this.textScale())
     },
