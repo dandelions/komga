@@ -524,6 +524,7 @@ test('vertical reflow uses line spacing as the single column gap', () => {
     columnGap: '0px',
     rowGap: '6px',
     flexWrap: 'wrap-reverse',
+    alignContent: 'stretch',
     paddingLeft: '0px',
     paddingRight: '0px',
   })
@@ -531,6 +532,7 @@ test('vertical reflow uses line spacing as the single column gap', () => {
     columnGap: '0px',
     rowGap: '6px',
     flexWrap: 'wrap-reverse',
+    alignContent: 'stretch',
     paddingLeft: '0px',
     paddingRight: '0px',
   })

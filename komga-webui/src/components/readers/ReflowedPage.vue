@@ -1084,7 +1084,7 @@ export default Vue.extend({
         flexDirection: 'column',
         flexWrap: this.verticalDirection === 'rtl' ? 'wrap-reverse' : 'wrap',
         alignItems: 'center',
-        alignContent: 'flex-start',
+        alignContent: 'stretch',
         paddingLeft: '0px',
         paddingRight: '0px',
       }
@@ -1104,7 +1104,7 @@ export default Vue.extend({
         flexDirection: 'column',
         flexWrap: this.verticalDirection === 'rtl' ? 'wrap-reverse' : 'wrap',
         alignItems: 'center',
-        alignContent: 'flex-start',
+        alignContent: 'stretch',
         paddingLeft: '0px',
         paddingRight: '0px',
       }
