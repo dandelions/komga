@@ -329,7 +329,6 @@
           @match-background-change="setReflowMatchBackground"
           @match-background-mode-change="setReflowMatchBackgroundMode"
           @block-spacing-change="setReflowBlockSpacing"
-          @line-spacing-change="setReflowLineSpacing"
           @rotation-change="setReaderRotation"
           @crop-mode-change="setReflowCropMode"
           @crop-rois-change="setReflowCropRois"
@@ -871,20 +870,9 @@
                 <v-list-item>
                   <v-slider
                     v-model="reflowSettings.blockSpacing"
-                    label="字间距"
+                    label="Spacing"
                     min="0"
                     max="24"
-                    step="1"
-                    thumb-label
-                    suffix="px"
-                  />
-                </v-list-item>
-                <v-list-item>
-                  <v-slider
-                    v-model="reflowSettings.lineSpacing"
-                    :label="reflowSettings.verticalText ? '列间距' : '行间距'"
-                    min="0"
-                    max="48"
                     step="1"
                     thumb-label
                     suffix="px"
@@ -1134,7 +1122,6 @@ function defaultReflowSettings(): any {
     imageQuality: 80,
     algorithmMode: 'original',
     blockSpacing: 6,
-    lineSpacing: 9,
     verticalText: false,
     verticalDirection: 'rtl',
     marginTop: 0,
@@ -2908,12 +2895,7 @@ export default Vue.extend({
           }
         }
         if (this.reflowSettingsBookId !== bookId) return
-        const mergedSettings = {...defaults, ...loaded}
-        if (!Object.prototype.hasOwnProperty.call(loaded, 'lineSpacing')) {
-          const previousBlockSpacing = this.clampReflowNumber(loaded.blockSpacing, 0, 24, defaults.blockSpacing)
-          mergedSettings.lineSpacing = Math.round(previousBlockSpacing * 1.5)
-        }
-        this.reflowSettings = this.normalizedReflowSettings(mergedSettings)
+        this.reflowSettings = this.normalizedReflowSettings({...defaults, ...loaded})
         if (loadedFromServer) {
           try {
             window.localStorage.setItem(this.reflowSettingsStorageKey(bookId), JSON.stringify(this.reflowSettings))
@@ -2983,7 +2965,6 @@ export default Vue.extend({
         imageQuality: this.normalizedReflowImageQuality(settings.imageQuality),
         algorithmMode: settings.algorithmMode === 'koreader' ? 'koreader' : 'original',
         blockSpacing: Math.round(this.clampReflowNumber(settings.blockSpacing, 0, 24, this.reflowSettings.blockSpacing)),
-        lineSpacing: Math.round(this.clampReflowNumber(settings.lineSpacing, 0, 48, this.reflowSettings.lineSpacing ?? 9)),
         verticalText: typeof settings.verticalText === 'boolean' ? settings.verticalText : this.reflowSettings.verticalText,
         verticalDirection: settings.verticalDirection === 'ltr' ? 'ltr' : 'rtl',
         marginTop: this.clampReflowNumber(settings.marginTop, 0, 45, this.reflowSettings.marginTop),
@@ -3312,9 +3293,6 @@ export default Vue.extend({
     },
     setReflowBlockSpacing(blockSpacing: number) {
       this.reflowSettings.blockSpacing = Math.max(0, Math.min(24, Math.round(blockSpacing)))
-    },
-    setReflowLineSpacing(lineSpacing: number) {
-      this.reflowSettings.lineSpacing = Math.max(0, Math.min(48, Math.round(lineSpacing)))
     },
     setReflowCropMode(cropMode: boolean) {
       this.reflowCropMode = cropMode

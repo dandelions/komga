@@ -27,45 +27,6 @@ describe('DivinaReader reflow cache changes', () => {
   })
 })
 
-describe('DivinaReader reflow spacing settings', () => {
-  test('clamps the line spacing set from the reflow toolbar', () => {
-    const reader = {reflowSettings: {lineSpacing: 9}}
-
-    methods.setReflowLineSpacing.call(reader, 60)
-    expect(reader.reflowSettings.lineSpacing).toBe(48)
-
-    methods.setReflowLineSpacing.call(reader, -4)
-    expect(reader.reflowSettings.lineSpacing).toBe(0)
-  })
-
-  test('migrates old character spacing to the previous line spacing', async () => {
-    const storageKey = 'komga.pdfReflowSettings.spacing-migration'
-    window.localStorage.setItem(storageKey, JSON.stringify({blockSpacing: 12}))
-    const normalizedReflowSettings = jest.fn(settings => settings)
-    const reader: any = {
-      bookId: 'spacing-migration',
-      reflowSettingsBookId: 'spacing-migration',
-      reflowSettings: {},
-      loadingReflowSettings: false,
-      reflowSettingsStorageKey: () => storageKey,
-      normalizedReflowSettings,
-      clampReflowNumber: methods.clampReflowNumber,
-      saveReflowSettingsServerDebounced: jest.fn(),
-      $nextTick: (callback: () => void) => callback(),
-      $debug: jest.fn(),
-    }
-
-    await methods.loadReflowSettings.call(reader, 'spacing-migration')
-
-    expect(normalizedReflowSettings).toHaveBeenCalledWith(expect.objectContaining({
-      blockSpacing: 12,
-      lineSpacing: 18,
-    }))
-    expect(reader.reflowSettings.lineSpacing).toBe(18)
-    window.localStorage.removeItem(storageKey)
-  })
-})
-
 describe('DivinaReader crop adjustment', () => {
   test('moves and resizes the active crop region within image bounds', () => {
     const reader = {}
