@@ -644,6 +644,7 @@ const EPUB_CHINESE_CONVERTERS = {} as Partial<Record<Exclude<ClientSettingsEpubC
 const EPUB_CHINESE_TEXT_PATTERN = /[\u3400-\u9fff\uf900-\ufaff]/
 const EPUB_HORIZONTAL_SWIPE_MIN_DISTANCE = 48
 const EPUB_HORIZONTAL_SWIPE_DOMINANCE_RATIO = 1.25
+const EPUB_TEXT_SELECTION_LONG_PRESS_DELAY = 300
 const EPUB_BACKGROUND_IMAGE_MAX_BYTES = 2 * 1024 * 1024
 const EPUB_BACKGROUND_IMAGE_MAX_DIMENSION = 1920
 const EPUB_BACKGROUND_IMAGE_JPEG_QUALITY = .86
@@ -909,6 +910,8 @@ export default Vue.extend({
       epubIframeEnhancementObserver: undefined as MutationObserver | undefined,
       epubIframeEnhancementTimers: [] as number[],
       epubTouchStart: undefined as EpubTouchStart | undefined,
+      epubTouchSelectionTimer: undefined as number | undefined,
+      epubTouchSelectionActive: false,
       epubImageZoomVisible: false,
       epubImageZoomSrc: '',
       epubImageZoomAlt: '',
@@ -920,6 +923,7 @@ export default Vue.extend({
     if (screenfull.isEnabled) screenfull.on('change', this.fullscreenChanged)
   },
   beforeDestroy() {
+    this.clearEpubTouchSelectionState()
     this.stopEpubIframeEnhancements()
     this.d2Reader?.stop?.()
   },
@@ -2067,7 +2071,7 @@ export default Vue.extend({
       }
 
       style.textContent = `
-        html, body, body * {
+        html, body, html * {
           -webkit-user-select: text !important;
           -moz-user-select: text !important;
           -ms-user-select: text !important;
@@ -2433,31 +2437,51 @@ export default Vue.extend({
       event.stopPropagation()
       event.stopImmediatePropagation()
     },
+    clearEpubTouchSelectionTimer() {
+      if (this.epubTouchSelectionTimer === undefined) return
+      window.clearTimeout(this.epubTouchSelectionTimer)
+      this.epubTouchSelectionTimer = undefined
+    },
+    clearEpubTouchSelectionState() {
+      this.clearEpubTouchSelectionTimer()
+      this.epubTouchStart = undefined
+      this.epubTouchSelectionActive = false
+    },
     handleEpubIframeTouchStart(event: TouchEvent) {
-      if (!this.shouldHandleEpubIframeTouch(event) || event.touches.length !== 1) {
-        this.epubTouchStart = undefined
-        return
-      }
+      this.clearEpubTouchSelectionState()
+      if (!this.shouldHandleEpubIframeTouch(event) || event.touches.length !== 1) return
 
       const touch = event.touches[0]
       this.epubTouchStart = {
         x: touch.clientX,
         y: touch.clientY,
       }
+      this.epubTouchSelectionTimer = window.setTimeout(() => {
+        this.epubTouchSelectionTimer = undefined
+        this.epubTouchSelectionActive = true
+      }, EPUB_TEXT_SELECTION_LONG_PRESS_DELAY)
     },
     handleEpubIframeTouchMove(event: TouchEvent) {
       const start = this.epubTouchStart
-      if (!start || !this.shouldHandleEpubIframeTouch(event) || event.touches.length !== 1) return
+      if (!start || this.epubTouchSelectionActive || !this.shouldHandleEpubIframeTouch(event) || event.touches.length !== 1) return
+
+      if (this.hasEpubTextSelection(event)) {
+        this.clearEpubTouchSelectionTimer()
+        this.epubTouchSelectionActive = true
+        return
+      }
 
       const touch = event.touches[0]
       if (this.getEpubHorizontalSwipeDirection(start, touch.clientX, touch.clientY) !== 0) {
+        this.clearEpubTouchSelectionTimer()
         this.stopEpubPageEvent(event)
       }
     },
     handleEpubIframeTouchEnd(event: TouchEvent) {
       const start = this.epubTouchStart
-      this.epubTouchStart = undefined
-      if (!start || !this.shouldHandleEpubIframeTouch(event) || event.changedTouches.length === 0) return
+      const selectionActive = this.epubTouchSelectionActive
+      this.clearEpubTouchSelectionState()
+      if (selectionActive || !start || !this.shouldHandleEpubIframeTouch(event) || event.changedTouches.length === 0) return
 
       const touch = event.changedTouches[0]
       const swipeDirection = this.getEpubHorizontalSwipeDirection(start, touch.clientX, touch.clientY)
@@ -2467,7 +2491,11 @@ export default Vue.extend({
       this.handleEpubHorizontalSwipe(swipeDirection)
     },
     handleEpubIframeTouchCancel() {
-      this.epubTouchStart = undefined
+      this.clearEpubTouchSelectionState()
+    },
+    hasEpubTextSelection(event: TouchEvent): boolean {
+      const selection = this.getEpubTouchDocument(event)?.getSelection()
+      return !!selection && selection.rangeCount > 0 && !selection.isCollapsed
     },
     shouldHandleEpubIframeTouch(event: TouchEvent): boolean {
       if (this.verticalScroll) return false
@@ -2478,8 +2506,7 @@ export default Vue.extend({
       const html = doc?.documentElement
       if (!doc || !view || !html) return false
 
-      const selection = doc.getSelection()
-      if (selection && selection.rangeCount > 0 && !selection.isCollapsed) return false
+      if (this.hasEpubTextSelection(event)) return false
 
       const mode = html.getAttribute('data-komga-writing-mode') || this.detectEpubVerticalWritingMode(doc, view)
       return mode.indexOf('vertical') === 0
