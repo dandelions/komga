@@ -1360,6 +1360,7 @@ export default Vue.extend({
         },
       })
 
+      this.patchEpubPaginationEnd()
       this.fixedLayout = this.d2Reader.publicationLayout === 'fixed'
 
       this.tocs.toc = this.d2Reader.tableOfContents
@@ -1387,6 +1388,24 @@ export default Vue.extend({
       } catch (e) {
         this.siblingPrevious = {} as BookDto
       }
+    },
+    // DITA can round the calculated page number up before the final reflow column is visible.
+    patchEpubPaginationEnd() {
+      const view = (this.d2Reader as any)?.navigator?.view
+      if (!view || view.layout !== 'reflowable' || typeof view.atEnd !== 'function' || view.__komgaAtEndPatched) return
+
+      const originalAtEnd = view.atEnd
+      view.atEnd = function (this: any) {
+        if (this.scrollMode) return originalAtEnd.call(this)
+
+        const scrollingElement = this.scrollingElement as HTMLElement | undefined
+        if (!scrollingElement || scrollingElement.clientWidth <= 0 || scrollingElement.scrollWidth <= 0) {
+          return originalAtEnd.call(this)
+        }
+
+        return scrollingElement.scrollLeft + scrollingElement.clientWidth >= scrollingElement.scrollWidth - 1
+      }
+      view.__komgaAtEndPatched = true
     },
     historyBack() {
       this.d2Reader.historyBack()
