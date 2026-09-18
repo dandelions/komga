@@ -1272,6 +1272,10 @@ export default Vue.extend({
         this.openEpubImageZoom(target as HTMLImageElement)
         return
       }
+      if (this.hasEpubIframeSelection(target)) {
+        clearTimeout(this.clickTimer)
+        return
+      }
 
       let x = e.x
       let y = e.y
@@ -2071,7 +2075,7 @@ export default Vue.extend({
       }
 
       style.textContent = `
-        html, body, html * {
+        html, html:not(.clean-mode), body, html * {
           -webkit-user-select: text !important;
           -moz-user-select: text !important;
           -ms-user-select: text !important;
@@ -2427,10 +2431,20 @@ export default Vue.extend({
       if (html.dataset.komgaEpubTouchNavigationBound === 'true') return
 
       html.dataset.komgaEpubTouchNavigationBound = 'true'
+      const view = doc.defaultView
+      if (view) {
+        view.addEventListener('contextmenu', this.handleEpubIframeContextMenu, {capture: true})
+      }
+      doc.addEventListener('contextmenu', this.handleEpubIframeContextMenu, {capture: true})
       doc.addEventListener('touchstart', this.handleEpubIframeTouchStart, {capture: true, passive: true})
       doc.addEventListener('touchmove', this.handleEpubIframeTouchMove, {capture: true, passive: false})
       doc.addEventListener('touchend', this.handleEpubIframeTouchEnd, {capture: true, passive: false})
       doc.addEventListener('touchcancel', this.handleEpubIframeTouchCancel, {capture: true, passive: true})
+    },
+    handleEpubIframeContextMenu(event: Event) {
+      this.epubTouchSelectionActive = true
+      this.clearEpubTouchSelectionTimer()
+      event.stopImmediatePropagation()
     },
     stopEpubPageEvent(event: Event) {
       event.preventDefault()
@@ -2492,6 +2506,15 @@ export default Vue.extend({
     },
     handleEpubIframeTouchCancel() {
       this.clearEpubTouchSelectionState()
+    },
+    hasEpubIframeSelection(target?: EventTarget | null): boolean {
+      try {
+        const doc = (target as Node)?.ownerDocument || document.querySelector<HTMLIFrameElement>('#iframe-wrapper iframe')?.contentDocument
+        const selection = doc?.getSelection()
+        return !!selection && !selection.isCollapsed && selection.toString().trim().length > 0
+      } catch (e) {
+        return false
+      }
     },
     hasEpubTextSelection(event: TouchEvent): boolean {
       const selection = this.getEpubTouchDocument(event)?.getSelection()
