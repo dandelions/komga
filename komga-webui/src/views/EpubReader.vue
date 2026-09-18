@@ -2478,6 +2478,9 @@ export default Vue.extend({
       const html = doc?.documentElement
       if (!doc || !view || !html) return false
 
+      const selection = doc.getSelection()
+      if (selection && selection.rangeCount > 0 && !selection.isCollapsed) return false
+
       const mode = html.getAttribute('data-komga-writing-mode') || this.detectEpubVerticalWritingMode(doc, view)
       return mode.indexOf('vertical') === 0
     },
