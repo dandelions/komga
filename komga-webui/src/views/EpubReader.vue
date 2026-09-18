@@ -539,6 +539,38 @@
       </v-card>
     </v-dialog>
 
+    <v-dialog
+      v-model="epubImageZoomVisible"
+      fullscreen
+      hide-overlay
+      content-class="epub-image-zoom-dialog"
+    >
+      <v-card
+        class="epub-image-zoom-card"
+        color="black"
+        tile
+        @click="epubImageZoomVisible = false"
+      >
+        <v-btn
+          absolute
+          top
+          right
+          icon
+          dark
+          aria-label="Close image preview"
+          @click.stop="epubImageZoomVisible = false"
+        >
+          <v-icon>mdi-close</v-icon>
+        </v-btn>
+        <img
+          class="epub-image-zoom-image"
+          :src="epubImageZoomSrc"
+          :alt="epubImageZoomAlt"
+          @click.stop
+        >
+      </v-card>
+    </v-dialog>
+
     <v-snackbar
       v-model="notification.enabled"
       centered
@@ -606,6 +638,7 @@ const EPUB_AUTHOR_IMAGE_SIZE_DISABLED_ATTR = 'komgaAuthorImageSizeDisabled'
 const EPUB_AUTHOR_ORIGINAL_WIDTH_ATTR = 'komgaOriginalWidth'
 const EPUB_AUTHOR_ORIGINAL_HEIGHT_ATTR = 'komgaOriginalHeight'
 const EPUB_VERTICAL_PAGE_MASK_ID = 'komga-epub-vertical-page-mask'
+const EPUB_TEXT_SELECTION_STYLE_ID = 'komga-epub-text-selection'
 const EPUB_CHINESE_TEXT_ORIGINALS = new WeakMap<Text, string>()
 const EPUB_CHINESE_CONVERTERS = {} as Partial<Record<Exclude<ClientSettingsEpubChineseConversion, 'none'>, ConverterFunction>>
 const EPUB_CHINESE_TEXT_PATTERN = /[\u3400-\u9fff\uf900-\ufaff]/
@@ -876,6 +909,9 @@ export default Vue.extend({
       epubIframeEnhancementObserver: undefined as MutationObserver | undefined,
       epubIframeEnhancementTimers: [] as number[],
       epubTouchStart: undefined as EpubTouchStart | undefined,
+      epubImageZoomVisible: false,
+      epubImageZoomSrc: '',
+      epubImageZoomAlt: '',
       pendingVerticalEpubResourceEdge: undefined as 'start' | 'end' | undefined,
     }
   },
@@ -1226,6 +1262,13 @@ export default Vue.extend({
       this.shortcuts[e.key]?.execute(this)
     },
     clickThrough(e: MouseEvent) {
+      const target = e.target as Element | null
+      if (e.detail === 2 && target?.tagName.toLowerCase() === 'img') {
+        clearTimeout(this.clickTimer)
+        this.openEpubImageZoom(target as HTMLImageElement)
+        return
+      }
+
       let x = e.x
       let y = e.y
       if (e.target.ownerDocument != document) {
@@ -1245,6 +1288,14 @@ export default Vue.extend({
       if (e.detail === 2) {
         clearTimeout(this.clickTimer)
       }
+    },
+    openEpubImageZoom(image: HTMLImageElement) {
+      const source = image.currentSrc || image.src
+      if (!source) return
+
+      this.epubImageZoomSrc = source
+      this.epubImageZoomAlt = image.alt || ''
+      this.epubImageZoomVisible = true
     },
     singleClick(x: number, y: number) {
       if (this.verticalScroll) {
@@ -1944,6 +1995,7 @@ export default Vue.extend({
         this.applyEpubChineseConversion(doc)
         this.applyEpubThemeToDocument(doc)
         this.applyEpubCustomStyleToDocument(doc)
+        this.applyEpubTextSelection(doc)
         if ((doc.documentElement.getAttribute('data-komga-writing-mode') || '').indexOf('vertical') === 0) {
           this.updateEpubVerticalPaginationMetrics(doc)
           this.applyPendingVerticalEpubResourceEdge(doc)
@@ -2004,6 +2056,25 @@ export default Vue.extend({
       if (!element) return ''
       const mode = view.getComputedStyle(element).writingMode || ''
       return mode.indexOf('vertical') === 0 ? mode : ''
+    },
+    applyEpubTextSelection(doc: Document) {
+      const existing = doc.getElementById(EPUB_TEXT_SELECTION_STYLE_ID)
+      const style = existing || doc.createElement('style')
+      if (!existing) {
+        style.id = EPUB_TEXT_SELECTION_STYLE_ID
+        style.setAttribute('type', 'text/css')
+        ;(doc.head || doc.documentElement).appendChild(style)
+      }
+
+      style.textContent = `
+        html, body, body * {
+          -webkit-user-select: text !important;
+          -moz-user-select: text !important;
+          -ms-user-select: text !important;
+          user-select: text !important;
+          -webkit-touch-callout: default !important;
+        }
+      `
     },
     applyEpubCustomStyleToDocument(doc: Document) {
       const config = (window as any)[EPUB_CUSTOM_STYLE_WINDOW_KEY] as ClientSettingsEpubCustomStyle | undefined
@@ -2700,6 +2771,10 @@ export default Vue.extend({
       }
     },
     closeDialog() {
+      if (this.epubImageZoomVisible) {
+        this.epubImageZoomVisible = false
+        return
+      }
       if (this.showToc) {
         this.showToc = false
         return
@@ -2847,6 +2922,22 @@ export default Vue.extend({
   gap: 8px;
   height: 160px;
   color: rgba(0, 0, 0, .58);
+}
+
+.epub-image-zoom-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+}
+
+.epub-image-zoom-image {
+  display: block;
+  max-width: 95vw;
+  max-height: 95vh;
+  object-fit: contain;
 }
 
 .epub-status-bar {
