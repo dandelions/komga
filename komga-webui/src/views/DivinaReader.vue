@@ -3336,14 +3336,18 @@ export default Vue.extend({
         : matchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale'
     },
     setReflowRemoveBackground(removeBackground: string) {
-      this.reflowSettings.removeBackground = removeBackground === 'clean' || removeBackground === 'normalize'
+      const mode = removeBackground === 'clean' || removeBackground === 'normalize'
         ? removeBackground
         : 'none'
+      this.reflowSettings.removeBackground = mode
+      if (this.reflowSettings.k2Settings) this.reflowSettings.k2Settings.removeBackground = mode
     },
     setReflowRemoveWatermark(removeWatermark: string) {
-      this.reflowSettings.removeWatermark = removeWatermark === 'light' || removeWatermark === 'color'
+      const mode = removeWatermark === 'light' || removeWatermark === 'color'
         ? removeWatermark
         : 'none'
+      this.reflowSettings.removeWatermark = mode
+      if (this.reflowSettings.k2Settings) this.reflowSettings.k2Settings.removeWatermark = mode
     },
     setReflowBlockSpacing(blockSpacing: number) {
       this.reflowSettings.blockSpacing = Math.max(0, Math.min(24, Math.round(blockSpacing)))
@@ -3377,6 +3381,8 @@ export default Vue.extend({
       Object.keys(normalized).forEach(key => {
         this.$set(this.reflowSettings.k2Settings, key, normalized[key])
       })
+      if (normalized.removeBackground) this.reflowSettings.removeBackground = normalized.removeBackground
+      if (normalized.removeWatermark) this.reflowSettings.removeWatermark = normalized.removeWatermark
     },
     cachedReflowEntry(page: PageDtoWithUrl | undefined): any {
       if (!page || this.reflowCropMode) return undefined

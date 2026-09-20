@@ -443,8 +443,11 @@ export default Vue.extend({
       this.$nextTick(this.constrainControlsPosition)
     },
     settings: {
-      handler() {
+      handler(newVal, oldVal) {
         this.syncSettingsFromProps()
+        if (oldVal && !this.cropMode) {
+          this.reflow()
+        }
       },
       deep: true,
       immediate: true,
@@ -2553,6 +2556,7 @@ export default Vue.extend({
         ? target.value
         : 'none'
       this.emitSettingsChange()
+      this.reflow()
     },
     setRemoveWatermark(event: Event) {
       const target = event.target as HTMLSelectElement
@@ -2560,6 +2564,7 @@ export default Vue.extend({
         ? target.value
         : 'none'
       this.emitSettingsChange()
+      this.reflow()
     },
     setWordGap(event: Event) {
       const target = event.target as HTMLInputElement

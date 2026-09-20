@@ -1660,14 +1660,14 @@ export default Vue.extend({
         context.drawImage(image, 0, 0)
         this.pageBackground = this.detectPageBackground(context, canvas.width, canvas.height)
         this.preprocessSourceCanvas(context, canvas.width, canvas.height)
-        const autoSkewCorrection = this.autoSkewCorrection
+        const autoSkewCorrection = this.controlAutoSkewCorrection
           ? this.detectCanvasAutoSkew(context, canvas.width, canvas.height, this.currentDeskewAnalysisRoi())
           : 0
         this.detectedAutoSkewCorrection = autoSkewCorrection
         this.enhanceSourceCanvas(context, canvas.width, canvas.height)
         await this.yieldLocalReflowFrame(requestId)
         if (requestId !== this.requestId) return
-        const skewCorrection = this.effectiveSkewCorrection(autoSkewCorrection, this.skewCorrection)
+        const skewCorrection = this.effectiveSkewCorrection(autoSkewCorrection, this.controlSkewCorrection)
         const deskewedCanvas = skewCorrection === 0 ? canvas : this.skewCorrectedCanvas(canvas, skewCorrection)
         const cropRois = this.reflowCropRois()
         const regionItems = [] as ReflowItem[][]
@@ -2281,11 +2281,13 @@ export default Vue.extend({
         columnGap: this.options.columnGap,
         wordGap: this.options.wordGap,
         strokeStrength: this.options.strokeStrength,
-        contrastEnhancement: this.options.contrastEnhancement,
-        matchBackground: this.options.matchBackground,
-        matchBackgroundMode: this.matchBackgroundMode,
-        removeBackground: this.removeBackground,
-        removeWatermark: this.removeWatermark,
+        skewCorrection: this.controlSkewCorrection,
+        autoSkewCorrection: this.controlAutoSkewCorrection,
+        contrastEnhancement: this.controlContrastEnhancement,
+        matchBackground: this.controlMatchBackground,
+        matchBackgroundMode: this.controlMatchBackgroundMode,
+        removeBackground: this.controlRemoveBackground,
+        removeWatermark: this.controlRemoveWatermark,
         imageQuality: this.imageQuality,
         algorithmMode: this.reflowAlgorithmMode(),
         verticalText: this.options.verticalText,
@@ -2533,13 +2535,15 @@ export default Vue.extend({
       return canvas.toDataURL('image/jpeg', this.imageQuality / 100)
     },
     preprocessSourceCanvas(context: CanvasRenderingContext2D, width: number, height: number) {
-      if (this.removeBackground === 'none' && this.removeWatermark === 'none') return
+      const removeBg = this.controlRemoveBackground
+      const removeWm = this.controlRemoveWatermark
+      if (removeBg === 'none' && removeWm === 'none') return
       preprocessDocumentCanvas(context, width, height, {
-        removeBackground: this.removeBackground,
-        removeWatermark: this.removeWatermark,
+        removeBackground: removeBg,
+        removeWatermark: removeWm,
         targetDark: this.darkDisplay,
       })
-      if (this.removeBackground !== 'none') {
+      if (removeBg !== 'none') {
         this.pageBackground = this.darkDisplay ? '#000' : '#fff'
       }
     },
@@ -2794,6 +2798,7 @@ export default Vue.extend({
       if (!context) return
       context.drawImage(image, 0, 0)
       this.pageBackground = this.detectPageBackground(context, canvas.width, canvas.height)
+      this.preprocessSourceCanvas(context, canvas.width, canvas.height)
       const autoSkewCorrection = this.controlAutoSkewCorrection
         ? this.detectCanvasAutoSkew(
           context,
@@ -6781,7 +6786,12 @@ export default Vue.extend({
     setAutoSkewCorrection(event: Event) {
       const target = event.target as HTMLInputElement
       this.pendingAutoSkewCorrection = target.checked
-      if (this.cropMode || this.deferReflow) this.ensureCropImage(this.controlSkewCorrection)
+      this.$emit('auto-skew-correction-change', target.checked)
+      if (this.cropMode || this.deferReflow) {
+        this.ensureCropImage(this.controlSkewCorrection)
+      } else {
+        this.reflow()
+      }
     },
     setCropSkewCorrection(event: Event) {
       const target = event.target as HTMLInputElement
@@ -6835,15 +6845,29 @@ export default Vue.extend({
     },
     setRemoveBackground(event: Event) {
       const target = event.target as HTMLSelectElement
-      this.pendingRemoveBackground = target.value === 'clean' || target.value === 'normalize'
+      const value = target.value === 'clean' || target.value === 'normalize'
         ? target.value
         : 'none'
+      this.pendingRemoveBackground = value
+      this.$emit('remove-background-change', value)
+      if (this.cropMode || this.deferReflow) {
+        this.ensureCropImage(this.controlSkewCorrection)
+      } else {
+        this.reflow()
+      }
     },
     setRemoveWatermark(event: Event) {
       const target = event.target as HTMLSelectElement
-      this.pendingRemoveWatermark = target.value === 'light' || target.value === 'color'
+      const value = target.value === 'light' || target.value === 'color'
         ? target.value
         : 'none'
+      this.pendingRemoveWatermark = value
+      this.$emit('remove-watermark-change', value)
+      if (this.cropMode || this.deferReflow) {
+        this.ensureCropImage(this.controlSkewCorrection)
+      } else {
+        this.reflow()
+      }
     },
     setBlockSpacing(event: Event) {
       const target = event.target as HTMLInputElement
