@@ -20,6 +20,8 @@ import java.nio.file.Path
 import javax.imageio.ImageIO
 import kotlin.math.roundToInt
 
+private const val MAX_IMAGE_DIMENSION = 65000F
+
 data class PdfTocEntry(
   val title: String,
   val pageNumber: Int? = null,
@@ -88,7 +90,12 @@ class PdfExtractor(
   private fun getScale(
     width: Float,
     height: Float,
-  ) = resolution / minOf(width, height)
+  ): Float {
+    val minDimension = minOf(width, height)
+    val maxDimension = maxOf(width, height)
+    if (minDimension <= 0f || maxDimension <= 0f) return 1f
+    return minOf(resolution / minDimension, MAX_IMAGE_DIMENSION / maxDimension)
+  }
 
   fun scaleDimension(dimension: Dimension): Dimension {
     val scale = getScale(dimension.width.toFloat(), dimension.height.toFloat())

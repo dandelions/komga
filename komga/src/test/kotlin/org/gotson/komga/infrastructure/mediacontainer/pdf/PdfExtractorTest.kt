@@ -5,6 +5,7 @@ import org.apache.pdfbox.pdmodel.PDPage
 import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDDocumentOutline
 import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDOutlineItem
 import org.assertj.core.api.Assertions.assertThat
+import org.gotson.komga.domain.model.Dimension
 import org.gotson.komga.infrastructure.image.ImageType
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -73,5 +74,14 @@ class PdfExtractorTest {
     assertThat(toc[1].children).hasSize(1)
     assertThat(toc[1].children[0].title).isEqualTo("Section 2.1")
     assertThat(toc[1].children[0].pageNumber).isEqualTo(2)
+  }
+
+  @Test
+  fun `given extreme aspect ratio dimension when scaling dimension then maximum dimension is capped`() {
+    val dimension = Dimension(800, 80000)
+    val scaled = pdfExtractor.scaleDimension(dimension)
+
+    assertThat(scaled.height).isLessThanOrEqualTo(65000)
+    assertThat(scaled.width).isLessThanOrEqualTo(65000)
   }
 }
