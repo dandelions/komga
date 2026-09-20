@@ -122,6 +122,20 @@ describe('image enhancement', () => {
     expect(data[12]).toBe(25) // text preserved
   })
 
+  test('removeDocumentWatermark removes 2D text watermark strokes with sharp edges', () => {
+    // 3x3 grid: center row is a thin watermark stroke (200), surrounded by white paper (255)
+    // Even though gradient is high (~55), it has no dark ink in 3x3, so it should be wiped to white
+    const data = grayPixels(
+      255, 255, 255,
+      200, 200, 200,
+      255, 255, 255,
+    )
+    removeDocumentWatermark(data, 3, 3, 'light', false)
+    for (let i = 0; i < 9; i++) {
+      expect(data[i * 4]).toBe(255)
+    }
+  })
+
   test('removeDocumentWatermark color mode removes colored stamp watermark', () => {
     // [255, 255, 255] = paper, [220, 40, 40] = red stamp, [20, 20, 20] = black text
     const data = new Uint8ClampedArray([

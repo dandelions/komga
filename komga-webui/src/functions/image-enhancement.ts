@@ -418,8 +418,9 @@ export function removeDocumentWatermark(
 ) {
   if (width <= 0 || height <= 0 || mode === 'none') return
   const targetBg = targetDark ? 0 : 255
-  const cutoff = mode === 'aggressive' ? 160 : 125
-  const checkChroma = mode === 'color' || mode === 'smart' || mode === 'aggressive'
+  const cutoff = mode === 'aggressive' ? 120 : 135
+  const inkCutoff = mode === 'aggressive' ? 130 : 115
+  const checkChroma = mode === 'color' || mode === 'light' || mode === 'smart' || mode === 'aggressive'
 
   const lumaMap = new Uint8Array(width * height)
   for (let i = 0; i < width * height; i++) {
@@ -428,8 +429,12 @@ export function removeDocumentWatermark(
   }
 
   for (let y = 0; y < height; y++) {
+    const yMin = Math.max(0, y - 1)
+    const yMax = Math.min(height - 1, y + 1)
+    const rowOffset = y * width
+
     for (let x = 0; x < width; x++) {
-      const idx = y * width + x
+      const idx = rowOffset + x
       const offset = idx * 4
       if (data[offset + 3] === 0) continue
 
@@ -452,16 +457,41 @@ export function removeDocumentWatermark(
 
       if (mode === 'color') continue
 
-      if (luma >= cutoff) {
-        const left = x > 0 ? lumaMap[idx - 1] : luma
-        const right = x < width - 1 ? lumaMap[idx + 1] : luma
-        const top = y > 0 ? lumaMap[idx - width] : luma
-        const bottom = y < height - 1 ? lumaMap[idx + width] : luma
-        const grad = Math.abs(right - left) + Math.abs(bottom - top)
-
-        const maxGradAllowed = mode === 'aggressive' ? 42 : 30
-        if (grad <= maxGradAllowed) {
-          setGrayPixel(data, offset, targetBg)
+      if (targetDark) {
+        if (luma <= 255 - cutoff) {
+          let hasInk = false
+          const xMin = Math.max(0, x - 1)
+          const xMax = Math.min(width - 1, x + 1)
+          for (let ny = yMin; ny <= yMax && !hasInk; ny++) {
+            const nRow = ny * width
+            for (let nx = xMin; nx <= xMax; nx++) {
+              if (lumaMap[nRow + nx] > 255 - inkCutoff) {
+                hasInk = true
+                break
+              }
+            }
+          }
+          if (!hasInk) {
+            setGrayPixel(data, offset, targetBg)
+          }
+        }
+      } else {
+        if (luma >= cutoff) {
+          let hasInk = false
+          const xMin = Math.max(0, x - 1)
+          const xMax = Math.min(width - 1, x + 1)
+          for (let ny = yMin; ny <= yMax && !hasInk; ny++) {
+            const nRow = ny * width
+            for (let nx = xMin; nx <= xMax; nx++) {
+              if (lumaMap[nRow + nx] < inkCutoff) {
+                hasInk = true
+                break
+              }
+            }
+          }
+          if (!hasInk) {
+            setGrayPixel(data, offset, targetBg)
+          }
         }
       }
     }
