@@ -1639,4 +1639,37 @@ class PdfPageReflowServiceTest {
     }
     return count
   }
+
+  @Test
+  fun `given long strip page with extreme aspect ratio when reflowing then width resolution is preserved`() {
+    val width = 800
+    val height = 7200
+    val image = BufferedImage(width, height, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, width, height)
+    graphics.color = Color.BLACK
+    graphics.fillRect(50, 100, 300, 40)
+    graphics.fillRect(400, 100, 300, 40)
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    val pageBytes = output.toByteArray()
+
+    val book = makeBook("long-strip-book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+      )
+
+    val wordBlocks = response.items.filter { it.type == "word" }
+    assertThat(wordBlocks).isNotEmpty
+    val firstWord = wordBlocks.first()
+    assertThat(firstWord.w).isGreaterThan(200)
+  }
 }

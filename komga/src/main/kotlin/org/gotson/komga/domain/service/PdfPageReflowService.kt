@@ -32,6 +32,9 @@ import kotlin.system.measureTimeMillis
 
 private const val SERVER_REFLOW_MAX_PIXELS = 8_000_000
 private const val SERVER_REFLOW_MAX_SIDE = 3600
+private const val SERVER_REFLOW_STRIP_ASPECT_RATIO = 2.0
+private const val SERVER_REFLOW_STRIP_MAX_SHORT_SIDE = 1800
+private const val SERVER_REFLOW_STRIP_MAX_LONG_SIDE = 65000
 private const val REFLOW_INLINE_DIRECT_PNG_MAX_BYTES = 64 * 1024
 private const val REFLOW_INLINE_TARGET_MAX_BYTES = 220 * 1024
 private const val REFLOW_INLINE_MAX_PIXELS = 1_400_000
@@ -41,7 +44,7 @@ private const val VERTICAL_PARAGRAPH_BLANK_BLOCKS = 2.0
 private const val EDGE_INK_THRESHOLD = 245
 private const val MAX_EDGE_TRIM = 6
 private const val MAX_EDGE_EXPANSION = 10
-private const val REFLOW_ALGORITHM_VERSION = 12
+private const val REFLOW_ALGORITHM_VERSION = 13
 
 data class PdfPageReflowOptions(
   val targetWidth: Int,
@@ -492,9 +495,21 @@ class PdfPageReflowService(
   }
 
   private fun downscaleServerImage(image: BufferedImage): BufferedImage {
-    val maxSideScale = SERVER_REFLOW_MAX_SIDE.toDouble() / max(image.width, image.height)
-    val pixelScale = kotlin.math.sqrt(SERVER_REFLOW_MAX_PIXELS.toDouble() / max(1, image.width * image.height))
-    val scale = min(1.0, min(maxSideScale, pixelScale))
+    val shortSide = min(image.width, image.height)
+    val longSide = max(image.width, image.height)
+    val aspectRatio = longSide.toDouble() / max(1, shortSide)
+
+    val scale =
+      if (aspectRatio > SERVER_REFLOW_STRIP_ASPECT_RATIO) {
+        val shortSideScale = SERVER_REFLOW_STRIP_MAX_SHORT_SIDE.toDouble() / shortSide
+        val longSideScale = SERVER_REFLOW_STRIP_MAX_LONG_SIDE.toDouble() / longSide
+        min(1.0, min(shortSideScale, longSideScale))
+      } else {
+        val maxSideScale = SERVER_REFLOW_MAX_SIDE.toDouble() / longSide
+        val pixelScale = kotlin.math.sqrt(SERVER_REFLOW_MAX_PIXELS.toDouble() / max(1, image.width * image.height))
+        min(1.0, min(maxSideScale, pixelScale))
+      }
+
     if (scale >= 0.99) return image
 
     val width = max(1, (image.width * scale).roundToInt())
