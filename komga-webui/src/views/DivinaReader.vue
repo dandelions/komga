@@ -328,6 +328,8 @@
           @contrast-enhancement-change="setReflowContrastEnhancement"
           @match-background-change="setReflowMatchBackground"
           @match-background-mode-change="setReflowMatchBackgroundMode"
+          @remove-background-change="setReflowRemoveBackground"
+          @remove-watermark-change="setReflowRemoveWatermark"
           @block-spacing-change="setReflowBlockSpacing"
           @rotation-change="setReaderRotation"
           @crop-mode-change="setReflowCropMode"
@@ -811,6 +813,20 @@
                 </v-list-item>
                 <v-list-item>
                   <settings-select
+                    :items="reflowRemoveBackgroundModes"
+                    v-model="reflowSettings.removeBackground"
+                    label="去除背景颜色"
+                  />
+                </v-list-item>
+                <v-list-item>
+                  <settings-select
+                    :items="reflowRemoveWatermarkModes"
+                    v-model="reflowSettings.removeWatermark"
+                    label="去除水印"
+                  />
+                </v-list-item>
+                <v-list-item>
+                  <settings-select
                     :items="reflowMatchBackgroundModes"
                     v-model="reflowSettings.matchBackgroundMode"
                     label="文字显示"
@@ -1119,6 +1135,8 @@ function defaultReflowSettings(): any {
     contrastEnhancement: false,
     matchBackground: false,
     matchBackgroundMode: 'grayscale',
+    removeBackground: 'none',
+    removeWatermark: 'none',
     imageQuality: 80,
     algorithmMode: 'original',
     blockSpacing: 6,
@@ -1142,6 +1160,8 @@ function defaultReflowSettings(): any {
       contrastEnhancement: false,
       matchBackground: false,
       matchBackgroundMode: 'grayscale',
+      removeBackground: 'none',
+      removeWatermark: 'none',
       wordGap: 3,
       outputPadding: 16,
     },
@@ -1332,6 +1352,16 @@ export default Vue.extend({
         {text: '原图', value: 'original'},
         {text: '灰阶', value: 'grayscale'},
         {text: '黑白', value: 'monochrome'},
+      ],
+      reflowRemoveBackgroundModes: [
+        {text: '关闭', value: 'none'},
+        {text: '对齐底色(自适应)', value: 'normalize'},
+        {text: '激进纯化', value: 'clean'},
+      ],
+      reflowRemoveWatermarkModes: [
+        {text: '关闭', value: 'none'},
+        {text: '浅色水印抑制', value: 'light'},
+        {text: '彩色印章抑制', value: 'color'},
       ],
       reflowImageQualities: [90, 80, 70, 60, 50, 40].map(value => ({
         text: `${value}%`,
@@ -1659,6 +1689,8 @@ export default Vue.extend({
         contrastEnhancement: this.reflowSettings.contrastEnhancement,
         matchBackground: this.reflowSettings.matchBackground,
         matchBackgroundMode: this.reflowSettings.matchBackgroundMode,
+        removeBackground: this.reflowSettings.removeBackground,
+        removeWatermark: this.reflowSettings.removeWatermark,
         imageQuality: this.reflowSettings.imageQuality,
         algorithmMode: this.reflowSettings.algorithmMode,
         verticalText: this.reflowSettings.verticalText,
@@ -2962,6 +2994,12 @@ export default Vue.extend({
         matchBackgroundMode: settings.matchBackgroundMode === 'original'
           ? 'original'
           : settings.matchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale',
+        removeBackground: settings.removeBackground === 'clean' || settings.removeBackground === 'normalize'
+          ? settings.removeBackground
+          : 'none',
+        removeWatermark: settings.removeWatermark === 'light' || settings.removeWatermark === 'color'
+          ? settings.removeWatermark
+          : 'none',
         imageQuality: this.normalizedReflowImageQuality(settings.imageQuality),
         algorithmMode: settings.algorithmMode === 'koreader' ? 'koreader' : 'original',
         blockSpacing: Math.round(this.clampReflowNumber(settings.blockSpacing, 0, 24, this.reflowSettings.blockSpacing)),
@@ -2989,6 +3027,12 @@ export default Vue.extend({
         matchBackgroundMode: settings.matchBackgroundMode === 'original'
           ? 'original'
           : settings.matchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale',
+        removeBackground: settings.removeBackground === 'clean' || settings.removeBackground === 'normalize'
+          ? settings.removeBackground
+          : 'none',
+        removeWatermark: settings.removeWatermark === 'light' || settings.removeWatermark === 'color'
+          ? settings.removeWatermark
+          : 'none',
         wordGap: Math.round(this.clampReflowNumber(settings.wordGap, 1, 30, this.reflowSettings.k2Settings.wordGap)),
         outputPadding: Math.round(this.clampReflowNumber(settings.outputPadding, 0, 48, this.reflowSettings.k2Settings.outputPadding)),
       }
@@ -3290,6 +3334,16 @@ export default Vue.extend({
       this.reflowSettings.matchBackgroundMode = matchBackgroundMode === 'original'
         ? 'original'
         : matchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale'
+    },
+    setReflowRemoveBackground(removeBackground: string) {
+      this.reflowSettings.removeBackground = removeBackground === 'clean' || removeBackground === 'normalize'
+        ? removeBackground
+        : 'none'
+    },
+    setReflowRemoveWatermark(removeWatermark: string) {
+      this.reflowSettings.removeWatermark = removeWatermark === 'light' || removeWatermark === 'color'
+        ? removeWatermark
+        : 'none'
     },
     setReflowBlockSpacing(blockSpacing: number) {
       this.reflowSettings.blockSpacing = Math.max(0, Math.min(24, Math.round(blockSpacing)))

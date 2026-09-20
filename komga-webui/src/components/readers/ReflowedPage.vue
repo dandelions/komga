@@ -174,6 +174,22 @@
           <input type="checkbox" :checked="controlMatchBackground" @change="setMatchBackground"/>
         </label>
         <label class="reflow-column-control">
+          <span>去除背景颜色</span>
+          <select :value="controlRemoveBackground" @change="setRemoveBackground">
+            <option value="none">关闭</option>
+            <option value="normalize">对齐底色(自适应)</option>
+            <option value="clean">激进纯化</option>
+          </select>
+        </label>
+        <label class="reflow-column-control">
+          <span>去除水印</span>
+          <select :value="controlRemoveWatermark" @change="setRemoveWatermark">
+            <option value="none">关闭</option>
+            <option value="light">浅色水印抑制</option>
+            <option value="color">彩色印章抑制</option>
+          </select>
+        </label>
+        <label class="reflow-column-control">
           <span>文字显示</span>
           <select :value="controlMatchBackgroundMode" @change="setMatchBackgroundMode">
             <option value="original">原图</option>
@@ -521,7 +537,12 @@
 <script lang="ts">
 import Vue from 'vue'
 import {PageDtoWithUrl} from '@/types/komga-books'
-import {enhanceTextContrast} from '@/functions/image-enhancement'
+import {
+  DocumentRemoveBackgroundMode,
+  DocumentRemoveWatermarkMode,
+  enhanceTextContrast,
+  preprocessDocumentCanvas,
+} from '@/functions/image-enhancement'
 import {detectAutoDeskewAngle} from '@/functions/auto-deskew'
 import {
   canonicalPageImageUrl,
@@ -557,6 +578,8 @@ type ReflowOptions = {
   contrastEnhancement: boolean,
   matchBackground: boolean,
   matchBackgroundMode: MatchBackgroundMode,
+  removeBackground?: DocumentRemoveBackgroundMode,
+  removeWatermark?: DocumentRemoveWatermarkMode,
   imageQuality: number,
   blockSpacing: number,
   verticalText: boolean,
@@ -729,6 +752,8 @@ type ReflowOptionsSnapshot = {
   contrastEnhancement: boolean,
   matchBackground: boolean,
   matchBackgroundMode: MatchBackgroundMode,
+  removeBackground: DocumentRemoveBackgroundMode,
+  removeWatermark: DocumentRemoveWatermarkMode,
   imageQuality: number,
   blockSpacing: number,
   cropRoisKey: string,
@@ -928,6 +953,8 @@ export default Vue.extend({
       pendingContrastEnhancement: false,
       pendingMatchBackground: false,
       pendingMatchBackgroundMode: 'grayscale' as MatchBackgroundMode,
+      pendingRemoveBackground: 'none' as DocumentRemoveBackgroundMode,
+      pendingRemoveWatermark: 'none' as DocumentRemoveWatermarkMode,
       pendingImageQuality: DEFAULT_REFLOW_IMAGE_QUALITY,
       pendingBlockSpacing: 6,
       optionsSnapshot: undefined as ReflowOptionsSnapshot | undefined,
@@ -985,6 +1012,18 @@ export default Vue.extend({
       if (this.options.matchBackgroundMode === 'original') return 'original'
       return this.options.matchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale'
     },
+    removeBackground(): DocumentRemoveBackgroundMode {
+      if (this.options.removeBackground === 'clean' || this.options.removeBackground === 'normalize') {
+        return this.options.removeBackground
+      }
+      return 'none'
+    },
+    removeWatermark(): DocumentRemoveWatermarkMode {
+      if (this.options.removeWatermark === 'light' || this.options.removeWatermark === 'color') {
+        return this.options.removeWatermark
+      }
+      return 'none'
+    },
     blockSpacing(): number {
       return this.clampNumber(this.options.blockSpacing, 0, 24, 6)
     },
@@ -1026,6 +1065,18 @@ export default Vue.extend({
     controlMatchBackgroundMode(): MatchBackgroundMode {
       if (this.pendingMatchBackgroundMode === 'original') return 'original'
       return this.pendingMatchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale'
+    },
+    controlRemoveBackground(): DocumentRemoveBackgroundMode {
+      if (this.pendingRemoveBackground === 'clean' || this.pendingRemoveBackground === 'normalize') {
+        return this.pendingRemoveBackground
+      }
+      return 'none'
+    },
+    controlRemoveWatermark(): DocumentRemoveWatermarkMode {
+      if (this.pendingRemoveWatermark === 'light' || this.pendingRemoveWatermark === 'color') {
+        return this.pendingRemoveWatermark
+      }
+      return 'none'
     },
     controlImageQuality(): number {
       return this.normalizedImageQuality(this.pendingImageQuality)
@@ -1503,6 +1554,8 @@ export default Vue.extend({
       if (force || !previous || snapshot.contrastEnhancement !== previous.contrastEnhancement) this.pendingContrastEnhancement = snapshot.contrastEnhancement
       if (force || !previous || snapshot.matchBackground !== previous.matchBackground) this.pendingMatchBackground = snapshot.matchBackground
       if (force || !previous || snapshot.matchBackgroundMode !== previous.matchBackgroundMode) this.pendingMatchBackgroundMode = snapshot.matchBackgroundMode
+      if (force || !previous || snapshot.removeBackground !== previous.removeBackground) this.pendingRemoveBackground = snapshot.removeBackground
+      if (force || !previous || snapshot.removeWatermark !== previous.removeWatermark) this.pendingRemoveWatermark = snapshot.removeWatermark
       if (force || !previous || snapshot.imageQuality !== previous.imageQuality) this.pendingImageQuality = snapshot.imageQuality
       if (force || !previous || snapshot.blockSpacing !== previous.blockSpacing) this.pendingBlockSpacing = snapshot.blockSpacing
       if (force || !previous || snapshot.cropRoisKey !== previous.cropRoisKey) this.syncCropRoisFromOptions()
@@ -1524,6 +1577,12 @@ export default Vue.extend({
         matchBackgroundMode: this.options.matchBackgroundMode === 'original'
           ? 'original'
           : this.options.matchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale',
+        removeBackground: this.options.removeBackground === 'clean' || this.options.removeBackground === 'normalize'
+          ? this.options.removeBackground
+          : 'none',
+        removeWatermark: this.options.removeWatermark === 'light' || this.options.removeWatermark === 'color'
+          ? this.options.removeWatermark
+          : 'none',
         imageQuality: this.normalizedImageQuality(this.options.imageQuality),
         algorithmMode: this.reflowAlgorithmMode(),
         blockSpacing: this.clampNumber(this.options.blockSpacing, 0, 24, 6),
@@ -1600,6 +1659,7 @@ export default Vue.extend({
         if (!context) throw new Error('Canvas is unavailable')
         context.drawImage(image, 0, 0)
         this.pageBackground = this.detectPageBackground(context, canvas.width, canvas.height)
+        this.preprocessSourceCanvas(context, canvas.width, canvas.height)
         const autoSkewCorrection = this.autoSkewCorrection
           ? this.detectCanvasAutoSkew(context, canvas.width, canvas.height, this.currentDeskewAnalysisRoi())
           : 0
@@ -1776,6 +1836,8 @@ export default Vue.extend({
       params.set('contrastEnhancement', String(this.contrastEnhancement))
       params.set('matchBackground', String(this.matchBackground))
       params.set('matchBackgroundMode', this.matchBackgroundMode)
+      params.set('removeBackground', this.removeBackground)
+      params.set('removeWatermark', this.removeWatermark)
       params.set('imageQuality', String(this.imageQuality))
       params.set('blockSpacing', String(this.blockSpacing))
       params.set('verticalText', String(this.verticalText))
@@ -2222,6 +2284,8 @@ export default Vue.extend({
         contrastEnhancement: this.options.contrastEnhancement,
         matchBackground: this.options.matchBackground,
         matchBackgroundMode: this.matchBackgroundMode,
+        removeBackground: this.removeBackground,
+        removeWatermark: this.removeWatermark,
         imageQuality: this.imageQuality,
         algorithmMode: this.reflowAlgorithmMode(),
         verticalText: this.options.verticalText,
@@ -2467,6 +2531,17 @@ export default Vue.extend({
     },
     reflowSliceDataUrl(canvas: HTMLCanvasElement): string {
       return canvas.toDataURL('image/jpeg', this.imageQuality / 100)
+    },
+    preprocessSourceCanvas(context: CanvasRenderingContext2D, width: number, height: number) {
+      if (this.removeBackground === 'none' && this.removeWatermark === 'none') return
+      preprocessDocumentCanvas(context, width, height, {
+        removeBackground: this.removeBackground,
+        removeWatermark: this.removeWatermark,
+        targetDark: this.darkDisplay,
+      })
+      if (this.removeBackground !== 'none') {
+        this.pageBackground = this.darkDisplay ? '#000' : '#fff'
+      }
     },
     enhanceSourceCanvas(context: CanvasRenderingContext2D, width: number, height: number) {
       if (!this.contrastEnhancement || this.darkDisplay || this.matchBackgroundMode === 'original') return
@@ -6758,6 +6833,18 @@ export default Vue.extend({
         ? 'original'
         : target.value === 'monochrome' ? 'monochrome' : 'grayscale'
     },
+    setRemoveBackground(event: Event) {
+      const target = event.target as HTMLSelectElement
+      this.pendingRemoveBackground = target.value === 'clean' || target.value === 'normalize'
+        ? target.value
+        : 'none'
+    },
+    setRemoveWatermark(event: Event) {
+      const target = event.target as HTMLSelectElement
+      this.pendingRemoveWatermark = target.value === 'light' || target.value === 'color'
+        ? target.value
+        : 'none'
+    },
     setBlockSpacing(event: Event) {
       const target = event.target as HTMLInputElement
       this.pendingBlockSpacing = this.clampNumber(Number(target.value), 0, 24, 6)
@@ -6775,6 +6862,8 @@ export default Vue.extend({
       this.$emit('contrast-enhancement-change', this.controlContrastEnhancement)
       this.$emit('match-background-change', this.controlMatchBackground)
       this.$emit('match-background-mode-change', this.controlMatchBackgroundMode)
+      this.$emit('remove-background-change', this.controlRemoveBackground)
+      this.$emit('remove-watermark-change', this.controlRemoveWatermark)
       this.$emit('image-quality-change', this.controlImageQuality)
       this.$emit('block-spacing-change', this.controlBlockSpacing)
       this.$emit('crop-rois-change', this.cropRoisPayload())

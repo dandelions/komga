@@ -90,6 +90,22 @@
           </select>
         </label>
         <label class="k2-control k2-compact">
+          <span>去除背景</span>
+          <select :value="removeBackground" @change="setRemoveBackground">
+            <option value="none">关闭</option>
+            <option value="normalize">对齐底色</option>
+            <option value="clean">纯化</option>
+          </select>
+        </label>
+        <label class="k2-control k2-compact">
+          <span>去除水印</span>
+          <select :value="removeWatermark" @change="setRemoveWatermark">
+            <option value="none">关闭</option>
+            <option value="light">浅色抑制</option>
+            <option value="color">彩色抑制</option>
+          </select>
+        </label>
+        <label class="k2-control k2-compact">
           <span>Word gap</span>
           <input type="number" min="1" max="30" step="1" :value="wordGap" @input="setWordGap"/>
         </label>
@@ -246,7 +262,12 @@
 <script lang="ts">
 import Vue from 'vue'
 import {PageDtoWithUrl} from '@/types/komga-books'
-import {enhanceTextContrast} from '@/functions/image-enhancement'
+import {
+  DocumentRemoveBackgroundMode,
+  DocumentRemoveWatermarkMode,
+  enhanceTextContrast,
+  preprocessDocumentCanvas,
+} from '@/functions/image-enhancement'
 import {canonicalPageImageUrl, loadCachedPageImageWithStats} from '@/functions/page-image-cache'
 
 type Roi = { x: number, y: number, w: number, h: number }
@@ -269,6 +290,8 @@ type K2Settings = {
   contrastEnhancement: boolean,
   matchBackground: boolean,
   matchBackgroundMode: MatchBackgroundMode,
+  removeBackground?: DocumentRemoveBackgroundMode,
+  removeWatermark?: DocumentRemoveWatermarkMode,
   wordGap: number,
   outputPadding: number,
 }
@@ -362,6 +385,8 @@ export default Vue.extend({
     contrastEnhancement: false,
     matchBackground: false,
     matchBackgroundMode: 'grayscale' as MatchBackgroundMode,
+    removeBackground: 'none' as DocumentRemoveBackgroundMode,
+    removeWatermark: 'none' as DocumentRemoveWatermarkMode,
     wordGap: DEFAULT_WORD_GAP,
     outputPadding: DEFAULT_OUTPUT_PADDING,
     magnifierPressTimer: undefined as number | undefined,
@@ -642,6 +667,12 @@ export default Vue.extend({
       this.matchBackgroundMode = this.settings.matchBackgroundMode === 'original'
         ? 'original'
         : this.settings.matchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale'
+      this.removeBackground = this.settings.removeBackground === 'clean' || this.settings.removeBackground === 'normalize'
+        ? this.settings.removeBackground
+        : 'none'
+      this.removeWatermark = this.settings.removeWatermark === 'light' || this.settings.removeWatermark === 'color'
+        ? this.settings.removeWatermark
+        : 'none'
       this.wordGap = Math.round(this.clampNumber(Number(this.settings.wordGap), 1, 30, DEFAULT_WORD_GAP))
       this.outputPadding = Math.round(this.clampNumber(Number(this.settings.outputPadding), 0, 48, DEFAULT_OUTPUT_PADDING))
     },
@@ -654,6 +685,8 @@ export default Vue.extend({
         contrastEnhancement: this.contrastEnhancement,
         matchBackground: this.matchBackground,
         matchBackgroundMode: this.matchBackgroundMode,
+        removeBackground: this.removeBackground,
+        removeWatermark: this.removeWatermark,
         wordGap: this.wordGap,
         outputPadding: this.outputPadding,
       } as K2Settings)
@@ -695,6 +728,7 @@ export default Vue.extend({
         if (!context) throw new Error('Canvas is unavailable')
         context.drawImage(image, 0, 0)
         this.pageBackground = this.detectPageBackground(context, canvas.width, canvas.height)
+        this.preprocessSourceCanvas(context, canvas.width, canvas.height)
         this.enhanceSourceCanvas(context, canvas.width, canvas.height)
 
         const detectionSource = this.detectionCanvasSource(canvas)
@@ -842,6 +876,17 @@ export default Vue.extend({
     fillWordSliceBackground(context: CanvasRenderingContext2D, width: number, height: number) {
       context.fillStyle = this.wordOutputBackground()
       context.fillRect(0, 0, width, height)
+    },
+    preprocessSourceCanvas(context: CanvasRenderingContext2D, width: number, height: number) {
+      if (this.removeBackground === 'none' && this.removeWatermark === 'none') return
+      preprocessDocumentCanvas(context, width, height, {
+        removeBackground: this.removeBackground,
+        removeWatermark: this.removeWatermark,
+        targetDark: this.darkDisplay,
+      })
+      if (this.removeBackground !== 'none') {
+        this.pageBackground = this.darkDisplay ? '#000' : '#fff'
+      }
     },
     enhanceSourceCanvas(context: CanvasRenderingContext2D, width: number, height: number) {
       if (!this.contrastEnhancement || this.darkDisplay || this.matchBackgroundMode === 'original') return
@@ -2500,6 +2545,20 @@ export default Vue.extend({
       this.matchBackgroundMode = target.value === 'original'
         ? 'original'
         : target.value === 'monochrome' ? 'monochrome' : 'grayscale'
+      this.emitSettingsChange()
+    },
+    setRemoveBackground(event: Event) {
+      const target = event.target as HTMLSelectElement
+      this.removeBackground = target.value === 'clean' || target.value === 'normalize'
+        ? target.value
+        : 'none'
+      this.emitSettingsChange()
+    },
+    setRemoveWatermark(event: Event) {
+      const target = event.target as HTMLSelectElement
+      this.removeWatermark = target.value === 'light' || target.value === 'color'
+        ? target.value
+        : 'none'
       this.emitSettingsChange()
     },
     setWordGap(event: Event) {

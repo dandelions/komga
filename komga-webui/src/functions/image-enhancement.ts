@@ -25,6 +25,50 @@ export function enhanceTextContrast(
   context.putImageData(imageData, 0, 0)
 }
 
+export type DocumentRemoveBackgroundMode = 'none' | 'normalize' | 'clean'
+export type DocumentRemoveWatermarkMode = 'none' | 'light' | 'color'
+
+export type DocumentPreprocessOptions = {
+  removeBackground?: DocumentRemoveBackgroundMode | string,
+  removeWatermark?: DocumentRemoveWatermarkMode | string,
+  targetDark?: boolean,
+}
+
+export function preprocessDocumentData(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+  options: DocumentPreprocessOptions = {},
+) {
+  const removeBg = options.removeBackground && options.removeBackground !== 'none'
+  const removeWm = options.removeWatermark && options.removeWatermark !== 'none'
+  if (!removeBg && !removeWm) return
+  if (width <= 0 || height <= 0) return
+
+  if (removeBg && options.removeBackground) {
+    removeDocumentBackground(data, width, height, options.removeBackground, options.targetDark)
+  }
+  if (removeWm && options.removeWatermark) {
+    removeDocumentWatermark(data, width, height, options.removeWatermark, options.targetDark)
+  }
+}
+
+export function preprocessDocumentCanvas(
+  context: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  options: DocumentPreprocessOptions = {},
+) {
+  const removeBg = options.removeBackground && options.removeBackground !== 'none'
+  const removeWm = options.removeWatermark && options.removeWatermark !== 'none'
+  if (!removeBg && !removeWm) return
+  if (width <= 0 || height <= 0) return
+
+  const imageData = context.getImageData(0, 0, width, height)
+  preprocessDocumentData(imageData.data, width, height, options)
+  context.putImageData(imageData, 0, 0)
+}
+
 export function enhanceTextContrastData(
   data: Uint8ClampedArray,
   width: number,
@@ -241,4 +285,185 @@ function isColoredPixel(data: Uint8ClampedArray, offset: number): boolean {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
+}
+
+export function removeDocumentBackground(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+  mode: string = 'normalize',
+  targetDark: boolean = false,
+) {
+  if (width <= 0 || height <= 0 || mode === 'none') return
+  const targetBg = targetDark ? 0 : 255
+
+  if (mode === 'clean') {
+    const stats = estimateLumaStats(data, width, height)
+    if (!stats) return
+    const bgLuma = stats.background
+    const isDark = stats.sourceDark
+    const tolerance = 26
+    const minThreshold = isDark ? bgLuma + tolerance : bgLuma - tolerance
+
+    for (let i = 0; i < width * height; i++) {
+      const offset = i * 4
+      if (data[offset + 3] === 0) {
+        setGrayPixel(data, offset, targetBg)
+        continue
+      }
+      const luma = pixelLuma(data, offset)
+      const isBg = isDark ? luma <= minThreshold : luma >= minThreshold
+      if (isBg) {
+        setGrayPixel(data, offset, targetBg)
+      } else if (targetDark) {
+        const inv = Math.round(clamp(255 - luma, 0, 255))
+        setGrayPixel(data, offset, inv)
+      }
+    }
+    return
+  }
+
+  // mode === 'normalize' (主流自适应平坦化漂白)
+  const blockSize = 32
+  const gridW = Math.max(1, Math.ceil(width / blockSize))
+  const gridH = Math.max(1, Math.ceil(height / blockSize))
+  const bgGrid = new Float32Array(gridW * gridH)
+
+  for (let gy = 0; gy < gridH; gy++) {
+    for (let gx = 0; gx < gridW; gx++) {
+      const startX = gx * blockSize
+      const startY = gy * blockSize
+      const endX = Math.min(width, startX + blockSize)
+      const endY = Math.min(height, startY + blockSize)
+
+      let maxLuma = 0
+      let lumaSum = 0
+      let count = 0
+      for (let y = startY; y < endY; y += 2) {
+        for (let x = startX; x < endX; x += 2) {
+          const offset = (y * width + x) * 4
+          if (data[offset + 3] === 0) continue
+          const luma = pixelLuma(data, offset)
+          if (luma > maxLuma) maxLuma = luma
+          lumaSum += luma
+          count++
+        }
+      }
+      const blockAvg = count > 0 ? lumaSum / count : 255
+      const blockEstimate = maxLuma > 0 ? (maxLuma * 0.7 + blockAvg * 0.3) : 255
+      bgGrid[gy * gridW + gx] = Math.max(30, blockEstimate)
+    }
+  }
+
+  for (let y = 0; y < height; y++) {
+    const gyExact = (y / blockSize) - 0.5
+    const gy0 = Math.max(0, Math.min(gridH - 1, Math.floor(gyExact)))
+    const gy1 = Math.max(0, Math.min(gridH - 1, gy0 + 1))
+    const yFrac = Math.max(0, Math.min(1, gyExact - gy0))
+
+    for (let x = 0; x < width; x++) {
+      const gxExact = (x / blockSize) - 0.5
+      const gx0 = Math.max(0, Math.min(gridW - 1, Math.floor(gxExact)))
+      const gx1 = Math.max(0, Math.min(gridW - 1, gx0 + 1))
+      const xFrac = Math.max(0, Math.min(1, gxExact - gx0))
+
+      const bg00 = bgGrid[gy0 * gridW + gx0]
+      const bg10 = bgGrid[gy0 * gridW + gx1]
+      const bg01 = bgGrid[gy1 * gridW + gx0]
+      const bg11 = bgGrid[gy1 * gridW + gx1]
+
+      const top = bg00 + (bg10 - bg00) * xFrac
+      const bottom = bg01 + (bg11 - bg01) * xFrac
+      const localBg = top + (bottom - top) * yFrac
+
+      const offset = (y * width + x) * 4
+      if (data[offset + 3] === 0) {
+        setGrayPixel(data, offset, targetBg)
+        continue
+      }
+
+      const luma = pixelLuma(data, offset)
+      if (luma >= localBg - 15) {
+        setGrayPixel(data, offset, targetBg)
+        continue
+      }
+
+      const gain = 255.0 / Math.max(1, localBg)
+      let normLuma = clamp(luma * gain, 0, 255)
+
+      if (normLuma >= 235) {
+        setGrayPixel(data, offset, targetBg)
+        continue
+      }
+
+      if (targetDark) {
+        normLuma = 255 - normLuma
+        setGrayPixel(data, offset, normLuma)
+      } else {
+        data[offset] = Math.round(clamp(data[offset] * gain, 0, 255))
+        data[offset + 1] = Math.round(clamp(data[offset + 1] * gain, 0, 255))
+        data[offset + 2] = Math.round(clamp(data[offset + 2] * gain, 0, 255))
+        data[offset + 3] = 255
+      }
+    }
+  }
+}
+
+export function removeDocumentWatermark(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+  mode: string = 'smart',
+  targetDark: boolean = false,
+) {
+  if (width <= 0 || height <= 0 || mode === 'none') return
+  const targetBg = targetDark ? 0 : 255
+  const cutoff = mode === 'aggressive' ? 160 : 125
+  const checkChroma = mode === 'color' || mode === 'smart' || mode === 'aggressive'
+
+  const lumaMap = new Uint8Array(width * height)
+  for (let i = 0; i < width * height; i++) {
+    const offset = i * 4
+    lumaMap[i] = Math.round(pixelLuma(data, offset))
+  }
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = y * width + x
+      const offset = idx * 4
+      if (data[offset + 3] === 0) continue
+
+      const luma = lumaMap[idx]
+      if (!targetDark && luma >= 248) continue
+      if (targetDark && luma <= 8) continue
+
+      if (checkChroma) {
+        const r = data[offset]
+        const g = data[offset + 1]
+        const b = data[offset + 2]
+        const maxC = Math.max(r, g, b)
+        const minC = Math.min(r, g, b)
+        const chroma = maxC - minC
+        if (chroma >= 18 && luma > 75) {
+          setGrayPixel(data, offset, targetBg)
+          continue
+        }
+      }
+
+      if (mode === 'color') continue
+
+      if (luma >= cutoff) {
+        const left = x > 0 ? lumaMap[idx - 1] : luma
+        const right = x < width - 1 ? lumaMap[idx + 1] : luma
+        const top = y > 0 ? lumaMap[idx - width] : luma
+        const bottom = y < height - 1 ? lumaMap[idx + width] : luma
+        const grad = Math.abs(right - left) + Math.abs(bottom - top)
+
+        const maxGradAllowed = mode === 'aggressive' ? 42 : 30
+        if (grad <= maxGradAllowed) {
+          setGrayPixel(data, offset, targetBg)
+        }
+      }
+    }
+  }
 }
