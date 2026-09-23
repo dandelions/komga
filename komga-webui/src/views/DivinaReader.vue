@@ -424,7 +424,7 @@
         :page-layout="pageLayout"
         :scale="scale"
         :animations="animations"
-        :swipe="readerSwipeEnabled"
+        :swipe="false"
         :left-navigation-action="pagedLeftNavigationAction"
         :image-filter="normalReaderImageFilter"
         :rotation="readerRotation"

@@ -1,12 +1,7 @@
 <template>
   <div
     class="paged-reader full-height"
-    v-touch="{
-               left: () => {if(swipe) {navigateRightSide()}},
-               right: () => {if(swipe) {navigateLeftSide()}},
-               up: () => {if(swipe) {verticalNext()}},
-               down: () => {if(swipe) {verticalPrev()}}
-             }"
+    v-touch="swipeTouchHandlers"
   >
     <v-carousel v-model="carouselPage"
                 :show-arrows="false"
@@ -168,7 +163,7 @@ export default Vue.extend({
     },
     swipe: {
       type: Boolean,
-      required: true,
+      default: false,
     },
     readingDirection: {
       type: String as () => ReadingDirection,
@@ -252,6 +247,8 @@ export default Vue.extend({
       } else {
         this.$emit('update:page', 1)
       }
+      this.scrollToPageEdge(this.pendingScrollPosition)
+      this.pendingScrollPosition = 'top'
       this.$nextTick(this.ensureLoadedDeskewedPageUrls)
     },
     page(val, old) {
@@ -289,6 +286,15 @@ export default Vue.extend({
     this.revokeDeskewedPageUrls()
   },
   computed: {
+    swipeTouchHandlers(): object | undefined {
+      if (!this.swipe) return undefined
+      return {
+        left: () => { if (this.swipe) this.navigateRightSide() },
+        right: () => { if (this.swipe) this.navigateLeftSide() },
+        up: () => { if (this.swipe) this.verticalNext() },
+        down: () => { if (this.swipe) this.verticalPrev() },
+      }
+    },
     shortcuts(): any {
       const shortcuts = []
       switch (this.readingDirection) {
@@ -940,7 +946,7 @@ export default Vue.extend({
       if (this.canPrev) {
         const previousPageNumber = this.spreadPageNumber(this.spreads[this.carouselPage - 1])
         const previousPageRegion = this.lastCropRegionIndex(previousPageNumber)
-        this.pendingScrollPosition = 'bottom'
+        this.pendingScrollPosition = previousPageRegion !== undefined ? 'bottom' : 'top'
         this.setActiveCropRegion(previousPageRegion, this.lastCropSegmentIndex(previousPageNumber, previousPageRegion))
         this.carouselPage--
       } else {
@@ -975,35 +981,81 @@ export default Vue.extend({
       }
     },
     scrollToPageEdge(position: 'top' | 'bottom') {
+      const isLandscapeRotated = Boolean(
+        (this.$el as HTMLElement | undefined)?.closest?.('.reader-frame-landscape') ||
+        (typeof document !== 'undefined' && document.querySelector?.('.reader-frame-landscape'))
+      )
+
       const scrollToEdge = () => {
+        if (typeof document === 'undefined') return
         const scrollingElement = document.scrollingElement || document.documentElement
         const reader = this.$el as HTMLElement
+        if (!reader) return
+
+        const frameLandscape = (reader.closest ? reader.closest('.reader-frame-landscape') : null) as HTMLElement | null
         const scrollableElements = [
           reader,
-          ...Array.from(reader.querySelectorAll('.v-carousel, .v-window, .v-window__container, .v-window-item')),
-        ] as HTMLElement[]
-        const scrollingElementTop = position === 'bottom' ? scrollingElement.scrollHeight : 0
-        const scrollableElementTop = (element: HTMLElement) => position === 'bottom' ? element.scrollHeight : 0
+          frameLandscape,
+          ...Array.from(reader.querySelectorAll('.v-carousel, .v-window, .v-window__container, .v-window-item, .v-window-item--active')),
+        ].filter(Boolean) as HTMLElement[]
 
-        window.scrollTo({top: scrollingElementTop, left: 0, behavior: 'auto'})
-        scrollingElement.scrollTop = scrollingElementTop
-        scrollingElement.scrollLeft = 0
-        document.documentElement.scrollTop = position === 'bottom' ? document.documentElement.scrollHeight : 0
-        document.documentElement.scrollLeft = 0
-        document.body.scrollTop = position === 'bottom' ? document.body.scrollHeight : 0
-        document.body.scrollLeft = 0
-        scrollableElements.forEach(x => {
-          x.scrollTop = scrollableElementTop(x)
-          x.scrollLeft = 0
-        })
+        if (isLandscapeRotated) {
+          // In 90deg rotated landscape (.reader-frame-landscape),
+          // DOM X axis maps to visual Y axis (left -> visual top, right -> visual bottom)
+          // DOM Y axis maps to visual X axis (top -> visual right, bottom -> visual left)
+          const scrollableElementLeft = (element: HTMLElement) => position === 'bottom' ? element.scrollWidth : 0
+          scrollableElements.forEach(x => {
+            x.scrollLeft = scrollableElementLeft(x)
+            x.scrollTop = 0
+          })
+          window.scrollTo({top: 0, left: 0, behavior: 'auto'})
+          scrollingElement.scrollTop = 0
+          scrollingElement.scrollLeft = 0
+          document.documentElement.scrollTop = 0
+          document.documentElement.scrollLeft = 0
+          document.body.scrollTop = 0
+          document.body.scrollLeft = 0
+        } else {
+          const scrollingElementTop = position === 'bottom' ? scrollingElement.scrollHeight : 0
+          const scrollableElementTop = (element: HTMLElement) => position === 'bottom' ? element.scrollHeight : 0
+
+          window.scrollTo({top: scrollingElementTop, left: 0, behavior: 'auto'})
+          scrollingElement.scrollTop = scrollingElementTop
+          scrollingElement.scrollLeft = 0
+          document.documentElement.scrollTop = position === 'bottom' ? document.documentElement.scrollHeight : 0
+          document.documentElement.scrollLeft = 0
+          document.body.scrollTop = position === 'bottom' ? document.body.scrollHeight : 0
+          document.body.scrollLeft = 0
+          scrollableElements.forEach(x => {
+            x.scrollTop = scrollableElementTop(x)
+            x.scrollLeft = 0
+          })
+        }
+
+        if (position === 'top') {
+          try {
+            const activeItem = (reader.querySelector('.v-window-item--active') || reader) as HTMLElement
+            const target = (activeItem.querySelector('img') || activeItem) as HTMLElement
+            if (target && typeof target.scrollIntoView === 'function') {
+              target.scrollIntoView({block: 'start', inline: 'start', behavior: 'auto'})
+            }
+          } catch (e) {
+            // ignore in testing environments without scrollIntoView
+          }
+        }
       }
 
       scrollToEdge()
-      this.$nextTick(() => {
-        scrollToEdge()
-        window.requestAnimationFrame(scrollToEdge)
-        window.setTimeout(scrollToEdge, 100)
-      })
+      if (typeof this.$nextTick === 'function') {
+        this.$nextTick(() => {
+          scrollToEdge()
+          if (typeof window !== 'undefined') {
+            if (window.requestAnimationFrame) window.requestAnimationFrame(scrollToEdge)
+            window.setTimeout(scrollToEdge, 50)
+            window.setTimeout(scrollToEdge, 150)
+          }
+        })
+      }
     },
     toSpreadIndex(i: number): number {
       this.$debug('[toSpreadIndex]', `i:${i}`, `isDoublePages:${this.isDoublePages}`)

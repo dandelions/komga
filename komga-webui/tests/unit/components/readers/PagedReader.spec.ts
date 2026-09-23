@@ -3,6 +3,7 @@ import {ReadingDirection} from '@/types/enum-books'
 import {ScaleType} from '@/types/enum-reader'
 
 const methods = (PagedReader as any).options.methods
+const computed = (PagedReader as any).options.computed
 const pageWatcher = (PagedReader as any).options.watch.page
 const rotationWatcher = (PagedReader as any).options.watch.rotation.handler
 
@@ -117,5 +118,89 @@ describe('PagedReader previous-page scroll restoration', () => {
     expect(reader.rebuildSpreads).toHaveBeenCalledWith(2)
     expect(reader.revokeDeskewedPageUrls).toHaveBeenCalled()
     expect(reader.ensureLoadedDeskewedPageUrls).toHaveBeenCalled()
+  })
+
+  test('disables touch swipe handlers when swipe is false', () => {
+    const reader = {swipe: false}
+    expect(computed.swipeTouchHandlers.call(reader)).toBeUndefined()
+  })
+
+  test('provides touch swipe handlers when swipe is true', () => {
+    const reader = {
+      swipe: true,
+      navigateRightSide: jest.fn(),
+      navigateLeftSide: jest.fn(),
+      verticalNext: jest.fn(),
+      verticalPrev: jest.fn(),
+    }
+    const handlers = computed.swipeTouchHandlers.call(reader)
+    expect(handlers).toBeDefined()
+    expect(typeof handlers.left).toBe('function')
+    expect(typeof handlers.right).toBe('function')
+    expect(typeof handlers.up).toBe('function')
+    expect(typeof handlers.down).toBe('function')
+
+    handlers.left()
+    expect(reader.navigateRightSide).toHaveBeenCalled()
+    handlers.right()
+    expect(reader.navigateLeftSide).toHaveBeenCalled()
+  })
+
+  test('scrollToPageEdge resets scrolling to visual top and triggers scrollIntoView', () => {
+    const targetImg = document.createElement('img')
+    targetImg.scrollIntoView = jest.fn()
+    const activeItem = document.createElement('div')
+    activeItem.className = 'v-window-item--active'
+    activeItem.appendChild(targetImg)
+
+    const el = document.createElement('div')
+    el.appendChild(activeItem)
+    const reader = {
+      $el: el,
+      $nextTick: jest.fn((cb: any) => cb()),
+    }
+
+    const scrollToSpy = jest.spyOn(window, 'scrollTo').mockImplementation(() => {})
+
+    methods.scrollToPageEdge.call(reader, 'top')
+
+    expect(scrollToSpy).toHaveBeenCalledWith({top: 0, left: 0, behavior: 'auto'})
+    expect(targetImg.scrollIntoView).toHaveBeenCalledWith({block: 'start', inline: 'start', behavior: 'auto'})
+
+    scrollToSpy.mockRestore()
+  })
+
+  test('scrollToPageEdge maps visual Y to DOM X in CSS landscape rotated mode', () => {
+    const landscapeContainer = document.createElement('div')
+    landscapeContainer.className = 'reader-frame-landscape'
+
+    const el = document.createElement('div')
+    const carousel = document.createElement('div')
+    carousel.className = 'v-carousel'
+    Object.defineProperty(carousel, 'scrollWidth', {value: 1200, configurable: true})
+    Object.defineProperty(carousel, 'scrollHeight', {value: 800, configurable: true})
+    el.appendChild(carousel)
+    landscapeContainer.appendChild(el)
+    document.body.appendChild(landscapeContainer)
+
+    const reader = {
+      $el: el,
+      $nextTick: jest.fn((cb: any) => cb()),
+    }
+
+    const scrollToSpy = jest.spyOn(window, 'scrollTo').mockImplementation(() => {})
+
+    // 'bottom' should set scrollLeft to scrollWidth in rotated mode
+    methods.scrollToPageEdge.call(reader, 'bottom')
+    expect(carousel.scrollLeft).toBe(1200)
+    expect(carousel.scrollTop).toBe(0)
+
+    // 'top' should set scrollLeft to 0 in rotated mode
+    methods.scrollToPageEdge.call(reader, 'top')
+    expect(carousel.scrollLeft).toBe(0)
+    expect(carousel.scrollTop).toBe(0)
+
+    scrollToSpy.mockRestore()
+    document.body.removeChild(landscapeContainer)
   })
 })
