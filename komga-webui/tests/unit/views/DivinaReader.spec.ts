@@ -144,4 +144,39 @@ describe('DivinaReader image magnifier', () => {
     expect(window.localStorage.getItem('komga.readerMagnifierMagnification')).toBe('3.25')
     window.localStorage.removeItem('komga.readerMagnifierMagnification')
   })
+
+  test('toggles landscape display with native orientation lock or fallback', async () => {
+    const originalScrollTo = window.scrollTo
+    window.scrollTo = jest.fn()
+    const readerWithLock = {
+      landscapeDisplay: false,
+      nativeOrientationLocked: false,
+      enterFullscreen: jest.fn().mockResolvedValue(undefined),
+      lockOrientation: jest.fn().mockResolvedValue(true),
+      unlockOrientation: jest.fn(),
+    }
+
+    await methods.toggleLandscapeDisplay.call(readerWithLock)
+    expect(readerWithLock.landscapeDisplay).toBe(true)
+    expect(readerWithLock.nativeOrientationLocked).toBe(true)
+    expect(readerWithLock.lockOrientation).toHaveBeenCalledWith('landscape')
+
+    await methods.toggleLandscapeDisplay.call(readerWithLock)
+    expect(readerWithLock.landscapeDisplay).toBe(false)
+    expect(readerWithLock.nativeOrientationLocked).toBe(false)
+    expect(readerWithLock.unlockOrientation).toHaveBeenCalled()
+
+    const readerFallback = {
+      landscapeDisplay: false,
+      nativeOrientationLocked: false,
+      enterFullscreen: jest.fn().mockResolvedValue(undefined),
+      lockOrientation: jest.fn().mockResolvedValue(false),
+      unlockOrientation: jest.fn(),
+    }
+
+    await methods.toggleLandscapeDisplay.call(readerFallback)
+    expect(readerFallback.landscapeDisplay).toBe(true)
+    expect(readerFallback.nativeOrientationLocked).toBe(false)
+    window.scrollTo = originalScrollTo
+  })
 })

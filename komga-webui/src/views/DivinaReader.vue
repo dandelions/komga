@@ -13,7 +13,7 @@
           dense elevation="1"
           v-if="showToolbars"
           class="settings full-width"
-          style="position: fixed; top: 0"
+          style="position: fixed; top: 0; z-index: 2"
         >
           <v-btn
             icon
@@ -236,7 +236,7 @@
 
     <div
       class="full-height reader-frame"
-      :class="{'reader-frame-landscape': landscapeDisplay && !continuousReader}"
+      :class="{'reader-frame-landscape': landscapeDisplay && !nativeOrientationLocked && !continuousReader}"
     >
       <div
         v-if="isPdf && k2ReflowMode && !continuousReader"
@@ -1249,6 +1249,7 @@ export default Vue.extend({
       magnifierPressTimer: undefined as number | undefined,
       magnifierLongPressTriggered: false,
       landscapeDisplay: false,
+      nativeOrientationLocked: false,
       reflowSetupMode: false,
       reflowMode: false,
       k2ReflowMode: false,
@@ -1439,7 +1440,7 @@ export default Vue.extend({
     this.revokeReaderCropImageUrl()
     this.revokeReaderDeskewedPageUrls()
 
-    this.unlockOrientation()
+    if (this.nativeOrientationLocked) this.unlockOrientation()
     this.$vuetify.rtl = (this.$t('common.locale_rtl') === 'true')
     window.removeEventListener('keydown', this.keyPressed)
     if (screenfull.isEnabled) {
@@ -2598,7 +2599,10 @@ export default Vue.extend({
       else {
         this.fullscreenIcon = 'mdi-fullscreen'
         if (this.landscapeDisplay) {
-          this.unlockOrientation()
+          if (this.nativeOrientationLocked) {
+            this.unlockOrientation()
+            this.nativeOrientationLocked = false
+          }
           this.landscapeDisplay = false
         }
       }
@@ -3604,9 +3608,10 @@ export default Vue.extend({
       if (landscapeDisplay) {
         await this.enterFullscreen()
         const locked = await this.lockOrientation('landscape')
-        if (!locked) return
+        this.nativeOrientationLocked = locked
       } else {
-        this.unlockOrientation()
+        if (this.nativeOrientationLocked) this.unlockOrientation()
+        this.nativeOrientationLocked = false
       }
       this.landscapeDisplay = landscapeDisplay
       window.scrollTo(0, 0)
@@ -3781,7 +3786,7 @@ export default Vue.extend({
 }
 
 .reader-landscape-shell {
-  overflow: visible;
+  overflow: hidden;
 }
 
 .reader-frame {
@@ -3790,7 +3795,15 @@ export default Vue.extend({
 }
 
 .reader-frame-landscape {
-  overflow: visible;
+  position: fixed;
+  top: calc((100vh - 100vw) / 2);
+  left: calc((100vw - 100vh) / 2);
+  width: 100vh;
+  height: 100vw;
+  transform: rotate(90deg);
+  transform-origin: center center;
+  overflow: hidden;
+  z-index: 1;
 }
 
 .reflow-reader {

@@ -100,7 +100,7 @@ import {shortcutsLTR, shortcutsRTL, shortcutsVertical} from '@/functions/shortcu
 import {PageDtoWithUrl} from '@/types/komga-books'
 import {buildSpreads} from '@/functions/book-spreads'
 import {enhanceTextContrast} from '@/functions/image-enhancement'
-import {markPageImageBrowserLoaded} from '@/functions/page-image-cache'
+import {loadCachedPageImage, markPageImageBrowserLoaded} from '@/functions/page-image-cache'
 
 type CropRegion = {
   x: number,
@@ -223,9 +223,14 @@ export default Vue.extend({
       this.revokeDeskewedPageUrls()
       this.$nextTick(this.ensureLoadedDeskewedPageUrls)
     },
-    rotation() {
-      this.revokeDeskewedPageUrls()
-      this.$nextTick(this.ensureLoadedDeskewedPageUrls)
+    rotation: {
+      handler() {
+        this.pageAspectRatios = {}
+        this.rebuildSpreads(this.page)
+        this.revokeDeskewedPageUrls()
+        this.$nextTick(this.ensureLoadedDeskewedPageUrls)
+      },
+      immediate: true,
     },
     contrastEnhancement() {
       this.revokeDeskewedPageUrls()
@@ -247,6 +252,7 @@ export default Vue.extend({
       } else {
         this.$emit('update:page', 1)
       }
+      this.$nextTick(this.ensureLoadedDeskewedPageUrls)
     },
     page(val, old) {
       this.$debug('[watch:page]', `old:${old}`, `new:${val}`)
@@ -366,8 +372,22 @@ export default Vue.extend({
     keyPressed(e: KeyboardEvent) {
       this.shortcuts[e.key]?.execute(this)
     },
+    spreadPages(): PageDtoWithUrl[] {
+      if (!this.pages) return []
+      const quarterTurn = Math.abs(this.normalizedRotation(this.rotation)) === 90
+      if (!quarterTurn) return this.pages
+      return this.pages.map(p => {
+        const hasWidth = p.width !== undefined && p.width !== null
+        const hasHeight = p.height !== undefined && p.height !== null
+        return {
+          ...p,
+          width: hasHeight ? Number(p.height) : p.width,
+          height: hasWidth ? Number(p.width) : p.height,
+        }
+      })
+    },
     rebuildSpreads(currentPage: number | undefined) {
-      this.spreads = buildSpreads(this.pages, this.effectivePageLayout)
+      this.spreads = buildSpreads(this.spreadPages(), this.effectivePageLayout)
       if (currentPage) this.carouselPage = this.toSpreadIndex(currentPage)
       else this.carouselPage = 0
     },
@@ -687,7 +707,31 @@ export default Vue.extend({
       }
       this.ensureDeskewedPageUrl(page, event)
     },
-    async ensureDeskewedPageUrl(page: PageDtoWithUrl, event: Event) {
+    async loadSourceImage(page: PageDtoWithUrl, fallbackImage?: HTMLImageElement): Promise<HTMLImageElement> {
+      try {
+        const blob = await loadCachedPageImage(page.url)
+        const objectUrl = URL.createObjectURL(blob)
+        return await new Promise<HTMLImageElement>((resolve, reject) => {
+          const img = new Image()
+          img.onload = () => {
+            URL.revokeObjectURL(objectUrl)
+            if (img.naturalWidth > 0 && img.naturalHeight > 0) resolve(img)
+            else reject(new Error('Empty image'))
+          }
+          img.onerror = () => {
+            URL.revokeObjectURL(objectUrl)
+            reject(new Error('Image decode error'))
+          }
+          img.src = objectUrl
+        })
+      } catch (e) {
+        if (fallbackImage && fallbackImage.complete && fallbackImage.naturalWidth > 0) {
+          return fallbackImage
+        }
+        throw e
+      }
+    },
+    async ensureDeskewedPageUrl(page: PageDtoWithUrl, event?: Event) {
       const rotation = this.normalizedRotation(this.rotation)
       const angle = this.skewCorrection || 0
       const contrastEnhancement = this.contrastEnhancement
@@ -698,18 +742,25 @@ export default Vue.extend({
       if (this.pageDisplayUrls[page.number]) return
       if ((!rotation && !angle && !this.contrastEnhancement) || this.deskewedPageUrls[page.number] || this.deskewedPagePending[page.number]) return
 
-      const image = event.target as HTMLImageElement
-      if (!image?.complete || image.naturalWidth <= 0) return
+      const image = event?.target as HTMLImageElement | undefined
+      if (image && (!image.complete || image.naturalWidth <= 0)) return
 
       this.$set(this.deskewedPagePending, page.number, true)
       try {
         const pageIsCurrent = this.isCurrentSpreadPage(page.number)
         if (!pageIsCurrent) await this.waitForReaderIdle()
         if (this.normalizedRotation(this.rotation) !== rotation || this.skewCorrection !== angle || this.contrastEnhancement !== contrastEnhancement || this.deskewedPageUrls[page.number]) return
-        const canvas = this.processedPageCanvas(image, rotation, angle)
+        const sourceImage = await this.loadSourceImage(page, image)
+        if (this.normalizedRotation(this.rotation) !== rotation || this.skewCorrection !== angle || this.contrastEnhancement !== contrastEnhancement || this.deskewedPageUrls[page.number]) return
+        const canvas = this.processedPageCanvas(sourceImage, rotation, angle)
         const url = await this.canvasObjectUrl(canvas)
-        if (this.normalizedRotation(this.rotation) === rotation && this.skewCorrection === angle && this.contrastEnhancement === contrastEnhancement) this.$set(this.deskewedPageUrls, page.number, url)
-        else URL.revokeObjectURL(url)
+        if (this.normalizedRotation(this.rotation) === rotation && this.skewCorrection === angle && this.contrastEnhancement === contrastEnhancement) {
+          this.$set(this.deskewedPageUrls, page.number, url)
+          const ratio = canvas.width / canvas.height
+          if (this.pageAspectRatios[page.number] !== ratio) this.$set(this.pageAspectRatios, page.number, ratio)
+        } else {
+          URL.revokeObjectURL(url)
+        }
       } catch (e) {
       } finally {
         this.$delete(this.deskewedPagePending, page.number)
@@ -788,11 +839,17 @@ export default Vue.extend({
     },
     ensureLoadedDeskewedPageUrls() {
       if (!this.normalizedRotation(this.rotation) && !this.skewCorrection && !this.contrastEnhancement) return
-      const images = Array.from(this.$el.querySelectorAll('img[data-page-number]')) as HTMLImageElement[]
+      const currentPages = this.spreads[this.carouselPage] || []
+      const images = Array.from(this.$el?.querySelectorAll?.('img[data-page-number]') || []) as HTMLImageElement[]
       images.forEach(image => {
         const pageNumber = Number(image.dataset.pageNumber)
         const page = this.pages.find(x => x.number === pageNumber)
         if (page && image.complete && image.naturalWidth > 0) this.ensureDeskewedPageUrl(page, {target: image} as unknown as Event)
+      })
+      currentPages.forEach(page => {
+        if (!this.deskewedPageUrls[page.number] && !this.deskewedPagePending[page.number]) {
+          this.ensureDeskewedPageUrl(page)
+        }
       })
     },
     waitForReaderIdle(): Promise<void> {

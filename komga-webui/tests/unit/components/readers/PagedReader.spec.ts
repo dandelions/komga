@@ -4,6 +4,7 @@ import {ScaleType} from '@/types/enum-reader'
 
 const methods = (PagedReader as any).options.methods
 const pageWatcher = (PagedReader as any).options.watch.page
+const rotationWatcher = (PagedReader as any).options.watch.rotation.handler
 
 function createReader(readingDirection: ReadingDirection = ReadingDirection.RIGHT_TO_LEFT): any {
   const previousPage = {number: 1, width: 2400, height: 1200}
@@ -72,5 +73,49 @@ describe('PagedReader previous-page scroll restoration', () => {
 
     expect(reader.scrollToPageEdge).toHaveBeenCalledWith('bottom')
     expect(reader.pendingScrollPosition).toBe('top')
+  })
+
+  test('swaps page dimensions on quarter turn in spreadPages', () => {
+    const reader = createReader()
+    reader.rotation = 0
+    expect(reader.spreadPages()).toEqual([
+      {number: 1, width: 2400, height: 1200},
+      {number: 2, width: 2400, height: 1200},
+    ])
+
+    reader.rotation = 90
+    expect(reader.spreadPages()).toEqual([
+      {number: 1, width: 1200, height: 2400},
+      {number: 2, width: 1200, height: 2400},
+    ])
+
+    reader.rotation = -90
+    expect(reader.spreadPages()).toEqual([
+      {number: 1, width: 1200, height: 2400},
+      {number: 2, width: 1200, height: 2400},
+    ])
+
+    reader.rotation = 180
+    expect(reader.spreadPages()).toEqual([
+      {number: 1, width: 2400, height: 1200},
+      {number: 2, width: 2400, height: 1200},
+    ])
+  })
+
+  test('rebuilds spreads and refreshes deskewed urls on rotation change', () => {
+    const reader = createReader()
+    reader.page = 2
+    reader.pageAspectRatios = {1: 2.0, 2: 2.0}
+    reader.rebuildSpreads = jest.fn()
+    reader.revokeDeskewedPageUrls = jest.fn()
+    reader.$nextTick = jest.fn((cb: any) => cb())
+    reader.ensureLoadedDeskewedPageUrls = jest.fn()
+
+    rotationWatcher.call(reader)
+
+    expect(reader.pageAspectRatios).toEqual({})
+    expect(reader.rebuildSpreads).toHaveBeenCalledWith(2)
+    expect(reader.revokeDeskewedPageUrls).toHaveBeenCalled()
+    expect(reader.ensureLoadedDeskewedPageUrls).toHaveBeenCalled()
   })
 })

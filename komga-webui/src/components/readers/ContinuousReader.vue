@@ -47,7 +47,7 @@ import {ContinuousScaleType} from '@/types/enum-reader'
 import {PageDtoWithUrl} from '@/types/komga-books'
 import {throttle} from 'lodash'
 import {enhanceTextContrast} from '@/functions/image-enhancement'
-import {markPageImageBrowserLoaded} from '@/functions/page-image-cache'
+import {loadCachedPageImage, markPageImageBrowserLoaded} from '@/functions/page-image-cache'
 
 type CropRegion = {
   x: number,
@@ -145,9 +145,12 @@ export default Vue.extend({
       this.revokeDeskewedPageUrls()
       this.$nextTick(this.ensureLoadedDeskewedPageUrls)
     },
-    rotation() {
-      this.revokeDeskewedPageUrls()
-      this.$nextTick(this.ensureLoadedDeskewedPageUrls)
+    rotation: {
+      handler() {
+        this.revokeDeskewedPageUrls()
+        this.$nextTick(this.ensureLoadedDeskewedPageUrls)
+      },
+      immediate: true,
     },
     contrastEnhancement() {
       this.revokeDeskewedPageUrls()
@@ -319,9 +322,33 @@ export default Vue.extend({
       if (!Number.isFinite(numberValue)) return fallback
       return Math.max(0, Math.min(100, numberValue))
     },
-    async ensureDeskewedPageUrl(page: PageDtoWithUrl, event: Event) {
-      const loadedImage = event.target as HTMLImageElement
-      markPageImageBrowserLoaded(page.url, loadedImage.currentSrc || loadedImage.src)
+    async loadSourceImage(page: PageDtoWithUrl, fallbackImage?: HTMLImageElement): Promise<HTMLImageElement> {
+      try {
+        const blob = await loadCachedPageImage(page.url)
+        const objectUrl = URL.createObjectURL(blob)
+        return await new Promise<HTMLImageElement>((resolve, reject) => {
+          const img = new Image()
+          img.onload = () => {
+            URL.revokeObjectURL(objectUrl)
+            if (img.naturalWidth > 0 && img.naturalHeight > 0) resolve(img)
+            else reject(new Error('Empty image'))
+          }
+          img.onerror = () => {
+            URL.revokeObjectURL(objectUrl)
+            reject(new Error('Image decode error'))
+          }
+          img.src = objectUrl
+        })
+      } catch (e) {
+        if (fallbackImage && fallbackImage.complete && fallbackImage.naturalWidth > 0) {
+          return fallbackImage
+        }
+        throw e
+      }
+    },
+    async ensureDeskewedPageUrl(page: PageDtoWithUrl, event?: Event) {
+      const loadedImage = event?.target as HTMLImageElement | undefined
+      if (loadedImage) markPageImageBrowserLoaded(page.url, loadedImage.currentSrc || loadedImage.src)
       const rotation = this.normalizedRotation(this.rotation)
       const angle = this.skewCorrection || 0
       const contrastEnhancement = this.contrastEnhancement
@@ -332,14 +359,16 @@ export default Vue.extend({
       if ((!rotation && !angle && !this.contrastEnhancement) || this.deskewedPageUrls[page.number] || this.deskewedPagePending[page.number]) return
 
       const image = loadedImage
-      if (!image?.complete || image.naturalWidth <= 0) return
+      if (image && (!image.complete || image.naturalWidth <= 0)) return
 
       this.$set(this.deskewedPagePending, page.number, true)
       try {
         const pageIsCurrent = page.number === this.currentPage
         if (!pageIsCurrent) await this.waitForReaderIdle()
         if (this.normalizedRotation(this.rotation) !== rotation || this.skewCorrection !== angle || this.contrastEnhancement !== contrastEnhancement || this.deskewedPageUrls[page.number]) return
-        const canvas = this.processedPageCanvas(image, rotation, angle)
+        const sourceImage = await this.loadSourceImage(page, image)
+        if (this.normalizedRotation(this.rotation) !== rotation || this.skewCorrection !== angle || this.contrastEnhancement !== contrastEnhancement || this.deskewedPageUrls[page.number]) return
+        const canvas = this.processedPageCanvas(sourceImage, rotation, angle)
         const url = await this.canvasObjectUrl(canvas)
         if (this.normalizedRotation(this.rotation) === rotation && this.skewCorrection === angle && this.contrastEnhancement === contrastEnhancement) this.$set(this.deskewedPageUrls, page.number, url)
         else URL.revokeObjectURL(url)
@@ -421,12 +450,16 @@ export default Vue.extend({
     },
     ensureLoadedDeskewedPageUrls() {
       if (!this.normalizedRotation(this.rotation) && !this.skewCorrection && !this.contrastEnhancement) return
-      const images = Array.from(this.$el.querySelectorAll('img[data-page-number]')) as HTMLImageElement[]
+      const images = Array.from(this.$el?.querySelectorAll?.('img[data-page-number]') || []) as HTMLImageElement[]
       images.forEach(image => {
         const pageNumber = Number(image.dataset.pageNumber)
         const page = this.pages.find(x => x.number === pageNumber)
         if (page && image.complete && image.naturalWidth > 0) this.ensureDeskewedPageUrl(page, {target: image} as unknown as Event)
       })
+      const currentPage = this.pages.find(x => x.number === this.currentPage)
+      if (currentPage && !this.deskewedPageUrls[currentPage.number] && !this.deskewedPagePending[currentPage.number]) {
+        this.ensureDeskewedPageUrl(currentPage)
+      }
     },
     waitForReaderIdle(): Promise<void> {
       return new Promise(resolve => {
