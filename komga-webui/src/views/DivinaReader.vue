@@ -236,7 +236,7 @@
 
     <div
       class="full-height reader-frame"
-      :class="{'reader-frame-landscape': landscapeDisplay && !nativeOrientationLocked && !continuousReader}"
+      :class="{'reader-frame-landscape': landscapeDisplay && !continuousReader}"
     >
       <div
         v-if="isPdf && k2ReflowMode && !continuousReader"
@@ -1249,7 +1249,6 @@ export default Vue.extend({
       magnifierPressTimer: undefined as number | undefined,
       magnifierLongPressTriggered: false,
       landscapeDisplay: false,
-      nativeOrientationLocked: false,
       reflowSetupMode: false,
       reflowMode: false,
       k2ReflowMode: false,
@@ -1440,7 +1439,6 @@ export default Vue.extend({
     this.revokeReaderCropImageUrl()
     this.revokeReaderDeskewedPageUrls()
 
-    if (this.nativeOrientationLocked) this.unlockOrientation()
     this.$vuetify.rtl = (this.$t('common.locale_rtl') === 'true')
     window.removeEventListener('keydown', this.keyPressed)
     if (screenfull.isEnabled) {
@@ -2598,13 +2596,6 @@ export default Vue.extend({
       if (screenfull.isEnabled && screenfull.isFullscreen) this.fullscreenIcon = 'mdi-fullscreen-exit'
       else {
         this.fullscreenIcon = 'mdi-fullscreen'
-        if (this.landscapeDisplay) {
-          if (this.nativeOrientationLocked) {
-            this.unlockOrientation()
-            this.nativeOrientationLocked = false
-          }
-          this.landscapeDisplay = false
-        }
       }
     },
     keyPressed(e: KeyboardEvent) {
@@ -3604,31 +3595,8 @@ export default Vue.extend({
       })
     },
     async toggleLandscapeDisplay() {
-      const landscapeDisplay = !this.landscapeDisplay
-      if (landscapeDisplay) {
-        await this.enterFullscreen()
-        const locked = await this.lockOrientation('landscape')
-        this.nativeOrientationLocked = locked
-      } else {
-        if (this.nativeOrientationLocked) this.unlockOrientation()
-        this.nativeOrientationLocked = false
-      }
-      this.landscapeDisplay = landscapeDisplay
+      this.landscapeDisplay = !this.landscapeDisplay
       window.scrollTo(0, 0)
-    },
-    async lockOrientation(orientation: string): Promise<boolean> {
-      const screenOrientation = (screen as any).orientation
-      if (!screenOrientation?.lock) return false
-      try {
-        await screenOrientation.lock(orientation)
-        return true
-      } catch (e) {
-        return false
-      }
-    },
-    unlockOrientation() {
-      const screenOrientation = (screen as any).orientation
-      screenOrientation?.unlock?.()
     },
     closeDialog() {
       if (this.showExplorer) {
