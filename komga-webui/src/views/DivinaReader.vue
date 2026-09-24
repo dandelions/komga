@@ -420,6 +420,7 @@
         ref="pagedReader"
         :pages="pages"
         :page.sync="page"
+        :landscape-display="landscapeDisplay"
         :reading-direction="readingDirection"
         :page-layout="pageLayout"
         :scale="scale"
@@ -3814,6 +3815,31 @@ export default Vue.extend({
   height: 100vh;
   width: 40vw;
   z-index: 3;
+}
+
+.reader-frame-landscape .reflow-click-left {
+  top: auto;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 30%;
+}
+
+.reader-frame-landscape .reflow-click-right {
+  top: 0;
+  bottom: auto;
+  left: 0;
+  right: 0;
+  width: 100%;
+  height: 30%;
+}
+
+.reader-frame-landscape .reflow-click-center {
+  top: 30%;
+  bottom: auto;
+  left: 0;
+  width: 100%;
+  height: 40%;
 }
 
 .reader-crop-panel {

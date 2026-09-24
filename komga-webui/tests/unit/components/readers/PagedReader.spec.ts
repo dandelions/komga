@@ -203,4 +203,66 @@ describe('PagedReader previous-page scroll restoration', () => {
     scrollToSpy.mockRestore()
     document.body.removeChild(landscapeContainer)
   })
+
+  test('carouselVertical and carouselReverse map axes correctly in unrotated vs landscape rotated modes', () => {
+    // Normal LTR (horizontal)
+    const ltrReader = {
+      isLandscapeRotated: false,
+      vertical: false,
+      flipDirection: false,
+    }
+    expect(computed.carouselVertical.call(ltrReader)).toBe(false)
+    expect(computed.carouselReverse.call(ltrReader)).toBe(false)
+
+    // Rotated LTR -> carousel becomes vertical and reverse flips to keep right-to-left slide visually
+    const rotatedLtrReader = {
+      isLandscapeRotated: true,
+      vertical: false,
+      flipDirection: false,
+    }
+    expect(computed.carouselVertical.call(rotatedLtrReader)).toBe(true)
+    expect(computed.carouselReverse.call(rotatedLtrReader)).toBe(true)
+
+    // Rotated RTL -> carousel becomes vertical and reverse is false
+    const rotatedRtlReader = {
+      isLandscapeRotated: true,
+      vertical: false,
+      flipDirection: true,
+    }
+    expect(computed.carouselVertical.call(rotatedRtlReader)).toBe(true)
+    expect(computed.carouselReverse.call(rotatedRtlReader)).toBe(false)
+
+    // Rotated Vertical -> carousel becomes horizontal
+    const rotatedVerticalReader = {
+      isLandscapeRotated: true,
+      vertical: true,
+      flipDirection: false,
+    }
+    expect(computed.carouselVertical.call(rotatedVerticalReader)).toBe(false)
+    expect(computed.carouselReverse.call(rotatedVerticalReader)).toBe(true)
+  })
+
+  test('keyPressed handles Space, PageDown, PageUp and rotated Arrow keys', () => {
+    const reader = {
+      shortcuts: {},
+      isLandscapeRotated: true,
+      next: jest.fn(),
+      prev: jest.fn(),
+    }
+
+    methods.keyPressed.call(reader, {key: ' '} as any)
+    expect(reader.next).toHaveBeenCalledTimes(1)
+
+    methods.keyPressed.call(reader, {key: 'PageDown'} as any)
+    expect(reader.next).toHaveBeenCalledTimes(2)
+
+    methods.keyPressed.call(reader, {key: 'ArrowDown'} as any)
+    expect(reader.next).toHaveBeenCalledTimes(3)
+
+    methods.keyPressed.call(reader, {key: 'PageUp'} as any)
+    expect(reader.prev).toHaveBeenCalledTimes(1)
+
+    methods.keyPressed.call(reader, {key: 'ArrowUp'} as any)
+    expect(reader.prev).toHaveBeenCalledTimes(2)
+  })
 })
