@@ -204,30 +204,42 @@ describe('PagedReader previous-page scroll restoration', () => {
     document.body.removeChild(landscapeContainer)
   })
 
-  test('carouselVertical and carouselReverse map correctly according to reading direction', () => {
+  test('carouselVertical and carouselReverse map axes correctly in unrotated vs landscape rotated modes', () => {
     // Normal LTR (horizontal)
     const ltrReader = {
+      isLandscapeRotated: false,
       vertical: false,
       flipDirection: false,
     }
     expect(computed.carouselVertical.call(ltrReader)).toBe(false)
     expect(computed.carouselReverse.call(ltrReader)).toBe(false)
 
-    // RTL (horizontal)
-    const rtlReader = {
+    // Rotated LTR -> carousel becomes vertical and reverse flips to keep right-to-left slide visually
+    const rotatedLtrReader = {
+      isLandscapeRotated: true,
+      vertical: false,
+      flipDirection: false,
+    }
+    expect(computed.carouselVertical.call(rotatedLtrReader)).toBe(true)
+    expect(computed.carouselReverse.call(rotatedLtrReader)).toBe(true)
+
+    // Rotated RTL -> carousel becomes vertical and reverse is false
+    const rotatedRtlReader = {
+      isLandscapeRotated: true,
       vertical: false,
       flipDirection: true,
     }
-    expect(computed.carouselVertical.call(rtlReader)).toBe(false)
-    expect(computed.carouselReverse.call(rtlReader)).toBe(true)
+    expect(computed.carouselVertical.call(rotatedRtlReader)).toBe(true)
+    expect(computed.carouselReverse.call(rotatedRtlReader)).toBe(false)
 
-    // Vertical
-    const verticalReader = {
+    // Rotated Vertical -> carousel becomes horizontal
+    const rotatedVerticalReader = {
+      isLandscapeRotated: true,
       vertical: true,
       flipDirection: false,
     }
-    expect(computed.carouselVertical.call(verticalReader)).toBe(true)
-    expect(computed.carouselReverse.call(verticalReader)).toBe(false)
+    expect(computed.carouselVertical.call(rotatedVerticalReader)).toBe(false)
+    expect(computed.carouselReverse.call(rotatedVerticalReader)).toBe(true)
   })
 
   test('keyPressed handles Space, PageDown, PageUp and rotated Arrow keys', () => {
