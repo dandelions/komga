@@ -983,7 +983,7 @@ export default Vue.extend({
     scrollToPageEdge(position: 'top' | 'bottom') {
       const isLandscapeRotated = Boolean(
         (this.$el as HTMLElement | undefined)?.closest?.('.reader-frame-landscape') ||
-        (typeof document !== 'undefined' && document.querySelector?.('.reader-frame-landscape'))
+        (typeof document !== 'undefined' && document.querySelector?.('.reader-frame-landscape')),
       )
 
       const scrollToEdge = () => {
