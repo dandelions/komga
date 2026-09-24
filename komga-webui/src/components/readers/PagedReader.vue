@@ -6,8 +6,8 @@
     <v-carousel v-model="carouselPage"
                 :show-arrows="false"
                 :continuous="false"
-                :reverse="carouselReverse"
-                :vertical="carouselVertical"
+                :reverse="flipDirection"
+                :vertical="vertical"
                 hide-delimiters
                 touchless
                 height="100%"
@@ -51,79 +51,39 @@
       :style="overlay.style"
     />
 
-    <!--  Clickable zones for normal (unrotated) layout  -->
-    <template v-if="!isLandscapeRotated">
-      <!--  clickable zone: left  -->
-      <div v-if="!vertical"
-           @click="navigateLeftSide()"
-           class="left-quarter"
-           style="z-index: 1;"
-      />
+    <!--  clickable zone: left  -->
+    <div v-if="!vertical"
+         @click="navigateLeftSide()"
+         class="left-quarter"
+         style="z-index: 1;"
+    />
 
-      <!--  clickable zone: right  -->
-      <div v-if="!vertical"
-           @click="navigateRightSide()"
-           class="right-quarter"
-           style="z-index: 1;"
-      />
+    <!--  clickable zone: right  -->
+    <div v-if="!vertical"
+         @click="navigateRightSide()"
+         class="right-quarter"
+         style="z-index: 1;"
+    />
 
-      <!--  clickable zone: top  -->
-      <div v-if="vertical"
-           @click="verticalPrev()"
-           class="top-quarter"
-           style="z-index: 1;"
-      />
+    <!--  clickable zone: top  -->
+    <div v-if="vertical"
+         @click="verticalPrev()"
+         class="top-quarter"
+         style="z-index: 1;"
+    />
 
-      <!--  clickable zone: bottom  -->
-      <div v-if="vertical"
-           @click="verticalNext()"
-           class="bottom-quarter"
-           style="z-index: 1;"
-      />
+    <!--  clickable zone: bottom  -->
+    <div v-if="vertical"
+         @click="verticalNext()"
+         class="bottom-quarter"
+         style="z-index: 1;"
+    />
 
-      <!--  clickable zone: menu  -->
-      <div @click="centerClick()"
-           :class="`${vertical ? 'center-vertical' : 'center-horizontal'}`"
-           style="z-index: 1;"
-      />
-    </template>
-
-    <!--  Clickable zones rotated for 90deg landscape layout  -->
-    <template v-else>
-      <!--  in 90deg rotated landscape: DOM bottom maps to visual left  -->
-      <div v-if="!vertical"
-           @click="navigateLeftSide()"
-           class="bottom-quarter"
-           style="z-index: 1;"
-      />
-
-      <!--  in 90deg rotated landscape: DOM top maps to visual right  -->
-      <div v-if="!vertical"
-           @click="navigateRightSide()"
-           class="top-quarter"
-           style="z-index: 1;"
-      />
-
-      <!--  in 90deg rotated landscape: DOM left maps to visual top  -->
-      <div v-if="vertical"
-           @click="verticalPrev()"
-           class="left-quarter"
-           style="z-index: 1;"
-      />
-
-      <!--  in 90deg rotated landscape: DOM right maps to visual bottom  -->
-      <div v-if="vertical"
-           @click="verticalNext()"
-           class="right-quarter"
-           style="z-index: 1;"
-      />
-
-      <!--  clickable zone: menu in rotated mode  -->
-      <div @click="centerClick()"
-           :class="`${vertical ? 'center-horizontal' : 'center-vertical'}`"
-           style="z-index: 1;"
-      />
-    </template>
+    <!--  clickable zone: menu  -->
+    <div @click="centerClick()"
+         :class="`${vertical ? 'center-vertical' : 'center-horizontal'}`"
+         style="z-index: 1;"
+    />
   </div>
 </template>
 
@@ -362,10 +322,10 @@ export default Vue.extend({
       )
     },
     carouselVertical(): boolean {
-      return this.isLandscapeRotated ? !this.vertical : this.vertical
+      return this.vertical
     },
     carouselReverse(): boolean {
-      return this.isLandscapeRotated ? !this.flipDirection : this.flipDirection
+      return this.flipDirection
     },
     flipDirection(): boolean {
       return this.readingDirection === ReadingDirection.RIGHT_TO_LEFT
@@ -1060,13 +1020,6 @@ export default Vue.extend({
       }
     },
     scrollToPageEdge(position: 'top' | 'bottom') {
-      const isLandscapeRotated = Boolean(
-        (this as any).isLandscapeRotated ?? (
-          (this.$el as HTMLElement | undefined)?.closest?.('.reader-frame-landscape') ||
-          (typeof document !== 'undefined' && document.querySelector?.('.reader-frame-landscape'))
-        ),
-      )
-
       const scrollToEdge = () => {
         if (typeof document === 'undefined') return
         const scrollingElement = document.scrollingElement || document.documentElement
@@ -1080,40 +1033,22 @@ export default Vue.extend({
           ...Array.from(reader.querySelectorAll('.v-carousel, .v-window, .v-window__container, .v-window-item, .v-window-item--active')),
         ].filter(Boolean) as HTMLElement[]
 
-        if (isLandscapeRotated) {
-          // In 90deg rotated landscape (.reader-frame-landscape),
-          // DOM X axis maps to visual Y axis (left -> visual top, right -> visual bottom)
-          // DOM Y axis maps to visual X axis (top -> visual right, bottom -> visual left)
-          const scrollableElementLeft = (element: HTMLElement) => position === 'bottom' ? element.scrollWidth : 0
-          scrollableElements.forEach(x => {
-            x.scrollLeft = scrollableElementLeft(x)
-            x.scrollTop = 0
-          })
-          window.scrollTo({top: 0, left: 0, behavior: 'auto'})
-          scrollingElement.scrollTop = 0
-          scrollingElement.scrollLeft = 0
-          document.documentElement.scrollTop = 0
-          document.documentElement.scrollLeft = 0
-          document.body.scrollTop = 0
-          document.body.scrollLeft = 0
-        } else {
-          const scrollingElementTop = position === 'bottom' ? scrollingElement.scrollHeight : 0
-          const scrollableElementTop = (element: HTMLElement) => position === 'bottom' ? element.scrollHeight : 0
+        const scrollingElementTop = position === 'bottom' ? scrollingElement.scrollHeight : 0
+        const scrollableElementTop = (element: HTMLElement) => position === 'bottom' ? element.scrollHeight : 0
 
-          window.scrollTo({top: scrollingElementTop, left: 0, behavior: 'auto'})
-          scrollingElement.scrollTop = scrollingElementTop
-          scrollingElement.scrollLeft = 0
-          document.documentElement.scrollTop = position === 'bottom' ? document.documentElement.scrollHeight : 0
-          document.documentElement.scrollLeft = 0
-          document.body.scrollTop = position === 'bottom' ? document.body.scrollHeight : 0
-          document.body.scrollLeft = 0
-          scrollableElements.forEach(x => {
-            x.scrollTop = scrollableElementTop(x)
-            x.scrollLeft = 0
-          })
-        }
+        window.scrollTo({top: scrollingElementTop, left: 0, behavior: 'auto'})
+        scrollingElement.scrollTop = scrollingElementTop
+        scrollingElement.scrollLeft = 0
+        document.documentElement.scrollTop = position === 'bottom' ? document.documentElement.scrollHeight : 0
+        document.documentElement.scrollLeft = 0
+        document.body.scrollTop = position === 'bottom' ? document.body.scrollHeight : 0
+        document.body.scrollLeft = 0
+        scrollableElements.forEach(x => {
+          x.scrollTop = scrollableElementTop(x)
+          x.scrollLeft = 0
+        })
 
-        if (position === 'top' && !isLandscapeRotated) {
+        if (position === 'top') {
           try {
             const activeItem = (reader.querySelector('.v-window-item--active') || reader) as HTMLElement
             const target = (activeItem.querySelector('img') || activeItem) as HTMLElement

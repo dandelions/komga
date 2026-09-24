@@ -170,7 +170,7 @@ describe('PagedReader previous-page scroll restoration', () => {
     scrollToSpy.mockRestore()
   })
 
-  test('scrollToPageEdge maps visual Y to DOM X in CSS landscape rotated mode', () => {
+  test('scrollToPageEdge scrolls vertically to edge in both unrotated and landscape rotated mode', () => {
     const landscapeContainer = document.createElement('div')
     landscapeContainer.className = 'reader-frame-landscape'
 
@@ -190,56 +190,44 @@ describe('PagedReader previous-page scroll restoration', () => {
 
     const scrollToSpy = jest.spyOn(window, 'scrollTo').mockImplementation(() => {})
 
-    // 'bottom' should set scrollLeft to scrollWidth in rotated mode
+    // 'bottom' should set scrollTop to scrollHeight
     methods.scrollToPageEdge.call(reader, 'bottom')
-    expect(carousel.scrollLeft).toBe(1200)
-    expect(carousel.scrollTop).toBe(0)
-
-    // 'top' should set scrollLeft to 0 in rotated mode
-    methods.scrollToPageEdge.call(reader, 'top')
+    expect(carousel.scrollTop).toBe(800)
     expect(carousel.scrollLeft).toBe(0)
+
+    // 'top' should set scrollTop to 0
+    methods.scrollToPageEdge.call(reader, 'top')
     expect(carousel.scrollTop).toBe(0)
+    expect(carousel.scrollLeft).toBe(0)
 
     scrollToSpy.mockRestore()
     document.body.removeChild(landscapeContainer)
   })
 
-  test('carouselVertical and carouselReverse map axes correctly in unrotated vs landscape rotated modes', () => {
+  test('carouselVertical and carouselReverse map correctly according to reading direction', () => {
     // Normal LTR (horizontal)
     const ltrReader = {
-      isLandscapeRotated: false,
       vertical: false,
       flipDirection: false,
     }
     expect(computed.carouselVertical.call(ltrReader)).toBe(false)
     expect(computed.carouselReverse.call(ltrReader)).toBe(false)
 
-    // Rotated LTR -> carousel becomes vertical and reverse flips to keep right-to-left slide visually
-    const rotatedLtrReader = {
-      isLandscapeRotated: true,
-      vertical: false,
-      flipDirection: false,
-    }
-    expect(computed.carouselVertical.call(rotatedLtrReader)).toBe(true)
-    expect(computed.carouselReverse.call(rotatedLtrReader)).toBe(true)
-
-    // Rotated RTL -> carousel becomes vertical and reverse is false
-    const rotatedRtlReader = {
-      isLandscapeRotated: true,
+    // RTL (horizontal)
+    const rtlReader = {
       vertical: false,
       flipDirection: true,
     }
-    expect(computed.carouselVertical.call(rotatedRtlReader)).toBe(true)
-    expect(computed.carouselReverse.call(rotatedRtlReader)).toBe(false)
+    expect(computed.carouselVertical.call(rtlReader)).toBe(false)
+    expect(computed.carouselReverse.call(rtlReader)).toBe(true)
 
-    // Rotated Vertical -> carousel becomes horizontal
-    const rotatedVerticalReader = {
-      isLandscapeRotated: true,
+    // Vertical
+    const verticalReader = {
       vertical: true,
       flipDirection: false,
     }
-    expect(computed.carouselVertical.call(rotatedVerticalReader)).toBe(false)
-    expect(computed.carouselReverse.call(rotatedVerticalReader)).toBe(true)
+    expect(computed.carouselVertical.call(verticalReader)).toBe(true)
+    expect(computed.carouselReverse.call(verticalReader)).toBe(false)
   })
 
   test('keyPressed handles Space, PageDown, PageUp and rotated Arrow keys', () => {

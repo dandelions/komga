@@ -3818,28 +3818,29 @@ export default Vue.extend({
 }
 
 .reader-frame-landscape .reflow-click-left {
-  top: auto;
+  top: 0;
   bottom: 0;
   left: 0;
-  width: 100%;
-  height: 30%;
+  right: auto;
+  width: 30%;
+  height: 100%;
 }
 
 .reader-frame-landscape .reflow-click-right {
   top: 0;
-  bottom: auto;
-  left: 0;
+  bottom: 0;
+  left: auto;
   right: 0;
-  width: 100%;
-  height: 30%;
+  width: 30%;
+  height: 100%;
 }
 
 .reader-frame-landscape .reflow-click-center {
-  top: 30%;
-  bottom: auto;
-  left: 0;
-  width: 100%;
-  height: 40%;
+  top: 0;
+  bottom: 0;
+  left: 30%;
+  width: 40%;
+  height: 100%;
 }
 
 .reader-crop-panel {
