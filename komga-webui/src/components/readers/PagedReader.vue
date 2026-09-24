@@ -330,8 +330,11 @@ export default Vue.extend({
     this.revokeDeskewedPageUrls()
   },
   computed: {
+    isRotated(): boolean {
+      return this.isLandscapeRotated || this.normalizedRotation(this.rotation) !== 0
+    },
     swipeTouchHandlers(): object | undefined {
-      if (!this.swipe) return undefined
+      if (!this.swipe || this.isRotated) return undefined
       return {
         left: () => { if (this.swipe) this.navigateRightSide() },
         right: () => { if (this.swipe) this.navigateLeftSide() },

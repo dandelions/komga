@@ -120,14 +120,41 @@ describe('PagedReader previous-page scroll restoration', () => {
     expect(reader.ensureLoadedDeskewedPageUrls).toHaveBeenCalled()
   })
 
-  test('disables touch swipe handlers when swipe is false', () => {
-    const reader = {swipe: false}
-    expect(computed.swipeTouchHandlers.call(reader)).toBeUndefined()
+  test('computes isRotated from isLandscapeRotated and rotation', () => {
+    const readerUnrotated = {
+      isLandscapeRotated: false,
+      rotation: 0,
+      normalizedRotation: methods.normalizedRotation,
+    }
+    expect(computed.isRotated.call(readerUnrotated)).toBe(false)
+
+    const readerLandscape = {
+      isLandscapeRotated: true,
+      rotation: 0,
+      normalizedRotation: methods.normalizedRotation,
+    }
+    expect(computed.isRotated.call(readerLandscape)).toBe(true)
+
+    const readerRotatedAngle = {
+      isLandscapeRotated: false,
+      rotation: 90,
+      normalizedRotation: methods.normalizedRotation,
+    }
+    expect(computed.isRotated.call(readerRotatedAngle)).toBe(true)
   })
 
-  test('provides touch swipe handlers when swipe is true', () => {
+  test('disables touch swipe handlers when swipe is false or when rotated', () => {
+    const readerDisabled = {swipe: false, isRotated: false}
+    expect(computed.swipeTouchHandlers.call(readerDisabled)).toBeUndefined()
+
+    const readerRotated = {swipe: true, isRotated: true}
+    expect(computed.swipeTouchHandlers.call(readerRotated)).toBeUndefined()
+  })
+
+  test('provides touch swipe handlers when swipe is true and not rotated (0 degrees)', () => {
     const reader = {
       swipe: true,
+      isRotated: false,
       navigateRightSide: jest.fn(),
       navigateLeftSide: jest.fn(),
       verticalNext: jest.fn(),

@@ -125,6 +125,48 @@ describe('DivinaReader image magnifier', () => {
     expect(computed.readerSwipeEnabled.call(reader)).toBe(true)
   })
 
+  test('disables paged swipe when rotated, enables when at 0 degrees', () => {
+    const readerRotatedLandscape = {
+      landscapeDisplay: true,
+      readerRotation: 0,
+      readerSwipeEnabled: true,
+      normalizedReaderRotation: (deg: number) => deg,
+    }
+    expect(computed.pagedSwipeEnabled.call(readerRotatedLandscape)).toBe(false)
+
+    const readerRotatedAngle = {
+      landscapeDisplay: false,
+      readerRotation: 90,
+      readerSwipeEnabled: true,
+      normalizedReaderRotation: (deg: number) => deg,
+    }
+    expect(computed.pagedSwipeEnabled.call(readerRotatedAngle)).toBe(false)
+
+    const readerUnrotated = {
+      landscapeDisplay: false,
+      readerRotation: 0,
+      readerSwipeEnabled: true,
+      normalizedReaderRotation: (deg: number) => deg,
+    }
+    expect(computed.pagedSwipeEnabled.call(readerUnrotated)).toBe(true)
+  })
+
+  test('disables reflow touch swipe when rotated', () => {
+    const reader = {
+      landscapeDisplay: true,
+      readerRotation: 0,
+      reflowMode: true,
+      k2ReflowMode: false,
+      readerSwipeEnabled: true,
+      reflowCropMode: false,
+      normalizedReaderRotation: (deg: number) => deg,
+    }
+    expect(methods.reflowTouchEnabled.call(reader)).toBe(false)
+
+    reader.landscapeDisplay = false
+    expect(methods.reflowTouchEnabled.call(reader)).toBe(true)
+  })
+
   test('stores a selected magnifier diameter', () => {
     const reader = {magnifierDiameter: 184}
 

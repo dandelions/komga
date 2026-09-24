@@ -425,7 +425,7 @@
         :page-layout="pageLayout"
         :scale="scale"
         :animations="animations"
-        :swipe="false"
+        :swipe="pagedSwipeEnabled"
         :left-navigation-action="pagedLeftNavigationAction"
         :image-filter="normalReaderImageFilter"
         :rotation="readerRotation"
@@ -1668,6 +1668,12 @@ export default Vue.extend({
       if (this.magnifierActive) return false
       if (!this.continuousReader && !this.activeReflowMode && this.scale === ScaleType.ORIGINAL) return false
       return this.swipe || this.$vuetify.breakpoint.smAndDown
+    },
+    pagedSwipeEnabled(): boolean {
+      if (this.landscapeDisplay || this.normalizedReaderRotation(this.readerRotation) !== 0) {
+        return false
+      }
+      return this.readerSwipeEnabled
     },
     reflowCacheKey(): string {
       return JSON.stringify({
@@ -3256,6 +3262,9 @@ export default Vue.extend({
       this.k2ReflowMode ? this.k2NextPage() : this.reflowNextPage()
     },
     reflowTouchEnabled(): boolean {
+      if (this.landscapeDisplay || this.normalizedReaderRotation(this.readerRotation) !== 0) {
+        return false
+      }
       return (this.reflowMode || this.k2ReflowMode) && this.readerSwipeEnabled && !this.reflowCropMode
     },
     reflowSwipeLeft() {
