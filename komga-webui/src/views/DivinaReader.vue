@@ -434,6 +434,7 @@
         :crop-regions-by-parity="readerCropRegionsByParity"
         :page-display-urls="readerDeskewedPageUrls"
         :active-crop-region="readerActiveCropRegion"
+        :magnifier-active="magnifierActive"
         @update:active-crop-region="setReaderActiveCropRegion"
         @menu="toggleToolbars()"
         @jump-previous="jumpToPrevious()"
@@ -3785,6 +3786,42 @@ export default Vue.extend({
   transform-origin: center center;
   overflow: hidden;
   z-index: 1;
+}
+
+.reader-frame-landscape .img-fit-screen {
+  width: 100vh !important;
+  height: 100vw !important;
+  max-width: 100vh !important;
+  max-height: 100vw !important;
+}
+
+.reader-frame-landscape .img-fit-height {
+  min-height: 100vw !important;
+  height: 100vw !important;
+  max-width: 100vh !important;
+}
+
+.reader-frame-landscape .img-fit-width {
+  width: 100vh !important;
+  min-height: 100vw !important;
+}
+
+.reader-frame-landscape .img-fit-width-shrink-only {
+  max-width: 100vh !important;
+}
+
+.reader-frame-landscape .img-double-fit-screen {
+  max-width: 50vh !important;
+  height: 100vw !important;
+}
+
+.reader-frame-landscape .img-double-fit-width {
+  width: 50vh !important;
+  min-height: 100vw !important;
+}
+
+.reader-frame-landscape .img-double-fit-width-shrink-only {
+  max-width: 50vh !important;
 }
 
 .reflow-reader {

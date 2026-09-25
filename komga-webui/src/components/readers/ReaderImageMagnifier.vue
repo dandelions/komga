@@ -156,6 +156,7 @@ export default Vue.extend({
       const sourceUrl = image.currentSrc || image.src
       const filter = window.getComputedStyle(image).filter
 
+      const isRotated = Boolean(image.closest('.reader-frame-landscape'))
       this.lensStyle = {
         left: `${left}px`,
         top: `${top}px`,
@@ -165,8 +166,13 @@ export default Vue.extend({
       const magnification = this.magnificationValue()
       this.contentStyle = {
         backgroundImage: `url(${JSON.stringify(sourceUrl)})`,
-        backgroundSize: `${contentRect.width * magnification}px ${contentRect.height * magnification}px`,
-        backgroundPosition: `${focusX - sourceX * magnification}px ${focusY - sourceY * magnification}px`,
+        backgroundSize: isRotated
+          ? `${contentRect.height * magnification}px ${contentRect.width * magnification}px`
+          : `${contentRect.width * magnification}px ${contentRect.height * magnification}px`,
+        backgroundPosition: isRotated
+          ? `${focusX - sourceY * magnification}px ${focusY - (contentRect.height - sourceX) * magnification}px`
+          : `${focusX - sourceX * magnification}px ${focusY - sourceY * magnification}px`,
+        transform: isRotated ? 'rotate(90deg)' : '',
         filter: filter === 'none' ? '' : filter,
       }
       this.visible = true
@@ -213,9 +219,13 @@ export default Vue.extend({
         return {left: rect.left, top: rect.top, width: rect.width, height: rect.height}
       }
 
-      const scale = Math.min(rect.width / image.naturalWidth, rect.height / image.naturalHeight)
-      const width = image.naturalWidth * scale
-      const height = image.naturalHeight * scale
+      const isRotated = Boolean(image.closest('.reader-frame-landscape'))
+      const naturalW = isRotated ? image.naturalHeight : image.naturalWidth
+      const naturalH = isRotated ? image.naturalWidth : image.naturalHeight
+
+      const scale = Math.min(rect.width / naturalW, rect.height / naturalH)
+      const width = naturalW * scale
+      const height = naturalH * scale
       return {
         left: rect.left + (rect.width - width) / 2,
         top: rect.top + (rect.height - height) / 2,

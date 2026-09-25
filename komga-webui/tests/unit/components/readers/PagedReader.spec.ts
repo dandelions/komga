@@ -335,4 +335,144 @@ describe('PagedReader previous-page scroll restoration', () => {
     methods.navigateBottomSide.call(rotatedMinus90Reader)
     expect(rotatedMinus90Reader.navigateLeftSide).toHaveBeenCalledTimes(1)
   })
+
+  test('dispatchNavigationAtPoint supports left 30% and right 30% of image content', () => {
+    const rect = {
+      left: 100,
+      top: 50,
+      right: 500,
+      bottom: 650,
+      width: 400,
+      height: 600,
+    }
+
+    const reader = {
+      vertical: false,
+      navigateLeftSide: jest.fn(),
+      navigateRightSide: jest.fn(),
+      navigateTopSide: jest.fn(),
+      navigateBottomSide: jest.fn(),
+      centerClick: jest.fn(),
+    }
+
+    // 1. Inside left 30% of image content (left is 100, 30% of 400 is 120, so x < 220)
+    methods.dispatchNavigationAtPoint.call(reader, 150, 300, rect)
+    expect(reader.navigateLeftSide).toHaveBeenCalledTimes(1)
+
+    // 2. Left margin outside image (x < 100)
+    methods.dispatchNavigationAtPoint.call(reader, 50, 300, rect)
+    expect(reader.navigateLeftSide).toHaveBeenCalledTimes(2)
+
+    // 3. Inside right 30% of image content (right is 500, right - 120 = 380, so x > 380)
+    methods.dispatchNavigationAtPoint.call(reader, 450, 300, rect)
+    expect(reader.navigateRightSide).toHaveBeenCalledTimes(1)
+
+    // 4. Right margin outside image (x > 500)
+    methods.dispatchNavigationAtPoint.call(reader, 550, 300, rect)
+    expect(reader.navigateRightSide).toHaveBeenCalledTimes(2)
+
+    // 5. Middle 40% center (x = 300, y = 350)
+    methods.dispatchNavigationAtPoint.call(reader, 300, 350, rect)
+    expect(reader.centerClick).toHaveBeenCalledTimes(1)
+
+    // 6. Middle 40% horizontal, top 20% vertical (y < 50 + 120 = 170)
+    methods.dispatchNavigationAtPoint.call(reader, 300, 100, rect)
+    expect(reader.navigateTopSide).toHaveBeenCalledTimes(1)
+
+    // 7. Middle 40% horizontal, bottom 20% vertical (y > 650 - 120 = 530)
+    methods.dispatchNavigationAtPoint.call(reader, 300, 600, rect)
+    expect(reader.navigateBottomSide).toHaveBeenCalledTimes(1)
+  })
+
+  test('dispatchNavigationAtPoint in vertical mode supports top 30% and bottom 30%', () => {
+    const rect = {
+      left: 100,
+      top: 50,
+      right: 500,
+      bottom: 650,
+      width: 400,
+      height: 600,
+    }
+
+    const verticalReader = {
+      vertical: true,
+      navigateLeftSide: jest.fn(),
+      navigateRightSide: jest.fn(),
+      navigateTopSide: jest.fn(),
+      navigateBottomSide: jest.fn(),
+      centerClick: jest.fn(),
+    }
+
+    // Top 30% (y < 50 + 180 = 230)
+    methods.dispatchNavigationAtPoint.call(verticalReader, 300, 150, rect)
+    expect(verticalReader.navigateTopSide).toHaveBeenCalledTimes(1)
+
+    // Bottom 30% (y > 650 - 180 = 470)
+    methods.dispatchNavigationAtPoint.call(verticalReader, 300, 550, rect)
+    expect(verticalReader.navigateBottomSide).toHaveBeenCalledTimes(1)
+
+    // Middle 40% vertical center
+    methods.dispatchNavigationAtPoint.call(verticalReader, 300, 350, rect)
+    expect(verticalReader.centerClick).toHaveBeenCalledTimes(1)
+  })
+
+  test('calculateImageContentRect calculates unrotated vs landscape rotated content bounds', () => {
+    const mockImg = {
+      complete: true,
+      naturalWidth: 800,
+      naturalHeight: 1200,
+      getBoundingClientRect: () => ({
+        left: 0,
+        top: 0,
+        width: 600,
+        height: 600,
+        right: 600,
+        bottom: 600,
+      }),
+    } as any
+
+    // Unrotated mode (scale = min(600/800, 600/1200) = 0.5 -> content: 400x600, centered horizontally at (600-400)/2 = 100)
+    const unrotatedReader = {
+      isLandscapeRotated: false,
+    }
+    const unrotatedRect = methods.calculateImageContentRect.call(unrotatedReader, mockImg)
+    expect(unrotatedRect.width).toBe(400)
+    expect(unrotatedRect.height).toBe(600)
+    expect(unrotatedRect.left).toBe(100)
+    expect(unrotatedRect.right).toBe(500)
+
+    // Rotated mode: swaps natural dimensions (naturalW = 1200, naturalH = 800)
+    // scale = min(600/1200, 600/800) = 0.5 -> content: 600x400, centered vertically at (600-400)/2 = 100
+    const rotatedReader = {
+      isLandscapeRotated: true,
+    }
+    const rotatedRect = methods.calculateImageContentRect.call(rotatedReader, mockImg)
+    expect(rotatedRect.width).toBe(600)
+    expect(rotatedRect.height).toBe(400)
+    expect(rotatedRect.top).toBe(100)
+    expect(rotatedRect.bottom).toBe(500)
+  })
+
+  test('resetZoom and pageZoomStyle handle zoom and pan state correctly', () => {
+    const reader = {
+      zoomLevel: 2.5,
+      panOffset: {x: 40, y: -60},
+      isPinching: false,
+      lastTouchDistance: 120,
+      hasDragged: true,
+    }
+
+    const zoomStyle = computed.pageZoomStyle.call(reader)
+    expect(zoomStyle.transform).toContain('scale(2.500)')
+    expect(zoomStyle.transform).toContain('translate(')
+
+    methods.resetZoom.call(reader)
+    expect(reader.zoomLevel).toBe(1)
+    expect(reader.panOffset).toEqual({x: 0, y: 0})
+    expect(reader.isPinching).toBe(false)
+    expect(reader.hasDragged).toBe(false)
+
+    const normalStyle = computed.pageZoomStyle.call(reader)
+    expect(normalStyle).toEqual({})
+  })
 })

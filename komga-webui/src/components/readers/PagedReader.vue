@@ -1,6 +1,7 @@
 <template>
   <div
     class="paged-reader full-height"
+    :class="{'paged-reader-landscape': isLandscapeRotated}"
     v-touch="swipeTouchHandlers"
   >
     <v-carousel v-model="carouselPage"
@@ -22,7 +23,10 @@
                        :reverse-transition="animations ? undefined : false"
       >
         <div :class="`full-height d-flex flex-column ${pageContainerClass}`">
-          <div :class="`d-flex flex-row${flipDirection ? '-reverse' : ''} justify-center px-0 mx-0`">
+          <div
+            :class="`d-flex flex-row${flipDirection ? '-reverse' : ''} justify-center align-center full-height px-0 mx-0`"
+            :style="i === carouselPage ? pageZoomStyle : undefined"
+          >
             <img v-for="(page, j) in spread"
                  :alt="`Page ${page.number}`"
                  :key="`spread${i}-${j}`"
@@ -49,6 +53,17 @@
       class="crop-segment-overlap"
       :class="overlay.className"
       :style="overlay.style"
+    />
+
+    <!--  Unified gesture and navigation surface with 30% / 40% / 30% image hitboxes  -->
+    <div
+      class="paged-click-surface"
+      @click="handleReaderClick($event)"
+      @touchstart="handleTouchStart($event)"
+      @touchmove="handleTouchMove($event)"
+      @touchend="handleTouchEnd($event)"
+      @touchcancel="handleTouchEnd($event)"
+      @wheel="handleWheel($event)"
     />
 
     <!--  Clickable zones for normal (unrotated) layout  -->
@@ -174,6 +189,15 @@ export default Vue.extend({
       pageAspectRatios: {} as Record<number, number>,
       deskewedPageUrls: {} as Record<number, string>,
       deskewedPagePending: {} as Record<number, boolean>,
+      zoomLevel: 1,
+      panOffset: {x: 0, y: 0},
+      isPinching: false,
+      lastTouchDistance: 0,
+      touchStartPos: {x: 0, y: 0},
+      touchStartTime: 0,
+      touchStartCount: 0,
+      hasDragged: false,
+      lastTapTime: 0,
     }
   },
   props: {
@@ -241,6 +265,10 @@ export default Vue.extend({
       type: String as () => PagedNavigationAction,
       default: PagedNavigationAction.PREVIOUS,
     },
+    magnifierActive: {
+      type: Boolean,
+      default: false,
+    },
   },
   watch: {
     pages: {
@@ -275,6 +303,7 @@ export default Vue.extend({
       deep: true,
     },
     carouselPage(val, old) {
+      this.resetZoom()
       this.$debug('[watch:carouselPage', `old:${old}`, `new:${val}`)
       if (this.carouselPage >= 0 && this.carouselPage < this.spreads.length && this.spreads.length > 0) {
         const currentSpread = this.spreads[this.carouselPage]
@@ -288,6 +317,7 @@ export default Vue.extend({
       this.$nextTick(this.ensureLoadedDeskewedPageUrls)
     },
     page(val, old) {
+      this.resetZoom()
       this.$debug('[watch:page]', `old:${old}`, `new:${val}`)
       const spreadIndex = this.toSpreadIndex(val)
       this.$debug('[watch:page]', `toSpreadIndex:${spreadIndex}`)
@@ -297,6 +327,9 @@ export default Vue.extend({
       this.scrollToPageEdge(this.pendingScrollPosition)
       this.pendingScrollPosition = 'top'
       this.$nextTick(this.ensureLoadedDeskewedPageUrls)
+    },
+    landscapeDisplay() {
+      this.resetZoom()
     },
     scale() {
       this.activeCropSegment = 0
@@ -322,6 +355,15 @@ export default Vue.extend({
     this.revokeDeskewedPageUrls()
   },
   computed: {
+    pageZoomStyle(): Record<string, string> {
+      if (this.zoomLevel <= 1.02) return {}
+      return {
+        transform: `scale(${this.zoomLevel.toFixed(3)}) translate(${(this.panOffset.x / this.zoomLevel).toFixed(2)}px, ${(this.panOffset.y / this.zoomLevel).toFixed(2)}px)`,
+        transformOrigin: 'center center',
+        transition: this.isPinching ? 'none' : 'transform 0.12s ease-out',
+        willChange: 'transform',
+      }
+    },
     isRotated(): boolean {
       return this.isLandscapeRotated || this.normalizedRotation(this.rotation) !== 0
     },
@@ -986,6 +1028,240 @@ export default Vue.extend({
       if (!this.vertical)
         this.flipDirection ? this.next() : this.prev()
     },
+    resetZoom() {
+      this.zoomLevel = 1
+      this.panOffset = {x: 0, y: 0}
+      this.isPinching = false
+      this.lastTouchDistance = 0
+      this.hasDragged = false
+    },
+    handleTouchStart(e: TouchEvent) {
+      this.touchStartCount = e.touches.length
+      if (e.touches.length === 2) {
+        this.isPinching = true
+        this.lastTouchDistance = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY,
+        )
+        this.hasDragged = true
+        if (e.cancelable) e.preventDefault()
+      } else if (e.touches.length === 1) {
+        this.touchStartPos = {x: e.touches[0].clientX, y: e.touches[0].clientY}
+        this.touchStartTime = Date.now()
+        this.hasDragged = false
+      }
+    },
+    handleTouchMove(e: TouchEvent) {
+      if (e.touches.length === 2 && this.isPinching) {
+        const dist = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY,
+        )
+        if (this.lastTouchDistance > 0) {
+          const delta = dist / this.lastTouchDistance
+          this.zoomLevel = Math.max(1, Math.min(4, this.zoomLevel * delta))
+          this.hasDragged = true
+        }
+        this.lastTouchDistance = dist
+        if (e.cancelable) e.preventDefault()
+        return
+      }
+
+      if (e.touches.length === 1 && this.zoomLevel > 1.05) {
+        const dx = e.touches[0].clientX - this.touchStartPos.x
+        const dy = e.touches[0].clientY - this.touchStartPos.y
+        if (Math.hypot(dx, dy) > 5) {
+          this.hasDragged = true
+        }
+        const localDx = this.isLandscapeRotated ? dy : dx
+        const localDy = this.isLandscapeRotated ? -dx : dy
+
+        this.panOffset.x += localDx
+        this.panOffset.y += localDy
+
+        const maxPanX = Math.max(window.innerWidth, window.innerHeight) * (this.zoomLevel - 1)
+        const maxPanY = Math.max(window.innerWidth, window.innerHeight) * (this.zoomLevel - 1)
+        this.panOffset.x = Math.max(-maxPanX, Math.min(maxPanX, this.panOffset.x))
+        this.panOffset.y = Math.max(-maxPanY, Math.min(maxPanY, this.panOffset.y))
+
+        this.touchStartPos = {x: e.touches[0].clientX, y: e.touches[0].clientY}
+        if (e.cancelable) e.preventDefault()
+      }
+    },
+    handleTouchEnd(e: TouchEvent) {
+      if (e.touches.length < 2) {
+        this.isPinching = false
+        this.lastTouchDistance = 0
+        if (this.zoomLevel < 1.05) {
+          this.resetZoom()
+        }
+      }
+
+      if (this.touchStartCount === 1 && !this.hasDragged && this.zoomLevel <= 1.05 && this.swipe && e.changedTouches.length === 1) {
+        const deltaX = e.changedTouches[0].clientX - this.touchStartPos.x
+        const deltaY = e.changedTouches[0].clientY - this.touchStartPos.y
+        const deltaTime = Date.now() - this.touchStartTime
+
+        if (deltaTime < 500) {
+          if (Math.abs(deltaX) > 40 && Math.abs(deltaX) > Math.abs(deltaY) * 1.5) {
+            this.hasDragged = true
+            if (deltaX > 0) {
+              this.navigateLeftSide()
+            } else {
+              this.navigateRightSide()
+            }
+            return
+          }
+          if (Math.abs(deltaY) > 40 && Math.abs(deltaY) > Math.abs(deltaX) * 1.5) {
+            this.hasDragged = true
+            if (deltaY > 0) {
+              this.navigateTopSide()
+            } else {
+              this.navigateBottomSide()
+            }
+            return
+          }
+        }
+      }
+    },
+    handleWheel(e: WheelEvent) {
+      if (e.ctrlKey) {
+        e.preventDefault()
+        const factor = e.deltaY < 0 ? 1.15 : 0.85
+        this.zoomLevel = Math.max(1, Math.min(4, this.zoomLevel * factor))
+        if (this.zoomLevel <= 1.05) {
+          this.resetZoom()
+        }
+      }
+    },
+    handleReaderClick(event: MouseEvent) {
+      if (this.hasDragged || this.zoomLevel > 1.05) {
+        return
+      }
+
+      if (this.magnifierActive || (typeof document !== 'undefined' && document.documentElement.classList.contains('reader-magnifier-gesture-active'))) {
+        return
+      }
+
+      const now = Date.now()
+      if (now - this.lastTapTime < 300) {
+        this.lastTapTime = 0
+        if (this.zoomLevel > 1.05) {
+          this.resetZoom()
+        } else {
+          this.zoomLevel = 2.2
+          this.panOffset = {x: 0, y: 0}
+        }
+        return
+      }
+      this.lastTapTime = now
+
+      const clientX = event.clientX
+      const clientY = event.clientY
+
+      const activeItem = (this.$el as HTMLElement | undefined)?.querySelector?.('.v-window-item--active')
+      const img = activeItem?.querySelector('img.img-fit-all') as HTMLImageElement | null
+
+      const contentRect = this.calculateImageContentRect(img)
+      this.dispatchNavigationAtPoint(clientX, clientY, contentRect)
+    },
+    calculateImageContentRect(img: HTMLImageElement | null): {
+      left: number,
+      top: number,
+      right: number,
+      bottom: number,
+      width: number,
+      height: number,
+    } {
+      if (!img || !img.complete || img.naturalWidth <= 0 || img.naturalHeight <= 0) {
+        const containerRect = (this.$el as HTMLElement | undefined)?.getBoundingClientRect?.() || {
+          left: 0,
+          top: 0,
+          right: typeof window !== 'undefined' ? window.innerWidth : 800,
+          bottom: typeof window !== 'undefined' ? window.innerHeight : 600,
+          width: typeof window !== 'undefined' ? window.innerWidth : 800,
+          height: typeof window !== 'undefined' ? window.innerHeight : 600,
+        }
+        return {
+          left: containerRect.left,
+          top: containerRect.top,
+          right: containerRect.right,
+          bottom: containerRect.bottom,
+          width: containerRect.width,
+          height: containerRect.height,
+        }
+      }
+
+      const rect = img.getBoundingClientRect()
+      const isRotated = Boolean(this.isLandscapeRotated)
+      const naturalW = isRotated ? img.naturalHeight : img.naturalWidth
+      const naturalH = isRotated ? img.naturalWidth : img.naturalHeight
+
+      const scale = Math.min(rect.width / naturalW, rect.height / naturalH)
+      const contentW = naturalW * scale
+      const contentH = naturalH * scale
+      const left = rect.left + (rect.width - contentW) / 2
+      const top = rect.top + (rect.height - contentH) / 2
+
+      return {
+        left,
+        top,
+        right: left + contentW,
+        bottom: top + contentH,
+        width: contentW,
+        height: contentH,
+      }
+    },
+    dispatchNavigationAtPoint(
+      clientX: number,
+      clientY: number,
+      rect: {left: number, top: number, right: number, bottom: number, width: number, height: number},
+    ) {
+      if (this.vertical) {
+        if (clientY < rect.top + rect.height * 0.3) {
+          this.navigateTopSide()
+          return
+        }
+        if (clientY > rect.bottom - rect.height * 0.3) {
+          this.navigateBottomSide()
+          return
+        }
+        if (clientX < rect.left + rect.width * 0.25) {
+          this.navigateLeftSide()
+          return
+        }
+        if (clientX > rect.right - rect.width * 0.25) {
+          this.navigateRightSide()
+          return
+        }
+        this.centerClick()
+        return
+      }
+
+      // Horizontal reading direction:
+      // Left 30% of image content (or left margin)
+      if (clientX < rect.left + rect.width * 0.3) {
+        this.navigateLeftSide()
+        return
+      }
+      // Right 30% of image content (or right margin)
+      if (clientX > rect.right - rect.width * 0.3) {
+        this.navigateRightSide()
+        return
+      }
+
+      // Middle 40% horizontally: check top / bottom margins or top 20% / bottom 20%
+      if (clientY < rect.top + rect.height * 0.2) {
+        this.navigateTopSide()
+        return
+      }
+      if (clientY > rect.bottom - rect.height * 0.2) {
+        this.navigateBottomSide()
+        return
+      }
+
+      this.centerClick()
+    },
     navigateTopSide() {
       if (this.vertical) {
         this.verticalPrev()
@@ -1031,6 +1307,7 @@ export default Vue.extend({
       this.next()
     },
     prev() {
+      this.resetZoom()
       const pageNumber = this.currentSpreadPageNumber()
       const previousSegment = this.previousCropSegmentIndex(pageNumber)
       if (previousSegment !== undefined) {
@@ -1058,6 +1335,7 @@ export default Vue.extend({
       }
     },
     next() {
+      this.resetZoom()
       const pageNumber = this.currentSpreadPageNumber()
       const nextSegment = this.nextCropSegmentIndex(pageNumber)
       if (nextSegment !== undefined) {
@@ -1321,6 +1599,54 @@ export default Vue.extend({
 .img-double-fit-screen {
   max-width: 50vw;
   height: 100vh;
+}
+
+.paged-click-surface {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 2;
+  touch-action: none;
+}
+
+.paged-reader-landscape .img-fit-screen {
+  width: 100vh;
+  height: 100vw;
+  max-width: 100vh;
+  max-height: 100vw;
+}
+
+.paged-reader-landscape .img-fit-height {
+  min-height: 100vw;
+  height: 100vw;
+  max-width: 100vh;
+}
+
+.paged-reader-landscape .img-fit-width {
+  width: 100vh;
+  min-height: 100vw;
+}
+
+.paged-reader-landscape .img-fit-width-shrink-only {
+  max-width: 100vh;
+}
+
+.paged-reader-landscape .img-double-fit-screen {
+  max-width: 50vh;
+  height: 100vw;
+}
+
+.paged-reader-landscape .img-double-fit-width {
+  width: 50vh;
+  min-height: 100vw;
+}
+
+.paged-reader-landscape .img-double-fit-width-shrink-only {
+  max-width: 50vh;
 }
 
 .pre-render {
