@@ -3790,11 +3790,18 @@ export default Vue.extend({
   z-index: 1;
 }
 
+.reader-frame-landscape .v-window__container,
+.reader-frame-landscape .v-window-item {
+  height: 100% !important;
+  width: 100% !important;
+}
+
 .reader-frame-landscape .img-fit-screen {
-  width: 100vh !important;
-  height: 100vw !important;
   max-width: 100vh !important;
   max-height: 100vw !important;
+  width: auto !important;
+  height: auto !important;
+  object-fit: contain !important;
 }
 
 .reader-frame-landscape .img-fit-height {

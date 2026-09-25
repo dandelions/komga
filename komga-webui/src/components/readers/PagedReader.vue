@@ -66,71 +66,31 @@
       @wheel="handleWheel($event)"
     />
 
-    <!--  Clickable zones for normal (unrotated) layout  -->
-    <template v-if="!isLandscapeRotated">
-      <!--  clickable zone: top  -->
-      <div @click="navigateTopSide()"
-           class="top-quarter"
-           style="z-index: 1;"
-      />
-
-      <!--  clickable zone: bottom  -->
-      <div @click="navigateBottomSide()"
-           class="bottom-quarter"
-           style="z-index: 1;"
-      />
-
-      <!--  clickable zone: left (middle height)  -->
-      <div @click="navigateLeftSide()"
-           class="mid-left"
-           style="z-index: 1;"
-      />
-
-      <!--  clickable zone: right (middle height)  -->
-      <div @click="navigateRightSide()"
-           class="mid-right"
-           style="z-index: 1;"
-      />
-
-      <!--  clickable zone: menu (center)  -->
-      <div @click="centerClick()"
-           class="mid-center"
-           style="z-index: 1;"
-      />
-    </template>
-
-    <!--  Clickable zones rotated for 90deg landscape layout  -->
-    <template v-else>
-      <!--  in 90deg rotated landscape: DOM left maps to physical top  -->
-      <div @click="navigateTopSide()"
-           class="left-quarter"
-           style="z-index: 1;"
-      />
-
-      <!--  in 90deg rotated landscape: DOM right maps to physical bottom  -->
-      <div @click="navigateBottomSide()"
-           class="right-quarter"
-           style="z-index: 1;"
-      />
-
-      <!--  in 90deg rotated landscape: DOM bottom (middle X) maps to physical left  -->
-      <div @click="navigateLeftSide()"
-           class="rotated-mid-left"
-           style="z-index: 1;"
-      />
-
-      <!--  in 90deg rotated landscape: DOM top (middle X) maps to physical right  -->
-      <div @click="navigateRightSide()"
-           class="rotated-mid-right"
-           style="z-index: 1;"
-      />
-
-      <!--  clickable zone: menu in rotated mode (center)  -->
-      <div @click="centerClick()"
-           class="rotated-mid-center"
-           style="z-index: 1;"
-      />
-    </template>
+    <!--  Clickable zones for normal and rotated layout  -->
+    <div v-if="vertical"
+         @click="verticalPrev()"
+         class="top-quarter"
+         style="z-index: 1;"
+    />
+    <div v-if="vertical"
+         @click="verticalNext()"
+         class="bottom-quarter"
+         style="z-index: 1;"
+    />
+    <div v-if="!vertical"
+         @click="navigateLeftSide()"
+         class="mid-left"
+         style="z-index: 1;"
+    />
+    <div v-if="!vertical"
+         @click="navigateRightSide()"
+         class="mid-right"
+         style="z-index: 1;"
+    />
+    <div @click="centerClick()"
+         :class="vertical ? 'center-vertical' : 'center-horizontal'"
+         style="z-index: 1;"
+    />
   </div>
 </template>
 
@@ -175,6 +135,23 @@ type CropSegment = {
   nextOverlapPercent: number,
   previousOverlapEdge?: CropSegmentEdge,
   nextOverlapEdge?: CropSegmentEdge,
+}
+
+function getEffectiveRotation(ctx: any): number {
+  if (ctx.effectiveRotation !== undefined) {
+    return Number(ctx.effectiveRotation) || 0
+  }
+  const baseRotation = ctx.isLandscapeRotated ? 90 : 0
+  const propRotation = ctx.normalizedRotation ? ctx.normalizedRotation(ctx.rotation) : (Number(ctx.rotation) || 0)
+  return ((baseRotation + propRotation) % 360 + 360) % 360
+}
+
+function getIsQuarterTurn(ctx: any): boolean {
+  if (ctx.isQuarterTurn !== undefined) {
+    return Boolean(ctx.isQuarterTurn)
+  }
+  const rot = getEffectiveRotation(ctx)
+  return rot === 90 || rot === 270
 }
 
 export default Vue.extend({
@@ -334,6 +311,10 @@ export default Vue.extend({
     },
     landscapeDisplay() {
       this.resetZoom()
+      this.rebuildSpreads(this.page)
+      this.$nextTick(() => {
+        this.scrollToPageEdge(this.pendingScrollPosition)
+      })
     },
     scale() {
       this.activeCropSegment = 0
@@ -368,8 +349,27 @@ export default Vue.extend({
         willChange: 'transform',
       }
     },
+    effectiveRotation(): number {
+      return getEffectiveRotation(this)
+    },
+    isQuarterTurn(): boolean {
+      return getIsQuarterTurn(this)
+    },
+    effectiveViewportWidth(): number {
+      const w = Math.max(1, this.$vuetify.breakpoint.width)
+      const h = Math.max(1, this.$vuetify.breakpoint.height)
+      return getIsQuarterTurn(this) ? h : w
+    },
+    effectiveViewportHeight(): number {
+      const w = Math.max(1, this.$vuetify.breakpoint.width)
+      const h = Math.max(1, this.$vuetify.breakpoint.height)
+      return getIsQuarterTurn(this) ? w : h
+    },
+    effectiveViewportRatio(): number {
+      return this.effectiveViewportWidth / this.effectiveViewportHeight
+    },
     isRotated(): boolean {
-      return this.isLandscapeRotated || this.normalizedRotation(this.rotation) !== 0
+      return getEffectiveRotation(this) !== 0
     },
     swipeTouchHandlers(): object | undefined {
       if (!this.swipe || this.isRotated) return undefined
@@ -437,9 +437,7 @@ export default Vue.extend({
     },
     heightPageNavigationEnabled(): boolean {
       if (this.scale !== ScaleType.HEIGHT || this.cropNavigationEnabled) return false
-      const viewportWidth = Math.max(1, this.$vuetify.breakpoint.width)
-      const viewportHeight = Math.max(1, this.$vuetify.breakpoint.height)
-      const viewportRatio = viewportWidth / viewportHeight
+      const viewportRatio = this.effectiveViewportRatio
       return this.pages.some(page => {
         const ratio = this.pageRatio(page)
         return ratio !== undefined && ratio > viewportRatio + 0.001
@@ -487,7 +485,7 @@ export default Vue.extend({
         this.prev()
         return
       }
-      if (this.isLandscapeRotated || Math.abs(this.normalizedRotation(this.rotation)) === 90) {
+      if (getIsQuarterTurn(this)) {
         if (e.key === 'ArrowDown') {
           this.next()
           return
@@ -500,8 +498,7 @@ export default Vue.extend({
     },
     spreadPages(): PageDtoWithUrl[] {
       if (!this.pages) return []
-      const quarterTurn = Math.abs(this.normalizedRotation(this.rotation)) === 90
-      if (!quarterTurn) return this.pages
+      if (!getIsQuarterTurn(this)) return this.pages
       return this.pages.map(p => {
         const hasWidth = p.width !== undefined && p.width !== null
         const hasHeight = p.height !== undefined && p.height !== null
@@ -650,20 +647,19 @@ export default Vue.extend({
       }
     },
     cropSegmentAxis(crop: CropRegion, pageRatio: number): CropSegmentAxis {
+      const isQuarterTurn = getIsQuarterTurn(this)
       switch (this.scale) {
         case ScaleType.WIDTH:
         case ScaleType.WIDTH_SHRINK_ONLY:
-          return 'vertical'
+          return isQuarterTurn ? 'horizontal' : 'vertical'
         case ScaleType.HEIGHT:
-          return 'horizontal'
+          return isQuarterTurn ? 'vertical' : 'horizontal'
       }
 
       // SCREEN and ORIGINAL can overflow in either direction after the crop is
       // enlarged. Split along the overflowing axis so a single crop region is
       // fully readable before navigation advances to the next source page.
-      const viewportWidth = Math.max(1, this.$vuetify.breakpoint.width)
-      const viewportHeight = Math.max(1, this.$vuetify.breakpoint.height)
-      const viewportRatio = viewportWidth / viewportHeight
+      const viewportRatio = this.effectiveViewportRatio
       const cropRatio = crop.w * pageRatio / crop.h
       return cropRatio <= viewportRatio ? 'vertical' : 'horizontal'
     },
@@ -672,7 +668,7 @@ export default Vue.extend({
       const height = Number(page.height)
       if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
         const sourceRatio = width / height
-        return Math.abs(this.normalizedRotation(this.rotation)) === 90 ? 1 / sourceRatio : sourceRatio
+        return getIsQuarterTurn(this) ? 1 / sourceRatio : sourceRatio
       }
 
       // The loaded image may already contain the reader rotation, so its
@@ -681,15 +677,13 @@ export default Vue.extend({
       return Number.isFinite(displayedRatio) && displayedRatio > 0 ? displayedRatio : undefined
     },
     displayPageWidth(page: PageDtoWithUrl): number {
-      return Math.abs(this.normalizedRotation(this.rotation)) === 90 ? Number(page.height) : Number(page.width)
+      return getIsQuarterTurn(this) ? Number(page.height) : Number(page.width)
     },
     displayPageHeight(page: PageDtoWithUrl): number {
-      return Math.abs(this.normalizedRotation(this.rotation)) === 90 ? Number(page.width) : Number(page.height)
+      return getIsQuarterTurn(this) ? Number(page.width) : Number(page.height)
     },
     cropSegmentViewportSpan(crop: CropRegion, pageRatio: number, axis: CropSegmentAxis): number {
-      const viewportWidth = Math.max(1, this.$vuetify.breakpoint.width)
-      const viewportHeight = Math.max(1, this.$vuetify.breakpoint.height)
-      const viewportRatio = viewportWidth / viewportHeight
+      const viewportRatio = this.effectiveViewportRatio
       if (axis === 'vertical') return Math.max(5, Math.min(crop.h, crop.w * pageRatio / viewportRatio))
       return Math.max(5, Math.min(crop.w, crop.h * viewportRatio / pageRatio))
     },
@@ -1077,8 +1071,19 @@ export default Vue.extend({
         if (Math.hypot(dx, dy) > 5) {
           this.hasDragged = true
         }
-        const localDx = this.isLandscapeRotated ? dy : dx
-        const localDy = this.isLandscapeRotated ? -dx : dy
+        const rot = getEffectiveRotation(this) % 360
+        let localDx = dx
+        let localDy = dy
+        if (rot === 90) {
+          localDx = dy
+          localDy = -dx
+        } else if (rot === 180) {
+          localDx = -dx
+          localDy = -dy
+        } else if (rot === 270) {
+          localDx = -dy
+          localDy = dx
+        }
 
         this.panOffset.x += localDx
         this.panOffset.y += localDy
@@ -1202,7 +1207,7 @@ export default Vue.extend({
       }
 
       const rect = img.getBoundingClientRect()
-      const isRotated = Boolean(this.isLandscapeRotated)
+      const isRotated = getIsQuarterTurn(this)
       const naturalW = isRotated ? img.naturalHeight : img.naturalWidth
       const naturalH = isRotated ? img.naturalWidth : img.naturalHeight
 
@@ -1235,20 +1240,39 @@ export default Vue.extend({
         return
       }
 
+      const rot = getEffectiveRotation(this) % 360
+      const cx = rect.left + rect.width / 2
+      const cy = rect.top + rect.height / 2
+      const dx = clientX - cx
+      const dy = clientY - cy
+
+      const rad = (-rot * Math.PI) / 180
+      const cos = Math.round(Math.cos(rad))
+      const sin = Math.round(Math.sin(rad))
+      const localX = dx * cos - dy * sin
+      const localY = dx * sin + dy * cos
+
+      const isQuarter = Math.abs(rot) === 90 || Math.abs(rot) === 270
+      const localW = Math.max(1, isQuarter ? rect.height : rect.width)
+      const localH = Math.max(1, isQuarter ? rect.width : rect.height)
+
+      const nx = localX / localW
+      const ny = localY / localH
+
       if (this.vertical) {
-        if (clientY < rect.top + rect.height * 0.3) {
+        if (ny < -0.2) {
           this.navigateTopSide()
           return
         }
-        if (clientY > rect.bottom - rect.height * 0.3) {
+        if (ny > 0.2) {
           this.navigateBottomSide()
           return
         }
-        if (clientX < rect.left + rect.width * 0.25) {
+        if (nx < -0.25) {
           this.navigateLeftSide()
           return
         }
-        if (clientX > rect.right - rect.width * 0.25) {
+        if (nx > 0.25) {
           this.navigateRightSide()
           return
         }
@@ -1258,22 +1282,22 @@ export default Vue.extend({
 
       // Horizontal reading direction:
       // Left 30% of image content (or left margin)
-      if (clientX < rect.left + rect.width * 0.3) {
+      if (nx < -0.2) {
         this.navigateLeftSide()
         return
       }
       // Right 30% of image content (or right margin)
-      if (clientX > rect.right - rect.width * 0.3) {
+      if (nx > 0.2) {
         this.navigateRightSide()
         return
       }
 
-      // Middle 40% horizontally: check top / bottom margins or top 20% / bottom 20%
-      if (clientY < rect.top + rect.height * 0.2) {
+      // Middle 40% horizontally: check top 20% / bottom 20%
+      if (ny < -0.3) {
         this.navigateTopSide()
         return
       }
-      if (clientY > rect.bottom - rect.height * 0.2) {
+      if (ny > 0.3) {
         this.navigateBottomSide()
         return
       }
@@ -1404,7 +1428,11 @@ export default Vue.extend({
         const scrollingElementTop = position === 'bottom' ? scrollingElement.scrollHeight : 0
         const scrollableElementTop = (element: HTMLElement) => position === 'bottom' ? element.scrollHeight : 0
 
-        window.scrollTo({top: scrollingElementTop, left: 0, behavior: 'auto'})
+        if (isLandscapeRotated) {
+          window.scrollTo({top: 0, left: 0, behavior: 'auto'})
+        } else {
+          window.scrollTo({top: scrollingElementTop, left: 0, behavior: 'auto'})
+        }
         scrollingElement.scrollTop = scrollingElementTop
         scrollingElement.scrollLeft = 0
         document.documentElement.scrollTop = position === 'bottom' ? document.documentElement.scrollHeight : 0
@@ -1627,15 +1655,22 @@ export default Vue.extend({
   bottom: 0;
   width: 100%;
   height: 100%;
-  z-index: 1;
+  z-index: 2;
   touch-action: none;
 }
 
+.paged-reader-landscape .v-window__container,
+.paged-reader-landscape .v-window-item {
+  height: 100% !important;
+  width: 100% !important;
+}
+
 .paged-reader-landscape .img-fit-screen {
-  width: 100vh;
-  height: 100vw;
   max-width: 100vh;
   max-height: 100vw;
+  width: auto;
+  height: auto;
+  object-fit: contain;
 }
 
 .paged-reader-landscape .img-fit-height {
