@@ -53,74 +53,66 @@
 
     <!--  Clickable zones for normal (unrotated) layout  -->
     <template v-if="!isLandscapeRotated">
-      <!--  clickable zone: left  -->
-      <div v-if="!vertical"
-           @click="navigateLeftSide()"
-           class="left-quarter"
-           style="z-index: 1;"
-      />
-
-      <!--  clickable zone: right  -->
-      <div v-if="!vertical"
-           @click="navigateRightSide()"
-           class="right-quarter"
-           style="z-index: 1;"
-      />
-
       <!--  clickable zone: top  -->
-      <div v-if="vertical"
-           @click="verticalPrev()"
+      <div @click="navigateTopSide()"
            class="top-quarter"
            style="z-index: 1;"
       />
 
       <!--  clickable zone: bottom  -->
-      <div v-if="vertical"
-           @click="verticalNext()"
+      <div @click="navigateBottomSide()"
            class="bottom-quarter"
            style="z-index: 1;"
       />
 
-      <!--  clickable zone: menu  -->
+      <!--  clickable zone: left (middle height)  -->
+      <div @click="navigateLeftSide()"
+           class="mid-left"
+           style="z-index: 1;"
+      />
+
+      <!--  clickable zone: right (middle height)  -->
+      <div @click="navigateRightSide()"
+           class="mid-right"
+           style="z-index: 1;"
+      />
+
+      <!--  clickable zone: menu (center)  -->
       <div @click="centerClick()"
-           :class="`${vertical ? 'center-vertical' : 'center-horizontal'}`"
+           class="mid-center"
            style="z-index: 1;"
       />
     </template>
 
     <!--  Clickable zones rotated for 90deg landscape layout  -->
     <template v-else>
-      <!--  in 90deg rotated landscape: DOM bottom maps to visual left  -->
-      <div v-if="!vertical"
-           @click="navigateLeftSide()"
-           class="bottom-quarter"
-           style="z-index: 1;"
-      />
-
-      <!--  in 90deg rotated landscape: DOM top maps to visual right  -->
-      <div v-if="!vertical"
-           @click="navigateRightSide()"
-           class="top-quarter"
-           style="z-index: 1;"
-      />
-
-      <!--  in 90deg rotated landscape: DOM left maps to visual top  -->
-      <div v-if="vertical"
-           @click="verticalPrev()"
+      <!--  in 90deg rotated landscape: DOM left maps to physical top  -->
+      <div @click="navigateTopSide()"
            class="left-quarter"
            style="z-index: 1;"
       />
 
-      <!--  in 90deg rotated landscape: DOM right maps to visual bottom  -->
-      <div v-if="vertical"
-           @click="verticalNext()"
+      <!--  in 90deg rotated landscape: DOM right maps to physical bottom  -->
+      <div @click="navigateBottomSide()"
            class="right-quarter"
            style="z-index: 1;"
       />
 
-      <!--  clickable zone: menu in rotated mode  -->
+      <!--  in 90deg rotated landscape: DOM bottom (middle X) maps to physical left  -->
+      <div @click="navigateLeftSide()"
+           class="rotated-mid-left"
+           style="z-index: 1;"
+      />
+
+      <!--  in 90deg rotated landscape: DOM top (middle X) maps to physical right  -->
+      <div @click="navigateRightSide()"
+           class="rotated-mid-right"
+           style="z-index: 1;"
+      />
+
+      <!--  clickable zone: menu in rotated mode (center)  -->
       <div @click="centerClick()"
-           :class="`${vertical ? 'center-horizontal' : 'center-vertical'}`"
+           class="rotated-mid-center"
            style="z-index: 1;"
       />
     </template>
@@ -449,7 +441,7 @@ export default Vue.extend({
         this.prev()
         return
       }
-      if (this.isLandscapeRotated) {
+      if (this.isLandscapeRotated || Math.abs(this.normalizedRotation(this.rotation)) === 90) {
         if (e.key === 'ArrowDown') {
           this.next()
           return
@@ -994,19 +986,49 @@ export default Vue.extend({
       if (!this.vertical)
         this.flipDirection ? this.next() : this.prev()
     },
+    navigateTopSide() {
+      if (this.vertical) {
+        this.verticalPrev()
+        return
+      }
+      const rotation = this.normalizedRotation(this.rotation)
+      if (rotation === -90 || rotation === 270) {
+        this.navigateRightSide()
+      } else {
+        this.navigateLeftSide()
+      }
+    },
+    navigateBottomSide() {
+      if (this.vertical) {
+        this.verticalNext()
+        return
+      }
+      const rotation = this.normalizedRotation(this.rotation)
+      if (rotation === -90 || rotation === 270) {
+        this.navigateLeftSide()
+      } else {
+        this.navigateRightSide()
+      }
+    },
     navigateLeftSide() {
-      if (this.vertical) return
+      if (this.vertical) {
+        this.verticalPrev()
+        return
+      }
       this.leftNavigationAction === PagedNavigationAction.NEXT ? this.next() : this.prev()
     },
     navigateRightSide() {
-      if (this.vertical) return
+      if (this.vertical) {
+        this.verticalNext()
+        return
+      }
       this.leftNavigationAction === PagedNavigationAction.NEXT ? this.prev() : this.next()
     },
     verticalPrev() {
-      if (this.vertical) this.prev()
+      this.prev()
     },
     verticalNext() {
-      if (this.vertical) this.next()
+      this.next()
     },
     prev() {
       const pageNumber = this.currentSpreadPageNumber()
@@ -1196,6 +1218,54 @@ export default Vue.extend({
   top: 25%;
   height: 50%;
   width: 100%;
+  position: absolute;
+}
+
+.mid-left {
+  top: 25%;
+  left: 0;
+  width: 25%;
+  height: 50%;
+  position: absolute;
+}
+
+.mid-right {
+  top: 25%;
+  right: 0;
+  width: 25%;
+  height: 50%;
+  position: absolute;
+}
+
+.mid-center {
+  top: 25%;
+  left: 25%;
+  width: 50%;
+  height: 50%;
+  position: absolute;
+}
+
+.rotated-mid-left {
+  left: 25%;
+  width: 50%;
+  bottom: 0;
+  height: 25%;
+  position: absolute;
+}
+
+.rotated-mid-right {
+  left: 25%;
+  width: 50%;
+  top: 0;
+  height: 25%;
+  position: absolute;
+}
+
+.rotated-mid-center {
+  left: 25%;
+  width: 50%;
+  top: 25%;
+  height: 50%;
   position: absolute;
 }
 

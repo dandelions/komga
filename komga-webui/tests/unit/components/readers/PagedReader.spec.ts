@@ -273,6 +273,8 @@ describe('PagedReader previous-page scroll restoration', () => {
     const reader = {
       shortcuts: {},
       isLandscapeRotated: true,
+      rotation: 0,
+      normalizedRotation: (r: number) => r,
       next: jest.fn(),
       prev: jest.fn(),
     }
@@ -291,5 +293,46 @@ describe('PagedReader previous-page scroll restoration', () => {
 
     methods.keyPressed.call(reader, {key: 'ArrowUp'} as any)
     expect(reader.prev).toHaveBeenCalledTimes(2)
+  })
+
+  test('navigateTopSide and navigateBottomSide handle vertical, LTR, RTL, and rotated angles', () => {
+    // 1. Vertical reading
+    const verticalReader = {
+      vertical: true,
+      verticalPrev: jest.fn(),
+      verticalNext: jest.fn(),
+      normalizedRotation: (r: number) => r,
+      rotation: 0,
+    }
+    methods.navigateTopSide.call(verticalReader)
+    expect(verticalReader.verticalPrev).toHaveBeenCalledTimes(1)
+    methods.navigateBottomSide.call(verticalReader)
+    expect(verticalReader.verticalNext).toHaveBeenCalledTimes(1)
+
+    // 2. Normal LTR (rotation 0)
+    const ltrReader = {
+      vertical: false,
+      rotation: 0,
+      normalizedRotation: (r: number) => r,
+      navigateLeftSide: jest.fn(),
+      navigateRightSide: jest.fn(),
+    }
+    methods.navigateTopSide.call(ltrReader)
+    expect(ltrReader.navigateLeftSide).toHaveBeenCalledTimes(1)
+    methods.navigateBottomSide.call(ltrReader)
+    expect(ltrReader.navigateRightSide).toHaveBeenCalledTimes(1)
+
+    // 3. Rotated -90 degrees
+    const rotatedMinus90Reader = {
+      vertical: false,
+      rotation: -90,
+      normalizedRotation: (r: number) => r,
+      navigateLeftSide: jest.fn(),
+      navigateRightSide: jest.fn(),
+    }
+    methods.navigateTopSide.call(rotatedMinus90Reader)
+    expect(rotatedMinus90Reader.navigateRightSide).toHaveBeenCalledTimes(1)
+    methods.navigateBottomSide.call(rotatedMinus90Reader)
+    expect(rotatedMinus90Reader.navigateLeftSide).toHaveBeenCalledTimes(1)
   })
 })
