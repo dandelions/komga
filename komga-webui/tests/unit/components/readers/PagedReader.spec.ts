@@ -475,4 +475,49 @@ describe('PagedReader previous-page scroll restoration', () => {
     const normalStyle = computed.pageZoomStyle.call(reader)
     expect(normalStyle).toEqual({})
   })
+
+  test('dispatchNavigationAtPoint protects top toolbar and bottom toolbar areas', () => {
+    const rect = {
+      left: 100,
+      top: 50,
+      right: 500,
+      bottom: 650,
+      width: 400,
+      height: 600,
+    }
+
+    const reader = {
+      vertical: false,
+      navigateLeftSide: jest.fn(),
+      navigateRightSide: jest.fn(),
+      navigateTopSide: jest.fn(),
+      navigateBottomSide: jest.fn(),
+      centerClick: jest.fn(),
+    }
+
+    // Top-right corner in the top toolbar strip (y < 48, x near right edge)
+    methods.dispatchNavigationAtPoint.call(reader, 480, 20, rect)
+    expect(reader.centerClick).toHaveBeenCalledTimes(1)
+    expect(reader.navigateRightSide).not.toHaveBeenCalled()
+
+    // Bottom toolbar strip (y > window.innerHeight - 48)
+    methods.dispatchNavigationAtPoint.call(reader, 480, window.innerHeight - 20, rect)
+    expect(reader.centerClick).toHaveBeenCalledTimes(2)
+  })
+
+  test('handleReaderClick dismisses menu/toolbars without page turn when toolbarsVisible is true', () => {
+    const reader = {
+      hasDragged: false,
+      zoomLevel: 1,
+      magnifierActive: false,
+      toolbarsVisible: true,
+      lastTapTime: 0,
+      centerClick: jest.fn(),
+      dispatchNavigationAtPoint: jest.fn(),
+    }
+
+    methods.handleReaderClick.call(reader, {clientX: 480, clientY: 20} as any)
+    expect(reader.centerClick).toHaveBeenCalledTimes(1)
+    expect(reader.dispatchNavigationAtPoint).not.toHaveBeenCalled()
+  })
 })

@@ -269,6 +269,10 @@ export default Vue.extend({
       type: Boolean,
       default: false,
     },
+    toolbarsVisible: {
+      type: Boolean,
+      default: false,
+    },
   },
   watch: {
     pages: {
@@ -1143,6 +1147,11 @@ export default Vue.extend({
         return
       }
 
+      if (this.toolbarsVisible) {
+        this.centerClick()
+        return
+      }
+
       const now = Date.now()
       if (now - this.lastTapTime < 300) {
         this.lastTapTime = 0
@@ -1217,6 +1226,15 @@ export default Vue.extend({
       clientY: number,
       rect: {left: number, top: number, right: number, bottom: number, width: number, height: number},
     ) {
+      const topBarHeight = 48
+      const bottomBarHeight = 48
+      const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 600
+
+      if (clientY < topBarHeight || clientY > viewportHeight - bottomBarHeight) {
+        this.centerClick()
+        return
+      }
+
       if (this.vertical) {
         if (clientY < rect.top + rect.height * 0.3) {
           this.navigateTopSide()
@@ -1609,7 +1627,7 @@ export default Vue.extend({
   bottom: 0;
   width: 100%;
   height: 100%;
-  z-index: 2;
+  z-index: 1;
   touch-action: none;
 }
 

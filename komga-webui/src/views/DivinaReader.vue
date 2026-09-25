@@ -13,7 +13,7 @@
           dense elevation="1"
           v-if="showToolbars"
           class="settings full-width"
-          style="position: fixed; top: 0; z-index: 2"
+          style="position: fixed; top: 0; z-index: 10"
         >
           <v-btn
             icon
@@ -196,7 +196,7 @@
           dense
           elevation="1"
           class="settings full-width"
-          style="position: fixed; bottom: 0"
+          style="position: fixed; bottom: 0; z-index: 10"
           horizontal
           v-if="showToolbars"
         >
@@ -435,6 +435,7 @@
         :page-display-urls="readerDeskewedPageUrls"
         :active-crop-region="readerActiveCropRegion"
         :magnifier-active="magnifierActive"
+        :toolbars-visible="showToolbars"
         @update:active-crop-region="setReaderActiveCropRegion"
         @menu="toggleToolbars()"
         @jump-previous="jumpToPrevious()"
@@ -3774,6 +3775,7 @@ export default Vue.extend({
 .reader-frame {
   position: relative;
   width: 100%;
+  z-index: 1;
 }
 
 .reader-frame-landscape {
