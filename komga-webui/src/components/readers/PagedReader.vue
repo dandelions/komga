@@ -138,18 +138,14 @@ type CropSegment = {
 }
 
 function getEffectiveRotation(ctx: any): number {
-  if (ctx.effectiveRotation !== undefined) {
-    return Number(ctx.effectiveRotation) || 0
-  }
-  const baseRotation = ctx.isLandscapeRotated ? 90 : 0
-  const propRotation = ctx.normalizedRotation ? ctx.normalizedRotation(ctx.rotation) : (Number(ctx.rotation) || 0)
+  const baseRotation = ctx?.isLandscapeRotated ? 90 : 0
+  const propRotation = typeof ctx?.normalizedRotation === 'function'
+    ? ctx.normalizedRotation(ctx.rotation)
+    : ((((Number(ctx?.rotation) || 0) % 360) + 360) % 360)
   return ((baseRotation + propRotation) % 360 + 360) % 360
 }
 
 function getIsQuarterTurn(ctx: any): boolean {
-  if (ctx.isQuarterTurn !== undefined) {
-    return Boolean(ctx.isQuarterTurn)
-  }
   const rot = getEffectiveRotation(ctx)
   return rot === 90 || rot === 270
 }
