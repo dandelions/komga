@@ -23,6 +23,15 @@
         <v-chip x-small class="mr-1" color="primary" outlined>
           {{ rate }}x
         </v-chip>
+        <v-btn
+          icon
+          x-small
+          class="mr-1"
+          @click.stop="$emit('toggle-toolbars')"
+          :title="$t('bookreader.shortcuts.show_hide_toolbars')"
+        >
+          <v-icon x-small>mdi-dock-top</v-icon>
+        </v-btn>
         <v-btn icon x-small @click.stop="minimized = false">
           <v-icon x-small>mdi-arrow-expand</v-icon>
         </v-btn>
@@ -65,6 +74,17 @@
             <span class="caption text--secondary mr-2">
               {{ totalCount > 0 ? `${currentIndex + 1}/${totalCount}` : '' }}
             </span>
+
+            <!-- 切换工具栏按钮 -->
+            <v-btn
+              icon
+              x-small
+              class="mr-1"
+              @click="$emit('toggle-toolbars')"
+              :title="$t('bookreader.shortcuts.show_hide_toolbars')"
+            >
+              <v-icon small>mdi-dock-top</v-icon>
+            </v-btn>
 
             <!-- 最小化按钮 -->
             <v-btn icon x-small class="mr-1" @click="minimized = true" :title="$t('epubreader.tts.minimize')">

@@ -638,6 +638,7 @@
       @update:autoScroll="ttsAutoScroll = $event"
       @update:highlight="ttsHighlight = $event"
       @set-sleep-timer="ttsSetSleepTimer"
+      @toggle-toolbars="toggleToolbars"
     />
   </div>
 </template>
@@ -1363,6 +1364,15 @@ export default Vue.extend({
         if (itemIdx !== -1) {
           clearTimeout(this.clickTimer)
           this.ttsPlayItem(itemIdx)
+          if (this.showToolbars) {
+            this.showToolbars = false
+          }
+          if (this.showToc) {
+            this.showToc = false
+          }
+          if (this.showSettings) {
+            this.showSettings = false
+          }
           return
         }
       }
@@ -1405,6 +1415,10 @@ export default Vue.extend({
       this.epubImageZoomVisible = true
     },
     singleClick(x: number, y: number) {
+      if (this.showToolbars) {
+        this.showToolbars = false
+        return
+      }
       if (this.verticalScroll) {
         if (this.settings.navigationClick) {
           if (y < this.$vuetify.breakpoint.height / 4) return this.d2Reader.previousPage()
@@ -3002,6 +3016,7 @@ export default Vue.extend({
         this.sendNotification(this.$t('epubreader.tts.not_supported').toString())
         return
       }
+      this.showToolbars = false
       this.ttsActive = true
       this.ttsStartCurrentChapter()
     },
