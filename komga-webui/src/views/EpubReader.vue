@@ -26,6 +26,15 @@
 
         <v-btn
           icon
+          :color="ttsActive ? 'primary' : undefined"
+          :title="$t('epubreader.tts.tooltip')"
+          @click="toggleTTS"
+        >
+          <v-icon>{{ ttsActive ? 'mdi-headphones' : 'mdi-headphones' }}</v-icon>
+        </v-btn>
+
+        <v-btn
+          icon
           :disabled="!screenfull.isEnabled"
           @click="screenfull.isFullscreen ? screenfull.exit() : enterFullscreen()">
           <v-icon>{{ fullscreenIcon }}</v-icon>
@@ -585,6 +594,39 @@
       v-model="showHelp"
       :shortcuts="shortcutsHelp"
     />
+
+    <epub-tts-player
+      :active="ttsActive"
+      :playing="ttsPlaying"
+      :book-title="bookTitle"
+      :chapter-title="progressionTitle"
+      :current-sentence="ttsCurrentSentence"
+      :current-index="ttsCurrentIndex"
+      :total-count="ttsItems.length"
+      :rate="ttsRate"
+      :pitch="ttsPitch"
+      :volume="ttsVolume"
+      :selected-voice-u-r-i="ttsVoiceURI"
+      :available-voices="ttsAvailableVoices"
+      :auto-scroll="ttsAutoScroll"
+      :highlight="ttsHighlight"
+      :sleep-mode="ttsSleepMode"
+      :sleep-timer-remaining="ttsSleepRemaining"
+      :is-first-chapter="ttsIsFirstChapter"
+      :is-last-chapter="ttsIsLastChapter"
+      :reader-appearance="appearance"
+      @toggle-play="ttsTogglePlay"
+      @previous="ttsPrevious"
+      @next="ttsNext"
+      @close="ttsClose"
+      @update:rate="ttsUpdateRate"
+      @update:pitch="ttsUpdatePitch"
+      @update:volume="ttsUpdateVolume"
+      @update:voiceURI="ttsUpdateVoiceURI"
+      @update:autoScroll="ttsAutoScroll = $event"
+      @update:highlight="ttsHighlight = $event"
+      @set-sleep-timer="ttsSetSleepTimer"
+    />
   </div>
 </template>
 
@@ -599,6 +641,7 @@ import {Context, ContextOrigin} from '@/types/context'
 import SettingsSwitch from '@/components/SettingsSwitch.vue'
 import {TocEntry} from '@/types/epub'
 import TocList from '@/components/TocList.vue'
+import EpubTtsPlayer from '@/components/readers/EpubTtsPlayer.vue'
 import {Locations} from '@d-i-t-a/reader/dist/types/model/Locator'
 import {
   epubShortcutsMenus,
@@ -772,7 +815,7 @@ type EpubNavigator = {
 
 export default Vue.extend({
   name: 'EpubReader',
-  components: {SettingsSelect, ShortcutHelpDialog, TocList, SettingsSwitch},
+  components: {SettingsSelect, ShortcutHelpDialog, TocList, SettingsSwitch, EpubTtsPlayer},
   data: function () {
     return {
       screenfull,
@@ -916,6 +959,24 @@ export default Vue.extend({
       epubImageZoomSrc: '',
       epubImageZoomAlt: '',
       pendingVerticalEpubResourceEdge: undefined as 'start' | 'end' | undefined,
+      ttsActive: false,
+      ttsPlaying: false,
+      ttsRate: 1.0,
+      ttsPitch: 1.0,
+      ttsVolume: 1.0,
+      ttsVoiceURI: '',
+      ttsAutoScroll: true,
+      ttsHighlight: true,
+      ttsSleepMode: 'off',
+      ttsSleepRemaining: 0,
+      ttsSleepTimerId: undefined as number | undefined,
+      ttsCurrentIndex: 0,
+      ttsCurrentSentence: '',
+      ttsItems: [] as { element: HTMLElement, text: string }[],
+      ttsAvailableVoices: [] as SpeechSynthesisVoice[],
+      ttsPendingNextChapter: false,
+      ttsUtterance: null as SpeechSynthesisUtterance | null,
+      ttsWatchdogTimer: undefined as number | undefined,
     }
   },
   created() {
@@ -923,6 +984,7 @@ export default Vue.extend({
     if (screenfull.isEnabled) screenfull.on('change', this.fullscreenChanged)
   },
   beforeDestroy() {
+    this.ttsStop()
     this.clearEpubTouchSelectionState()
     this.stopEpubIframeEnhancements()
     this.d2Reader?.stop?.()
@@ -942,6 +1004,8 @@ export default Vue.extend({
     this.fontFamiliesAdditional = await this.$komgaFonts.getFamilies()
     this.fontFamilies = [...this.fontFamilyDefault, ...this.fontFamiliesAdditional]
 
+    this.ttsInitVoices()
+    this.ttsLoadSettings()
     this.setup(this.bookId)
   },
   props: {
@@ -955,6 +1019,7 @@ export default Vue.extend({
       // route update means either:
       // - going to previous/next book, in this case the query.page is not set, so it will default to first page
       // - pressing the back button of the browser and navigating to the previous book, in this case the query.page is set, so we honor it
+      this.ttsStop()
       this.stopEpubIframeEnhancements()
       this.d2Reader?.stop?.()
       this.setup(to.params.bookId, Number(to.query.page))
@@ -964,6 +1029,20 @@ export default Vue.extend({
   computed: {
     isRtl(): boolean {
       return this.effectiveDirection === 'rtl'
+    },
+    ttsIsFirstChapter(): boolean {
+      const reader = this.d2Reader as D2Reader & { readingOrder?: EpubReadingOrderItem[] }
+      const readingOrder = reader?.readingOrder || []
+      if (readingOrder.length === 0) return false
+      const idx = this.getCurrentEpubResourceIndex(readingOrder)
+      return idx !== undefined && idx <= 0
+    },
+    ttsIsLastChapter(): boolean {
+      const reader = this.d2Reader as D2Reader & { readingOrder?: EpubReadingOrderItem[] }
+      const readingOrder = reader?.readingOrder || []
+      if (readingOrder.length === 0) return false
+      const idx = this.getCurrentEpubResourceIndex(readingOrder)
+      return idx !== undefined && idx >= readingOrder.length - 1
     },
     shortcuts(): any {
       const shortcuts = [...epubShortcutsSettings, ...epubShortcutsMenus]
@@ -1267,6 +1346,14 @@ export default Vue.extend({
     },
     clickThrough(e: MouseEvent) {
       const target = e.target as Element | null
+      if (this.ttsActive && target) {
+        const itemIdx = this.ttsItems.findIndex(it => it.element === target || it.element.contains(target))
+        if (itemIdx !== -1) {
+          clearTimeout(this.clickTimer)
+          this.ttsPlayItem(itemIdx)
+          return
+        }
+      }
       if (e.detail === 2 && target?.tagName.toLowerCase() === 'img') {
         clearTimeout(this.clickTimer)
         this.openEpubImageZoom(target as HTMLImageElement)
@@ -1480,6 +1567,9 @@ export default Vue.extend({
       this.markProgress(location)
       this.currentLocation = location
       this.scheduleEpubIframeEnhancements(false)
+      if (this.ttsActive && this.ttsPendingNextChapter) {
+        this.ttsOnNextChapterLoaded()
+      }
       return new Promise(function (resolve, _) {
         resolve(location)
       })
@@ -2004,6 +2094,7 @@ export default Vue.extend({
         this.applyEpubThemeToDocument(doc)
         this.applyEpubCustomStyleToDocument(doc)
         this.applyEpubTextSelection(doc)
+        this.ttsInjectHighlightStyle(doc)
         if ((doc.documentElement.getAttribute('data-komga-writing-mode') || '').indexOf('vertical') === 0) {
           this.updateEpubVerticalPaginationMetrics(doc)
           this.applyPendingVerticalEpubResourceEdge(doc)
@@ -2887,6 +2978,457 @@ export default Vue.extend({
         this.$komgaBooks.updateProgression(this.bookId, createR2Progression(location))
       }
     }, 500),
+    toggleTTS() {
+      if (this.ttsActive) {
+        this.ttsClose()
+      } else {
+        this.ttsStart()
+      }
+    },
+    ttsStart() {
+      if (typeof window === 'undefined' || !('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) {
+        this.sendNotification(this.$t('epubreader.tts.not_supported').toString())
+        return
+      }
+      this.ttsActive = true
+      this.ttsStartCurrentChapter()
+    },
+    ttsStartCurrentChapter(targetIndex?: number) {
+      const items = this.ttsExtractItemsFromIframe()
+      this.ttsItems = items
+      if (items.length === 0) {
+        setTimeout(() => {
+          if (!this.ttsActive) return
+          const retryItems = this.ttsExtractItemsFromIframe()
+          this.ttsItems = retryItems
+          if (retryItems.length > 0) {
+            const startIdx = targetIndex !== undefined ? targetIndex : this.ttsFindStartIndex(retryItems)
+            this.ttsPlayItem(startIdx)
+          }
+        }, 500)
+        return
+      }
+
+      const startIdx = targetIndex !== undefined ? targetIndex : this.ttsFindStartIndex(items)
+      this.ttsPlayItem(startIdx)
+    },
+    ttsOnNextChapterLoaded() {
+      this.ttsPendingNextChapter = false
+      this.$nextTick(() => {
+        setTimeout(() => {
+          if (!this.ttsActive) return
+          this.ttsStartCurrentChapter(0)
+        }, 350)
+      })
+    },
+    ttsClose() {
+      this.ttsStop()
+      this.ttsActive = false
+    },
+    ttsStop() {
+      this.ttsPlaying = false
+      this.ttsClearWatchdog()
+      this.ttsClearSleepTimer()
+      this.ttsClearHighlight()
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel()
+      }
+    },
+    ttsTogglePlay() {
+      if (this.ttsPlaying) {
+        this.ttsPause()
+      } else {
+        this.ttsPlay()
+      }
+    },
+    ttsPlay() {
+      if (this.ttsItems.length === 0) {
+        this.ttsStartCurrentChapter()
+        return
+      }
+      this.ttsPlayItem(this.ttsCurrentIndex)
+    },
+    ttsPause() {
+      this.ttsPlaying = false
+      this.ttsClearWatchdog()
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel()
+      }
+    },
+    ttsPrevious() {
+      if (this.ttsCurrentIndex > 0) {
+        this.ttsPlayItem(this.ttsCurrentIndex - 1)
+      } else if (!this.ttsIsFirstChapter) {
+        this.ttsPendingNextChapter = true
+        this.previousEpubResource()
+      }
+    },
+    ttsNext() {
+      if (this.ttsCurrentIndex < this.ttsItems.length - 1) {
+        this.ttsPlayItem(this.ttsCurrentIndex + 1)
+      } else {
+        this.ttsOnChapterEnd()
+      }
+    },
+    ttsUpdateRate(r: number) {
+      this.ttsRate = r
+      this.ttsSaveSettings()
+      if (this.ttsPlaying) {
+        this.ttsPlayItem(this.ttsCurrentIndex)
+      }
+    },
+    ttsUpdatePitch(p: number) {
+      this.ttsPitch = p
+      this.ttsSaveSettings()
+      if (this.ttsPlaying) {
+        this.ttsPlayItem(this.ttsCurrentIndex)
+      }
+    },
+    ttsUpdateVolume(v: number) {
+      this.ttsVolume = v
+      this.ttsSaveSettings()
+      if (this.ttsPlaying) {
+        this.ttsPlayItem(this.ttsCurrentIndex)
+      }
+    },
+    ttsUpdateVoiceURI(uri: string) {
+      this.ttsVoiceURI = uri
+      this.ttsSaveSettings()
+      if (this.ttsPlaying) {
+        this.ttsPlayItem(this.ttsCurrentIndex)
+      }
+    },
+    ttsSetSleepTimer(val: string) {
+      this.ttsSleepMode = val
+      this.ttsClearSleepTimer()
+      if (val === 'off' || val === 'chapter') {
+        this.ttsSleepRemaining = 0
+        return
+      }
+      const mins = parseInt(val, 10)
+      if (!isNaN(mins) && mins > 0) {
+        this.ttsSleepRemaining = mins * 60
+        this.ttsSleepTimerId = window.setInterval(() => {
+          this.ttsSleepRemaining -= 1
+          if (this.ttsSleepRemaining <= 0) {
+            this.ttsClearSleepTimer()
+            this.ttsSleepMode = 'off'
+            this.ttsPause()
+            this.sendNotification(this.$t('epubreader.tts.timer').toString())
+          }
+        }, 1000)
+      }
+    },
+    ttsClearSleepTimer() {
+      if (this.ttsSleepTimerId !== undefined) {
+        clearInterval(this.ttsSleepTimerId)
+        this.ttsSleepTimerId = undefined
+      }
+    },
+    ttsLoadSettings() {
+      try {
+        const raw = localStorage.getItem('komga-epub-tts-settings')
+        if (raw) {
+          const parsed = JSON.parse(raw)
+          if (typeof parsed.rate === 'number') this.ttsRate = parsed.rate
+          if (typeof parsed.pitch === 'number') this.ttsPitch = parsed.pitch
+          if (typeof parsed.volume === 'number') this.ttsVolume = parsed.volume
+          if (typeof parsed.voiceURI === 'string') this.ttsVoiceURI = parsed.voiceURI
+          if (typeof parsed.autoScroll === 'boolean') this.ttsAutoScroll = parsed.autoScroll
+          if (typeof parsed.highlight === 'boolean') this.ttsHighlight = parsed.highlight
+        }
+      } catch (e) {
+      }
+    },
+    ttsSaveSettings() {
+      try {
+        const s = {
+          rate: this.ttsRate,
+          pitch: this.ttsPitch,
+          volume: this.ttsVolume,
+          voiceURI: this.ttsVoiceURI,
+          autoScroll: this.ttsAutoScroll,
+          highlight: this.ttsHighlight,
+        }
+        localStorage.setItem('komga-epub-tts-settings', JSON.stringify(s))
+      } catch (e) {
+      }
+    },
+    ttsInitVoices() {
+      if (typeof window === 'undefined' || !('speechSynthesis' in window)) return
+      const update = () => {
+        const voices = window.speechSynthesis.getVoices() || []
+        this.ttsAvailableVoices = voices
+        if (voices.length > 0 && !this.ttsVoiceURI) {
+          const lang = (this.book?.metadata as any)?.language || navigator.language || 'zh-CN'
+          const prefix = lang.toLowerCase().slice(0, 2)
+          const matched = voices.find(v => v.lang && v.lang.toLowerCase().startsWith(prefix))
+            || voices.find(v => v.default)
+            || voices[0]
+          if (matched) this.ttsVoiceURI = matched.voiceURI
+        }
+      }
+      update()
+      if (window.speechSynthesis.onvoiceschanged !== undefined) {
+        window.speechSynthesis.onvoiceschanged = update
+      }
+    },
+    ttsInjectHighlightStyle(doc: Document) {
+      const STYLE_ID = 'komga-epub-tts-highlight-style'
+      if (doc.getElementById(STYLE_ID)) return
+      const style = doc.createElement('style')
+      style.id = STYLE_ID
+      style.textContent = `
+        .komga-tts-active {
+          background-color: rgba(255, 235, 59, 0.45) !important;
+          border-radius: 4px !important;
+          box-shadow: 0 0 0 2px rgba(255, 215, 0, 0.5) !important;
+          transition: background-color 0.2s ease, box-shadow 0.2s ease !important;
+        }
+        .night .komga-tts-active, [data-theme="night"] .komga-tts-active {
+          background-color: rgba(255, 215, 0, 0.25) !important;
+          box-shadow: 0 0 0 2px rgba(255, 215, 0, 0.35) !important;
+        }
+      `
+      doc.head?.appendChild(style)
+    },
+    ttsExtractItemsFromIframe(): { element: HTMLElement, text: string }[] {
+      const iframe = document.querySelector<HTMLIFrameElement>('#iframe-wrapper iframe')
+      const doc = iframe?.contentDocument
+      if (!doc || !doc.body) return []
+
+      this.ttsInjectHighlightStyle(doc)
+
+      const candidates = Array.from(doc.querySelectorAll<HTMLElement>(
+        'p, h1, h2, h3, h4, h5, h6, li, blockquote, dt, dd, pre',
+      )).filter(el => {
+        if (el.closest('script, style, svg, noscript, audio, video, nav')) return false
+        const text = (el.innerText || el.textContent || '').trim()
+        return text.length > 0
+      })
+
+      let blockElements: HTMLElement[] = []
+      if (candidates.length > 0) {
+        blockElements = candidates.filter(el => !candidates.some(other => other !== el && el.contains(other)))
+      } else {
+        blockElements = Array.from(doc.querySelectorAll<HTMLElement>('div')).filter(el => {
+          if (el.closest('script, style, svg, noscript, audio, video, nav')) return false
+          const hasBlockChild = el.querySelector('div, p, h1, h2, h3, h4, h5, h6, ul, ol, table')
+          if (hasBlockChild) return false
+          const text = (el.innerText || el.textContent || '').trim()
+          return text.length > 0
+        })
+      }
+
+      const items: { element: HTMLElement, text: string }[] = []
+      const sentenceRegex = /[^。！？!?；;\n\r]+([。！？!?；;\n\r]+["'”’）)]*|$)/g
+
+      blockElements.forEach(el => {
+        const rawText = (el.innerText || el.textContent || '').trim()
+        if (!rawText) return
+        const sentences = rawText.match(sentenceRegex)
+        if (sentences && sentences.length > 0) {
+          sentences.forEach(s => {
+            const cleaned = s.trim()
+            if (cleaned.length > 0) {
+              items.push({
+                element: el,
+                text: cleaned,
+              })
+            }
+          })
+        } else {
+          items.push({
+            element: el,
+            text: rawText,
+          })
+        }
+      })
+
+      return items
+    },
+    ttsFindStartIndex(items: { element: HTMLElement, text: string }[]): number {
+      if (!items || items.length === 0) return 0
+      const iframe = document.querySelector<HTMLIFrameElement>('#iframe-wrapper iframe')
+      if (!iframe) return 0
+
+      const viewWidth = iframe.clientWidth || window.innerWidth
+      const viewHeight = iframe.clientHeight || window.innerHeight
+
+      if (this.verticalScroll) {
+        for (let i = 0; i < items.length; i++) {
+          const rect = items[i].element.getBoundingClientRect()
+          if (rect.bottom > 40 && rect.top < viewHeight - 40) {
+            return i
+          }
+        }
+      } else {
+        for (let i = 0; i < items.length; i++) {
+          const rect = items[i].element.getBoundingClientRect()
+          if (rect.right > 15 && rect.left < viewWidth - 15) {
+            return i
+          }
+        }
+      }
+
+      let closestIndex = 0
+      let minDistance = Infinity
+      const centerX = viewWidth / 2
+      const centerY = viewHeight / 2
+
+      for (let i = 0; i < items.length; i++) {
+        const rect = items[i].element.getBoundingClientRect()
+        const dist = Math.hypot((rect.left + rect.width / 2) - centerX, (rect.top + rect.height / 2) - centerY)
+        if (dist < minDistance) {
+          minDistance = dist
+          closestIndex = i
+        }
+      }
+      return closestIndex
+    },
+    ttsPlayItem(index: number) {
+      if (!this.ttsActive) return
+      if (typeof window === 'undefined' || !('speechSynthesis' in window)) return
+
+      window.speechSynthesis.cancel()
+      this.ttsClearWatchdog()
+
+      if (index < 0 || index >= this.ttsItems.length) {
+        this.ttsOnChapterEnd()
+        return
+      }
+
+      this.ttsCurrentIndex = index
+      const item = this.ttsItems[index]
+      this.ttsCurrentSentence = item.text
+
+      if (this.ttsHighlight) {
+        this.ttsApplyHighlight(item.element)
+      } else {
+        this.ttsClearHighlight()
+      }
+
+      if (this.ttsAutoScroll) {
+        this.ttsScrollIntoViewIfNeeded(item.element)
+      }
+
+      const utterance = new SpeechSynthesisUtterance(item.text)
+      utterance.rate = this.ttsRate
+      utterance.pitch = this.ttsPitch
+      utterance.volume = this.ttsVolume
+
+      if (this.ttsVoiceURI) {
+        const voice = this.ttsAvailableVoices.find(v => v.voiceURI === this.ttsVoiceURI)
+        if (voice) utterance.voice = voice
+      }
+
+      utterance.onstart = () => {
+        this.ttsPlaying = true
+      }
+
+      utterance.onend = () => {
+        this.ttsClearWatchdog()
+        if (!this.ttsActive || !this.ttsPlaying) return
+
+        if (this.ttsSleepMode !== 'off' && this.ttsSleepMode !== 'chapter' && this.ttsSleepRemaining <= 0) {
+          this.ttsPause()
+          return
+        }
+
+        this.ttsPlayItem(this.ttsCurrentIndex + 1)
+      }
+
+      utterance.onerror = (e) => {
+        this.ttsClearWatchdog()
+        if (e.error === 'canceled' || e.error === 'interrupted') return
+        if (this.ttsActive && this.ttsPlaying) {
+          setTimeout(() => {
+            if (this.ttsActive && this.ttsPlaying) {
+              this.ttsPlayItem(this.ttsCurrentIndex + 1)
+            }
+          }, 300)
+        }
+      }
+
+      this.ttsUtterance = utterance
+      this.ttsPlaying = true
+
+      this.ttsStartWatchdog(item.text)
+
+      window.speechSynthesis.speak(utterance)
+      if (window.speechSynthesis.paused) {
+        window.speechSynthesis.resume()
+      }
+    },
+    ttsApplyHighlight(element: HTMLElement) {
+      this.ttsClearHighlight()
+      element.classList.add('komga-tts-active')
+    },
+    ttsClearHighlight() {
+      const iframe = document.querySelector<HTMLIFrameElement>('#iframe-wrapper iframe')
+      const doc = iframe?.contentDocument
+      if (!doc) return
+      doc.querySelectorAll('.komga-tts-active').forEach(el => el.classList.remove('komga-tts-active'))
+    },
+    ttsScrollIntoViewIfNeeded(element: HTMLElement) {
+      const iframe = document.querySelector<HTMLIFrameElement>('#iframe-wrapper iframe')
+      if (!iframe) return
+
+      const viewWidth = iframe.clientWidth || window.innerWidth
+      const viewHeight = iframe.clientHeight || window.innerHeight
+
+      if (this.verticalScroll) {
+        const rect = element.getBoundingClientRect()
+        if (rect.top < 60 || rect.bottom > viewHeight - 60) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        }
+      } else {
+        const rect = element.getBoundingClientRect()
+        if (rect.left >= viewWidth - 15) {
+          this.nextEpubPage()
+        } else if (rect.right <= 15) {
+          this.previousEpubPage()
+        }
+      }
+    },
+    ttsOnChapterEnd() {
+      if (this.ttsSleepMode === 'chapter') {
+        this.ttsPause()
+        this.sendNotification(this.$t('epubreader.tts.chapter_finished').toString())
+        return
+      }
+
+      if (this.ttsIsLastChapter) {
+        this.ttsPause()
+        this.sendNotification(this.$t('epubreader.tts.chapter_finished').toString())
+        return
+      }
+
+      this.ttsPendingNextChapter = true
+      this.ttsCurrentSentence = this.$t('epubreader.tts.loading_next_chapter').toString()
+      this.nextEpubResource()
+    },
+    ttsStartWatchdog(text: string) {
+      this.ttsClearWatchdog()
+      const estimatedSeconds = Math.max(8, Math.ceil((text.length / 2) / Math.max(0.5, this.ttsRate)) + 4)
+      this.ttsWatchdogTimer = window.setTimeout(() => {
+        if (!this.ttsActive || !this.ttsPlaying) return
+        if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+          if (window.speechSynthesis.paused) {
+            window.speechSynthesis.resume()
+          } else if (window.speechSynthesis.speaking) {
+            window.speechSynthesis.cancel()
+            this.ttsPlayItem(this.ttsCurrentIndex + 1)
+          }
+        }
+      }, estimatedSeconds * 1000)
+    },
+    ttsClearWatchdog() {
+      if (this.ttsWatchdogTimer !== undefined) {
+        clearTimeout(this.ttsWatchdogTimer)
+        this.ttsWatchdogTimer = undefined
+      }
+    },
   },
 })
 </script>
