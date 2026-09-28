@@ -21,7 +21,7 @@
           <v-icon>mdi-table-of-contents</v-icon>
         </v-btn>
 
-        <v-toolbar-title> {{ bookTitle }}</v-toolbar-title>
+        <v-toolbar-title class="text-truncate" style="max-width: 35vw"> {{ bookTitle }}</v-toolbar-title>
         <v-spacer></v-spacer>
 
         <v-btn
@@ -206,6 +206,18 @@
         <v-card-text class="pa-0">
           <v-list class="full-height full-width">
             <v-subheader class="font-weight-black text-h6">{{ $t('bookreader.settings.general') }}</v-subheader>
+            <v-list-item @click="toggleTTS(); showSettings = false">
+              <v-list-item-icon>
+                <v-icon :color="ttsActive ? 'primary' : undefined">mdi-headphones</v-icon>
+              </v-list-item-icon>
+              <v-list-item-content>
+                <v-list-item-title>{{ $t('epubreader.tts.title') }}</v-list-item-title>
+                <v-list-item-subtitle>{{ ttsActive ? (ttsPlaying ? $t('epubreader.tts.pause') : $t('epubreader.tts.play')) : $t('epubreader.tts.start') }}</v-list-item-subtitle>
+              </v-list-item-content>
+              <v-list-item-action>
+                <v-switch :input-value="ttsActive" @change="toggleTTS(); showSettings = false" />
+              </v-list-item-action>
+            </v-list-item>
             <v-list-item v-if="fixedLayout">
               <settings-select
                 :items="readingDirs"

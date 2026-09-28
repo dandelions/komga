@@ -794,7 +794,8 @@
   "epubreader": {
     "tts": {
       "tooltip": "Read Aloud (TTS)",
-      "title": "Text-to-Speech Settings",
+      "title": "Text-to-Speech (TTS)",
+      "start": "Start Reading",
       "not_supported": "Web Speech API is not supported in this browser",
       "play": "Play",
       "pause": "Pause",
@@ -879,7 +880,8 @@
       "reader_navigation": "Reader Navigation",
       "scroll": "Change layout to scroll",
       "settings": "Settings",
-      "show_hide_toc": "Show/hide table of contents"
+      "show_hide_toc": "Show/hide table of contents",
+      "tts": "Toggle Text-to-Speech (TTS)"
     }
   },
   "error_codes": {

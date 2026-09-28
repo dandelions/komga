@@ -793,8 +793,9 @@
   },
   "epubreader": {
     "tts": {
-      "tooltip": "语音阅读",
-      "title": "语音阅读设置",
+      "tooltip": "语音阅读 (TTS)",
+      "title": "语音阅读 (TTS)",
+      "start": "开始阅读",
       "not_supported": "当前浏览器不支持语音合成（Web Speech API）",
       "play": "播放",
       "pause": "暂停",
@@ -879,7 +880,8 @@
       "reader_navigation": "阅读方向",
       "scroll": "更改布局为滚屏",
       "settings": "设置",
-      "show_hide_toc": "显示/隐藏目录"
+      "show_hide_toc": "显示/隐藏目录",
+      "tts": "语音阅读 (TTS) 切换"
     }
   },
   "error_codes": {

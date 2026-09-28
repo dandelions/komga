@@ -52,6 +52,9 @@ export const epubShortcutsSettings = [
 ]
 
 export const epubShortcutsMenus = [
+  new Shortcut('epubreader.shortcuts.tts',
+    (ctx: any) => ctx.toggleTTS()
+    , 'r'),
   new Shortcut('bookreader.shortcuts.show_hide_toolbars',
     (ctx: any) => ctx.toggleToolbars()
     , 'm'),
