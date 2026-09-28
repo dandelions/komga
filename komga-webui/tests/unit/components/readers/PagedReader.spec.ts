@@ -520,4 +520,148 @@ describe('PagedReader previous-page scroll restoration', () => {
     expect(reader.centerClick).toHaveBeenCalledTimes(1)
     expect(reader.dispatchNavigationAtPoint).not.toHaveBeenCalled()
   })
+
+  describe('handleTouchEnd swipe navigation', () => {
+    test('swiping left triggers navigateRightSide exactly once', () => {
+      const stopPropagation = jest.fn()
+      const reader = {
+        touchStartCount: 1,
+        hasDragged: false,
+        zoomLevel: 1,
+        swipe: true,
+        isLandscapeRotated: false,
+        touchStartPos: {x: 200, y: 100},
+        touchStartTime: Date.now() - 100,
+        navigateLeftSide: jest.fn(),
+        navigateRightSide: jest.fn(),
+        navigateTopSide: jest.fn(),
+        navigateBottomSide: jest.fn(),
+        resetZoom: jest.fn(),
+      }
+
+      const event = {
+        touches: [],
+        changedTouches: [{clientX: 100, clientY: 105}],
+        stopPropagation,
+      } as any
+
+      methods.handleTouchEnd.call(reader, event)
+
+      expect(reader.navigateRightSide).toHaveBeenCalledTimes(1)
+      expect(reader.navigateLeftSide).not.toHaveBeenCalled()
+      expect(reader.hasDragged).toBe(true)
+      expect(stopPropagation).toHaveBeenCalled()
+    })
+
+    test('swiping right triggers navigateLeftSide exactly once', () => {
+      const stopPropagation = jest.fn()
+      const reader = {
+        touchStartCount: 1,
+        hasDragged: false,
+        zoomLevel: 1,
+        swipe: true,
+        isLandscapeRotated: false,
+        touchStartPos: {x: 100, y: 100},
+        touchStartTime: Date.now() - 100,
+        navigateLeftSide: jest.fn(),
+        navigateRightSide: jest.fn(),
+        navigateTopSide: jest.fn(),
+        navigateBottomSide: jest.fn(),
+        resetZoom: jest.fn(),
+      }
+
+      const event = {
+        touches: [],
+        changedTouches: [{clientX: 200, clientY: 102}],
+        stopPropagation,
+      } as any
+
+      methods.handleTouchEnd.call(reader, event)
+
+      expect(reader.navigateLeftSide).toHaveBeenCalledTimes(1)
+      expect(reader.navigateRightSide).not.toHaveBeenCalled()
+      expect(reader.hasDragged).toBe(true)
+      expect(stopPropagation).toHaveBeenCalled()
+    })
+
+    test('does not swipe when zoomed in (zoomLevel > 1.05)', () => {
+      const reader = {
+        touchStartCount: 1,
+        hasDragged: false,
+        zoomLevel: 1.8,
+        swipe: true,
+        isLandscapeRotated: false,
+        touchStartPos: {x: 200, y: 100},
+        touchStartTime: Date.now() - 100,
+        navigateLeftSide: jest.fn(),
+        navigateRightSide: jest.fn(),
+        resetZoom: jest.fn(),
+      }
+
+      const event = {
+        touches: [],
+        changedTouches: [{clientX: 100, clientY: 100}],
+      } as any
+
+      methods.handleTouchEnd.call(reader, event)
+
+      expect(reader.navigateRightSide).not.toHaveBeenCalled()
+      expect(reader.navigateLeftSide).not.toHaveBeenCalled()
+    })
+
+    test('does not swipe when swipe is false', () => {
+      const reader = {
+        touchStartCount: 1,
+        hasDragged: false,
+        zoomLevel: 1,
+        swipe: false,
+        isLandscapeRotated: false,
+        touchStartPos: {x: 200, y: 100},
+        touchStartTime: Date.now() - 100,
+        navigateLeftSide: jest.fn(),
+        navigateRightSide: jest.fn(),
+        resetZoom: jest.fn(),
+      }
+
+      const event = {
+        touches: [],
+        changedTouches: [{clientX: 100, clientY: 100}],
+      } as any
+
+      methods.handleTouchEnd.call(reader, event)
+
+      expect(reader.navigateRightSide).not.toHaveBeenCalled()
+      expect(reader.navigateLeftSide).not.toHaveBeenCalled()
+    })
+
+    test('maps swipe coordinates correctly when isLandscapeRotated is true', () => {
+      // In landscape rotated 90deg, physical deltaY < 0 corresponds to visual localDeltaX < 0 (left swipe)
+      const stopPropagation = jest.fn()
+      const reader = {
+        touchStartCount: 1,
+        hasDragged: false,
+        zoomLevel: 1,
+        swipe: true,
+        isLandscapeRotated: true,
+        touchStartPos: {x: 100, y: 200},
+        touchStartTime: Date.now() - 100,
+        navigateLeftSide: jest.fn(),
+        navigateRightSide: jest.fn(),
+        navigateTopSide: jest.fn(),
+        navigateBottomSide: jest.fn(),
+        resetZoom: jest.fn(),
+      }
+
+      const event = {
+        touches: [],
+        changedTouches: [{clientX: 105, clientY: 100}], // deltaX = 5, deltaY = -100 -> localDeltaX = -100
+        stopPropagation,
+      } as any
+
+      methods.handleTouchEnd.call(reader, event)
+
+      expect(reader.navigateRightSide).toHaveBeenCalledTimes(1)
+      expect(reader.navigateLeftSide).not.toHaveBeenCalled()
+    })
+  })
 })

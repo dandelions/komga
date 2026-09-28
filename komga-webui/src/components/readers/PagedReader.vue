@@ -2,7 +2,6 @@
   <div
     class="paged-reader full-height"
     :class="{'paged-reader-landscape': isLandscapeRotated}"
-    v-touch="swipeTouchHandlers"
   >
     <v-carousel v-model="carouselPage"
                 :show-arrows="false"
@@ -1108,18 +1107,22 @@ export default Vue.extend({
         const deltaTime = Date.now() - this.touchStartTime
 
         if (deltaTime < 500) {
-          if (Math.abs(deltaX) > 40 && Math.abs(deltaX) > Math.abs(deltaY) * 1.5) {
+          const localDeltaX = this.isLandscapeRotated ? deltaY : deltaX
+          const localDeltaY = this.isLandscapeRotated ? -deltaX : deltaY
+          if (Math.abs(localDeltaX) > 40 && Math.abs(localDeltaX) > Math.abs(localDeltaY) * 1.5) {
             this.hasDragged = true
-            if (deltaX > 0) {
+            if (e.stopPropagation) e.stopPropagation()
+            if (localDeltaX > 0) {
               this.navigateLeftSide()
             } else {
               this.navigateRightSide()
             }
             return
           }
-          if (Math.abs(deltaY) > 40 && Math.abs(deltaY) > Math.abs(deltaX) * 1.5) {
+          if (Math.abs(localDeltaY) > 40 && Math.abs(localDeltaY) > Math.abs(localDeltaX) * 1.5) {
             this.hasDragged = true
-            if (deltaY > 0) {
+            if (e.stopPropagation) e.stopPropagation()
+            if (localDeltaY > 0) {
               this.navigateTopSide()
             } else {
               this.navigateBottomSide()
