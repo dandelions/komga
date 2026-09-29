@@ -235,8 +235,33 @@
         <v-divider/>
 
         <v-card-text class="pt-4 pb-2">
-          <!-- 发音人选择 -->
+          <!-- TTS 引擎选择 -->
           <div class="mb-4">
+            <div class="caption font-weight-bold mb-1 d-flex align-center">
+              <v-icon x-small left>mdi-cog-outline</v-icon>
+              {{ $t('epubreader.tts.engine') }}
+            </div>
+            <v-btn-toggle
+              :value="engine"
+              mandatory
+              dense
+              color="primary"
+              class="d-flex"
+              @change="$emit('update:engine', $event)"
+            >
+              <v-btn value="web-speech" small class="flex-grow-1">
+                <v-icon x-small left>mdi-web</v-icon>
+                {{ $t('epubreader.tts.engine_web_speech') }}
+              </v-btn>
+              <v-btn value="custom-server" small class="flex-grow-1">
+                <v-icon x-small left>mdi-server-network</v-icon>
+                {{ $t('epubreader.tts.engine_custom_server') }}
+              </v-btn>
+            </v-btn-toggle>
+          </div>
+
+          <!-- Web Speech 模式下的发音人选择 -->
+          <div v-if="engine === 'web-speech'" class="mb-4">
             <div class="caption font-weight-bold mb-1 d-flex align-center">
               <v-icon x-small left>mdi-account-voice</v-icon>
               {{ $t('epubreader.tts.voice') }}
@@ -263,6 +288,102 @@
             </v-select>
           </div>
 
+          <!-- 自定义服务端 TTS 设置 -->
+          <div v-else class="mb-4">
+            <!-- 服务端 API 地址 -->
+            <div class="mb-3">
+              <div class="caption font-weight-bold mb-1 d-flex align-center">
+                <v-icon x-small left>mdi-link-variant</v-icon>
+                {{ $t('epubreader.tts.server_url') }}
+              </div>
+              <v-text-field
+                :value="serverUrl"
+                @input="$emit('update:serverUrl', $event)"
+                dense
+                outlined
+                hide-details
+                placeholder="http://localhost:5050/v1/audio/speech"
+              />
+              <div class="caption text--secondary mt-1">
+                {{ $t('epubreader.tts.server_url_hint') }}
+              </div>
+            </div>
+
+            <!-- 服务端发音人/模型 -->
+            <div class="mb-3">
+              <div class="caption font-weight-bold mb-1 d-flex align-center">
+                <v-icon x-small left>mdi-account-voice</v-icon>
+                {{ $t('epubreader.tts.server_voice') }}
+              </div>
+              <v-combobox
+                :items="serverVoicePresets"
+                :value="serverVoice"
+                @input="$emit('update:serverVoice', $event)"
+                dense
+                outlined
+                hide-details
+                item-text="text"
+                item-value="value"
+                :return-object="false"
+                placeholder="zh-CN-XiaoxiaoNeural"
+              />
+            </div>
+
+            <!-- 音频格式 -->
+            <div class="mb-3">
+              <div class="caption font-weight-bold mb-1 d-flex align-center">
+                <v-icon x-small left>mdi-file-music-outline</v-icon>
+                {{ $t('epubreader.tts.server_format') }}
+              </div>
+              <v-select
+                :items="['mp3', 'wav', 'opus', 'aac']"
+                :value="serverFormat"
+                @change="$emit('update:serverFormat', $event)"
+                dense
+                outlined
+                hide-details
+              />
+            </div>
+
+            <!-- 服务端 Token（可选） -->
+            <div class="mb-3">
+              <div class="caption font-weight-bold mb-1 d-flex align-center">
+                <v-icon x-small left>mdi-key-outline</v-icon>
+                {{ $t('epubreader.tts.server_token') }}
+              </div>
+              <v-text-field
+                :value="serverToken"
+                @input="$emit('update:serverToken', $event)"
+                type="password"
+                dense
+                outlined
+                hide-details
+                :placeholder="$t('epubreader.tts.server_token_placeholder')"
+              />
+            </div>
+
+            <!-- 测试连接按钮 -->
+            <div class="d-flex align-center flex-wrap">
+              <v-btn
+                outlined
+                small
+                color="primary"
+                :loading="testingServer"
+                @click="testServerConnection"
+              >
+                <v-icon x-small left>mdi-connection</v-icon>
+                {{ $t('epubreader.tts.test_connection') }}
+              </v-btn>
+              <span
+                v-if="testResultText"
+                class="caption ml-2"
+                :class="testResultSuccess ? 'success--text' : 'error--text'"
+              >
+                {{ testResultText }}
+              </span>
+            </div>
+          </div>
+
           <!-- 语速滑块调节 -->
           <div class="mb-4">
             <div class="d-flex justify-space-between align-center mb-1">
@@ -285,8 +406,8 @@
             />
           </div>
 
-          <!-- 音调滑块调节 -->
-          <div class="mb-4">
+          <!-- 音调滑块调节 (仅原生 Web Speech 支持) -->
+          <div v-if="engine === 'web-speech'" class="mb-4">
             <div class="d-flex justify-space-between align-center mb-1">
               <span class="caption font-weight-bold">
                 <v-icon x-small left>mdi-waveform</v-icon>
@@ -447,12 +568,50 @@ export default Vue.extend({
       type: String,
       default: 'day',
     },
+    engine: {
+      type: String,
+      default: 'web-speech',
+    },
+    serverUrl: {
+      type: String,
+      default: '',
+    },
+    serverVoice: {
+      type: String,
+      default: 'zh-CN-XiaoxiaoNeural',
+    },
+    serverFormat: {
+      type: String,
+      default: 'mp3',
+    },
+    serverToken: {
+      type: String,
+      default: '',
+    },
   },
   data() {
     return {
       minimized: false,
       showSettingsDialog: false,
       rateOptions: [0.75, 1.0, 1.25, 1.5, 1.75, 2.0],
+      testingServer: false,
+      testResultText: '',
+      testResultSuccess: false,
+      serverVoicePresets: [
+        { text: 'zh-CN-XiaoxiaoNeural (微软晓晓 - 女声温柔)', value: 'zh-CN-XiaoxiaoNeural' },
+        { text: 'zh-CN-YunxiNeural (微软云希 - 男声小说)', value: 'zh-CN-YunxiNeural' },
+        { text: 'zh-CN-YunjianNeural (微软云健 - 男声评书)', value: 'zh-CN-YunjianNeural' },
+        { text: 'zh-CN-XiaoyiNeural (微软晓伊 - 女声自然)', value: 'zh-CN-XiaoyiNeural' },
+        { text: 'zh-CN-YunyangNeural (微软云扬 - 男声播报)', value: 'zh-CN-YunyangNeural' },
+        { text: 'zh-HK-HiuGaaiNeural (微软晓佳 - 粤语女声)', value: 'zh-HK-HiuGaaiNeural' },
+        { text: 'zh-TW-HsiaoChenNeural (微软晓臻 - 台湾女声)', value: 'zh-TW-HsiaoChenNeural' },
+        { text: 'en-US-JennyNeural (Jenny - English Female)', value: 'en-US-JennyNeural' },
+        { text: 'en-US-GuyNeural (Guy - English Male)', value: 'en-US-GuyNeural' },
+        { text: 'ja-JP-NanamiNeural (Nanami - 日本語女性)', value: 'ja-JP-NanamiNeural' },
+        { text: 'alloy (OpenAI)', value: 'alloy' },
+        { text: 'echo (OpenAI)', value: 'echo' },
+        { text: 'zh_CN-huayan-medium (Piper)', value: 'zh_CN-huayan-medium' },
+      ],
     }
   },
   computed: {
@@ -500,6 +659,55 @@ export default Vue.extend({
         lang: v.lang,
       }))
       return [defaultItem, ...list]
+    },
+  },
+  methods: {
+    async testServerConnection() {
+      if (!this.serverUrl) {
+        this.testResultText = this.$t('epubreader.tts.server_url_required').toString()
+        this.testResultSuccess = false
+        return
+      }
+      this.testingServer = true
+      this.testResultText = ''
+      try {
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+        }
+        if (this.serverToken) {
+          headers.Authorization = `Bearer ${this.serverToken}`
+        }
+        const res = await fetch(this.serverUrl, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            input: '测试语音连接成功',
+            voice: this.serverVoice || 'zh-CN-XiaoxiaoNeural',
+            response_format: this.serverFormat || 'mp3',
+            speed: this.rate || 1.0,
+          }),
+        })
+        if (!res.ok) {
+          this.testResultText = `HTTP ${res.status}`
+          this.testResultSuccess = false
+        } else {
+          const blob = await res.blob()
+          if (blob.size > 0) {
+            this.testResultText = this.$t('epubreader.tts.test_success').toString()
+            this.testResultSuccess = true
+            const audio = new Audio(URL.createObjectURL(blob))
+            audio.play().catch(() => {})
+          } else {
+            this.testResultText = this.$t('epubreader.tts.test_failed_empty').toString()
+            this.testResultSuccess = false
+          }
+        }
+      } catch (err: any) {
+        this.testResultText = err.message || 'Connection failed'
+        this.testResultSuccess = false
+      } finally {
+        this.testingServer = false
+      }
     },
   },
 })
