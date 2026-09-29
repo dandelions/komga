@@ -40,6 +40,8 @@ export default Vue.extend({
 .sticky-bar {
   position: -webkit-sticky;
   position: sticky;
-  z-index: 2
+  z-index: 2;
+  width: 100%;
+  max-width: 100%;
 }
 </style>

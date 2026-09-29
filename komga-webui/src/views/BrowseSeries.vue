@@ -100,10 +100,11 @@
 
     <v-container fluid class="pa-6">
       <v-row>
-        <v-col cols="4" sm="4" md="auto" lg="auto" xl="auto">
+        <v-col cols="4" sm="4" md="auto" lg="auto" xl="auto" style="min-width: 0; max-width: 100%;">
           <item-card
             v-if="series.hasOwnProperty('id')"
             width="212"
+            style="max-width: 100%"
             :item="series"
             thumbnail-only
             no-link
@@ -111,11 +112,11 @@
           ></item-card>
         </v-col>
 
-        <v-col cols="8">
-          <v-container>
+        <v-col cols="8" sm="8" md="" class="col flex-grow-1" style="min-width: 0;">
+          <v-container fluid class="pa-0">
             <v-row>
               <v-col class="py-1">
-                <span class="text-h5" v-if="$_.get(series, 'metadata.title')">{{ series.metadata.title }}</span>
+                <span class="text-h5 text-wrap" style="word-break: break-word; overflow-wrap: break-word;" v-if="$_.get(series, 'metadata.title')">{{ series.metadata.title }}</span>
                 <router-link
                   class="caption link-underline"
                   :class="$vuetify.breakpoint.smAndUp ? 'mx-2' : ''"

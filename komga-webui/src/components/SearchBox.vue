@@ -1,5 +1,5 @@
 <template>
-  <div>
+  <div style="min-width: 0; max-width: 100%;">
     <v-autocomplete
       v-model="selectedItem"
       :placeholder="$t('search.search')"

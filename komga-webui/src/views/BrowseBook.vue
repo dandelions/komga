@@ -104,10 +104,11 @@
       </v-row>
 
       <v-row>
-        <v-col cols="4" sm="4" md="auto" lg="auto" xl="auto">
+        <v-col cols="4" sm="4" md="auto" lg="auto" xl="auto" style="min-width: 0; max-width: 100%;">
           <item-card
             v-if="book.hasOwnProperty('id')"
             width="212"
+            style="max-width: 100%"
             :item="book"
             thumbnail-only
             no-link
@@ -126,13 +127,14 @@
           </div>
         </v-col>
 
-        <v-col cols="8">
-          <v-container>
+        <v-col cols="8" sm="8" md="" class="col flex-grow-1" style="min-width: 0;">
+          <v-container fluid class="pa-0">
             <v-row>
               <v-col class="py-1">
                 <router-link
                   :to="{name:'browse-series', params: {seriesId: book.seriesId}}"
-                  class="link-underline text-h5"
+                  class="link-underline text-h5 text-wrap"
+                  style="word-break: break-word; overflow-wrap: break-word;"
                 >{{ book.seriesTitle }}
                 </router-link>
                 <router-link
@@ -146,7 +148,7 @@
             </v-row>
             <v-row>
               <v-col class="py-1">
-                <div class="text-h6">{{ book.metadata.title }}</div>
+                <div class="text-h6 text-wrap" style="word-break: break-word; overflow-wrap: break-word;">{{ book.metadata.title }}</div>
               </v-col>
             </v-row>
 

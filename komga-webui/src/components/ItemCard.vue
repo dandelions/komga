@@ -6,6 +6,7 @@
         @click="onClick"
         :class="noLink ? 'no-link' : ''"
         :ripple="false"
+        style="max-width: 100%"
       >
         <!--      Thumbnail-->
         <v-img

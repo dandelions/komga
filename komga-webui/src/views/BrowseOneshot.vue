@@ -114,10 +114,11 @@
       </v-row>
 
       <v-row>
-        <v-col cols="4" sm="4" md="auto" lg="auto" xl="auto">
+        <v-col cols="4" sm="4" md="auto" lg="auto" xl="auto" style="min-width: 0; max-width: 100%;">
           <item-card
             v-if="book.hasOwnProperty('id')"
             width="212"
+            style="max-width: 100%"
             :item="book"
             thumbnail-only
             no-link
@@ -136,11 +137,11 @@
           </div>
         </v-col>
 
-        <v-col cols="8">
-          <v-container>
+        <v-col cols="8" sm="8" md="" class="col flex-grow-1" style="min-width: 0;">
+          <v-container fluid class="pa-0">
             <v-row>
               <v-col class="py-1">
-                <span class="text-h6">{{ book.metadata.title }}</span>
+                <span class="text-h6 text-wrap" style="word-break: break-word; overflow-wrap: break-word;">{{ book.metadata.title }}</span>
                 <router-link
                   class="caption link-underline"
                   :class="$vuetify.breakpoint.smAndUp ? 'mx-1' : ''"
