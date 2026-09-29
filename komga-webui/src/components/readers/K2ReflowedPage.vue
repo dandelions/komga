@@ -455,11 +455,11 @@ export default Vue.extend({
   },
   computed: {
     k2ControlsStyle(): object {
-      const viewportHeight = this.viewportHeight || Math.floor(window.visualViewport?.height || window.innerHeight || 720)
+      const viewport = this.controlsViewportSize()
       return {
         left: `${this.controlsPosition.x}px`,
         top: `${this.controlsPosition.y}px`,
-        maxHeight: `${Math.max(64, viewportHeight - this.controlsPosition.y - 8)}px`,
+        maxHeight: `${Math.max(64, viewport.height - this.controlsPosition.y - 8)}px`,
       }
     },
     visibleItems(): K2Item[] {
@@ -613,10 +613,27 @@ export default Vue.extend({
       window.removeEventListener('pointerup', this.finishControlsDrag, true)
       window.removeEventListener('pointercancel', this.finishControlsDrag, true)
     },
+    isLandscapeFrame(): boolean {
+      if (typeof document === 'undefined' || !this.$el) return false
+      return Boolean(this.$el?.closest?.('.reader-frame-landscape'))
+    },
     controlsViewportSize(): {width: number, height: number} {
+      const clientWidth = (typeof document !== 'undefined' && document.documentElement?.clientWidth)
+        || (typeof window !== 'undefined' ? (window.visualViewport?.width || window.innerWidth) : 0)
+        || this.targetWidth
+        || 320
+      const clientHeight = (typeof document !== 'undefined' && document.documentElement?.clientHeight)
+        || (typeof window !== 'undefined' ? (window.visualViewport?.height || window.innerHeight) : 0)
+        || 720
+      if (this.isLandscapeFrame()) {
+        return {
+          width: Math.floor(clientHeight),
+          height: Math.floor(clientWidth),
+        }
+      }
       return {
-        width: Math.floor(window.visualViewport?.width || window.innerWidth || document.documentElement.clientWidth || this.targetWidth || 320),
-        height: Math.floor(window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight || 720),
+        width: Math.floor(clientWidth),
+        height: Math.floor(clientHeight),
       }
     },
     clampControlsPosition(x: number, y: number): {x: number, y: number} {
@@ -765,11 +782,28 @@ export default Vue.extend({
       this.repaginate(false)
     },
     updateViewportMetrics() {
-      this.viewportHeight = Math.floor(window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight || 720)
+      const clientWidth = (typeof document !== 'undefined' && document.documentElement?.clientWidth)
+        || (typeof window !== 'undefined' ? (window.visualViewport?.width || window.innerWidth) : 0)
+        || 0
+      const clientHeight = (typeof document !== 'undefined' && document.documentElement?.clientHeight)
+        || (typeof window !== 'undefined' ? (window.visualViewport?.height || window.innerHeight) : 0)
+        || 720
+      if (this.isLandscapeFrame()) {
+        this.viewportHeight = Math.floor(clientWidth || 720)
+      } else {
+        this.viewportHeight = Math.floor(clientHeight)
+      }
     },
     pageContentHeight(): number {
-      const height = this.viewportHeight || Math.floor(window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight || 720)
-      return Math.max(240, height)
+      if (this.viewportHeight) return Math.max(240, this.viewportHeight)
+      const clientWidth = (typeof document !== 'undefined' && document.documentElement?.clientWidth)
+        || (typeof window !== 'undefined' ? (window.visualViewport?.width || window.innerWidth) : 0)
+        || 0
+      const clientHeight = (typeof document !== 'undefined' && document.documentElement?.clientHeight)
+        || (typeof window !== 'undefined' ? (window.visualViewport?.height || window.innerHeight) : 0)
+        || 720
+      const height = this.isLandscapeFrame() ? (clientWidth || 720) : clientHeight
+      return Math.max(240, Math.floor(height))
     },
     async ensureCropImage() {
       if (this.objectUrl && this.imageSize.w && this.imageSize.h) return
@@ -2736,6 +2770,7 @@ export default Vue.extend({
   justify-content: flex-start;
   gap: 6px;
   width: min(300px, calc(100vw - 24px));
+  width: min(300px, calc(100dvw - 24px));
   min-height: 0;
   padding: 8px;
   box-sizing: border-box;
@@ -2981,6 +3016,7 @@ export default Vue.extend({
 
 .k2-status {
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -3000,6 +3036,7 @@ export default Vue.extend({
 
 .k2-crop-panel {
   min-height: 100vh;
+  min-height: 100dvh;
   padding: 8px;
   box-sizing: border-box;
   display: flex;

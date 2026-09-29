@@ -1642,7 +1642,17 @@ export default Vue.extend({
       return filters.join(' ') || 'none'
     },
     reflowTargetWidth(): number {
-      return this.$vuetify.breakpoint.width
+      const isLandscape = this.landscapeDisplay && !this.continuousReader
+      if (isLandscape) {
+        const clientHeight = (typeof document !== 'undefined' && document.documentElement?.clientHeight)
+          || (typeof window !== 'undefined' ? (window.visualViewport?.height || window.innerHeight) : 0)
+          || this.$vuetify.breakpoint.height
+        return Math.floor(clientHeight)
+      }
+      const clientWidth = (typeof document !== 'undefined' && document.documentElement?.clientWidth)
+        || (typeof window !== 'undefined' ? (window.visualViewport?.width || window.innerWidth) : 0)
+        || this.$vuetify.breakpoint.width
+      return Math.floor(clientWidth)
     },
     reflowOptions(): object {
       return this.reflowSettings
@@ -3782,8 +3792,12 @@ export default Vue.extend({
   position: fixed;
   top: calc((100vh - 100vw) / 2);
   left: calc((100vw - 100vh) / 2);
+  top: calc((100dvh - 100dvw) / 2);
+  left: calc((100dvw - 100dvh) / 2);
   width: 100vh;
+  width: 100dvh;
   height: 100vw;
+  height: 100dvw;
   transform: rotate(90deg);
   transform-origin: center center;
   overflow: hidden;
@@ -3798,7 +3812,9 @@ export default Vue.extend({
 
 .reader-frame-landscape .img-fit-screen {
   max-width: 100vh !important;
+  max-width: 100dvh !important;
   max-height: 100vw !important;
+  max-height: 100dvw !important;
   width: auto !important;
   height: auto !important;
   object-fit: contain !important;
@@ -3806,31 +3822,42 @@ export default Vue.extend({
 
 .reader-frame-landscape .img-fit-height {
   min-height: 100vw !important;
+  min-height: 100dvw !important;
   height: 100vw !important;
+  height: 100dvw !important;
   max-width: 100vh !important;
+  max-width: 100dvh !important;
 }
 
 .reader-frame-landscape .img-fit-width {
   width: 100vh !important;
+  width: 100dvh !important;
   min-height: 100vw !important;
+  min-height: 100dvw !important;
 }
 
 .reader-frame-landscape .img-fit-width-shrink-only {
   max-width: 100vh !important;
+  max-width: 100dvh !important;
 }
 
 .reader-frame-landscape .img-double-fit-screen {
   max-width: 50vh !important;
+  max-width: 50dvh !important;
   height: 100vw !important;
+  height: 100dvw !important;
 }
 
 .reader-frame-landscape .img-double-fit-width {
   width: 50vh !important;
+  width: 50dvh !important;
   min-height: 100vw !important;
+  min-height: 100dvw !important;
 }
 
 .reader-frame-landscape .img-double-fit-width-shrink-only {
   max-width: 50vh !important;
+  max-width: 50dvh !important;
 }
 
 .reflow-reader {

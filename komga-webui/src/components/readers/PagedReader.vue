@@ -1606,23 +1606,29 @@ export default Vue.extend({
 
 .img-fit-width {
   width: 100vw;
+  width: 100dvw;
   min-height: 100vh;
+  min-height: 100dvh;
   align-self: flex-start;
 }
 
 .img-double-fit-width {
   width: 50vw;
+  width: 50dvw;
   min-height: 100vh;
+  min-height: 100dvh;
   align-self: flex-start;
 }
 
 .img-fit-width-shrink-only {
   max-width: 100vw;
+  max-width: 100dvw;
   align-self: flex-start;
 }
 
 .img-double-fit-width-shrink-only {
   max-width: 50vw;
+  max-width: 50dvw;
   align-self: flex-start;
 }
 
@@ -1633,17 +1639,23 @@ export default Vue.extend({
 
 .img-fit-height {
   min-height: 100vh;
+  min-height: 100dvh;
   height: 100vh;
+  height: 100dvh;
 }
 
 .img-fit-screen {
   width: 100vw;
+  width: 100dvw;
   height: 100vh;
+  height: 100dvh;
 }
 
 .img-double-fit-screen {
   max-width: 50vw;
+  max-width: 50dvw;
   height: 100vh;
+  height: 100dvh;
 }
 
 .paged-click-surface {
@@ -1666,7 +1678,9 @@ export default Vue.extend({
 
 .paged-reader-landscape .img-fit-screen {
   max-width: 100vh;
+  max-width: 100dvh;
   max-height: 100vw;
+  max-height: 100dvw;
   width: auto;
   height: auto;
   object-fit: contain;
@@ -1674,31 +1688,42 @@ export default Vue.extend({
 
 .paged-reader-landscape .img-fit-height {
   min-height: 100vw;
+  min-height: 100dvw;
   height: 100vw;
+  height: 100dvw;
   max-width: 100vh;
+  max-width: 100dvh;
 }
 
 .paged-reader-landscape .img-fit-width {
   width: 100vh;
+  width: 100dvh;
   min-height: 100vw;
+  min-height: 100dvw;
 }
 
 .paged-reader-landscape .img-fit-width-shrink-only {
   max-width: 100vh;
+  max-width: 100dvh;
 }
 
 .paged-reader-landscape .img-double-fit-screen {
   max-width: 50vh;
+  max-width: 50dvh;
   height: 100vw;
+  height: 100dvw;
 }
 
 .paged-reader-landscape .img-double-fit-width {
   width: 50vh;
+  width: 50dvh;
   min-height: 100vw;
+  min-height: 100dvw;
 }
 
 .paged-reader-landscape .img-double-fit-width-shrink-only {
   max-width: 50vh;
+  max-width: 50dvh;
 }
 
 .pre-render {
