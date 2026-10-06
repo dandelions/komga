@@ -60,7 +60,7 @@ class EbookConverter internal constructor(
     private set
 
   @Volatile
-  private var resolvedEbookConvertPath: String = ebookConvertPath
+  private var resolvedEbookConvertPath: String = ebookConvertPath.trim()
 
   @PostConstruct
   private fun configureOnStartup() {
@@ -174,15 +174,23 @@ class EbookConverter internal constructor(
   }
 
   internal fun checkAvailability(): Boolean {
-    val candidates = (listOf(ebookConvertPath) + FALLBACK_EBOOK_CONVERT_PATHS).distinct()
+    val candidates =
+      (listOf(ebookConvertPath.trim()) + FALLBACK_EBOOK_CONVERT_PATHS)
+        .filter { it.isNotBlank() }
+        .distinct()
+    var lastError: Exception? = null
     for (candidate in candidates) {
       try {
         runCommand(timeoutSeconds = AVAILABILITY_TIMEOUT_SECONDS, candidate, "--version")
         resolvedEbookConvertPath = candidate
         return true
       } catch (e: Exception) {
+        lastError = e
         logger.debug(e) { "ebook-convert availability check failed for: $candidate" }
       }
+    }
+    if (lastError != null) {
+      logger.warn { "ebook-convert availability check failed (tried ${candidates.joinToString()}): ${lastError.message}" }
     }
     return false
   }
@@ -196,9 +204,21 @@ class EbookConverter internal constructor(
       val calibreRuntimeDir = cacheDir.resolve(".calibre-env")
       Files.createDirectories(calibreRuntimeDir)
       val env = pb.environment()
-      env.putIfAbsent("CALIBRE_CONFIG_DIRECTORY", calibreRuntimeDir.resolve("config").toString())
-      env.putIfAbsent("CALIBRE_TEMP_DIR", calibreRuntimeDir.resolve("tmp").toString())
-      env.putIfAbsent("CALIBRE_CACHE_DIRECTORY", calibreRuntimeDir.resolve("cache").toString())
+      val configDir = env["CALIBRE_CONFIG_DIRECTORY"]?.trim()?.takeIf { it.isNotEmpty() } ?: calibreRuntimeDir.resolve("config").toString()
+      val tempDir = env["CALIBRE_TEMP_DIR"]?.trim()?.takeIf { it.isNotEmpty() } ?: calibreRuntimeDir.resolve("tmp").toString()
+      val cacheDirPath = env["CALIBRE_CACHE_DIRECTORY"]?.trim()?.takeIf { it.isNotEmpty() } ?: calibreRuntimeDir.resolve("cache").toString()
+      val runtimeDir = calibreRuntimeDir.resolve("runtime")
+      Files.createDirectories(Path.of(configDir))
+      Files.createDirectories(Path.of(tempDir))
+      Files.createDirectories(Path.of(cacheDirPath))
+      Files.createDirectories(runtimeDir)
+      env["CALIBRE_CONFIG_DIRECTORY"] = configDir
+      env["CALIBRE_TEMP_DIR"] = tempDir
+      env["CALIBRE_CACHE_DIRECTORY"] = cacheDirPath
+      env.putIfAbsent("XDG_RUNTIME_DIR", runtimeDir.toString())
+      env.putIfAbsent("QT_QPA_PLATFORM", "offscreen")
+      env.putIfAbsent("QTWEBENGINE_DISABLE_SANDBOX", "1")
+      env.putIfAbsent("QTWEBENGINE_CHROMIUM_FLAGS", "--no-sandbox")
       val currentHome = env["HOME"]
       if (currentHome.isNullOrBlank() || !Files.isWritable(Path.of(currentHome))) {
         env["HOME"] = calibreRuntimeDir.toString()
