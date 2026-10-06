@@ -615,7 +615,13 @@ export default Vue.extend({
       return bookThumbnailUrl(this.bookId)
     },
     bookFilename(): string {
-      return this.book.url.split(/[\\/]/).pop() || this.book.name
+      const rawName = this.book.url.split(/[\\/]/).pop() || this.book.name
+      const extMatch = rawName.match(/(\.[^.]+)$/)
+      const ext = extMatch ? extMatch[1] : ''
+      const title = (this.book.metadata?.title || '').replace(/[\\/:*?"<>|\u0000-\u001F]/g, '_').trim().replace(/\.+$/, '')
+      if (!title) return rawName
+      if (ext && title.toLowerCase().endsWith(ext.toLowerCase())) return title
+      return `${title}${ext}`
     },
     fileUrl(): string {
       return bookFileUrl(this.bookId, this.bookFilename)

@@ -17,10 +17,12 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. 设置环境变量，确保系统和 Java 都使用 UTF-8
+# 2. 设置环境变量，确保系统和 Java 都使用 UTF-8，并指定 Calibre 路径与可写临时目录
 ENV LANG=en_US.UTF-8
 ENV LANGUAGE=en_US:en
 ENV LC_ALL=en_US.UTF-8
+ENV KOMGA_EBOOK_CONVERT_PATH=/usr/bin/ebook-convert
+ENV CALIBRE_CONFIG_DIRECTORY=/tmp/.calibre-config
 
 WORKDIR /app
 

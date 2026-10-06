@@ -1487,4 +1487,32 @@ class BookControllerTest(
         header { string(HttpHeaders.CONTENT_TYPE, containsString(org.gotson.komga.domain.model.MediaType.EPUB.type)) }
       }
   }
+
+  @Test
+  @WithMockCustomUser
+  fun `given book with custom metadata title when getting book file then attachment uses metadata title and preserves extension`() {
+    val tempFile =
+      Files
+        .createTempFile("pinyin_filename_", ".epub")
+        .also { it.toFile().deleteOnExit() }
+    makeSeries(name = "series", libraryId = library.id).let { series ->
+      seriesLifecycle.createSeries(series).let { created ->
+        val books = listOf(makeBook("pinyin_filename", libraryId = library.id, url = tempFile.toUri().toURL()))
+        seriesLifecycle.addBooks(created, books)
+      }
+    }
+
+    val book = bookRepository.findAll().first()
+    val customTitle = "中文书名测试"
+    bookMetadataRepository.findById(book.id).let {
+      bookMetadataRepository.update(it.copy(title = customTitle))
+    }
+
+    mockMvc
+      .get("/api/v1/books/${book.id}/file")
+      .andExpect {
+        status { isOk() }
+        header { string(HttpHeaders.CONTENT_DISPOSITION, containsString(URLEncoder.encode("$customTitle.epub", StandardCharsets.UTF_8.name()))) }
+      }
+  }
 }

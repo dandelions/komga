@@ -82,6 +82,37 @@ class EbookConverterTest {
     assertThat(staleTempFile).exists()
   }
 
+  @Test
+  fun `given converter not checked on startup when converting ebook then availability is checked on demand`(
+    @TempDir dir: Path,
+  ) {
+    // given
+    val fakeScript = dir.resolve("fake-ebook-convert.sh")
+    fakeScript.writeText(
+      """
+      #!/bin/sh
+      if [ "$1" = "--version" ]; then
+        echo "ebook-convert (calibre 7.0.0)"
+        exit 0
+      fi
+      cp "$1" "$2"
+      """.trimIndent(),
+    )
+    fakeScript.toFile().setExecutable(true)
+
+    val source = dir.resolve("book.azw3").apply { writeText("content") }
+    val converter = EbookConverter(fakeScript.toString(), Duration.ofDays(7), dir.resolve("cache"))
+
+    assertThat(converter.isAvailable).isFalse()
+
+    // when
+    val converted = converter.getOrConvertToEpub(source)
+
+    // then
+    assertThat(converter.isAvailable).isTrue()
+    assertThat(converted).exists()
+  }
+
   private fun Path.writeCacheFile(lastModified: Instant): Path {
     writeText("cache")
     Files.setLastModifiedTime(this, FileTime.from(lastModified))

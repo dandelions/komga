@@ -23,6 +23,13 @@ import kotlin.io.path.readAttributes
 
 private val logger = KotlinLogging.logger {}
 private const val CACHE_DIR_NAME = "komga-ebook-conversions"
+private const val AVAILABILITY_TIMEOUT_SECONDS = 30L
+private val FALLBACK_EBOOK_CONVERT_PATHS =
+  listOf(
+    "/usr/bin/ebook-convert",
+    "/usr/local/bin/ebook-convert",
+    "/opt/calibre/ebook-convert",
+  )
 
 class EbookConversionException(
   message: String,
@@ -48,20 +55,24 @@ class EbookConverter internal constructor(
     conversionTimeout,
   )
 
+  @Volatile
   final var isAvailable = false
     private set
+
+  @Volatile
+  private var resolvedEbookConvertPath: String = ebookConvertPath
 
   @PostConstruct
   private fun configureOnStartup() {
     isAvailable = checkAvailability()
     if (isAvailable)
-      logger.info { "AZW3/MOBI conversion available. ebook-convert path: $ebookConvertPath, timeout: $conversionTimeout" }
+      logger.info { "AZW3/MOBI conversion available. ebook-convert path: $resolvedEbookConvertPath, timeout: $conversionTimeout" }
     else
       logger.warn { "AZW3/MOBI conversion unavailable. ebook-convert was not found or is not executable: $ebookConvertPath" }
   }
 
   fun getOrConvertToEpub(path: Path): Path {
-    if (!isAvailable) throw EbookConversionException("ebook-convert is not available")
+    if (!ensureAvailable()) throw EbookConversionException("ebook-convert is not available")
 
     Files.createDirectories(cacheDir)
 
@@ -77,7 +88,7 @@ class EbookConverter internal constructor(
     try {
       val command =
         arrayOf(
-          ebookConvertPath,
+          resolvedEbookConvertPath,
           path.toString(),
           temp.toString(),
         )
@@ -152,20 +163,50 @@ class EbookConverter internal constructor(
     }
   }
 
-  private fun checkAvailability(): Boolean =
-    try {
-      runCommand(timeoutSeconds = 5, ebookConvertPath, "--version")
-      true
-    } catch (e: Exception) {
-      logger.debug(e) { "ebook-convert availability check failed" }
-      false
+  @Synchronized
+  private fun ensureAvailable(): Boolean {
+    if (isAvailable) return true
+    isAvailable = checkAvailability()
+    if (isAvailable) {
+      logger.info { "AZW3/MOBI conversion available after retry. ebook-convert path: $resolvedEbookConvertPath, timeout: $conversionTimeout" }
     }
+    return isAvailable
+  }
+
+  internal fun checkAvailability(): Boolean {
+    val candidates = (listOf(ebookConvertPath) + FALLBACK_EBOOK_CONVERT_PATHS).distinct()
+    for (candidate in candidates) {
+      try {
+        runCommand(timeoutSeconds = AVAILABILITY_TIMEOUT_SECONDS, candidate, "--version")
+        resolvedEbookConvertPath = candidate
+        return true
+      } catch (e: Exception) {
+        logger.debug(e) { "ebook-convert availability check failed for: $candidate" }
+      }
+    }
+    return false
+  }
 
   private fun runCommand(
     timeoutSeconds: Long,
     vararg command: String,
   ): String {
-    val process = ProcessBuilder(*command).redirectErrorStream(true).start()
+    val pb = ProcessBuilder(*command).redirectErrorStream(true)
+    try {
+      val calibreRuntimeDir = cacheDir.resolve(".calibre-env")
+      Files.createDirectories(calibreRuntimeDir)
+      val env = pb.environment()
+      env.putIfAbsent("CALIBRE_CONFIG_DIRECTORY", calibreRuntimeDir.resolve("config").toString())
+      env.putIfAbsent("CALIBRE_TEMP_DIR", calibreRuntimeDir.resolve("tmp").toString())
+      env.putIfAbsent("CALIBRE_CACHE_DIRECTORY", calibreRuntimeDir.resolve("cache").toString())
+      val currentHome = env["HOME"]
+      if (currentHome.isNullOrBlank() || !Files.isWritable(Path.of(currentHome))) {
+        env["HOME"] = calibreRuntimeDir.toString()
+      }
+    } catch (e: Exception) {
+      logger.debug(e) { "Could not prepare Calibre environment directory" }
+    }
+    val process = pb.start()
     val executor = Executors.newSingleThreadExecutor()
     val output = executor.submit<String> { process.inputStream.bufferedReader().use { it.readText() } }
 

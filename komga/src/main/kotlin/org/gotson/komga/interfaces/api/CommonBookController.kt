@@ -16,6 +16,7 @@ import org.gotson.komga.domain.model.MediaProfile
 import org.gotson.komga.domain.model.MediaUnsupportedException
 import org.gotson.komga.domain.model.R2Progression
 import org.gotson.komga.domain.model.toR2Progression
+import org.gotson.komga.domain.persistence.BookMetadataRepository
 import org.gotson.komga.domain.persistence.BookRepository
 import org.gotson.komga.domain.persistence.MediaRepository
 import org.gotson.komga.domain.persistence.ReadProgressRepository
@@ -63,6 +64,7 @@ private val FONT_EXTENSIONS = listOf("otf", "woff", "woff2", "eot", "ttf", "svg"
 class CommonBookController(
   private val mediaRepository: MediaRepository,
   private val bookRepository: BookRepository,
+  private val bookMetadataRepository: BookMetadataRepository,
   private val bookDtoRepository: BookDtoRepository,
   private val seriesMetadataRepository: SeriesMetadataRepository,
   private val bookLifecycle: BookLifecycle,
@@ -364,7 +366,7 @@ class CommonBookController(
                 contentDisposition =
                   ContentDisposition
                     .builder("attachment")
-                    .filename(book.path.name, StandardCharsets.UTF_8)
+                    .filename(getBookDownloadFileName(book), StandardCharsets.UTF_8)
                     .build()
               },
             ).contentType(getBookDownloadMediaType(book, media))
@@ -376,6 +378,30 @@ class CommonBookController(
         throw ResponseStatusException(HttpStatus.NOT_FOUND, "File not found, it may have moved")
       }
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+
+  private fun getBookDownloadFileName(book: Book): String {
+    val rawFileName = book.path.name
+    val extension = FilenameUtils.getExtension(rawFileName)
+    val baseName = FilenameUtils.getBaseName(rawFileName)
+    val title =
+      bookMetadataRepository
+        .findByIdOrNull(book.id)
+        ?.title
+        ?.trim()
+        .orEmpty()
+    val sanitizedTitle =
+      title
+        .replace(Regex("""[\\/:*?"<>|\u0000-\u001F]"""), "_")
+        .trim()
+        .trimEnd('.')
+    if (sanitizedTitle.isBlank() || sanitizedTitle == baseName || sanitizedTitle == book.name) {
+      return rawFileName
+    }
+    if (extension.isNotBlank() && sanitizedTitle.endsWith(".$extension", ignoreCase = true)) {
+      return sanitizedTitle
+    }
+    return if (extension.isNotBlank()) "$sanitizedTitle.$extension" else sanitizedTitle
+  }
 
   private fun getBookDownloadMediaType(
     book: Book,
