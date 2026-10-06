@@ -202,4 +202,28 @@ describe('DivinaReader image magnifier', () => {
     expect(reader.landscapeDisplay).toBe(false)
     window.scrollTo = originalScrollTo
   })
+
+  test('uses visualViewport height for landscape reflowTargetWidth when address bar hides', () => {
+    const originalVisualViewport = (window as any).visualViewport
+    const clientWidthSpy = jest.spyOn(document.documentElement, 'clientWidth', 'get').mockReturnValue(360)
+    const clientHeightSpy = jest.spyOn(document.documentElement, 'clientHeight', 'get').mockReturnValue(640)
+    ;(window as any).visualViewport = {width: 360, height: 712, scale: 1}
+
+    try {
+      const reader: any = {
+        landscapeDisplay: true,
+        continuousReader: false,
+        viewportWidth: 0,
+        viewportHeight: 0,
+      }
+      methods.updateViewportMetrics.call(reader)
+      expect(reader.viewportWidth).toBe(360)
+      expect(reader.viewportHeight).toBe(712)
+      expect(computed.reflowTargetWidth.call(reader)).toBe(712)
+    } finally {
+      ;(window as any).visualViewport = originalVisualViewport
+      clientWidthSpy.mockRestore()
+      clientHeightSpy.mockRestore()
+    }
+  })
 })

@@ -461,6 +461,41 @@ describe.each([
   test('uses the full viewport height for text pagination', () => {
     expect(toolbarMethods.pageContentHeight.call({viewportHeight: 700})).toBe(700)
   })
+
+  test('tracks visualViewport size changes when the browser address bar hides', () => {
+    const originalVisualViewport = (window as any).visualViewport
+    const clientWidthSpy = jest.spyOn(document.documentElement, 'clientWidth', 'get').mockReturnValue(360)
+    const clientHeightSpy = jest.spyOn(document.documentElement, 'clientHeight', 'get').mockReturnValue(640)
+    ;(window as any).visualViewport = {width: 360, height: 716, scale: 1}
+
+    try {
+      const portraitContext: any = {
+        viewportWidth: 0,
+        viewportHeight: 0,
+        targetWidth: 360,
+        isLandscapeFrame: () => false,
+      }
+      toolbarMethods.updateViewportMetrics.call(portraitContext)
+      expect(portraitContext.viewportWidth).toBe(360)
+      expect(portraitContext.viewportHeight).toBe(716)
+      expect(toolbarMethods.pageContentHeight.call(portraitContext)).toBe(716)
+
+      const landscapeContext: any = {
+        viewportWidth: 0,
+        viewportHeight: 0,
+        targetWidth: 640,
+        isLandscapeFrame: () => true,
+      }
+      toolbarMethods.updateViewportMetrics.call(landscapeContext)
+      expect(landscapeContext.viewportWidth).toBe(716)
+      expect(landscapeContext.viewportHeight).toBe(360)
+      expect(toolbarMethods.pageContentWidth.call(landscapeContext)).toBe(716)
+    } finally {
+      ;(window as any).visualViewport = originalVisualViewport
+      clientWidthSpy.mockRestore()
+      clientHeightSpy.mockRestore()
+    }
+  })
 })
 
 test('standard reflow does not reserve bottom space for its side toolbar', () => {

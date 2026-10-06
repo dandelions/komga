@@ -1252,6 +1252,8 @@ export default Vue.extend({
       magnifierPressTimer: undefined as number | undefined,
       magnifierLongPressTriggered: false,
       landscapeDisplay: false,
+      viewportWidth: 0,
+      viewportHeight: 0,
       reflowSetupMode: false,
       reflowMode: false,
       k2ReflowMode: false,
@@ -1412,6 +1414,10 @@ export default Vue.extend({
   },
   async mounted() {
     document.documentElement.classList.add('html-reader')
+    this.updateViewportMetrics()
+    window.addEventListener('resize', this.updateViewportMetrics)
+    window.visualViewport?.addEventListener('resize', this.updateViewportMetrics)
+    window.visualViewport?.addEventListener('scroll', this.updateViewportMetrics)
     this.loadMagnifierSettings()
 
     this.$debug('[mounted]', 'route.query:', this.$route.query)
@@ -1437,6 +1443,9 @@ export default Vue.extend({
   },
   destroyed() {
     document.documentElement.classList.remove('html-reader')
+    window.removeEventListener('resize', this.updateViewportMetrics)
+    window.visualViewport?.removeEventListener('resize', this.updateViewportMetrics)
+    window.visualViewport?.removeEventListener('scroll', this.updateViewportMetrics)
     this.clearReflowPrefetch()
     this.clearReaderCropImagePreparationTimer()
     this.revokeReaderCropImageUrl()
@@ -1643,15 +1652,23 @@ export default Vue.extend({
     },
     reflowTargetWidth(): number {
       const isLandscape = this.landscapeDisplay && !this.continuousReader
+      const vv = typeof window !== 'undefined' ? window.visualViewport : undefined
+      const vvScale = vv?.scale && vv.scale > 1.01 ? vv.scale : 1
       if (isLandscape) {
-        const clientHeight = (typeof document !== 'undefined' && document.documentElement?.clientHeight)
-          || (typeof window !== 'undefined' ? (window.visualViewport?.height || window.innerHeight) : 0)
-          || this.$vuetify.breakpoint.height
+        const clientHeight = this.viewportHeight
+          || (vv?.height ? vv.height * vvScale : 0)
+          || (typeof window !== 'undefined' ? window.innerHeight : 0)
+          || (typeof document !== 'undefined' && document.documentElement?.clientHeight)
+          || this.$vuetify?.breakpoint?.height
+          || 0
         return Math.floor(clientHeight)
       }
-      const clientWidth = (typeof document !== 'undefined' && document.documentElement?.clientWidth)
-        || (typeof window !== 'undefined' ? (window.visualViewport?.width || window.innerWidth) : 0)
-        || this.$vuetify.breakpoint.width
+      const clientWidth = this.viewportWidth
+        || (vv?.width ? vv.width * vvScale : 0)
+        || (typeof document !== 'undefined' && document.documentElement?.clientWidth)
+        || (typeof window !== 'undefined' ? window.innerWidth : 0)
+        || this.$vuetify?.breakpoint?.width
+        || 0
       return Math.floor(clientWidth)
     },
     reflowOptions(): object {
@@ -1694,7 +1711,6 @@ export default Vue.extend({
       return JSON.stringify({
         renderVersion: 15,
         bookId: this.bookId,
-        width: this.reflowTargetWidth,
         processingMode: this.reflowSettings.processingMode,
         rotation: this.readerRotation,
         autoCropBorder: this.reflowSettings.autoCropBorder,
@@ -3619,8 +3635,23 @@ export default Vue.extend({
         window.setTimeout(scroll, 100)
       })
     },
+    updateViewportMetrics() {
+      const vv = typeof window !== 'undefined' ? window.visualViewport : undefined
+      const vvScale = vv?.scale && vv.scale > 1.01 ? vv.scale : 1
+      const width = (vv?.width ? vv.width * vvScale : 0)
+        || (typeof document !== 'undefined' && document.documentElement?.clientWidth)
+        || (typeof window !== 'undefined' ? window.innerWidth : 0)
+        || 0
+      const height = (vv?.height ? vv.height * vvScale : 0)
+        || (typeof window !== 'undefined' ? window.innerHeight : 0)
+        || (typeof document !== 'undefined' && document.documentElement?.clientHeight)
+        || 0
+      this.viewportWidth = Math.floor(width)
+      this.viewportHeight = Math.floor(height)
+    },
     async toggleLandscapeDisplay() {
       this.landscapeDisplay = !this.landscapeDisplay
+      this.updateViewportMetrics?.()
       window.scrollTo(0, 0)
     },
     closeDialog() {

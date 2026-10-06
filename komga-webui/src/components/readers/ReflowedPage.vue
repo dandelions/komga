@@ -873,6 +873,7 @@ export default Vue.extend({
       reflowItems: [] as ReflowItem[],
       pages: [] as ReflowItem[][],
       virtualPageIndex: 0,
+      viewportWidth: 0,
       viewportHeight: 0,
       pageBackground: '#fff',
       lastDetectionKey: '',
@@ -1113,7 +1114,7 @@ export default Vue.extend({
     },
     measureWrapperStyle(): object {
       const style = {
-        width: `${this.targetWidth}px`,
+        width: `${this.pageContentWidth()}px`,
         columnGap: `${this.blockSpacing}px`,
         rowGap: `${Math.round(this.blockSpacing * 1.5)}px`,
       }
@@ -1315,7 +1316,13 @@ export default Vue.extend({
       deep: true,
     },
     targetWidth() {
+      this.updateViewportMetrics()
       if (this.deferReflow) return
+      if (this.reflowItems.length > 0) {
+        this.rescaleReflowItems()
+        this.repaginate(false)
+        return
+      }
       this.reflow()
     },
     startAtEnd() {
@@ -1388,6 +1395,7 @@ export default Vue.extend({
     this.updateViewportMetrics()
     window.addEventListener('resize', this.handleResize)
     window.visualViewport?.addEventListener('resize', this.handleResize)
+    window.visualViewport?.addEventListener('scroll', this.handleResize)
     this.$nextTick(() => {
       this.initializeControlsPosition()
       this.updateViewportMetrics()
@@ -1397,6 +1405,7 @@ export default Vue.extend({
   destroyed() {
     window.removeEventListener('resize', this.handleResize)
     window.visualViewport?.removeEventListener('resize', this.handleResize)
+    window.visualViewport?.removeEventListener('scroll', this.handleResize)
     this.removeControlsDragListeners()
     this.requestId += 1
     this.cancelServerReflowRequest()
@@ -1499,12 +1508,16 @@ export default Vue.extend({
       return Boolean(this.$el?.closest?.('.reader-frame-landscape'))
     },
     controlsViewportSize(): {width: number, height: number} {
-      const clientWidth = (typeof document !== 'undefined' && document.documentElement?.clientWidth)
-        || (typeof window !== 'undefined' ? (window.visualViewport?.width || window.innerWidth) : 0)
+      const vv = typeof window !== 'undefined' ? window.visualViewport : undefined
+      const vvScale = vv?.scale && vv.scale > 1.01 ? vv.scale : 1
+      const clientWidth = (vv?.width ? vv.width * vvScale : 0)
+        || (typeof window !== 'undefined' ? window.innerWidth : 0)
+        || (typeof document !== 'undefined' && document.documentElement?.clientWidth)
         || this.targetWidth
         || 320
-      const clientHeight = (typeof document !== 'undefined' && document.documentElement?.clientHeight)
-        || (typeof window !== 'undefined' ? (window.visualViewport?.height || window.innerHeight) : 0)
+      const clientHeight = (vv?.height ? vv.height * vvScale : 0)
+        || (typeof window !== 'undefined' ? window.innerHeight : 0)
+        || (typeof document !== 'undefined' && document.documentElement?.clientHeight)
         || 720
       if (this.isLandscapeFrame()) {
         return {
@@ -1947,35 +1960,53 @@ export default Vue.extend({
     handleResize() {
       this.updateViewportMetrics()
       this.$nextTick(this.constrainControlsPosition)
+      if (this.reflowItems.length > 0) {
+        this.rescaleReflowItems()
+      }
       this.repaginate(false)
     },
     updateViewportMetrics() {
-      const clientWidth = (typeof document !== 'undefined' && document.documentElement?.clientWidth)
-        || (typeof window !== 'undefined' ? (window.visualViewport?.width || window.innerWidth) : 0)
+      const vv = typeof window !== 'undefined' ? window.visualViewport : undefined
+      const vvScale = vv?.scale && vv.scale > 1.01 ? vv.scale : 1
+      const clientWidth = (vv?.width ? vv.width * vvScale : 0)
+        || (typeof window !== 'undefined' ? window.innerWidth : 0)
+        || (typeof document !== 'undefined' && document.documentElement?.clientWidth)
         || 0
-      const clientHeight = (typeof document !== 'undefined' && document.documentElement?.clientHeight)
-        || (typeof window !== 'undefined' ? (window.visualViewport?.height || window.innerHeight) : 0)
+      const clientHeight = (vv?.height ? vv.height * vvScale : 0)
+        || (typeof window !== 'undefined' ? window.innerHeight : 0)
+        || (typeof document !== 'undefined' && document.documentElement?.clientHeight)
         || 0
       if (this.isLandscapeFrame()) {
+        this.viewportWidth = Math.floor(clientHeight)
         this.viewportHeight = Math.floor(clientWidth)
       } else {
+        this.viewportWidth = Math.floor(clientWidth)
         this.viewportHeight = Math.floor(clientHeight)
       }
     },
+    pageContentWidth(): number {
+      if (this.viewportWidth) return Math.max(120, this.viewportWidth)
+      return Math.max(120, Math.floor(this.targetWidth || 320))
+    },
     pageContentHeight(): number {
       if (this.viewportHeight) return Math.max(240, this.viewportHeight)
-      const clientWidth = (typeof document !== 'undefined' && document.documentElement?.clientWidth)
-        || (typeof window !== 'undefined' ? (window.visualViewport?.width || window.innerWidth) : 0)
+      const vv = typeof window !== 'undefined' ? window.visualViewport : undefined
+      const vvScale = vv?.scale && vv.scale > 1.01 ? vv.scale : 1
+      const clientWidth = (vv?.width ? vv.width * vvScale : 0)
+        || (typeof window !== 'undefined' ? window.innerWidth : 0)
+        || (typeof document !== 'undefined' && document.documentElement?.clientWidth)
         || 0
-      const clientHeight = (typeof document !== 'undefined' && document.documentElement?.clientHeight)
-        || (typeof window !== 'undefined' ? (window.visualViewport?.height || window.innerHeight) : 0)
+      const clientHeight = (vv?.height ? vv.height * vvScale : 0)
+        || (typeof window !== 'undefined' ? window.innerHeight : 0)
+        || (typeof document !== 'undefined' && document.documentElement?.clientHeight)
         || 0
       const height = this.isLandscapeFrame() ? clientWidth : clientHeight
       return Math.max(240, Math.floor(height))
     },
     horizontalContentPadding(): number {
       if (!this.verticalText) return 16
-      return Math.max(24, Math.min(36, Math.round(this.targetWidth * 0.08)))
+      const targetWidth = (typeof this.pageContentWidth === 'function' ? this.pageContentWidth() : 0) || this.targetWidth
+      return Math.max(24, Math.min(36, Math.round(targetWidth * 0.08)))
     },
     repaginate(resetPage: boolean = true) {
       this.updateViewportMetrics()
@@ -2115,7 +2146,8 @@ export default Vue.extend({
     paginateItemsEstimated(items: ReflowItem[]): ReflowItem[][] {
       if (items.length === 0) return []
 
-      const contentWidth = Math.max(120, this.targetWidth - this.horizontalContentPadding() * 2)
+      const targetWidth = (typeof this.pageContentWidth === 'function' ? this.pageContentWidth() : 0) || this.targetWidth
+      const contentWidth = Math.max(120, targetWidth - this.horizontalContentPadding() * 2)
       const pageHeight = Math.max(120, this.pageContentHeight() - 32)
       const rowGap = Math.max(0, Math.round(this.blockSpacing * 1.5))
       const columnGap = this.blockSpacing
@@ -2171,7 +2203,8 @@ export default Vue.extend({
     paginateVerticalItemsEstimated(items: ReflowItem[]): ReflowItem[][] {
       if (items.length === 0) return []
 
-      const contentWidth = Math.max(120, this.targetWidth - this.horizontalContentPadding() * 2)
+      const targetWidth = (typeof this.pageContentWidth === 'function' ? this.pageContentWidth() : 0) || this.targetWidth
+      const contentWidth = Math.max(120, targetWidth - this.horizontalContentPadding() * 2)
       const contentHeight = Math.max(120, this.pageContentHeight() - 32)
       const columnGap = Math.max(0, this.blockSpacing)
       const rowGap = Math.max(0, Math.round(this.blockSpacing * 1.5))
@@ -2249,7 +2282,8 @@ export default Vue.extend({
     wordBlockDisplayDimensions(item: RenderedWordBlock): {width: number, height: number} {
       const sourceWidth = Math.max(1, item.w)
       const sourceHeight = Math.max(1, item.h)
-      const maxWidth = Math.max(1, this.targetWidth - this.horizontalContentPadding() * 2)
+      const targetWidth = (typeof this.pageContentWidth === 'function' ? this.pageContentWidth() : 0) || this.targetWidth
+      const maxWidth = Math.max(1, targetWidth - this.horizontalContentPadding() * 2)
       const scale = Math.min(this.textScale(), maxWidth / sourceWidth)
       return {
         width: Math.max(1, Math.round(sourceWidth * scale)),
@@ -6270,7 +6304,8 @@ export default Vue.extend({
       return max - min <= 32 && this.pixelLuma(data, offset) <= threshold
     },
     scaledImageDimensions(sourceWidth: number, sourceHeight: number): {width: number, height: number} {
-      const maxWidth = Math.max(1, this.targetWidth - this.horizontalContentPadding() * 2)
+      const targetWidth = (typeof this.pageContentWidth === 'function' ? this.pageContentWidth() : 0) || this.targetWidth
+      const maxWidth = Math.max(1, targetWidth - this.horizontalContentPadding() * 2)
       const maxHeight = Math.max(80, this.pageContentHeight() - 32)
       return fitReflowImageDimensions(sourceWidth, sourceHeight, maxWidth, maxHeight, this.textScale())
     },
@@ -6785,7 +6820,8 @@ export default Vue.extend({
       })
     },
     scaledIndentWidth(sourceWidth: number): number {
-      const maxIndent = Math.max(0, (this.targetWidth - 32) * 0.45)
+      const targetWidth = (typeof this.pageContentWidth === 'function' ? this.pageContentWidth() : 0) || this.targetWidth
+      const maxIndent = Math.max(0, (targetWidth - 32) * 0.45)
       return Math.min(maxIndent, sourceWidth * this.textScale())
     },
     textScale(): number {
