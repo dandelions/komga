@@ -1,7 +1,7 @@
 import { useCurrentUser } from '@/colada/users'
 import { useIntl } from 'vue-intl'
 import { storeToRefs } from 'pinia'
-import { useDialogsStore } from '@/stores/dialogs'
+import { type DialogResult, useDialogsStore } from '@/stores/dialogs'
 import { useMessagesStore } from '@/stores/messages'
 import { useDisplay } from 'vuetify/framework'
 import { commonMessages } from '@/utils/i18n/common-messages'
@@ -139,8 +139,9 @@ export function useLibraryActions(
         id: 'am3r7e',
       }),
       maxWidth: 600,
-      okText: 'Save',
-      cardTextClass: 'px-0',
+      cardTextProps: {
+        class: 'px-0',
+      },
       closeOnSave: false,
       scrollable: true,
       fullscreen: display.xs.value,
@@ -151,9 +152,15 @@ export function useLibraryActions(
     }
     dialogConfirmEdit.value.record = toValue(library)
     dialogConfirmEdit.value.callback = (
+      result: DialogResult,
       hideDialog: () => void,
       setLoading: (isLoading: boolean) => void,
     ) => {
+      if (result === 'cancel') {
+        callback(LibraryAction.Edit)
+        return
+      }
+
       setLoading(true)
 
       const updatedLib = dialogConfirmEdit.value.record as LibraryDto
@@ -219,8 +226,10 @@ export function useLibraryActions(
       ),
       props: {},
     }
-    dialogConfirm.value.callback = () => {
-      mutateRefreshMetadata(toValue(library).id)
+    dialogConfirm.value.callback = (result: DialogResult) => {
+      if (result === 'confirm') {
+        mutateRefreshMetadata(toValue(library).id)
+      }
       callback(LibraryAction.RefreshMetadata)
     }
   }
@@ -244,8 +253,10 @@ export function useLibraryActions(
       component: markRaw(h('div', intl.formatMessage(commonMessages.dialogEmptyTrashNotice))),
       props: {},
     }
-    dialogConfirm.value.callback = () => {
-      mutateEmptyTrash(toValue(library).id)
+    dialogConfirm.value.callback = (result: DialogResult) => {
+      if (result === 'confirm') {
+        mutateEmptyTrash(toValue(library).id)
+      }
       callback(LibraryAction.EmptyTrash)
     }
   }
@@ -295,8 +306,10 @@ export function useLibraryActions(
       ),
       props: {},
     }
-    dialogConfirm.value.callback = () => {
-      targetLibraries().forEach((target) => mutateAnalyze(target.id))
+    dialogConfirm.value.callback = (result: DialogResult) => {
+      if (result === 'confirm') {
+        targetLibraries().forEach((target) => mutateAnalyze(target.id))
+      }
       callback(LibraryAction.Analyze)
     }
   }
@@ -343,8 +356,10 @@ export function useLibraryActions(
       ),
       props: {},
     }
-    dialogConfirm.value.callback = () => {
-      targetLibraries().forEach((target) => mutateScan({ libraryId: target.id, deep: true }))
+    dialogConfirm.value.callback = (result: DialogResult) => {
+      if (result === 'confirm') {
+        targetLibraries().forEach((target) => mutateScan({ libraryId: target.id, deep: true }))
+      }
       callback(LibraryAction.ScanDeep)
     }
   }
@@ -377,25 +392,28 @@ export function useLibraryActions(
       component: markRaw(LibraryDeletionWarning),
       props: {},
     }
-    dialogConfirm.value.callback = () => {
-      mutateDelete(toValue(library).id)
-        .then(() => {
-          messagesStore.messages.push({
-            message: intl.formatMessage(
-              {
-                description: 'Snackbar notification shown upon successful library deletion',
-                defaultMessage: 'Library deleted: {library}',
-                id: 'PvKF7E',
-              },
-              {
-                library: toValue(library).name,
-              },
-            ),
+    dialogConfirm.value.callback = (result: DialogResult) => {
+      if (result === 'confirm') {
+        mutateDelete(toValue(library).id)
+          .then(() => {
+            messagesStore.messages.push({
+              message: intl.formatMessage(
+                {
+                  description: 'Snackbar notification shown upon successful library deletion',
+                  defaultMessage: 'Library deleted: {library}',
+                  id: 'PvKF7E',
+                },
+                {
+                  library: toValue(library).name,
+                },
+              ),
+            })
           })
-        })
-        .catch((error) => {
-          messagesStore.messages.push(error?.cause?.message ?? commonMessages.networkError)
-        })
+          .catch((error) => {
+            messagesStore.messages.push(error?.cause?.message ?? commonMessages.networkError)
+          })
+      }
+
       callback(LibraryAction.Delete)
     }
   }

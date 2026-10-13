@@ -29,7 +29,7 @@
     <template #[`item.url`]="{ value }">
       <div
         v-if="display.xs.value"
-        v-tooltip="value"
+        v-ktooltip="value"
         class="text-truncate"
         style="max-width: 200px"
       >
@@ -144,4 +144,3 @@ function updateOptions({
 }
 //endregion
 </script>
-<script setup lang="ts"></script>

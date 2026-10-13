@@ -29,6 +29,7 @@ class KoboDtoDao(
   private val a = Tables.BOOK_METADATA_AUTHOR
   private val sd = Tables.SERIES_METADATA
   private val bt = Tables.THUMBNAIL_BOOK
+  private val p = Tables.BOOK_PROJECTION
 
   override fun findBookMetadataByIds(
     bookIds: Collection<String>,
@@ -84,6 +85,12 @@ class KoboDtoDao(
           .filter { it.name != null }
           .groupBy({ it.bookId }, { it })
 
+      val projections =
+        dslRO
+          .selectFrom(p)
+          .where(p.BOOK_ID.`in`(bookIds))
+          .groupBy({ it.bookId }, { it })
+
       KoboBookMetadataDto(
         contributorRoles = authors[dr.bookId].orEmpty().map { ContributorDto(it.name) },
         contributors = authors[dr.bookId].orEmpty().map { it.name },
@@ -112,6 +119,7 @@ class KoboDtoDao(
         isKepub = mr.epubIsKepub,
         isPrePaginated = mediaExtension?.isFixedLayout == true,
         fileSize = br.fileSize,
+        extraFileSizes = projections[dr.bookId].orEmpty().associate { it.profile to it.fileSize } + ("default" to br.fileSize),
       )
     }
   }

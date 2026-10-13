@@ -5,7 +5,8 @@ import {
   komgaResetLibraryScanDailyFileLimitUsage,
 } from '@/generated/openapi'
 import { client } from '@/generated/openapi/client.gen'
-import type { SettingsDtoExtended, SettingsUpdateDtoExtended } from '@/types/ThumbnailRegenerate'
+import type { SettingsDtoExtended, SettingsUpdateDtoExtended } from '@/types/Settings'
+import { STALE_TIME } from '@/types/time'
 
 export const QUERY_KEYS_SETTINGS = {
   root: ['settings'] as const,
@@ -15,8 +16,7 @@ export const useSettings = defineQuery(() => {
   return useQuery({
     key: () => QUERY_KEYS_SETTINGS.root,
     query: async () => (await komgaGetServerSettings()) as SettingsDtoExtended,
-    // 1 hour
-    staleTime: 60 * 60 * 1000,
+    staleTime: STALE_TIME.LONG,
     gcTime: false,
   })
 })

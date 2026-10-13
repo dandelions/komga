@@ -4,7 +4,7 @@
 
 import { type DefaultBodyType, http, type HttpHandler, HttpResponse, type HttpResponseResolver, type RequestHandlerOptions as RequestHandlerOptions2 } from 'msw';
 
-import type { AddLibraryData, AddLibraryResponses, AddUserData, AddUserResponses, AddUserUploadedBookThumbnailData, AddUserUploadedBookThumbnailResponses, AddUserUploadedCollectionThumbnailData, AddUserUploadedCollectionThumbnailResponses, AddUserUploadedReadListThumbnailData, AddUserUploadedReadListThumbnailResponses, AddUserUploadedSeriesThumbnailData, AddUserUploadedSeriesThumbnailResponses, AnalyzeTransientBookResponses, BookAnalyzeResponses, BookRefreshMetadataResponses, BooksRegenerateThumbnailsResponses, ClaimServerResponses, ClientOptions, ConvertHeaderSessionToCookieResponses, CreateApiKeyForCurrentUserData, CreateApiKeyForCurrentUserResponses, CreateCollectionData, CreateCollectionResponses, CreateOrUpdateKnownPageHashData, CreateOrUpdateKnownPageHashResponses, CreateReadListData, CreateReadListResponses, DeleteApiKeyByKeyIdResponses, DeleteBookFileResponses, DeleteBookReadProgressResponses, DeleteCollectionByIdResponses, DeleteDuplicatePagesByPageHashResponses, DeleteGlobalSettingsData, DeleteGlobalSettingsResponses, DeleteLibraryByIdResponses, DeleteReadListByIdResponses, DeleteSeriesFileResponses, DeleteSingleMatchByPageHashData, DeleteSingleMatchByPageHashResponses, DeleteSyncPointsForCurrentUserResponses, DeleteUserByIdResponses, DeleteUserSettingsData, DeleteUserSettingsResponses, DeleteUserUploadedBookThumbnailResponses, DeleteUserUploadedCollectionThumbnailResponses, DeleteUserUploadedReadListThumbnailResponses, DeleteUserUploadedSeriesThumbnailResponses, DownloadBookFile1Responses, DownloadBookFileResponses, DownloadReadListAsZipResponses, DownloadSeriesAsZipResponses, EmptyTaskQueueResponses, GetActuatorInfoResponses, GetAgeRatingsResponses, GetAnnouncementsResponses, GetApiKeysForCurrentUserResponses, GetAuthenticationActivityForCurrentUserResponses, GetAuthenticationActivityResponses, GetAuthorsNamesResponses, GetAuthorsResponses, GetAuthorsRolesResponses, GetBookByIdResponses, GetBookEpubResourceResponses, GetBookPageRawByNumberResponses, GetBookPagesResponses, GetBookPositionsResponses, GetBookProgressionResponses, GetBooksByReadListIdResponses, GetBooksData, GetBooksDuplicatesResponses, GetBookSiblingNextInReadListResponses, GetBookSiblingNextResponses, GetBookSiblingPreviousInReadListResponses, GetBookSiblingPreviousResponses, GetBooksLatestResponses, GetBooksOnDeckResponses, GetBooksResponses, GetBookThumbnailsResponses, GetBookWebPubManifestDivinaResponses, GetBookWebPubManifestEpubResponses, GetBookWebPubManifestPdfResponses, GetBookWebPubManifestResponses, GetClaimStatusResponses, GetCollectionByIdResponses, GetCollectionsBySeriesIdResponses, GetCollectionsResponses, GetCollectionThumbnailsResponses, GetCurrentUserResponses, GetDirectoryListingData, GetDirectoryListingResponses, GetFontFamilyAsCssResponses, GetFontFileResponses, GetFontsResponses, GetGenresResponses, GetGlobalSettingsResponses, GetHistoricalEventsResponses, GetKnownPageHashesResponses, GetLanguagesResponses, GetLatestAuthenticationActivityByUserIdResponses, GetLibrariesResponses, GetLibraryByIdResponses, GetMihonReadProgressByReadListIdResponses, GetMihonReadProgressBySeriesIdResponses, GetOAuth2ProvidersResponses, GetPageByTransientBookIdResponses, GetPageHashMatchesResponses, GetPublishersResponses, GetReadListByIdResponses, GetReadListsByBookIdResponses, GetReadListsResponses, GetReadListThumbnailsResponses, GetReleasesResponses, GetSeriesAlphabeticalGroupsData, GetSeriesAlphabeticalGroupsResponses, GetSeriesByCollectionIdResponses, GetSeriesByIdResponses, GetSeriesData, GetSeriesLatestResponses, GetSeriesNewResponses, GetSeriesReleaseYearsResponses, GetSeriesResponses, GetSeriesThumbnailsResponses, GetSeriesUpdatedResponses, GetServerSettingsResponses, GetSharingLabelsResponses, GetTagsResponses, GetUnknownPageHashesResponses, GetUserSettingsResponses, GetUsersResponses, ImportBooksData, ImportBooksResponses, LibraryAnalyzeResponses, LibraryEmptyTrashResponses, LibraryRefreshMetadataResponses, LibraryScanResponses, MarkAnnouncementsReadData, MarkAnnouncementsReadResponses, MarkBookReadProgressData, MarkBookReadProgressResponses, MarkBookThumbnailSelectedResponses, MarkCollectionThumbnailSelectedResponses, MarkReadListThumbnailSelectedResponses, MarkSeriesAsReadResponses, MarkSeriesAsUnreadResponses, MarkSeriesThumbnailSelectedResponses, MatchComicRackListData, MatchComicRackListResponses, PostLogout1Responses, PostLogoutResponses, ResetLibraryScanDailyFileLimitUsageResponses, SaveGlobalSettingData, SaveGlobalSettingResponses, SaveUserSettingData, SaveUserSettingResponses, ScanTransientBooksData, ScanTransientBooksResponses, SeriesAnalyzeResponses, SeriesRefreshMetadataResponses, UpdateBookMetadataByBatchData, UpdateBookMetadataByBatchResponses, UpdateBookMetadataData, UpdateBookMetadataResponses, UpdateBookProgressionData, UpdateBookProgressionResponses, UpdateCollectionByIdData, UpdateCollectionByIdResponses, UpdateLibraryByIdData, UpdateLibraryByIdResponses, UpdateMihonReadProgressByReadListIdData, UpdateMihonReadProgressByReadListIdResponses, UpdateMihonReadProgressBySeriesIdData, UpdateMihonReadProgressBySeriesIdResponses, UpdatePasswordByUserIdData, UpdatePasswordByUserIdResponses, UpdatePasswordForCurrentUserData, UpdatePasswordForCurrentUserResponses, UpdateReadListByIdData, UpdateReadListByIdResponses, UpdateSeriesMetadataData, UpdateSeriesMetadataResponses, UpdateServerSettingsData, UpdateServerSettingsResponses, UpdateUserByIdData, UpdateUserByIdResponses } from './types.gen';
+import type { AddLibraryData, AddLibraryResponses, AddUserData, AddUserResponses, AddUserUploadedBookThumbnailData, AddUserUploadedBookThumbnailResponses, AddUserUploadedCollectionThumbnailData, AddUserUploadedCollectionThumbnailResponses, AddUserUploadedReadListThumbnailData, AddUserUploadedReadListThumbnailResponses, AddUserUploadedSeriesThumbnailData, AddUserUploadedSeriesThumbnailResponses, AnalyzeTransientBookResponses, BookAnalyzeResponses, BookRefreshMetadataResponses, BooksRegenerateThumbnailsResponses, ClaimServerResponses, ClientOptions, ConvertHeaderSessionToCookieResponses, CreateApiKeyForCurrentUserData, CreateApiKeyForCurrentUserResponses, CreateCollectionData, CreateCollectionResponses, CreateOrUpdateKnownPageHashData, CreateOrUpdateKnownPageHashResponses, CreateReadListData, CreateReadListResponses, DeleteApiKeyByKeyIdResponses, DeleteBookFileResponses, DeleteBookReadProgressResponses, DeleteCollectionByIdResponses, DeleteDuplicatePagesByPageHashResponses, DeleteGlobalSettingsData, DeleteGlobalSettingsResponses, DeleteLibraryByIdResponses, DeleteReadListByIdResponses, DeleteSeriesFileResponses, DeleteSingleMatchByPageHashData, DeleteSingleMatchByPageHashResponses, DeleteSyncPointsForCurrentUserResponses, DeleteUserByIdResponses, DeleteUserSettingsData, DeleteUserSettingsResponses, DeleteUserUploadedBookThumbnailResponses, DeleteUserUploadedCollectionThumbnailResponses, DeleteUserUploadedReadListThumbnailResponses, DeleteUserUploadedSeriesThumbnailResponses, DownloadBookFile1Responses, DownloadBookFileResponses, DownloadReadListAsZipResponses, DownloadSeriesAsZipResponses, EmptyTaskQueueResponses, GetActuatorInfoResponses, GetAgeRatingsResponses, GetAnnouncementsResponses, GetApiKeysForCurrentUserResponses, GetAuthenticationActivityForCurrentUserResponses, GetAuthenticationActivityResponses, GetAuthorsNamesResponses, GetAuthorsResponses, GetAuthorsRolesResponses, GetBookByIdResponses, GetBookEpubResourceResponses, GetBookPageRawByNumberResponses, GetBookPagesResponses, GetBookPositionsResponses, GetBookProgressionResponses, GetBooksByReadListIdResponses, GetBooksData, GetBooksDuplicatesResponses, GetBookSiblingNextInReadListResponses, GetBookSiblingNextResponses, GetBookSiblingPreviousInReadListResponses, GetBookSiblingPreviousResponses, GetBooksLatestResponses, GetBooksOnDeckResponses, GetBooksResponses, GetBookThumbnailsResponses, GetBookWebPubManifestDivinaResponses, GetBookWebPubManifestEpubResponses, GetBookWebPubManifestPdfResponses, GetBookWebPubManifestResponses, GetClaimStatusResponses, GetCollectionByIdResponses, GetCollectionsBySeriesIdResponses, GetCollectionsResponses, GetCollectionThumbnailsResponses, GetCurrentUserResponses, GetDirectoryListingData, GetDirectoryListingResponses, GetFontFamilyAsCssResponses, GetFontFileResponses, GetFontsResponses, GetGenresResponses, GetGlobalSettingsResponses, GetHistoricalEventsResponses, GetKnownPageHashesResponses, GetLanguagesResponses, GetLatestAuthenticationActivityByUserIdResponses, GetLibrariesResponses, GetLibraryByIdResponses, GetMihonReadProgressByReadListIdResponses, GetMihonReadProgressBySeriesIdResponses, GetNotableEntitiesKindsResponses, GetNotableEntitiesNamesResponses, GetNotableEntitiesResponses, GetOAuth2ProvidersResponses, GetPageByTransientBookIdResponses, GetPageHashMatchesResponses, GetPublishersResponses, GetReadListByIdResponses, GetReadListsByBookIdResponses, GetReadListsResponses, GetReadListThumbnailsResponses, GetReleasesResponses, GetSeriesAlphabeticalGroupsData, GetSeriesAlphabeticalGroupsResponses, GetSeriesByCollectionIdResponses, GetSeriesByIdResponses, GetSeriesData, GetSeriesLatestResponses, GetSeriesNewResponses, GetSeriesReleaseYearsResponses, GetSeriesResponses, GetSeriesThumbnailsResponses, GetSeriesUpdatedResponses, GetServerSettingsResponses, GetSharingLabelsResponses, GetTagsResponses, GetUnknownPageHashesResponses, GetUserSettingsResponses, GetUsersResponses, ImportBooksData, ImportBooksResponses, LibraryAnalyzeResponses, LibraryEmptyTrashResponses, LibraryRefreshMetadataResponses, LibraryScanResponses, MarkAnnouncementsReadData, MarkAnnouncementsReadResponses, MarkBookReadProgressData, MarkBookReadProgressResponses, MarkBookThumbnailSelectedResponses, MarkCollectionThumbnailSelectedResponses, MarkReadListThumbnailSelectedResponses, MarkSeriesAsReadResponses, MarkSeriesAsUnreadResponses, MarkSeriesThumbnailSelectedResponses, MatchComicRackListData, MatchComicRackListResponses, PostLogout1Responses, PostLogoutResponses, ResetLibraryScanDailyFileLimitUsageResponses, SaveGlobalSettingData, SaveGlobalSettingResponses, SaveUserSettingData, SaveUserSettingResponses, ScanTransientBooksData, ScanTransientBooksResponses, SeriesAnalyzeResponses, SeriesRefreshMetadataResponses, UpdateBookMetadataByBatchData, UpdateBookMetadataByBatchResponses, UpdateBookMetadataData, UpdateBookMetadataResponses, UpdateBookProgressionData, UpdateBookProgressionResponses, UpdateCollectionByIdData, UpdateCollectionByIdResponses, UpdateLibraryByIdData, UpdateLibraryByIdResponses, UpdateMihonReadProgressByReadListIdData, UpdateMihonReadProgressByReadListIdResponses, UpdateMihonReadProgressBySeriesIdData, UpdateMihonReadProgressBySeriesIdResponses, UpdatePasswordByUserIdData, UpdatePasswordByUserIdResponses, UpdatePasswordForCurrentUserData, UpdatePasswordForCurrentUserResponses, UpdateReadListByIdData, UpdateReadListByIdResponses, UpdateSeriesMetadataData, UpdateSeriesMetadataResponses, UpdateServerSettingsData, UpdateServerSettingsResponses, UpdateUserByIdData, UpdateUserByIdResponses } from './types.gen';
 
 export type RequestHandlerOptions = RequestHandlerOptions2 & {
     baseUrl?: ClientOptions['baseUrl'];
@@ -4708,6 +4708,87 @@ export function handleResetLibraryScanDailyFileLimitUsage(response?: HandleReset
     }, options);
 }
 
+export type HandleGetNotableEntitiesResponse = {
+    body: GetNotableEntitiesResponses[200];
+    status?: 200;
+};
+
+/**
+ * Handler for the `GET /api/v3/notable-entities` operation.
+ */
+export function handleGetNotableEntities(response?: HandleGetNotableEntitiesResponse | HttpResponseResolver<never, never>, options?: RequestHandlerOptions): HttpHandler {
+    return http.get<never, never>(`${options?.baseUrl ?? '*'}/api/v3/notable-entities`, info => {
+        if (typeof response === 'function') {
+            return response(info);
+        }
+        const body = response?.body;
+        if (body !== undefined) {
+            return HttpResponse.json(body, { status: response?.status ?? 200 });
+        }
+        if (options?.responseFallback === 'passthrough') {
+            return;
+        }
+        return new Response('Not Implemented', {
+            status: 501,
+            statusText: 'Not Implemented'
+        });
+    }, options);
+}
+
+export type HandleGetNotableEntitiesKindsResponse = {
+    body: GetNotableEntitiesKindsResponses[200];
+    status?: 200;
+};
+
+/**
+ * Handler for the `GET /api/v3/notable-entities/kinds` operation.
+ */
+export function handleGetNotableEntitiesKinds(response?: HandleGetNotableEntitiesKindsResponse | HttpResponseResolver<never, never>, options?: RequestHandlerOptions): HttpHandler {
+    return http.get<never, never>(`${options?.baseUrl ?? '*'}/api/v3/notable-entities/kinds`, info => {
+        if (typeof response === 'function') {
+            return response(info);
+        }
+        const body = response?.body;
+        if (body !== undefined) {
+            return HttpResponse.json(body, { status: response?.status ?? 200 });
+        }
+        if (options?.responseFallback === 'passthrough') {
+            return;
+        }
+        return new Response('Not Implemented', {
+            status: 501,
+            statusText: 'Not Implemented'
+        });
+    }, options);
+}
+
+export type HandleGetNotableEntitiesNamesResponse = {
+    body: GetNotableEntitiesNamesResponses[200];
+    status?: 200;
+};
+
+/**
+ * Handler for the `GET /api/v3/notable-entities/names` operation.
+ */
+export function handleGetNotableEntitiesNames(response?: HandleGetNotableEntitiesNamesResponse | HttpResponseResolver<never, never>, options?: RequestHandlerOptions): HttpHandler {
+    return http.get<never, never>(`${options?.baseUrl ?? '*'}/api/v3/notable-entities/names`, info => {
+        if (typeof response === 'function') {
+            return response(info);
+        }
+        const body = response?.body;
+        if (body !== undefined) {
+            return HttpResponse.json(body, { status: response?.status ?? 200 });
+        }
+        if (options?.responseFallback === 'passthrough') {
+            return;
+        }
+        return new Response('Not Implemented', {
+            status: 501,
+            statusText: 'Not Implemented'
+        });
+    }, options);
+}
+
 export type MswHandlerFactories = {
     /**
      * Handler for the `GET /actuator/info` operation.
@@ -5341,6 +5422,18 @@ export type MswHandlerFactories = {
      * Handler for the `POST /api/v1/settings/library-scan-daily-file-limit/reset` operation.
      */
     resetLibraryScanDailyFileLimitUsage: typeof handleResetLibraryScanDailyFileLimitUsage;
+    /**
+     * Handler for the `GET /api/v3/notable-entities` operation.
+     */
+    getNotableEntities: typeof handleGetNotableEntities;
+    /**
+     * Handler for the `GET /api/v3/notable-entities/kinds` operation.
+     */
+    getNotableEntitiesKinds: typeof handleGetNotableEntitiesKinds;
+    /**
+     * Handler for the `GET /api/v3/notable-entities/names` operation.
+     */
+    getNotableEntitiesNames: typeof handleGetNotableEntitiesNames;
 };
 
 export type CreateMswHandlersResult = {
@@ -5515,7 +5608,10 @@ export function createMswHandlers(config: RequestHandlerOptions = {}): CreateMsw
         updateUserById: wrap(handleUpdateUserById),
         getLatestAuthenticationActivityByUserId: wrap(handleGetLatestAuthenticationActivityByUserId),
         updatePasswordByUserId: wrap(handleUpdatePasswordByUserId),
-        resetLibraryScanDailyFileLimitUsage: wrap(handleResetLibraryScanDailyFileLimitUsage)
+        resetLibraryScanDailyFileLimitUsage: wrap(handleResetLibraryScanDailyFileLimitUsage),
+        getNotableEntities: wrap(handleGetNotableEntities),
+        getNotableEntitiesKinds: wrap(handleGetNotableEntitiesKinds),
+        getNotableEntitiesNames: wrap(handleGetNotableEntitiesNames)
     };
     const all: CreateMswHandlersResult['all'] = (options = {}) => {
         type OverrideValue<R> = R | [
@@ -5640,6 +5736,8 @@ export function createMswHandlers(config: RequestHandlerOptions = {}): CreateMsw
             invoke(pick.getSeriesReleaseYears, overrides.getSeriesReleaseYears),
             invoke(pick.getAuthenticationActivity, overrides.getAuthenticationActivity),
             invoke(pick.getCurrentUser, overrides.getCurrentUser),
+            invoke(pick.getNotableEntitiesKinds, overrides.getNotableEntitiesKinds),
+            invoke(pick.getNotableEntitiesNames, overrides.getNotableEntitiesNames),
             invoke(pick.getBookById, overrides.getBookById),
             invoke(pick.deleteCollectionById, overrides.deleteCollectionById),
             invoke(pick.getCollectionById, overrides.getCollectionById),
@@ -5682,6 +5780,7 @@ export function createMswHandlers(config: RequestHandlerOptions = {}): CreateMsw
             invoke(pick.getTags, overrides.getTags),
             invoke(pick.getUsers, overrides.getUsers),
             invoke(pick.addUser, overrides.addUser),
+            invoke(pick.getNotableEntities, overrides.getNotableEntities),
             invoke(pick.getActuatorInfo, overrides.getActuatorInfo),
             invoke(pick.postLogout, overrides.postLogout),
             invoke(pick.postLogout1, overrides.postLogout1)

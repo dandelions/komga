@@ -23,6 +23,7 @@ import org.gotson.komga.domain.model.ThumbnailBook
 import org.gotson.komga.domain.model.TypedBytes
 import org.gotson.komga.domain.persistence.BookContentRepository
 import org.gotson.komga.domain.persistence.BookMetadataRepository
+import org.gotson.komga.domain.persistence.BookProjectionRepository
 import org.gotson.komga.domain.persistence.BookQuickHashRepository
 import org.gotson.komga.domain.persistence.BookRepository
 import org.gotson.komga.domain.persistence.HistoricalEventRepository
@@ -33,9 +34,9 @@ import org.gotson.komga.domain.persistence.ReadProgressRepository
 import org.gotson.komga.domain.persistence.ThumbnailBookRepository
 import org.gotson.komga.infrastructure.configuration.KomgaSettingsProvider
 import org.gotson.komga.infrastructure.hash.Hasher
-import org.gotson.komga.infrastructure.hash.KoreaderHasher
 import org.gotson.komga.infrastructure.image.ImageConverter
 import org.gotson.komga.infrastructure.image.ImageType
+import org.gotson.komga.infrastructure.koreader.KoreaderHasher
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.context.ApplicationEventPublisher
@@ -68,6 +69,7 @@ class BookLifecycle(
   private val bookQuickHashRepository: BookQuickHashRepository,
   private val mediaRepository: MediaRepository,
   private val bookMetadataRepository: BookMetadataRepository,
+  private val bookProjectionRepository: BookProjectionRepository,
   private val readProgressRepository: ReadProgressRepository,
   private val thumbnailBookRepository: ThumbnailBookRepository,
   private val readListRepository: ReadListRepository,
@@ -560,6 +562,7 @@ class BookLifecycle(
       mediaRepository.delete(book.id)
       thumbnailBookRepository.deleteByBookId(book.id)
       bookMetadataRepository.delete(book.id)
+      bookProjectionRepository.delete(book.id)
 
       bookRepository.delete(book.id)
     }
@@ -592,6 +595,7 @@ class BookLifecycle(
       mediaRepository.delete(bookIds)
       thumbnailBookRepository.deleteByBookIds(bookIds)
       bookMetadataRepository.delete(bookIds)
+      bookProjectionRepository.delete(bookIds)
 
       bookRepository.delete(bookIds)
     }
@@ -700,11 +704,11 @@ class BookLifecycle(
             if (extension.isFixedLayout && matchingPositions.size == 1)
               matchingPositions.first()
             else
-              matchingPositions.firstOrNull { it.locations!!.progression == newProgression.locator.locations!!.progression }
+              matchingPositions.firstOrNull { it.locations!!.progression == newProgression.locator.locations.progression }
                 ?: run {
                   // no exact match
-                  val before = matchingPositions.filter { it.locations!!.progression!! < newProgression.locator.locations!!.progression!! }.maxByOrNull { it.locations!!.position!! }
-                  val after = matchingPositions.filter { it.locations!!.progression!! > newProgression.locator.locations!!.progression!! }.minByOrNull { it.locations!!.position!! }
+                  val before = matchingPositions.filter { it.locations!!.progression!! < newProgression.locator.locations.progression }.maxByOrNull { it.locations!!.position!! }
+                  val after = matchingPositions.filter { it.locations!!.progression!! > newProgression.locator.locations.progression }.minByOrNull { it.locations!!.position!! }
                   if (before == null || after == null || before.locations!!.position!! > after.locations!!.position!!)
                     throw IllegalArgumentException("Invalid progression")
                   before
@@ -725,7 +729,7 @@ class BookLifecycle(
               // if no koboSpan is provided, use the one we matched
               koboSpan = newProgression.locator.koboSpan ?: matchedPosition.koboSpan,
               // don't trust the provided total progression, the one from Kobo can be wrong
-              locations = newProgression.locator.locations?.copy(totalProgression = totalProgression),
+              locations = newProgression.locator.locations.copy(totalProgression = totalProgression),
             ),
           )
         }

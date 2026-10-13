@@ -2,7 +2,7 @@
   <v-menu>
     <template #activator="{ props }">
       <v-btn
-        v-tooltip:bottom="
+        v-ktooltip:bottom="
           $formatMessage({
             description: 'Task Indicator button: tooltip',
             defaultMessage: 'Activity',
@@ -113,14 +113,3 @@ async function resetQuota() {
   }
 }
 </script>
-
-<style scoped></style>
-
-async function resetQuota() {
-  resetting.value = true
-  try {
-    await resetLibraryScanDailyFileLimitUsage()
-  } finally {
-    resetting.value = false
-  }
-}

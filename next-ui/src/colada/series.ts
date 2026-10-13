@@ -6,22 +6,28 @@ import {
 } from '@pinia/colada'
 import { client } from '@/generated/openapi/client.gen'
 import { PageRequest, type Sort, sortToString } from '@/types/PageRequest'
-import { seriesMetadataToDto } from '@/functions/series'
-import { entityChanged } from '@/colada/cache'
+import { seriesMetadataToUpdateDto } from '@/functions/series'
+import { clearSeries, clearThumbnailSeries } from '@/colada/cache'
 import { useAppStore } from '@/stores/app'
 import {
+  komgaAddUserUploadedSeriesThumbnail,
   komgaDeleteSeriesFile,
+  komgaDeleteUserUploadedSeriesThumbnail,
   komgaGetSeries,
   komgaGetSeriesById,
+  komgaGetSeriesThumbnails,
   komgaGetSeriesUpdated,
   komgaMarkSeriesAsRead,
   komgaMarkSeriesAsUnread,
+  komgaMarkSeriesThumbnailSelected,
   komgaSeriesAnalyze,
   komgaSeriesRefreshMetadata,
   komgaUpdateSeriesMetadata,
   type SeriesMetadataDto,
   type SeriesSearch,
 } from '@/generated/openapi'
+import { useImageCacheStore } from '@/stores/image-cache'
+import { STALE_TIME } from '@/types/time'
 
 export const QUERY_KEYS_SERIES = {
   root: ['series'] as const,
@@ -29,6 +35,7 @@ export const QUERY_KEYS_SERIES = {
   byId: (seriesId: string) => [...QUERY_KEYS_SERIES.root, seriesId] as const,
   updated: (request: object) =>
     [...QUERY_KEYS_SERIES.root, 'updated', JSON.stringify(request)] as const,
+  posters: (id: string) => [...QUERY_KEYS_SERIES.byId(id), 'posters'] as const,
 }
 
 export const seriesListQuery = defineQueryOptions(
@@ -89,6 +96,7 @@ export const seriesDetailQuery = defineQueryOptions(({ seriesId }: { seriesId: s
         seriesId: seriesId,
       },
     }),
+  staleTime: STALE_TIME.LONG,
 }))
 
 export const useRefreshMetadataSeries = defineMutation(() =>
@@ -135,7 +143,7 @@ export const useDeleteSeries = defineMutation(() => {
         },
       }),
     onSuccess: (_data, seriesId) => {
-      if (appStore.sseUnavailable) entityChanged(QUERY_KEYS_SERIES.root, seriesId)
+      if (appStore.sseUnavailable) clearSeries(seriesId, false)
     },
   })
 })
@@ -150,7 +158,7 @@ export const useMarkSeriesRead = defineMutation(() => {
         },
       }),
     onSuccess: (_data, seriesId) => {
-      if (appStore.sseUnavailable) entityChanged(QUERY_KEYS_SERIES.root, seriesId)
+      if (appStore.sseUnavailable) clearSeries(seriesId, false)
     },
   })
 })
@@ -165,7 +173,7 @@ export const useMarkSeriesUnread = defineMutation(() => {
         },
       }),
     onSuccess: (_data, seriesId) => {
-      if (appStore.sseUnavailable) entityChanged(QUERY_KEYS_SERIES.root, seriesId)
+      if (appStore.sseUnavailable) clearSeries(seriesId, false)
     },
   })
 })
@@ -173,15 +181,97 @@ export const useMarkSeriesUnread = defineMutation(() => {
 export const useUpdateSeriesMetadata = defineMutation(() => {
   const appStore = useAppStore()
   return useMutation({
-    mutation: ({ seriesId, metadata }: { seriesId: string; metadata: SeriesMetadataDto }) =>
+    mutation: ({
+      seriesId,
+      metadata,
+    }: {
+      seriesId: string
+      metadata: Partial<SeriesMetadataDto>
+    }) =>
       komgaUpdateSeriesMetadata({
         path: {
           seriesId: seriesId,
         },
-        body: seriesMetadataToDto(metadata),
+        body: seriesMetadataToUpdateDto(metadata),
       }),
     onSuccess: (_data, { seriesId }) => {
-      if (appStore.sseUnavailable) entityChanged(QUERY_KEYS_SERIES.root, seriesId)
+      if (appStore.sseUnavailable) clearSeries(seriesId, false)
+    },
+  })
+})
+
+export const seriesPostersQuery = defineQueryOptions(({ seriesId }: { seriesId: string }) => ({
+  key: QUERY_KEYS_SERIES.posters(seriesId),
+  query: () =>
+    komgaGetSeriesThumbnails({
+      path: {
+        seriesId: seriesId,
+      },
+    }),
+  staleTime: STALE_TIME.LONG,
+}))
+
+export const useAddSeriesPoster = defineMutation(() => {
+  const appStore = useAppStore()
+  const cacheStore = useImageCacheStore()
+  return useMutation({
+    mutation: ({ seriesId, file, selected }: { seriesId: string; file: File; selected: boolean }) =>
+      komgaAddUserUploadedSeriesThumbnail({
+        query: {
+          selected: selected,
+        },
+        body: {
+          file: file,
+        },
+        path: {
+          seriesId: seriesId,
+        },
+      }),
+    onSuccess: (_data, { seriesId }) => {
+      if (appStore.sseUnavailable) {
+        clearThumbnailSeries(seriesId)
+        cacheStore.bustCache(seriesId)
+      }
+    },
+  })
+})
+
+export const useDeleteSeriesPoster = defineMutation(() => {
+  const appStore = useAppStore()
+  const cacheStore = useImageCacheStore()
+  return useMutation({
+    mutation: ({ seriesId, thumbnailId }: { seriesId: string; thumbnailId: string }) =>
+      komgaDeleteUserUploadedSeriesThumbnail({
+        path: {
+          seriesId: seriesId,
+          thumbnailId: thumbnailId,
+        },
+      }),
+    onSuccess: (_data, { seriesId }) => {
+      if (appStore.sseUnavailable) {
+        clearThumbnailSeries(seriesId)
+        cacheStore.bustCache(seriesId)
+      }
+    },
+  })
+})
+
+export const useMarkSeriesPosterSelected = defineMutation(() => {
+  const appStore = useAppStore()
+  const cacheStore = useImageCacheStore()
+  return useMutation({
+    mutation: ({ seriesId, thumbnailId }: { seriesId: string; thumbnailId: string }) =>
+      komgaMarkSeriesThumbnailSelected({
+        path: {
+          seriesId: seriesId,
+          thumbnailId: thumbnailId,
+        },
+      }),
+    onSuccess: (_data, { seriesId }) => {
+      if (appStore.sseUnavailable) {
+        clearThumbnailSeries(seriesId)
+        cacheStore.bustCache(seriesId)
+      }
     },
   })
 })

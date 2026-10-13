@@ -60,6 +60,8 @@ data class BookMetadataDto(
   val releaseDateLock: Boolean,
   val authors: List<AuthorDto>,
   val authorsLock: Boolean,
+  val notableEntities: List<NotableEntityDto>,
+  val notableEntitiesLock: Boolean,
   val tags: Set<String>,
   val tagsLock: Boolean,
   val isbn: String,

@@ -14,6 +14,80 @@
             <div class="text-label-large">
               {{
                 $formatMessage({
+                  description: 'Server settings: section header for UI settings',
+                  defaultMessage: 'User interface',
+                  id: '+6DtMH',
+                })
+              }}
+            </div>
+
+            <v-checkbox
+              v-model="proxyModel.value.nextUiAsDefault"
+              :label="
+                $formatMessage({
+                  description: 'Server settings: checkbox to use NextUI as the default UI',
+                  defaultMessage: 'Use the new NextUI as default for this server',
+                  id: '13nnQg',
+                })
+              "
+              hide-details
+            />
+
+            <v-checkbox
+              v-model="proxyModel.value.oauth2.hideLoginFields"
+              :label="
+                $formatMessage({
+                  description:
+                    'Server settings: checkbox to hide login fields if OAuth2 is enabled',
+                  defaultMessage: 'Hide login fields if OAuth2 is enabled',
+                  id: 'yxnX5k',
+                })
+              "
+              hide-details
+              @update:model-value="
+                (val) => (!val ? (proxyModel.value.oauth2.autoLogin = false) : undefined)
+              "
+            />
+
+            <v-checkbox
+              v-model="proxyModel.value.oauth2.autoLogin"
+              :disabled="!proxyModel.value.oauth2.hideLoginFields"
+              :label="
+                $formatMessage({
+                  description: 'Server settings: checkbox to set automatic OAuth2 login',
+                  defaultMessage: 'Automatic OAuth2 login',
+                  id: 'V8tkJa',
+                })
+              "
+              hide-details
+              class="ms-8"
+            >
+              <template #append>
+                <v-icon
+                  v-ktooltip:bottom="{
+                    text: $formatMessage({
+                      description:
+                        'Server settings: checkbox to set automatic OAuth2 login - information tooltip',
+                      defaultMessage: 'Works only if a single OAuth2 provider is configured',
+                      id: 'roy9ap',
+                    }),
+                    openOnClick: true,
+                    clickFade: 2500,
+                  }"
+                  icon="i-mdi:information-outline"
+                ></v-icon>
+              </template>
+            </v-checkbox>
+          </v-col>
+        </v-row>
+
+        <v-divider class="mb-4" />
+
+        <v-row>
+          <v-col>
+            <div class="text-label-large">
+              {{
+                $formatMessage({
                   description: 'Server settings: section header for posters',
                   defaultMessage: 'Posters',
                   id: 'a5MYiP',
@@ -250,17 +324,21 @@
               "
               :min="1"
               :max="65535"
-              :placeholder="settings?.serverPort.configurationSource?.toString()"
-              :persistent-placeholder="!!settings?.serverPort.configurationSource"
+              :placeholder="settings?.serverPort?.configurationSource?.toString()"
+              :persistent-placeholder="!!settings?.serverPort?.configurationSource"
               clearable
               hide-details
             >
               <template
-                v-if="!!settings?.serverPort.configurationSource"
+                v-if="!!settings?.serverPort?.configurationSource"
                 #append-inner
               >
                 <v-icon
-                  v-tooltip:bottom="messagePrecedence"
+                  v-ktooltip:bottom="{
+                    text: messagePrecedence,
+                    openOnClick: true,
+                    clickFade: 2500,
+                  }"
                   icon="i-mdi:information-outline"
                 ></v-icon>
               </template>
@@ -279,8 +357,8 @@
                   id: 'eRJOa6',
                 })
               "
-              :placeholder="settings?.serverContextPath.configurationSource?.toString()"
-              :persistent-placeholder="!!settings?.serverContextPath.configurationSource"
+              :placeholder="settings?.serverContextPath?.configurationSource?.toString()"
+              :persistent-placeholder="!!settings?.serverContextPath?.configurationSource"
               clearable
               :rules="[
                 rules.pattern(
@@ -295,11 +373,15 @@
                 ),
               ]"
               ><template
-                v-if="!!settings?.serverContextPath.configurationSource"
+                v-if="!!settings?.serverContextPath?.configurationSource"
                 #append-inner
               >
                 <v-icon
-                  v-tooltip:bottom="messagePrecedence"
+                  v-ktooltip:bottom="{
+                    text: messagePrecedence,
+                    openOnClick: true,
+                    clickFade: 2500,
+                  }"
                   icon="i-mdi:information-outline"
                 ></v-icon> </template
             ></v-text-field>
@@ -396,14 +478,15 @@ import { ThumbnailSizeValues, thumbnailSizeMessages } from '@/types/ThumbnailSiz
 import { useIntl } from 'vue-intl'
 
 import { watchImmediate } from '@vueuse/core'
-import { useRules } from 'vuetify/labs/rules'
-import type { SettingsDtoExtended, SettingsUpdateDtoExtended } from '@/types/ThumbnailRegenerate'
+import { useRules } from 'vuetify'
+import type { SettingsDtoExtended, SettingsUpdateDtoExtended } from '@/types/Settings'
+import type { ClientSettingOauth2Login } from '@/types/ClientSettingsGlobal'
 
 const intl = useIntl()
 const rules = useRules()
 
 const { settings, loading = false } = defineProps<{
-  settings?: SettingsDtoExtended
+  settings?: Omit<SettingsDtoExtended, 'kepubifyPath'> & { oauth2: ClientSettingOauth2Login }
   loading?: boolean
 }>()
 
@@ -424,6 +507,11 @@ const settingsUpdate = ref<SettingsUpdateDtoExtended>({
   koboProxy: false,
   koboPort: undefined,
   thumbnailRegenerate: 'bigger',
+  nextUiAsDefault: false,
+  oauth2: {
+    hideLoginFields: false,
+    autoLogin: false,
+  },
 })
 
 watchImmediate(
@@ -438,11 +526,16 @@ watchImmediate(
         taskPoolSize: settings.taskPoolSize,
         rememberMeDurationDays: settings.rememberMeDurationDays,
         renewRememberMeKey: false,
-        serverPort: settings.serverPort.databaseSource,
-        serverContextPath: settings.serverContextPath.databaseSource,
+        serverPort: settings.serverPort?.databaseSource,
+        serverContextPath: settings.serverContextPath?.databaseSource,
         koboProxy: settings.koboProxy,
         koboPort: settings.koboPort,
         thumbnailRegenerate: 'bigger',
+        nextUiAsDefault: settings.nextUiAsDefault,
+        oauth2: {
+          hideLoginFields: settings.oauth2.hideLoginFields,
+          autoLogin: settings.oauth2.autoLogin,
+        },
       }
   },
 )
@@ -452,7 +545,7 @@ const form = ref()
 async function submitForm(callback: () => void) {
   const { valid } = await form.value.validate()
   if (valid) {
-    // comit the changes from the form to the model
+    // commit the changes from the form to the model
     callback()
     // if the thumbnail size did not change, force the regeneration value to 'no'
     if (settings?.thumbnailSize === settingsUpdate.value.thumbnailSize) {
