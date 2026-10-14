@@ -3720,14 +3720,7 @@ export default Vue.extend({
       }
     },
     ttsGetMultiTtsText(item: { element: HTMLElement, text: string, isParagraphEnd?: boolean, isHeading?: boolean }): string {
-      let text = item.text
-      if (item.isHeading) {
-        const pauseMs = Math.max(800, this.ttsMultittsParagraphPause > 0 ? Math.round(this.ttsMultittsParagraphPause * 1.5) : 800)
-        text = `${text}[[PAUSE:${pauseMs}]]`
-      } else if (item.isParagraphEnd && this.ttsMultittsParagraphPause > 0) {
-        text = `${text}[[PAUSE:${this.ttsMultittsParagraphPause}]]`
-      }
-      return text
+      return (item.text || '').replace(/\[\[.*?\]\]/g, '').trim()
     },
     ttsPlayMultiTts(index: number, item: { element: HTMLElement, text: string, isParagraphEnd?: boolean, isHeading?: boolean }) {
       if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
@@ -3739,11 +3732,15 @@ export default Vue.extend({
         return
       }
 
-      this.ttsStopAudioElement()
+      const spokenText = this.ttsGetMultiTtsText(item)
+      // 若当前项为空白或无有效文本，直接跳过并朗读下一句
+      if (!spokenText) {
+        this.ttsPlayItem(index + 1)
+        return
+      }
 
       const baseUrl = this.ttsMultittsUrl.trim().replace(/\/+$/, '')
       const forwardUrl = baseUrl.endsWith('/forward') ? baseUrl : `${baseUrl}/forward`
-      const spokenText = this.ttsGetMultiTtsText(item)
       const params = new URLSearchParams()
       params.append('text', spokenText)
       if (this.ttsMultittsVoice && this.ttsMultittsVoice.trim()) {
@@ -3756,16 +3753,12 @@ export default Vue.extend({
 
       const requestUrl = `${forwardUrl}?${params.toString()}`
 
-      let audio: HTMLAudioElement
-      if (this.ttsPrefetchIndex === index && this.ttsPrefetchAudio) {
-        audio = this.ttsPrefetchAudio
-        this.ttsPrefetchAudio = null
-        this.ttsPrefetchIndex = -1
-      } else {
-        audio = new Audio(requestUrl)
+      let audio = this.ttsAudioElement
+      if (!audio) {
+        audio = new Audio()
+        this.ttsAudioElement = audio
       }
 
-      this.ttsAudioElement = audio
       audio.volume = this.ttsVolume
 
       audio.onplay = () => {
@@ -3783,14 +3776,32 @@ export default Vue.extend({
           return
         }
 
-        this.ttsPlayItem(this.ttsCurrentIndex + 1)
+        // 段落结尾或标题停顿控制（在前端平滑停顿，避免服务端不支持标记报错）
+        let pauseMs = 0
+        if (item.isHeading) {
+          pauseMs = Math.max(600, this.ttsMultittsParagraphPause > 0 ? Math.round(this.ttsMultittsParagraphPause * 1.5) : 600)
+        } else if (item.isParagraphEnd && this.ttsMultittsParagraphPause > 0) {
+          pauseMs = this.ttsMultittsParagraphPause
+        }
+
+        if (pauseMs > 0) {
+          setTimeout(() => {
+            if (this.ttsActive && this.ttsPlaying) {
+              this.ttsPlayItem(this.ttsCurrentIndex + 1)
+            }
+          }, pauseMs)
+        } else {
+          this.ttsPlayItem(this.ttsCurrentIndex + 1)
+        }
       }
 
       audio.onerror = () => {
         this.ttsClearWatchdog()
         if (this.ttsActive && this.ttsPlaying) {
           const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:'
-          const errMsg = isHttps
+          const isHttpUrl = (this.ttsMultittsUrl || '').trim().toLowerCase().startsWith('http:')
+          const isMixedContent = isHttps && isHttpUrl
+          const errMsg = isMixedContent
             ? this.$t('epubreader.tts.multitts_https_tip').toString()
             : this.$t('epubreader.tts.multitts_play_error').toString()
           this.sendNotification(errMsg)
@@ -3802,22 +3813,29 @@ export default Vue.extend({
         }
       }
 
+      // 切换音频源并开始播放
+      audio.src = requestUrl
       audio.play().catch(err => {
         if (this.ttsActive && this.ttsPlaying) {
           const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:'
-          const isSourceErr = err && (err.name === 'NotSupportedError' || (err.message && err.message.includes('no supported source')))
-          const errMsg = (isHttps || isSourceErr)
+          const isHttpUrl = (this.ttsMultittsUrl || '').trim().toLowerCase().startsWith('http:')
+          const isMixedContent = isHttps && isHttpUrl
+          const errMsg = isMixedContent
             ? this.$t('epubreader.tts.multitts_https_tip').toString()
-            : this.$t('epubreader.tts.multitts_play_error').toString()
+            : (err.message || this.$t('epubreader.tts.multitts_play_error').toString())
           this.sendNotification(errMsg)
-          this.ttsPause()
+          // 尝试自动跳到下一句继续
+          setTimeout(() => {
+            if (this.ttsActive && this.ttsPlaying) {
+              this.ttsPlayItem(this.ttsCurrentIndex + 1)
+            }
+          }, 800)
         }
       })
     },
     ttsPrefetchMultiTts(nextIndex: number) {
       if (this.ttsEngine !== 'multitts' || !this.ttsMultittsUrl) return
       if (nextIndex < 0 || nextIndex >= this.ttsItems.length) return
-      if (this.ttsPrefetchIndex === nextIndex && this.ttsPrefetchAudio) return
 
       const item = this.ttsItems[nextIndex]
       if (!item || !item.text.trim()) return
@@ -3825,6 +3843,8 @@ export default Vue.extend({
       const baseUrl = this.ttsMultittsUrl.trim().replace(/\/+$/, '')
       const forwardUrl = baseUrl.endsWith('/forward') ? baseUrl : `${baseUrl}/forward`
       const spokenText = this.ttsGetMultiTtsText(item)
+      if (!spokenText) return
+
       const params = new URLSearchParams()
       params.append('text', spokenText)
       if (this.ttsMultittsVoice && this.ttsMultittsVoice.trim()) {
@@ -3836,11 +3856,10 @@ export default Vue.extend({
       }
 
       const nextUrl = `${forwardUrl}?${params.toString()}`
-      const preAudio = new Audio()
-      preAudio.preload = 'auto'
-      preAudio.src = nextUrl
-      this.ttsPrefetchAudio = preAudio
-      this.ttsPrefetchIndex = nextIndex
+      // 静默后台预取（通过 fetch 预热浏览器缓存，不干扰播放器实例）
+      fetch(nextUrl, { method: 'GET', mode: 'cors' }).catch(() => {
+        // 预热失败不影响主链路
+      })
     },
     ttsApplyHighlight(element: HTMLElement) {
       this.ttsClearHighlight()
