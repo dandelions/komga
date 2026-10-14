@@ -3430,7 +3430,10 @@ export default Vue.extend({
       }
 
       const items: { element: HTMLElement, text: string, isParagraphEnd?: boolean, isHeading?: boolean }[] = []
+      // 第一层：按句号、感叹号、问号、分号分句
       const sentenceRegex = /[^。！？!?；;\n\r]+([。！？!?；;\n\r]+["'”’）)]*|$)/g
+      // 第二层：当单句偏长时，按逗号、顿号、冒号、破折号细化分节，使跨页分界线处的子句也能立刻触发翻页
+      const clauseRegex = /[^，,、：:—…]+([，,、：:—…]+|$)/g
 
       blockElements.forEach(el => {
         const rawText = (el.innerText || el.textContent || '').trim()
@@ -3447,30 +3450,47 @@ export default Vue.extend({
           return
         }
 
-        const validSentences = sentences.map(s => s.trim()).filter(s => s.length > 0)
-        if (validSentences.length <= 1) {
+        // 拆解出最小视觉/发音单元（保持适度颗粒度，单句大于 15 字自动按子句拆开）
+        const validUnits: string[] = []
+        sentences.forEach(s => {
+          const trimmedS = s.trim()
+          if (!trimmedS) return
+          if (trimmedS.length > 15) {
+            const clauses = trimmedS.match(clauseRegex)
+            if (clauses && clauses.length > 1) {
+              clauses.forEach(c => {
+                const trimmedC = c.trim()
+                if (trimmedC) validUnits.push(trimmedC)
+              })
+              return
+            }
+          }
+          validUnits.push(trimmedS)
+        })
+
+        if (validUnits.length <= 1) {
           items.push({
             element: el,
-            text: validSentences[0] || rawText,
+            text: validUnits[0] || rawText,
             isParagraphEnd: true,
             isHeading,
           })
           return
         }
 
-        // 若段落由多个句子组成，将句子拆分包裹为独立 span，实现句子级独立物理坐标，解决跨页翻页问题
+        // 将长段落与长句子拆分包裹为独立 span，实现细粒度的物理 DOM 坐标
         let sentenceSpans: HTMLElement[] = []
         try {
           const hasBlockChildren = el.querySelector('p, div, ul, ol, li, h1, h2, h3, h4, h5, h6, table, blockquote')
-          // 纯文本段落（无块级子元素，无复杂行内标签或仅有少量 br）
+          // 纯文本段落（无复杂块级子标签）
           if (!hasBlockChildren && (el.children.length === 0 || Array.from(el.children).every(c => c.tagName === 'BR'))) {
             const fragment = doc.createDocumentFragment()
-            validSentences.forEach((s, idx) => {
+            validUnits.forEach((s, idx) => {
               const span = doc.createElement('span')
               span.className = 'komga-tts-sentence'
               span.textContent = s
               fragment.appendChild(span)
-              if (idx < validSentences.length - 1) {
+              if (idx < validUnits.length - 1) {
                 fragment.appendChild(doc.createTextNode(' '))
               }
               sentenceSpans.push(span)
@@ -3482,12 +3502,12 @@ export default Vue.extend({
           sentenceSpans = []
         }
 
-        const hasSpans = sentenceSpans.length === validSentences.length
-        validSentences.forEach((s, idx) => {
+        const hasSpans = sentenceSpans.length === validUnits.length
+        validUnits.forEach((s, idx) => {
           items.push({
             element: hasSpans ? sentenceSpans[idx] : el,
             text: s,
-            isParagraphEnd: idx === validSentences.length - 1,
+            isParagraphEnd: idx === validUnits.length - 1,
             isHeading,
           })
         })
@@ -3940,19 +3960,25 @@ export default Vue.extend({
         }
       } else {
         const rect = element.getBoundingClientRect()
-        // 若当前朗读句子的起点已经超出右侧可视区（即排版在下一页/下一屏），立刻自动翻下一页
-        if (rect.left >= clientWidth - 20) {
+        // 获取内联子句/段落的精准多行/多列边界框集合
+        const rects = typeof element.getClientRects === 'function' ? Array.from(element.getClientRects()) : []
+        const hasOverflowRect = rects.some(r => r.left >= clientWidth - 25)
+        const isPartiallyPastRight = rect.right > clientWidth + 20 && rect.left >= 0
+        const isFullyNextPage = rect.left >= clientWidth - 25
+
+        // 一旦当前朗读的文字有任何字符已经跨入或排版在下一页，立即翻到下一页
+        if (isFullyNextPage || hasOverflowRect || isPartiallyPastRight) {
           this.nextEpubPage()
           // 针对极大字号可能跨越2页的极端场景，翻页后做一次微调检查
           setTimeout(() => {
             if (!this.ttsActive || this.verticalScroll) return
             const afterRect = element.getBoundingClientRect()
-            if (afterRect.left >= clientWidth - 20) {
+            if (afterRect.left >= clientWidth - 25) {
               this.nextEpubPage()
             }
           }, 350)
         } else if (rect.right <= 20) {
-          // 若当前句子排在左侧上一页，自动翻回上一页
+          // 若当前文字排在左侧上一页，自动翻回上一页
           this.previousEpubPage()
         }
       }
