@@ -3746,15 +3746,13 @@ export default Vue.extend({
       const spokenText = this.ttsGetMultiTtsText(item)
       const params = new URLSearchParams()
       params.append('text', spokenText)
-      if (this.ttsMultittsVoice) {
-        params.append('voice', this.ttsMultittsVoice)
+      if (this.ttsMultittsVoice && this.ttsMultittsVoice.trim()) {
+        params.append('voice', this.ttsMultittsVoice.trim())
       }
-      const speed = Math.min(100, Math.max(0, Math.round(this.ttsRate * 50)))
-      params.append('speed', speed.toString())
-      const vol = Math.min(100, Math.max(0, Math.round(this.ttsVolume * 100)))
-      params.append('volume', vol.toString())
-      const pitch = Math.min(100, Math.max(0, Math.round(this.ttsPitch * 50)))
-      params.append('pitch', pitch.toString())
+      if (this.ttsRate !== 1.0) {
+        const speed = Math.min(100, Math.max(0, Math.round(this.ttsRate * 50)))
+        params.append('speed', speed.toString())
+      }
 
       const requestUrl = `${forwardUrl}?${params.toString()}`
 
@@ -3791,7 +3789,11 @@ export default Vue.extend({
       audio.onerror = () => {
         this.ttsClearWatchdog()
         if (this.ttsActive && this.ttsPlaying) {
-          this.sendNotification(this.$t('epubreader.tts.multitts_play_error').toString())
+          const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:'
+          const errMsg = isHttps
+            ? this.$t('epubreader.tts.multitts_https_tip').toString()
+            : this.$t('epubreader.tts.multitts_play_error').toString()
+          this.sendNotification(errMsg)
           setTimeout(() => {
             if (this.ttsActive && this.ttsPlaying) {
               this.ttsPlayItem(this.ttsCurrentIndex + 1)
@@ -3802,7 +3804,12 @@ export default Vue.extend({
 
       audio.play().catch(err => {
         if (this.ttsActive && this.ttsPlaying) {
-          this.sendNotification(this.$t('epubreader.tts.multitts_play_error').toString())
+          const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:'
+          const isSourceErr = err && (err.name === 'NotSupportedError' || (err.message && err.message.includes('no supported source')))
+          const errMsg = (isHttps || isSourceErr)
+            ? this.$t('epubreader.tts.multitts_https_tip').toString()
+            : this.$t('epubreader.tts.multitts_play_error').toString()
+          this.sendNotification(errMsg)
           this.ttsPause()
         }
       })
@@ -3820,15 +3827,13 @@ export default Vue.extend({
       const spokenText = this.ttsGetMultiTtsText(item)
       const params = new URLSearchParams()
       params.append('text', spokenText)
-      if (this.ttsMultittsVoice) {
-        params.append('voice', this.ttsMultittsVoice)
+      if (this.ttsMultittsVoice && this.ttsMultittsVoice.trim()) {
+        params.append('voice', this.ttsMultittsVoice.trim())
       }
-      const speed = Math.min(100, Math.max(0, Math.round(this.ttsRate * 50)))
-      params.append('speed', speed.toString())
-      const vol = Math.min(100, Math.max(0, Math.round(this.ttsVolume * 100)))
-      params.append('volume', vol.toString())
-      const pitch = Math.min(100, Math.max(0, Math.round(this.ttsPitch * 50)))
-      params.append('pitch', pitch.toString())
+      if (this.ttsRate !== 1.0) {
+        const speed = Math.min(100, Math.max(0, Math.round(this.ttsRate * 50)))
+        params.append('speed', speed.toString())
+      }
 
       const nextUrl = `${forwardUrl}?${params.toString()}`
       const preAudio = new Audio()
