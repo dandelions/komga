@@ -1014,6 +1014,7 @@ export default Vue.extend({
       ttsMultittsUrl: 'http://127.0.0.1:8774',
       ttsMultittsVoice: '',
       ttsMultittsParagraphPause: 500,
+      ttsPlayToken: 0,
       ttsAudioElement: null as HTMLAudioElement | null,
       ttsPrefetchAudio: null as HTMLAudioElement | null,
       ttsPrefetchUrl: null as string | null,
@@ -3105,13 +3106,15 @@ export default Vue.extend({
       }
     },
     ttsStopAudioElement() {
+      this.ttsPlayToken++
       if (this.ttsAudioElement) {
         this.ttsAudioElement.pause()
-        this.ttsAudioElement.src = ''
-        this.ttsAudioElement = null
+        this.ttsAudioElement.removeAttribute('src')
+        this.ttsAudioElement.load()
       }
       if (this.ttsPrefetchAudio) {
-        this.ttsPrefetchAudio.src = ''
+        this.ttsPrefetchAudio.removeAttribute('src')
+        this.ttsPrefetchAudio.load()
         this.ttsPrefetchAudio = null
       }
       if (this.ttsAbortController) {
@@ -3495,6 +3498,7 @@ export default Vue.extend({
     async ttsPlayItem(index: number) {
       if (!this.ttsActive) return
 
+      this.ttsPlayToken++
       this.ttsClearWatchdog()
 
       if (index < 0 || index >= this.ttsItems.length) {
@@ -3675,6 +3679,9 @@ export default Vue.extend({
         await audio.play()
         this.ttsPlaying = true
       } catch (err: any) {
+        if (err && (err.name === 'AbortError' || (err.message && err.message.includes('interrupted')))) {
+          return
+        }
         if (this.ttsActive && this.ttsPlaying) {
           this.sendNotification(this.$t('epubreader.tts.server_error', { err: err.message || 'play failed' }).toString())
           this.ttsPause()
@@ -3752,6 +3759,7 @@ export default Vue.extend({
       }
 
       const requestUrl = `${forwardUrl}?${params.toString()}`
+      const currentToken = this.ttsPlayToken
 
       let audio = this.ttsAudioElement
       if (!audio) {
@@ -3762,12 +3770,14 @@ export default Vue.extend({
       audio.volume = this.ttsVolume
 
       audio.onplay = () => {
+        if (this.ttsPlayToken !== currentToken) return
         this.ttsPlaying = true
         this.ttsStartWatchdog(item.text)
         this.ttsPrefetchMultiTts(index + 1)
       }
 
       audio.onended = () => {
+        if (this.ttsPlayToken !== currentToken) return
         this.ttsClearWatchdog()
         if (!this.ttsActive || !this.ttsPlaying) return
 
@@ -3786,7 +3796,7 @@ export default Vue.extend({
 
         if (pauseMs > 0) {
           setTimeout(() => {
-            if (this.ttsActive && this.ttsPlaying) {
+            if (this.ttsPlayToken === currentToken && this.ttsActive && this.ttsPlaying) {
               this.ttsPlayItem(this.ttsCurrentIndex + 1)
             }
           }, pauseMs)
@@ -3796,6 +3806,7 @@ export default Vue.extend({
       }
 
       audio.onerror = () => {
+        if (this.ttsPlayToken !== currentToken) return
         this.ttsClearWatchdog()
         if (this.ttsActive && this.ttsPlaying) {
           const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:'
@@ -3806,7 +3817,7 @@ export default Vue.extend({
             : this.$t('epubreader.tts.multitts_play_error').toString()
           this.sendNotification(errMsg)
           setTimeout(() => {
-            if (this.ttsActive && this.ttsPlaying) {
+            if (this.ttsPlayToken === currentToken && this.ttsActive && this.ttsPlaying) {
               this.ttsPlayItem(this.ttsCurrentIndex + 1)
             }
           }, 500)
@@ -3816,6 +3827,11 @@ export default Vue.extend({
       // 切换音频源并开始播放
       audio.src = requestUrl
       audio.play().catch(err => {
+        // Chrome 官方规范：当被新的 load() 或切句打断时，浏览器抛出 AbortError，属于正常控制流，静默忽略
+        if (err && (err.name === 'AbortError' || (err.message && err.message.includes('interrupted')))) {
+          return
+        }
+        if (this.ttsPlayToken !== currentToken) return
         if (this.ttsActive && this.ttsPlaying) {
           const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:'
           const isHttpUrl = (this.ttsMultittsUrl || '').trim().toLowerCase().startsWith('http:')
@@ -3826,7 +3842,7 @@ export default Vue.extend({
           this.sendNotification(errMsg)
           // 尝试自动跳到下一句继续
           setTimeout(() => {
-            if (this.ttsActive && this.ttsPlaying) {
+            if (this.ttsPlayToken === currentToken && this.ttsActive && this.ttsPlaying) {
               this.ttsPlayItem(this.ttsCurrentIndex + 1)
             }
           }, 800)
@@ -3915,9 +3931,12 @@ export default Vue.extend({
       this.ttsWatchdogTimer = window.setTimeout(() => {
         if (!this.ttsActive || !this.ttsPlaying) return
         if (this.ttsEngine === 'custom-server' || this.ttsEngine === 'multitts') {
-          if (this.ttsAudioElement && !this.ttsAudioElement.paused) {
-            this.ttsPlayItem(this.ttsCurrentIndex + 1)
+          // 若网络音频正在正常播放中，绝不强行中断切句
+          if (this.ttsAudioElement && !this.ttsAudioElement.paused && this.ttsAudioElement.currentTime > 0) {
+            return
           }
+          // 仅在网络加载彻底无响应时才跳至下一句
+          this.ttsPlayItem(this.ttsCurrentIndex + 1)
         } else if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
           if (window.speechSynthesis.paused) {
             window.speechSynthesis.resume()
