@@ -634,6 +634,7 @@
       :server-token="ttsServerToken"
       :multitts-url="ttsMultittsUrl"
       :multitts-voice="ttsMultittsVoice"
+      :multitts-paragraph-pause="ttsMultittsParagraphPause"
       @toggle-play="ttsTogglePlay"
       @previous="ttsPrevious"
       @next="ttsNext"
@@ -651,6 +652,7 @@
       @update:serverToken="ttsUpdateServerToken"
       @update:multittsUrl="ttsUpdateMultittsUrl"
       @update:multittsVoice="ttsUpdateMultittsVoice"
+      @update:multittsParagraphPause="ttsUpdateMultittsParagraphPause"
       @set-sleep-timer="ttsSetSleepTimer"
       @toggle-toolbars="toggleToolbars"
     />
@@ -999,7 +1001,7 @@ export default Vue.extend({
       ttsSleepTimerId: undefined as number | undefined,
       ttsCurrentIndex: 0,
       ttsCurrentSentence: '',
-      ttsItems: [] as { element: HTMLElement, text: string }[],
+      ttsItems: [] as { element: HTMLElement, text: string, isParagraphEnd?: boolean, isHeading?: boolean }[],
       ttsAvailableVoices: [] as SpeechSynthesisVoice[],
       ttsPendingNextChapter: false,
       ttsUtterance: null as SpeechSynthesisUtterance | null,
@@ -1011,6 +1013,7 @@ export default Vue.extend({
       ttsServerToken: '',
       ttsMultittsUrl: 'http://127.0.0.1:8774',
       ttsMultittsVoice: '',
+      ttsMultittsParagraphPause: 500,
       ttsAudioElement: null as HTMLAudioElement | null,
       ttsPrefetchAudio: null as HTMLAudioElement | null,
       ttsPrefetchUrl: null as string | null,
@@ -3273,6 +3276,15 @@ export default Vue.extend({
         this.ttsPlayItem(this.ttsCurrentIndex)
       }
     },
+    ttsUpdateMultittsParagraphPause(ms: number) {
+      this.ttsMultittsParagraphPause = ms
+      this.ttsSaveSettings()
+      if (this.ttsPrefetchAudio) {
+        this.ttsPrefetchAudio.src = ''
+        this.ttsPrefetchAudio = null
+        this.ttsPrefetchIndex = -1
+      }
+    },
     ttsSetSleepTimer(val: string) {
       this.ttsSleepMode = val
       this.ttsClearSleepTimer()
@@ -3318,6 +3330,7 @@ export default Vue.extend({
           if (typeof parsed.serverToken === 'string') this.ttsServerToken = parsed.serverToken
           if (typeof parsed.multittsUrl === 'string') this.ttsMultittsUrl = parsed.multittsUrl
           if (typeof parsed.multittsVoice === 'string') this.ttsMultittsVoice = parsed.multittsVoice
+          if (typeof parsed.multittsParagraphPause === 'number') this.ttsMultittsParagraphPause = parsed.multittsParagraphPause
         }
       } catch (e) {
       }
@@ -3338,6 +3351,7 @@ export default Vue.extend({
           serverToken: this.ttsServerToken,
           multittsUrl: this.ttsMultittsUrl,
           multittsVoice: this.ttsMultittsVoice,
+          multittsParagraphPause: this.ttsMultittsParagraphPause,
         }
         localStorage.setItem('komga-epub-tts-settings', JSON.stringify(s))
       } catch (e) {
@@ -3409,34 +3423,37 @@ export default Vue.extend({
         })
       }
 
-      const items: { element: HTMLElement, text: string }[] = []
+      const items: { element: HTMLElement, text: string, isParagraphEnd?: boolean, isHeading?: boolean }[] = []
       const sentenceRegex = /[^。！？!?；;\n\r]+([。！？!?；;\n\r]+["'”’）)]*|$)/g
 
       blockElements.forEach(el => {
         const rawText = (el.innerText || el.textContent || '').trim()
         if (!rawText) return
+        const isHeading = /^H[1-6]$/i.test(el.tagName)
         const sentences = rawText.match(sentenceRegex)
         if (sentences && sentences.length > 0) {
-          sentences.forEach(s => {
-            const cleaned = s.trim()
-            if (cleaned.length > 0) {
-              items.push({
-                element: el,
-                text: cleaned,
-              })
-            }
+          const validSentences = sentences.map(s => s.trim()).filter(s => s.length > 0)
+          validSentences.forEach((s, idx) => {
+            items.push({
+              element: el,
+              text: s,
+              isParagraphEnd: idx === validSentences.length - 1,
+              isHeading,
+            })
           })
         } else {
           items.push({
             element: el,
             text: rawText,
+            isParagraphEnd: true,
+            isHeading,
           })
         }
       })
 
       return items
     },
-    ttsFindStartIndex(items: { element: HTMLElement, text: string }[]): number {
+    ttsFindStartIndex(items: { element: HTMLElement, text: string, isParagraphEnd?: boolean, isHeading?: boolean }[]): number {
       if (!items || items.length === 0) return 0
       const iframe = document.querySelector<HTMLIFrameElement>('#iframe-wrapper iframe')
       if (!iframe) return 0
@@ -3512,7 +3529,8 @@ export default Vue.extend({
 
       window.speechSynthesis.cancel()
 
-      const utterance = new SpeechSynthesisUtterance(item.text)
+      const text = item.text.replace(/\[\[.*?\]\]/g, '').trim() || item.text
+      const utterance = new SpeechSynthesisUtterance(text)
       utterance.rate = this.ttsRate
       utterance.pitch = this.ttsPitch
       utterance.volume = this.ttsVolume
@@ -3587,12 +3605,13 @@ export default Vue.extend({
           if (this.ttsServerToken) {
             headers.Authorization = `Bearer ${this.ttsServerToken}`
           }
+          const cleanText = item.text.replace(/\[\[.*?\]\]/g, '').trim() || item.text
           const res = await fetch(this.ttsServerUrl, {
             method: 'POST',
             headers,
             signal: abortController.signal,
             body: JSON.stringify({
-              input: item.text,
+              input: cleanText,
               voice: this.ttsServerVoice || 'zh-CN-XiaoxiaoNeural',
               speed: this.ttsRate || 1.0,
               response_format: this.ttsServerFormat || 'mp3',
@@ -3677,11 +3696,12 @@ export default Vue.extend({
         if (this.ttsServerToken) {
           headers.Authorization = `Bearer ${this.ttsServerToken}`
         }
+        const cleanText = item.text.replace(/\[\[.*?\]\]/g, '').trim() || item.text
         const res = await fetch(this.ttsServerUrl, {
           method: 'POST',
           headers,
           body: JSON.stringify({
-            input: item.text,
+            input: cleanText,
             voice: this.ttsServerVoice || 'zh-CN-XiaoxiaoNeural',
             speed: this.ttsRate || 1.0,
             response_format: this.ttsServerFormat || 'mp3',
@@ -3699,7 +3719,17 @@ export default Vue.extend({
         // prefetch failure is non-fatal
       }
     },
-    ttsPlayMultiTts(index: number, item: { element: HTMLElement, text: string }) {
+    ttsGetMultiTtsText(item: { element: HTMLElement, text: string, isParagraphEnd?: boolean, isHeading?: boolean }): string {
+      let text = item.text
+      if (item.isHeading) {
+        const pauseMs = Math.max(800, this.ttsMultittsParagraphPause > 0 ? Math.round(this.ttsMultittsParagraphPause * 1.5) : 800)
+        text = `${text}[[PAUSE:${pauseMs}]]`
+      } else if (item.isParagraphEnd && this.ttsMultittsParagraphPause > 0) {
+        text = `${text}[[PAUSE:${this.ttsMultittsParagraphPause}]]`
+      }
+      return text
+    },
+    ttsPlayMultiTts(index: number, item: { element: HTMLElement, text: string, isParagraphEnd?: boolean, isHeading?: boolean }) {
       if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
         window.speechSynthesis.cancel()
       }
@@ -3713,8 +3743,9 @@ export default Vue.extend({
 
       const baseUrl = this.ttsMultittsUrl.trim().replace(/\/+$/, '')
       const forwardUrl = baseUrl.endsWith('/forward') ? baseUrl : `${baseUrl}/forward`
+      const spokenText = this.ttsGetMultiTtsText(item)
       const params = new URLSearchParams()
-      params.append('text', item.text)
+      params.append('text', spokenText)
       if (this.ttsMultittsVoice) {
         params.append('voice', this.ttsMultittsVoice)
       }
@@ -3786,8 +3817,9 @@ export default Vue.extend({
 
       const baseUrl = this.ttsMultittsUrl.trim().replace(/\/+$/, '')
       const forwardUrl = baseUrl.endsWith('/forward') ? baseUrl : `${baseUrl}/forward`
+      const spokenText = this.ttsGetMultiTtsText(item)
       const params = new URLSearchParams()
-      params.append('text', item.text)
+      params.append('text', spokenText)
       if (this.ttsMultittsVoice) {
         params.append('voice', this.ttsMultittsVoice)
       }

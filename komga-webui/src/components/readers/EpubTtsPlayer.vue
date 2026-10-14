@@ -356,6 +356,33 @@
               </div>
             </div>
 
+            <!-- MultiTTS 段落停顿设置 (基于自定义标记 [[PAUSE:ms]]) -->
+            <div class="mb-3">
+              <div class="caption font-weight-bold mb-1 d-flex align-center">
+                <v-icon x-small left>mdi-timer-sand</v-icon>
+                {{ $t('epubreader.tts.multitts_paragraph_pause') }}
+              </div>
+              <v-select
+                :items="multittsPauseOptions"
+                :value="multittsParagraphPause"
+                @input="$emit('update:multittsParagraphPause', $event)"
+                dense
+                outlined
+                hide-details
+              />
+              <div class="caption text--secondary mt-1">
+                {{ $t('epubreader.tts.multitts_paragraph_pause_hint') }}
+              </div>
+            </div>
+
+            <!-- MultiTTS 自定义标记特性说明 -->
+            <div class="mb-3 pa-2 rounded" style="background-color: rgba(var(--v-theme-surface-variant, 128, 128, 128), 0.08); border-left: 3px solid var(--v-primary-base, #1976d2);">
+              <div class="caption text--secondary d-flex align-center">
+                <v-icon x-small left color="primary">mdi-information-outline</v-icon>
+                {{ $t('epubreader.tts.multitts_tag_info') }}
+              </div>
+            </div>
+
             <!-- 测试连接按钮 -->
             <div class="d-flex align-center flex-wrap">
               <v-btn
@@ -686,6 +713,10 @@ export default Vue.extend({
       type: String,
       default: '',
     },
+    multittsParagraphPause: {
+      type: Number,
+      default: 500,
+    },
   },
   data() {
     return {
@@ -768,6 +799,15 @@ export default Vue.extend({
     isHttps(): boolean {
       return typeof window !== 'undefined' && window.location.protocol === 'https:'
     },
+    multittsPauseOptions(): { text: string, value: number }[] {
+      return [
+        { text: this.$t('epubreader.tts.multitts_pause_none').toString(), value: 0 },
+        { text: this.$t('epubreader.tts.multitts_pause_ms', { ms: 300 }).toString(), value: 300 },
+        { text: this.$t('epubreader.tts.multitts_pause_ms', { ms: 500 }).toString(), value: 500 },
+        { text: this.$t('epubreader.tts.multitts_pause_ms', { ms: 800 }).toString(), value: 800 },
+        { text: this.$t('epubreader.tts.multitts_pause_ms', { ms: 1200 }).toString(), value: 1200 },
+      ]
+    },
   },
   methods: {
     async fetchMultittsVoices() {
@@ -814,12 +854,13 @@ export default Vue.extend({
       const baseUrl = (this.multittsUrl || 'http://127.0.0.1:8774').trim().replace(/\/+$/, '')
       const forwardUrl = baseUrl.endsWith('/forward') ? baseUrl : `${baseUrl}/forward`
       const params = new URLSearchParams()
-      params.append('text', 'MultiTTS连接成功，正在为您朗读')
+      params.append('text', 'MultiTTS连接成功[[PAUSE:500]]正在为您朗读')
       if (this.multittsVoice) {
         params.append('voice', this.multittsVoice)
       }
       params.append('speed', '50')
       params.append('volume', '100')
+      params.append('pitch', '50')
       const testUrl = `${forwardUrl}?${params.toString()}`
 
       this.testingMultitts = true
