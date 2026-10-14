@@ -3385,6 +3385,9 @@ export default Vue.extend({
       const style = doc.createElement('style')
       style.id = STYLE_ID
       style.textContent = `
+        .komga-tts-sentence {
+          display: inline !important;
+        }
         .komga-tts-active {
           background-color: rgba(255, 235, 59, 0.45) !important;
           border-radius: 4px !important;
@@ -3434,24 +3437,60 @@ export default Vue.extend({
         if (!rawText) return
         const isHeading = /^H[1-6]$/i.test(el.tagName)
         const sentences = rawText.match(sentenceRegex)
-        if (sentences && sentences.length > 0) {
-          const validSentences = sentences.map(s => s.trim()).filter(s => s.length > 0)
-          validSentences.forEach((s, idx) => {
-            items.push({
-              element: el,
-              text: s,
-              isParagraphEnd: idx === validSentences.length - 1,
-              isHeading,
-            })
-          })
-        } else {
+        if (!sentences || sentences.length === 0) {
           items.push({
             element: el,
             text: rawText,
             isParagraphEnd: true,
             isHeading,
           })
+          return
         }
+
+        const validSentences = sentences.map(s => s.trim()).filter(s => s.length > 0)
+        if (validSentences.length <= 1) {
+          items.push({
+            element: el,
+            text: validSentences[0] || rawText,
+            isParagraphEnd: true,
+            isHeading,
+          })
+          return
+        }
+
+        // 若段落由多个句子组成，将句子拆分包裹为独立 span，实现句子级独立物理坐标，解决跨页翻页问题
+        let sentenceSpans: HTMLElement[] = []
+        try {
+          const hasBlockChildren = el.querySelector('p, div, ul, ol, li, h1, h2, h3, h4, h5, h6, table, blockquote')
+          // 纯文本段落（无块级子元素，无复杂行内标签或仅有少量 br）
+          if (!hasBlockChildren && (el.children.length === 0 || Array.from(el.children).every(c => c.tagName === 'BR'))) {
+            const fragment = doc.createDocumentFragment()
+            validSentences.forEach((s, idx) => {
+              const span = doc.createElement('span')
+              span.className = 'komga-tts-sentence'
+              span.textContent = s
+              fragment.appendChild(span)
+              if (idx < validSentences.length - 1) {
+                fragment.appendChild(doc.createTextNode(' '))
+              }
+              sentenceSpans.push(span)
+            })
+            el.innerHTML = ''
+            el.appendChild(fragment)
+          }
+        } catch (e) {
+          sentenceSpans = []
+        }
+
+        const hasSpans = sentenceSpans.length === validSentences.length
+        validSentences.forEach((s, idx) => {
+          items.push({
+            element: hasSpans ? sentenceSpans[idx] : el,
+            text: s,
+            isParagraphEnd: idx === validSentences.length - 1,
+            isHeading,
+          })
+        })
       })
 
       return items
@@ -3891,8 +3930,8 @@ export default Vue.extend({
       const iframe = document.querySelector<HTMLIFrameElement>('#iframe-wrapper iframe')
       if (!iframe) return
 
-      const viewWidth = iframe.clientWidth || window.innerWidth
       const viewHeight = iframe.clientHeight || window.innerHeight
+      const clientWidth = iframe.contentWindow?.innerWidth || iframe.clientWidth || window.innerWidth
 
       if (this.verticalScroll) {
         const rect = element.getBoundingClientRect()
@@ -3901,9 +3940,19 @@ export default Vue.extend({
         }
       } else {
         const rect = element.getBoundingClientRect()
-        if (rect.left >= viewWidth - 15) {
+        // 若当前朗读句子的起点已经超出右侧可视区（即排版在下一页/下一屏），立刻自动翻下一页
+        if (rect.left >= clientWidth - 20) {
           this.nextEpubPage()
-        } else if (rect.right <= 15) {
+          // 针对极大字号可能跨越2页的极端场景，翻页后做一次微调检查
+          setTimeout(() => {
+            if (!this.ttsActive || this.verticalScroll) return
+            const afterRect = element.getBoundingClientRect()
+            if (afterRect.left >= clientWidth - 20) {
+              this.nextEpubPage()
+            }
+          }, 350)
+        } else if (rect.right <= 20) {
+          // 若当前句子排在左侧上一页，自动翻回上一页
           this.previousEpubPage()
         }
       }
