@@ -870,6 +870,56 @@ export default Vue.extend({
     },
   },
   methods: {
+    parseVoicesResponse(json: any): { label: string, id: string }[] {
+      const voices: { label: string, id: string }[] = []
+      const extractItem = (item: any) => {
+        if (!item) return
+        if (typeof item === 'string') {
+          const val = item.trim()
+          if (val) voices.push({ label: val, id: val })
+          return
+        }
+        if (typeof item === 'object') {
+          const id = item.ShortName || item.id || item.voice || item.voiceId || item.code || item.name || item.key
+          if (!id) return
+          const friendly = item.FriendlyName || item.name || item.label || item.displayName || id
+          const locale = item.Locale || item.locale || item.lang || ''
+          const label = locale && !friendly.includes(locale) ? `${friendly} (${locale})` : friendly
+          voices.push({ label: String(label), id: String(id) })
+        }
+      }
+
+      if (json && json.data && json.data.catalog && typeof json.data.catalog === 'object') {
+        for (const [, list] of Object.entries(json.data.catalog)) {
+          if (Array.isArray(list)) {
+            for (const item of list) {
+              extractItem(item)
+            }
+          }
+        }
+      } else if (Array.isArray(json)) {
+        for (const item of json) {
+          extractItem(item)
+        }
+      } else if (json && Array.isArray(json.data)) {
+        for (const item of json.data) {
+          extractItem(item)
+        }
+      } else if (json && Array.isArray(json.voices)) {
+        for (const item of json.voices) {
+          extractItem(item)
+        }
+      } else if (json && typeof json === 'object') {
+        for (const [k, v] of Object.entries(json)) {
+          if (typeof v === 'string') {
+            voices.push({ label: `${v} (${k})`, id: k })
+          } else if (v && typeof v === 'object') {
+            extractItem({ id: k, ...(v as object) })
+          }
+        }
+      }
+      return voices
+    },
     async fetchMultittsVoices() {
       const baseUrl = (this.multittsUrl || 'http://127.0.0.1:8774').trim().replace(/\/+$/, '')
       const url = baseUrl.endsWith('/voices') ? baseUrl : `${baseUrl}/voices`
@@ -879,44 +929,36 @@ export default Vue.extend({
         const res = await fetch(url)
         if (!res.ok) {
           if (res.status === 502) {
-            throw new Error('HTTP 502 Bad Gateway (网关错误：反代服务正常，但后端 TTS 服务未连通或未启动)')
+            throw new Error('HTTP 502 Bad Gateway (网关错误：Lucky 反代正常，但后端目标 TTS 服务未连通或未启动)')
           } else if (res.status === 504) {
             throw new Error('HTTP 504 Gateway Timeout (网关连接后端 TTS 超时)')
           } else if (res.status === 404) {
-            throw new Error('HTTP 404 Not Found (该服务未实现 /voices 接口)')
+            throw new Error('HTTP 404 Not Found (服务端未提供 /voices 接口)')
           } else {
             throw new Error(`HTTP ${res.status} ${res.statusText}`)
           }
         }
-        const json = await res.json()
-        const voices: { label: string, id: string }[] = []
-        if (json && json.data && json.data.catalog) {
-          for (const [provider, list] of Object.entries(json.data.catalog)) {
-            if (Array.isArray(list)) {
-              for (const item of list) {
-                if (item && item.id) {
-                  const label = item.name ? `${item.name} (${item.locale || provider})` : item.id
-                  voices.push({ label, id: item.id })
-                }
-              }
-            }
-          }
-        } else if (Array.isArray(json)) {
-          for (const item of json) {
-            if (typeof item === 'string') {
-              voices.push({ label: item, id: item })
-            } else if (item && item.id) {
-              voices.push({ label: item.name || item.id, id: item.id })
-            }
-          }
+        let json: any
+        try {
+          json = await res.json()
+        } catch (jsonErr) {
+          throw new Error('接口返回非 JSON 数据，请检查 /voices 地址是否正确')
         }
-        this.multittsVoiceItems = voices
-        this.multittsFetchSuccess = true
-        this.multittsFetchResult = this.$t('epubreader.tts.multitts_voices_loaded', { count: voices.length }).toString()
+        const voices = this.parseVoicesResponse(json)
+        if (voices.length > 0) {
+          this.multittsVoiceItems = voices
+          this.multittsFetchSuccess = true
+          this.multittsFetchResult = this.$t('epubreader.tts.multitts_voices_loaded', { count: voices.length }).toString()
+        } else {
+          this.multittsFetchSuccess = false
+          this.multittsFetchResult = '接口返回成功，但未解析出发音人数据（格式未知），可手动输入声音名称'
+        }
       } catch (err: any) {
         this.multittsFetchSuccess = false
         const msg = (err && err.message) || ''
-        if (msg.startsWith('HTTP 404')) {
+        if (err instanceof TypeError && (msg.includes('fetch') || msg.includes('Network') || msg.includes('Failed'))) {
+          this.multittsFetchResult = '跨域拦截 (CORS)：Komga 与 MultiTTS 域名不同源。请在 Lucky 反向代理的「自定义响应头」中添加 Access-Control-Allow-Origin: *'
+        } else if (msg.startsWith('HTTP 404')) {
           this.multittsFetchResult = this.$t('epubreader.tts.multitts_fetch_voices_failed').toString()
         } else if (msg) {
           this.multittsFetchResult = msg
