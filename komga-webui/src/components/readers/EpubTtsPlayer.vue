@@ -877,7 +877,17 @@ export default Vue.extend({
       this.multittsFetchResult = ''
       try {
         const res = await fetch(url)
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        if (!res.ok) {
+          if (res.status === 502) {
+            throw new Error('HTTP 502 Bad Gateway (网关错误：反代服务正常，但后端 TTS 服务未连通或未启动)')
+          } else if (res.status === 504) {
+            throw new Error('HTTP 504 Gateway Timeout (网关连接后端 TTS 超时)')
+          } else if (res.status === 404) {
+            throw new Error('HTTP 404 Not Found (该服务未实现 /voices 接口)')
+          } else {
+            throw new Error(`HTTP ${res.status} ${res.statusText}`)
+          }
+        }
         const json = await res.json()
         const voices: { label: string, id: string }[] = []
         if (json && json.data && json.data.catalog) {
@@ -905,12 +915,19 @@ export default Vue.extend({
         this.multittsFetchResult = this.$t('epubreader.tts.multitts_voices_loaded', { count: voices.length }).toString()
       } catch (err: any) {
         this.multittsFetchSuccess = false
-        this.multittsFetchResult = this.$t('epubreader.tts.multitts_fetch_voices_failed').toString()
+        const msg = (err && err.message) || ''
+        if (msg.startsWith('HTTP 404')) {
+          this.multittsFetchResult = this.$t('epubreader.tts.multitts_fetch_voices_failed').toString()
+        } else if (msg) {
+          this.multittsFetchResult = msg
+        } else {
+          this.multittsFetchResult = this.$t('epubreader.tts.multitts_fetch_voices_failed').toString()
+        }
       } finally {
         this.fetchingMultittsVoices = false
       }
     },
-    testMultittsConnection() {
+    async testMultittsConnection() {
       const baseUrl = (this.multittsUrl || 'http://127.0.0.1:8774').trim().replace(/\/+$/, '')
       const forwardUrl = baseUrl.endsWith('/forward') ? baseUrl : `${baseUrl}/forward`
       const params = new URLSearchParams()
@@ -925,29 +942,63 @@ export default Vue.extend({
       this.multittsTestSuccess = false
       this.multittsTestSourceError = false
 
-      const audio = new Audio(testUrl)
-      audio.onplay = () => {
-        this.testingMultitts = false
-        this.multittsTestSuccess = true
-        this.multittsTestSourceError = false
-        this.multittsTestResultText = this.$t('epubreader.tts.multitts_test_success').toString()
-      }
-      const handleError = (err?: any) => {
-        this.testingMultitts = false
-        this.multittsTestSuccess = false
-        const msg = (err && err.message) || ''
-        const isSourceError = (err && (err.name === 'NotSupportedError' || msg.includes('no supported source'))) ||
-                              (audio.error && audio.error.code === 4) ||
-                              this.isHttps
-        if (isSourceError) {
-          this.multittsTestSourceError = true
-          this.multittsTestResultText = ''
-        } else {
-          this.multittsTestResultText = msg || this.$t('epubreader.tts.multitts_play_error').toString()
+      try {
+        const probeRes = await fetch(testUrl, { method: 'GET' })
+        if (!probeRes.ok) {
+          this.testingMultitts = false
+          this.multittsTestSuccess = false
+          if (probeRes.status === 502) {
+            this.multittsTestResultText = 'HTTP 502 Bad Gateway (网关错误：反向代理正常，但后端 TTS 服务未连通或未启动)'
+          } else if (probeRes.status === 504) {
+            this.multittsTestResultText = 'HTTP 504 Gateway Timeout (网关连接后端 TTS 超时)'
+          } else {
+            this.multittsTestResultText = `HTTP ${probeRes.status} ${probeRes.statusText}`
+          }
+          return
         }
+        const blob = await probeRes.blob()
+        const audio = new Audio(URL.createObjectURL(blob))
+        audio.onplay = () => {
+          this.testingMultitts = false
+          this.multittsTestSuccess = true
+          this.multittsTestSourceError = false
+          this.multittsTestResultText = this.$t('epubreader.tts.multitts_test_success').toString()
+        }
+        audio.onerror = () => {
+          this.testingMultitts = false
+          this.multittsTestSuccess = false
+          this.multittsTestResultText = this.$t('epubreader.tts.multitts_play_error').toString()
+        }
+        audio.play().catch(err => {
+          this.testingMultitts = false
+          this.multittsTestSuccess = false
+          this.multittsTestResultText = err.message || this.$t('epubreader.tts.multitts_play_error').toString()
+        })
+      } catch (e: any) {
+        const audio = new Audio(testUrl)
+        audio.onplay = () => {
+          this.testingMultitts = false
+          this.multittsTestSuccess = true
+          this.multittsTestSourceError = false
+          this.multittsTestResultText = this.$t('epubreader.tts.multitts_test_success').toString()
+        }
+        const handleError = (err?: any) => {
+          this.testingMultitts = false
+          this.multittsTestSuccess = false
+          const msg = (err && err.message) || ''
+          const isSourceError = (err && (err.name === 'NotSupportedError' || msg.includes('no supported source'))) ||
+                                (audio.error && audio.error.code === 4) ||
+                                (this.isHttps && testUrl.startsWith('http://'))
+          if (isSourceError) {
+            this.multittsTestSourceError = true
+            this.multittsTestResultText = ''
+          } else {
+            this.multittsTestResultText = msg || this.$t('epubreader.tts.multitts_play_error').toString()
+          }
+        }
+        audio.onerror = () => handleError()
+        audio.play().catch(err => handleError(err))
       }
-      audio.onerror = () => handleError()
-      audio.play().catch(err => handleError(err))
     },
     async testServerConnection() {
       if (!this.serverUrl) {
