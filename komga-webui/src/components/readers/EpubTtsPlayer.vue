@@ -872,52 +872,57 @@ export default Vue.extend({
   methods: {
     parseVoicesResponse(json: any): { label: string, id: string }[] {
       const voices: { label: string, id: string }[] = []
+      const seenIds = new Set<string>()
+
       const extractItem = (item: any) => {
         if (!item) return
         if (typeof item === 'string') {
           const val = item.trim()
-          if (val) voices.push({ label: val, id: val })
+          if (val && !seenIds.has(val)) {
+            seenIds.add(val)
+            voices.push({ label: val, id: val })
+          }
           return
         }
         if (typeof item === 'object') {
-          const id = item.ShortName || item.id || item.voice || item.voiceId || item.code || item.name || item.key
+          const id = item.ShortName || item.id || item.voice || item.voiceId || item.code || item.key
           if (!id) return
-          const friendly = item.FriendlyName || item.name || item.label || item.displayName || id
+          const strId = String(id).trim()
+          if (seenIds.has(strId)) return
+          seenIds.add(strId)
+
+          const friendly = item.FriendlyName || item.name || item.label || item.displayName || strId
           const locale = item.Locale || item.locale || item.lang || ''
-          const label = locale && !friendly.includes(locale) ? `${friendly} (${locale})` : friendly
-          voices.push({ label: String(label), id: String(id) })
+          const voiceType = item.type ? ` [${item.type}]` : ''
+          const label = locale && !friendly.includes(locale)
+            ? `${friendly} (${locale})${voiceType}`
+            : `${friendly}${voiceType}`
+          voices.push({ label: String(label), id: strId })
         }
       }
 
-      if (json && json.data && json.data.catalog && typeof json.data.catalog === 'object') {
-        for (const [, list] of Object.entries(json.data.catalog)) {
-          if (Array.isArray(list)) {
-            for (const item of list) {
-              extractItem(item)
+      const traverse = (node: any, depth = 0) => {
+        if (!node || depth > 5) return
+        if (Array.isArray(node)) {
+          for (const item of node) {
+            extractItem(item)
+          }
+        } else if (typeof node === 'object') {
+          // 如果节点本身像是一个发音人（包含 id/voice/ShortName 且包含 name/displayName/FriendlyName/locale）
+          if ((node.id || node.voice || node.ShortName) && (node.name || node.FriendlyName || node.locale)) {
+            extractItem(node)
+            return
+          }
+          // 否则遍历它的子属性（支持对象分组如 { microsoft: [...], xiaomi: [...] } 或嵌套在 data.voices 中）
+          for (const [, val] of Object.entries(node)) {
+            if (Array.isArray(val) || (typeof val === 'object' && val !== null)) {
+              traverse(val, depth + 1)
             }
           }
         }
-      } else if (Array.isArray(json)) {
-        for (const item of json) {
-          extractItem(item)
-        }
-      } else if (json && Array.isArray(json.data)) {
-        for (const item of json.data) {
-          extractItem(item)
-        }
-      } else if (json && Array.isArray(json.voices)) {
-        for (const item of json.voices) {
-          extractItem(item)
-        }
-      } else if (json && typeof json === 'object') {
-        for (const [k, v] of Object.entries(json)) {
-          if (typeof v === 'string') {
-            voices.push({ label: `${v} (${k})`, id: k })
-          } else if (v && typeof v === 'object') {
-            extractItem({ id: k, ...(v as object) })
-          }
-        }
       }
+
+      traverse(json)
       return voices
     },
     async fetchMultittsVoices() {
