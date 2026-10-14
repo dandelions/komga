@@ -253,6 +253,10 @@
                 <v-icon x-small left>mdi-web</v-icon>
                 {{ $t('epubreader.tts.engine_web_speech') }}
               </v-btn>
+              <v-btn value="multitts" small class="flex-grow-1">
+                <v-icon x-small left>mdi-cellphone-sound</v-icon>
+                {{ $t('epubreader.tts.engine_multitts') }}
+              </v-btn>
               <v-btn value="custom-server" small class="flex-grow-1">
                 <v-icon x-small left>mdi-server-network</v-icon>
                 {{ $t('epubreader.tts.engine_custom_server') }}
@@ -286,6 +290,92 @@
                 </div>
               </template>
             </v-select>
+          </div>
+
+          <!-- MultiTTS 设置 -->
+          <div v-else-if="engine === 'multitts'" class="mb-4">
+            <!-- MultiTTS API 地址 -->
+            <div class="mb-3">
+              <div class="caption font-weight-bold mb-1 d-flex align-center">
+                <v-icon x-small left>mdi-cellphone-sound</v-icon>
+                {{ $t('epubreader.tts.multitts_url') }}
+              </div>
+              <v-text-field
+                :value="multittsUrl"
+                @input="$emit('update:multittsUrl', $event)"
+                dense
+                outlined
+                hide-details
+                placeholder="http://127.0.0.1:8774"
+              />
+              <div class="caption text--secondary mt-1">
+                {{ $t('epubreader.tts.multitts_url_hint') }}
+              </div>
+              <div class="caption text--secondary mt-1 d-flex align-center">
+                <v-icon x-small left color="primary">mdi-shield-check-outline</v-icon>
+                {{ $t('epubreader.tts.multitts_cors_tip') }}
+              </div>
+              <div v-if="isHttps" class="caption warning--text mt-1 d-flex align-center">
+                <v-icon x-small left color="warning">mdi-alert</v-icon>
+                {{ $t('epubreader.tts.multitts_https_tip') }}
+              </div>
+            </div>
+
+            <!-- MultiTTS 发音人选择 -->
+            <div class="mb-3">
+              <div class="caption font-weight-bold mb-1 d-flex align-center justify-space-between">
+                <span>
+                  <v-icon x-small left>mdi-account-voice</v-icon>
+                  {{ $t('epubreader.tts.multitts_voice') }}
+                </span>
+                <v-btn
+                  x-small
+                  text
+                  color="primary"
+                  :loading="fetchingMultittsVoices"
+                  @click="fetchMultittsVoices"
+                >
+                  <v-icon x-small left>mdi-refresh</v-icon>
+                  {{ $t('epubreader.tts.multitts_fetch_voices') }}
+                </v-btn>
+              </div>
+              <v-combobox
+                :items="multittsVoiceItems"
+                :value="multittsVoice"
+                @input="$emit('update:multittsVoice', $event)"
+                dense
+                outlined
+                hide-details
+                item-text="label"
+                item-value="id"
+                :return-object="false"
+                :placeholder="$t('epubreader.tts.multitts_voice_placeholder')"
+              />
+              <div v-if="multittsFetchResult" class="caption mt-1" :class="multittsFetchSuccess ? 'success--text' : 'warning--text'">
+                {{ multittsFetchResult }}
+              </div>
+            </div>
+
+            <!-- 测试连接按钮 -->
+            <div class="d-flex align-center flex-wrap">
+              <v-btn
+                outlined
+                small
+                color="primary"
+                :loading="testingMultitts"
+                @click="testMultittsConnection"
+              >
+                <v-icon x-small left>mdi-volume-high</v-icon>
+                {{ $t('epubreader.tts.test_connection') }}
+              </v-btn>
+              <span
+                v-if="multittsTestResultText"
+                class="caption ml-2"
+                :class="multittsTestSuccess ? 'success--text' : 'error--text'"
+              >
+                {{ multittsTestResultText }}
+              </span>
+            </div>
           </div>
 
           <!-- 自定义服务端 TTS 设置 -->
@@ -588,6 +678,14 @@ export default Vue.extend({
       type: String,
       default: '',
     },
+    multittsUrl: {
+      type: String,
+      default: 'http://127.0.0.1:8774',
+    },
+    multittsVoice: {
+      type: String,
+      default: '',
+    },
   },
   data() {
     return {
@@ -597,6 +695,13 @@ export default Vue.extend({
       testingServer: false,
       testResultText: '',
       testResultSuccess: false,
+      fetchingMultittsVoices: false,
+      multittsFetchResult: '',
+      multittsFetchSuccess: false,
+      multittsVoiceItems: [] as { label: string, id: string }[],
+      testingMultitts: false,
+      multittsTestResultText: '',
+      multittsTestSuccess: false,
       serverVoicePresets: [
         { text: 'zh-CN-XiaoxiaoNeural (微软晓晓 - 女声温柔)', value: 'zh-CN-XiaoxiaoNeural' },
         { text: 'zh-CN-YunxiNeural (微软云希 - 男声小说)', value: 'zh-CN-YunxiNeural' },
@@ -660,8 +765,84 @@ export default Vue.extend({
       }))
       return [defaultItem, ...list]
     },
+    isHttps(): boolean {
+      return typeof window !== 'undefined' && window.location.protocol === 'https:'
+    },
   },
   methods: {
+    async fetchMultittsVoices() {
+      const baseUrl = (this.multittsUrl || 'http://127.0.0.1:8774').trim().replace(/\/+$/, '')
+      const url = baseUrl.endsWith('/voices') ? baseUrl : `${baseUrl}/voices`
+      this.fetchingMultittsVoices = true
+      this.multittsFetchResult = ''
+      try {
+        const res = await fetch(url)
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const json = await res.json()
+        const voices: { label: string, id: string }[] = []
+        if (json && json.data && json.data.catalog) {
+          for (const [provider, list] of Object.entries(json.data.catalog)) {
+            if (Array.isArray(list)) {
+              for (const item of list) {
+                if (item && item.id) {
+                  const label = item.name ? `${item.name} (${item.locale || provider})` : item.id
+                  voices.push({ label, id: item.id })
+                }
+              }
+            }
+          }
+        } else if (Array.isArray(json)) {
+          for (const item of json) {
+            if (typeof item === 'string') {
+              voices.push({ label: item, id: item })
+            } else if (item && item.id) {
+              voices.push({ label: item.name || item.id, id: item.id })
+            }
+          }
+        }
+        this.multittsVoiceItems = voices
+        this.multittsFetchSuccess = true
+        this.multittsFetchResult = this.$t('epubreader.tts.multitts_voices_loaded', { count: voices.length }).toString()
+      } catch (err: any) {
+        this.multittsFetchSuccess = false
+        this.multittsFetchResult = this.$t('epubreader.tts.multitts_fetch_voices_failed').toString()
+      } finally {
+        this.fetchingMultittsVoices = false
+      }
+    },
+    testMultittsConnection() {
+      const baseUrl = (this.multittsUrl || 'http://127.0.0.1:8774').trim().replace(/\/+$/, '')
+      const forwardUrl = baseUrl.endsWith('/forward') ? baseUrl : `${baseUrl}/forward`
+      const params = new URLSearchParams()
+      params.append('text', 'MultiTTS连接成功，正在为您朗读')
+      if (this.multittsVoice) {
+        params.append('voice', this.multittsVoice)
+      }
+      params.append('speed', '50')
+      params.append('volume', '100')
+      const testUrl = `${forwardUrl}?${params.toString()}`
+
+      this.testingMultitts = true
+      this.multittsTestResultText = ''
+      this.multittsTestSuccess = false
+
+      const audio = new Audio(testUrl)
+      audio.onplay = () => {
+        this.testingMultitts = false
+        this.multittsTestSuccess = true
+        this.multittsTestResultText = this.$t('epubreader.tts.multitts_test_success').toString()
+      }
+      audio.onerror = () => {
+        this.testingMultitts = false
+        this.multittsTestSuccess = false
+        this.multittsTestResultText = this.$t('epubreader.tts.multitts_play_error').toString()
+      }
+      audio.play().catch(err => {
+        this.testingMultitts = false
+        this.multittsTestSuccess = false
+        this.multittsTestResultText = err.message || this.$t('epubreader.tts.multitts_play_error').toString()
+      })
+    },
     async testServerConnection() {
       if (!this.serverUrl) {
         this.testResultText = this.$t('epubreader.tts.server_url_required').toString()

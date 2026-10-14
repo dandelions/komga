@@ -632,6 +632,8 @@
       :server-voice="ttsServerVoice"
       :server-format="ttsServerFormat"
       :server-token="ttsServerToken"
+      :multitts-url="ttsMultittsUrl"
+      :multitts-voice="ttsMultittsVoice"
       @toggle-play="ttsTogglePlay"
       @previous="ttsPrevious"
       @next="ttsNext"
@@ -647,6 +649,8 @@
       @update:serverVoice="ttsUpdateServerVoice"
       @update:serverFormat="ttsUpdateServerFormat"
       @update:serverToken="ttsUpdateServerToken"
+      @update:multittsUrl="ttsUpdateMultittsUrl"
+      @update:multittsVoice="ttsUpdateMultittsVoice"
       @set-sleep-timer="ttsSetSleepTimer"
       @toggle-toolbars="toggleToolbars"
     />
@@ -1005,7 +1009,10 @@ export default Vue.extend({
       ttsServerVoice: 'zh-CN-XiaoxiaoNeural',
       ttsServerFormat: 'mp3',
       ttsServerToken: '',
+      ttsMultittsUrl: 'http://127.0.0.1:8774',
+      ttsMultittsVoice: '',
       ttsAudioElement: null as HTMLAudioElement | null,
+      ttsPrefetchAudio: null as HTMLAudioElement | null,
       ttsPrefetchUrl: null as string | null,
       ttsPrefetchIndex: -1,
       ttsAbortController: null as AbortController | null,
@@ -3100,6 +3107,10 @@ export default Vue.extend({
         this.ttsAudioElement.src = ''
         this.ttsAudioElement = null
       }
+      if (this.ttsPrefetchAudio) {
+        this.ttsPrefetchAudio.src = ''
+        this.ttsPrefetchAudio = null
+      }
       if (this.ttsAbortController) {
         this.ttsAbortController.abort()
         this.ttsAbortController = null
@@ -3117,7 +3128,7 @@ export default Vue.extend({
         this.ttsStartCurrentChapter()
         return
       }
-      if (this.ttsEngine === 'custom-server' && this.ttsAudioElement && this.ttsAudioElement.paused && this.ttsAudioElement.src) {
+      if ((this.ttsEngine === 'custom-server' || this.ttsEngine === 'multitts') && this.ttsAudioElement && this.ttsAudioElement.paused && this.ttsAudioElement.src) {
         this.ttsAudioElement.play().then(() => {
           this.ttsPlaying = true
           this.ttsStartWatchdog(this.ttsCurrentSentence)
@@ -3164,14 +3175,19 @@ export default Vue.extend({
         this.ttsPrefetchUrl = null
         this.ttsPrefetchIndex = -1
       }
-      if (this.ttsPlaying && this.ttsEngine === 'web-speech') {
+      if (this.ttsPrefetchAudio) {
+        this.ttsPrefetchAudio.src = ''
+        this.ttsPrefetchAudio = null
+        this.ttsPrefetchIndex = -1
+      }
+      if (this.ttsPlaying && (this.ttsEngine === 'web-speech' || this.ttsEngine === 'multitts')) {
         this.ttsPlayItem(this.ttsCurrentIndex)
       }
     },
     ttsUpdatePitch(p: number) {
       this.ttsPitch = p
       this.ttsSaveSettings()
-      if (this.ttsPlaying && this.ttsEngine === 'web-speech') {
+      if (this.ttsPlaying && (this.ttsEngine === 'web-speech' || this.ttsEngine === 'multitts')) {
         this.ttsPlayItem(this.ttsCurrentIndex)
       }
     },
@@ -3198,6 +3214,11 @@ export default Vue.extend({
       if (this.ttsPrefetchUrl) {
         URL.revokeObjectURL(this.ttsPrefetchUrl)
         this.ttsPrefetchUrl = null
+        this.ttsPrefetchIndex = -1
+      }
+      if (this.ttsPrefetchAudio) {
+        this.ttsPrefetchAudio.src = ''
+        this.ttsPrefetchAudio = null
         this.ttsPrefetchIndex = -1
       }
       if (this.ttsPlaying) {
@@ -3227,6 +3248,30 @@ export default Vue.extend({
     ttsUpdateServerToken(token: string) {
       this.ttsServerToken = token
       this.ttsSaveSettings()
+    },
+    ttsUpdateMultittsUrl(url: string) {
+      this.ttsMultittsUrl = url
+      this.ttsSaveSettings()
+      if (this.ttsPrefetchAudio) {
+        this.ttsPrefetchAudio.src = ''
+        this.ttsPrefetchAudio = null
+        this.ttsPrefetchIndex = -1
+      }
+      if (this.ttsPlaying && this.ttsEngine === 'multitts') {
+        this.ttsPlayItem(this.ttsCurrentIndex)
+      }
+    },
+    ttsUpdateMultittsVoice(voice: string) {
+      this.ttsMultittsVoice = voice
+      this.ttsSaveSettings()
+      if (this.ttsPrefetchAudio) {
+        this.ttsPrefetchAudio.src = ''
+        this.ttsPrefetchAudio = null
+        this.ttsPrefetchIndex = -1
+      }
+      if (this.ttsPlaying && this.ttsEngine === 'multitts') {
+        this.ttsPlayItem(this.ttsCurrentIndex)
+      }
     },
     ttsSetSleepTimer(val: string) {
       this.ttsSleepMode = val
@@ -3271,6 +3316,8 @@ export default Vue.extend({
           if (typeof parsed.serverVoice === 'string') this.ttsServerVoice = parsed.serverVoice
           if (typeof parsed.serverFormat === 'string') this.ttsServerFormat = parsed.serverFormat
           if (typeof parsed.serverToken === 'string') this.ttsServerToken = parsed.serverToken
+          if (typeof parsed.multittsUrl === 'string') this.ttsMultittsUrl = parsed.multittsUrl
+          if (typeof parsed.multittsVoice === 'string') this.ttsMultittsVoice = parsed.multittsVoice
         }
       } catch (e) {
       }
@@ -3289,6 +3336,8 @@ export default Vue.extend({
           serverVoice: this.ttsServerVoice,
           serverFormat: this.ttsServerFormat,
           serverToken: this.ttsServerToken,
+          multittsUrl: this.ttsMultittsUrl,
+          multittsVoice: this.ttsMultittsVoice,
         }
         localStorage.setItem('komga-epub-tts-settings', JSON.stringify(s))
       } catch (e) {
@@ -3452,6 +3501,8 @@ export default Vue.extend({
 
       if (this.ttsEngine === 'custom-server') {
         await this.ttsPlayCustomServer(index, item)
+      } else if (this.ttsEngine === 'multitts') {
+        this.ttsPlayMultiTts(index, item)
       } else {
         this.ttsPlayWebSpeech(index, item)
       }
@@ -3648,6 +3699,112 @@ export default Vue.extend({
         // prefetch failure is non-fatal
       }
     },
+    ttsPlayMultiTts(index: number, item: { element: HTMLElement, text: string }) {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel()
+      }
+      if (!this.ttsMultittsUrl) {
+        this.sendNotification(this.$t('epubreader.tts.multitts_url_required').toString())
+        this.ttsPause()
+        return
+      }
+
+      this.ttsStopAudioElement()
+
+      const baseUrl = this.ttsMultittsUrl.trim().replace(/\/+$/, '')
+      const forwardUrl = baseUrl.endsWith('/forward') ? baseUrl : `${baseUrl}/forward`
+      const params = new URLSearchParams()
+      params.append('text', item.text)
+      if (this.ttsMultittsVoice) {
+        params.append('voice', this.ttsMultittsVoice)
+      }
+      const speed = Math.min(100, Math.max(0, Math.round(this.ttsRate * 50)))
+      params.append('speed', speed.toString())
+      const vol = Math.min(100, Math.max(0, Math.round(this.ttsVolume * 100)))
+      params.append('volume', vol.toString())
+      const pitch = Math.min(100, Math.max(0, Math.round(this.ttsPitch * 50)))
+      params.append('pitch', pitch.toString())
+
+      const requestUrl = `${forwardUrl}?${params.toString()}`
+
+      let audio: HTMLAudioElement
+      if (this.ttsPrefetchIndex === index && this.ttsPrefetchAudio) {
+        audio = this.ttsPrefetchAudio
+        this.ttsPrefetchAudio = null
+        this.ttsPrefetchIndex = -1
+      } else {
+        audio = new Audio(requestUrl)
+      }
+
+      this.ttsAudioElement = audio
+      audio.volume = this.ttsVolume
+
+      audio.onplay = () => {
+        this.ttsPlaying = true
+        this.ttsStartWatchdog(item.text)
+        this.ttsPrefetchMultiTts(index + 1)
+      }
+
+      audio.onended = () => {
+        this.ttsClearWatchdog()
+        if (!this.ttsActive || !this.ttsPlaying) return
+
+        if (this.ttsSleepMode !== 'off' && this.ttsSleepMode !== 'chapter' && this.ttsSleepRemaining <= 0) {
+          this.ttsPause()
+          return
+        }
+
+        this.ttsPlayItem(this.ttsCurrentIndex + 1)
+      }
+
+      audio.onerror = () => {
+        this.ttsClearWatchdog()
+        if (this.ttsActive && this.ttsPlaying) {
+          this.sendNotification(this.$t('epubreader.tts.multitts_play_error').toString())
+          setTimeout(() => {
+            if (this.ttsActive && this.ttsPlaying) {
+              this.ttsPlayItem(this.ttsCurrentIndex + 1)
+            }
+          }, 500)
+        }
+      }
+
+      audio.play().catch(err => {
+        if (this.ttsActive && this.ttsPlaying) {
+          this.sendNotification(this.$t('epubreader.tts.multitts_play_error').toString())
+          this.ttsPause()
+        }
+      })
+    },
+    ttsPrefetchMultiTts(nextIndex: number) {
+      if (this.ttsEngine !== 'multitts' || !this.ttsMultittsUrl) return
+      if (nextIndex < 0 || nextIndex >= this.ttsItems.length) return
+      if (this.ttsPrefetchIndex === nextIndex && this.ttsPrefetchAudio) return
+
+      const item = this.ttsItems[nextIndex]
+      if (!item || !item.text.trim()) return
+
+      const baseUrl = this.ttsMultittsUrl.trim().replace(/\/+$/, '')
+      const forwardUrl = baseUrl.endsWith('/forward') ? baseUrl : `${baseUrl}/forward`
+      const params = new URLSearchParams()
+      params.append('text', item.text)
+      if (this.ttsMultittsVoice) {
+        params.append('voice', this.ttsMultittsVoice)
+      }
+      const speed = Math.min(100, Math.max(0, Math.round(this.ttsRate * 50)))
+      params.append('speed', speed.toString())
+      const vol = Math.min(100, Math.max(0, Math.round(this.ttsVolume * 100)))
+      params.append('volume', vol.toString())
+      const pitch = Math.min(100, Math.max(0, Math.round(this.ttsPitch * 50)))
+      params.append('pitch', pitch.toString())
+
+      const nextUrl = `${forwardUrl}?${params.toString()}`
+      const preAudio = new Audio()
+      preAudio.preload = 'auto'
+      preAudio.src = nextUrl
+      this.ttsPrefetchAudio = preAudio
+      this.ttsPrefetchIndex = nextIndex
+    },
     ttsApplyHighlight(element: HTMLElement) {
       this.ttsClearHighlight()
       element.classList.add('komga-tts-active')
@@ -3701,7 +3858,7 @@ export default Vue.extend({
       const estimatedSeconds = Math.max(10, Math.ceil((text.length / 2) / Math.max(0.5, this.ttsRate)) + 6)
       this.ttsWatchdogTimer = window.setTimeout(() => {
         if (!this.ttsActive || !this.ttsPlaying) return
-        if (this.ttsEngine === 'custom-server') {
+        if (this.ttsEngine === 'custom-server' || this.ttsEngine === 'multitts') {
           if (this.ttsAudioElement && !this.ttsAudioElement.paused) {
             this.ttsPlayItem(this.ttsCurrentIndex + 1)
           }
