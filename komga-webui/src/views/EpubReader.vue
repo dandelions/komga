@@ -3430,10 +3430,8 @@ export default Vue.extend({
       }
 
       const items: { element: HTMLElement, text: string, isParagraphEnd?: boolean, isHeading?: boolean }[] = []
-      // 第一层：按句号、感叹号、问号、分号分句
+      // 按句号、感叹号、问号、分号、换行分句（保持整句发音自然，不被逗号切碎）
       const sentenceRegex = /[^。！？!?；;\n\r]+([。！？!?；;\n\r]+["'”’）)]*|$)/g
-      // 第二层：当单句偏长时，按逗号、顿号、冒号、破折号细化分节，使跨页分界线处的子句也能立刻触发翻页
-      const clauseRegex = /[^，,、：:—…]+([，,、：:—…]+|$)/g
 
       blockElements.forEach(el => {
         const rawText = (el.innerText || el.textContent || '').trim()
@@ -3450,64 +3448,51 @@ export default Vue.extend({
           return
         }
 
-        // 拆解出最小视觉/发音单元（保持适度颗粒度，单句大于 15 字自动按子句拆开）
-        const validUnits: string[] = []
-        sentences.forEach(s => {
-          const trimmedS = s.trim()
-          if (!trimmedS) return
-          if (trimmedS.length > 15) {
-            const clauses = trimmedS.match(clauseRegex)
-            if (clauses && clauses.length > 1) {
-              clauses.forEach(c => {
-                const trimmedC = c.trim()
-                if (trimmedC) validUnits.push(trimmedC)
-              })
-              return
-            }
-          }
-          validUnits.push(trimmedS)
-        })
-
-        if (validUnits.length <= 1) {
+        const validSentences = sentences.map(s => s.trim()).filter(s => s.length > 0)
+        if (validSentences.length <= 1) {
           items.push({
             element: el,
-            text: validUnits[0] || rawText,
+            text: validSentences[0] || rawText,
             isParagraphEnd: true,
             isHeading,
           })
           return
         }
 
-        // 将长段落与长句子拆分包裹为独立 span，实现细粒度的物理 DOM 坐标
+        // 为多句段落包裹独立 span，使每个完整句子拥有精准的 DOM 物理坐标，跨页时能够准确翻页
         let sentenceSpans: HTMLElement[] = []
         try {
           const hasBlockChildren = el.querySelector('p, div, ul, ol, li, h1, h2, h3, h4, h5, h6, table, blockquote')
-          // 纯文本段落（无复杂块级子标签）
-          if (!hasBlockChildren && (el.children.length === 0 || Array.from(el.children).every(c => c.tagName === 'BR'))) {
-            const fragment = doc.createDocumentFragment()
-            validUnits.forEach((s, idx) => {
-              const span = doc.createElement('span')
-              span.className = 'komga-tts-sentence'
-              span.textContent = s
-              fragment.appendChild(span)
-              if (idx < validUnits.length - 1) {
-                fragment.appendChild(doc.createTextNode(' '))
-              }
-              sentenceSpans.push(span)
-            })
-            el.innerHTML = ''
-            el.appendChild(fragment)
+          if (!hasBlockChildren) {
+            const existingSpans = Array.from(el.querySelectorAll<HTMLElement>('.komga-tts-sentence'))
+            if (existingSpans.length === validSentences.length) {
+              sentenceSpans = existingSpans
+            } else {
+              const fragment = doc.createDocumentFragment()
+              validSentences.forEach((s, idx) => {
+                const span = doc.createElement('span')
+                span.className = 'komga-tts-sentence'
+                span.textContent = s
+                fragment.appendChild(span)
+                if (idx < validSentences.length - 1) {
+                  fragment.appendChild(doc.createTextNode(' '))
+                }
+                sentenceSpans.push(span)
+              })
+              el.innerHTML = ''
+              el.appendChild(fragment)
+            }
           }
         } catch (e) {
           sentenceSpans = []
         }
 
-        const hasSpans = sentenceSpans.length === validUnits.length
-        validUnits.forEach((s, idx) => {
+        const hasSpans = sentenceSpans.length === validSentences.length
+        validSentences.forEach((s, idx) => {
           items.push({
             element: hasSpans ? sentenceSpans[idx] : el,
             text: s,
-            isParagraphEnd: idx === validUnits.length - 1,
+            isParagraphEnd: idx === validSentences.length - 1,
             isHeading,
           })
         })
@@ -3960,16 +3945,14 @@ export default Vue.extend({
         }
       } else {
         const rect = element.getBoundingClientRect()
-        // 获取内联子句/段落的精准多行/多列边界框集合
         const rects = typeof element.getClientRects === 'function' ? Array.from(element.getClientRects()) : []
-        const hasOverflowRect = rects.some(r => r.left >= clientWidth - 25)
-        const isPartiallyPastRight = rect.right > clientWidth + 20 && rect.left >= 0
-        const isFullyNextPage = rect.left >= clientWidth - 25
+        const firstRect = rects[0] || rect
+        const lastRect = rects[rects.length - 1] || rect
 
-        // 一旦当前朗读的文字有任何字符已经跨入或排版在下一页，立即翻到下一页
-        if (isFullyNextPage || hasOverflowRect || isPartiallyPastRight) {
+        // 若当前完整句子的起点已经处于下一页/下一屏，立刻翻到下一页
+        if (firstRect.left >= clientWidth - 25 || rect.left >= clientWidth - 25) {
           this.nextEpubPage()
-          // 针对极大字号可能跨越2页的极端场景，翻页后做一次微调检查
+          // 针对翻页延迟，做一次微调检查
           setTimeout(() => {
             if (!this.ttsActive || this.verticalScroll) return
             const afterRect = element.getBoundingClientRect()
@@ -3977,8 +3960,8 @@ export default Vue.extend({
               this.nextEpubPage()
             }
           }, 350)
-        } else if (rect.right <= 20) {
-          // 若当前文字排在左侧上一页，自动翻回上一页
+        } else if (lastRect.right <= 20 && rect.right <= 20) {
+          // 若当前句子已在左侧上一页，翻回上一页
           this.previousEpubPage()
         }
       }
