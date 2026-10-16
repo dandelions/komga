@@ -1006,6 +1006,8 @@ export default Vue.extend({
       ttsPendingNextChapter: false,
       ttsUtterance: null as SpeechSynthesisUtterance | null,
       ttsWatchdogTimer: undefined as number | undefined,
+      ttsCrossPageTimer: undefined as number | undefined,
+      ttsCrossPageFlipped: false,
       ttsEngine: 'web-speech',
       ttsServerUrl: '',
       ttsServerVoice: 'zh-CN-XiaoxiaoNeural',
@@ -3093,6 +3095,7 @@ export default Vue.extend({
     ttsStop() {
       this.ttsPlaying = false
       this.ttsClearWatchdog()
+      this.ttsClearCrossPageTimer()
       this.ttsClearSleepTimer()
       this.ttsClearHighlight()
       this.ttsStopAudioElement()
@@ -3148,6 +3151,7 @@ export default Vue.extend({
     ttsPause() {
       this.ttsPlaying = false
       this.ttsClearWatchdog()
+      this.ttsClearCrossPageTimer()
       if (this.ttsAudioElement) {
         this.ttsAudioElement.pause()
       }
@@ -3450,9 +3454,29 @@ export default Vue.extend({
 
         const validSentences = sentences.map(s => s.trim()).filter(s => s.length > 0)
         if (validSentences.length <= 1) {
+          const singleText = validSentences[0] || rawText
+          let singleSpan: HTMLElement | null = null
+          try {
+            const hasBlockChildren = el.querySelector('p, div, ul, ol, li, h1, h2, h3, h4, h5, h6, table, blockquote')
+            if (!hasBlockChildren) {
+              const existing = el.querySelector<HTMLElement>('.komga-tts-sentence')
+              if (existing && existing.textContent === singleText) {
+                singleSpan = existing
+              } else {
+                const span = doc.createElement('span')
+                span.className = 'komga-tts-sentence'
+                span.textContent = singleText
+                el.innerHTML = ''
+                el.appendChild(span)
+                singleSpan = span
+              }
+            }
+          } catch (e) {
+            singleSpan = null
+          }
           items.push({
-            element: el,
-            text: validSentences[0] || rawText,
+            element: singleSpan || el,
+            text: singleText,
             isParagraphEnd: true,
             isHeading,
           })
@@ -3544,6 +3568,8 @@ export default Vue.extend({
 
       this.ttsPlayToken++
       this.ttsClearWatchdog()
+      this.ttsClearCrossPageTimer()
+      this.ttsCrossPageFlipped = false
 
       if (index < 0 || index >= this.ttsItems.length) {
         this.ttsOnChapterEnd()
@@ -3692,6 +3718,9 @@ export default Vue.extend({
         this.ttsPlaying = true
         this.ttsStartWatchdog(item.text)
         this.ttsPrefetchNext(index + 1)
+        if (audio.duration && !isNaN(audio.duration) && audio.duration > 0) {
+          this.ttsScrollIntoViewIfNeeded(item.element, audio.duration)
+        }
       }
 
       audio.onended = () => {
@@ -3822,6 +3851,9 @@ export default Vue.extend({
         this.ttsPlaying = true
         this.ttsStartWatchdog(item.text)
         this.ttsPrefetchMultiTts(index + 1)
+        if (audio.duration && !isNaN(audio.duration) && audio.duration > 0) {
+          this.ttsScrollIntoViewIfNeeded(item.element, audio.duration)
+        }
       }
 
       audio.onended = () => {
@@ -3939,7 +3971,10 @@ export default Vue.extend({
       if (!doc) return
       doc.querySelectorAll('.komga-tts-active').forEach(el => el.classList.remove('komga-tts-active'))
     },
-    ttsScrollIntoViewIfNeeded(element: HTMLElement) {
+    ttsScrollIntoViewIfNeeded(element: HTMLElement, durationSeconds?: number) {
+      this.ttsClearCrossPageTimer()
+      this.ttsCrossPageFlipped = false
+
       const iframe = document.querySelector<HTMLIFrameElement>('#iframe-wrapper iframe')
       if (!iframe) return
 
@@ -3957,7 +3992,7 @@ export default Vue.extend({
         const firstRect = rects[0] || rect
         const lastRect = rects[rects.length - 1] || rect
 
-        // 若当前完整句子的起点已经处于下一页/下一屏，立刻翻到下一页
+        // 1. 若当前句子的起点/整体已经处于下一页/下一屏，立刻翻到下一页
         if (firstRect.left >= clientWidth - 25 || rect.left >= clientWidth - 25) {
           this.nextEpubPage()
           // 针对翻页延迟，做一次微调检查
@@ -3968,10 +4003,48 @@ export default Vue.extend({
               this.nextEpubPage()
             }
           }, 350)
-        } else if (lastRect.right <= 20 && rect.right <= 20) {
-          // 若当前句子已在左侧上一页，翻回上一页
-          this.previousEpubPage()
+          return
         }
+
+        // 2. 若当前句子整体已在左侧上一页，翻回上一页
+        if (lastRect.right <= 20 && rect.right <= 20) {
+          this.previousEpubPage()
+          return
+        }
+
+        // 3. 核心跨页优化：本句开头在当前页，但尾部或部分行已经排入下一页（本页最后一句跨入下一页）
+        const visibleLines = rects.filter(r => r.left < clientWidth - 25 && r.right > 20)
+        const overflowLines = rects.filter(r => r.left >= clientWidth - 25)
+        const isCrossingPage = overflowLines.length > 0 || (rect.right > clientWidth + 20 && visibleLines.length > 0)
+
+        if (isCrossingPage && rects.length > 0) {
+          // 计算当前页文本行占总行数的比例，合理推断在何时翻到下一页
+          const totalLines = rects.length
+          const currentLinesCount = visibleLines.length > 0 ? visibleLines.length : Math.max(1, totalLines - overflowLines.length)
+          const ratio = Math.max(0.15, Math.min(0.85, currentLinesCount / totalLines))
+
+          // 估算本句的朗读总时长（秒）
+          const textLen = (element.innerText || element.textContent || '').trim().length
+          const estDuration = durationSeconds && durationSeconds > 0
+            ? durationSeconds
+            : Math.max(1.5, (textLen / 3.5) / Math.max(0.5, this.ttsRate))
+
+          // 在朗读到下一页文字的节点前略微提前 150ms 翻页，让视觉切换极其自然流畅
+          const delayMs = Math.max(300, Math.round(estDuration * 1000 * ratio) - 150)
+
+          const currentToken = this.ttsPlayToken
+          this.ttsCrossPageTimer = window.setTimeout(() => {
+            if (!this.ttsActive || !this.ttsPlaying || this.ttsPlayToken !== currentToken || this.verticalScroll || this.ttsCrossPageFlipped) return
+            this.ttsCrossPageFlipped = true
+            this.nextEpubPage()
+          }, delayMs)
+        }
+      }
+    },
+    ttsClearCrossPageTimer() {
+      if (this.ttsCrossPageTimer !== undefined) {
+        clearTimeout(this.ttsCrossPageTimer)
+        this.ttsCrossPageTimer = undefined
       }
     },
     ttsOnChapterEnd() {

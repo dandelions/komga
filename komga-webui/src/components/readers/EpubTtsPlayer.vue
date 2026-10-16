@@ -106,6 +106,29 @@
           </div>
         </div>
 
+        <!-- 语音阅读界面音色/音调调节滑块 (Web Speech 与 MultiTTS 均支持) -->
+        <div v-if="engine === 'web-speech' || engine === 'multitts'" class="px-4 pb-1 pt-1">
+          <div class="d-flex align-center justify-space-between">
+            <span class="caption text--secondary d-flex align-center mr-2 text-no-wrap" :title="$t('epubreader.tts.pitch')">
+              <v-icon x-small left>mdi-waveform</v-icon>
+              <span class="text-truncate" style="max-width: 120px;">{{ $t('epubreader.tts.pitch') }}</span>
+            </span>
+            <v-slider
+              :value="pitch"
+              @change="$emit('update:pitch', $event)"
+              min="0.5"
+              max="1.5"
+              step="0.1"
+              dense
+              hide-details
+              class="mt-0 pt-0 flex-grow-1 mx-2"
+            />
+            <span class="caption font-weight-bold primary--text text-no-wrap" style="min-width: 28px; text-align: right;">
+              {{ pitch }}
+            </span>
+          </div>
+        </div>
+
         <!-- 播放控制主操作区 -->
         <div class="px-3 pb-2 pt-1 d-flex align-center justify-space-between">
           <!-- 左侧：语速调节快捷按钮 -->
@@ -391,6 +414,49 @@
               />
               <div class="caption text--secondary mt-1">
                 {{ $t('epubreader.tts.multitts_paragraph_pause_hint') }}
+              </div>
+            </div>
+
+            <!-- MultiTTS 语速与音色调节 -->
+            <div class="mb-3 pa-3 rounded" style="background-color: rgba(var(--v-theme-surface-variant, 128, 128, 128), 0.05); border: 1px solid rgba(128, 128, 128, 0.15);">
+              <div class="mb-3">
+                <div class="d-flex justify-space-between align-center mb-1">
+                  <span class="caption font-weight-bold">
+                    <v-icon x-small left>mdi-speedometer</v-icon>
+                    {{ $t('epubreader.tts.rate') }}
+                  </span>
+                  <span class="caption font-weight-bold primary--text">{{ rate }}x</span>
+                </div>
+                <v-slider
+                  :value="rate"
+                  @change="$emit('update:rate', $event)"
+                  min="0.5"
+                  max="2.5"
+                  step="0.1"
+                  dense
+                  hide-details
+                  ticks="always"
+                  tick-size="2"
+                />
+              </div>
+
+              <div>
+                <div class="d-flex justify-space-between align-center mb-1">
+                  <span class="caption font-weight-bold">
+                    <v-icon x-small left>mdi-waveform</v-icon>
+                    {{ $t('epubreader.tts.pitch') }}
+                  </span>
+                  <span class="caption font-weight-bold primary--text">{{ pitch }}</span>
+                </div>
+                <v-slider
+                  :value="pitch"
+                  @change="$emit('update:pitch', $event)"
+                  min="0.5"
+                  max="1.5"
+                  step="0.1"
+                  dense
+                  hide-details
+                />
               </div>
             </div>
 
