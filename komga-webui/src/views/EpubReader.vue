@@ -635,6 +635,7 @@
       :multitts-url="ttsMultittsUrl"
       :multitts-voice="ttsMultittsVoice"
       :multitts-paragraph-pause="ttsMultittsParagraphPause"
+      :sentence-pause="ttsSentencePause"
       @toggle-play="ttsTogglePlay"
       @previous="ttsPrevious"
       @next="ttsNext"
@@ -653,6 +654,7 @@
       @update:multittsUrl="ttsUpdateMultittsUrl"
       @update:multittsVoice="ttsUpdateMultittsVoice"
       @update:multittsParagraphPause="ttsUpdateMultittsParagraphPause"
+      @update:sentencePause="ttsUpdateSentencePause"
       @set-sleep-timer="ttsSetSleepTimer"
       @toggle-toolbars="toggleToolbars"
     />
@@ -1015,7 +1017,8 @@ export default Vue.extend({
       ttsServerToken: '',
       ttsMultittsUrl: 'http://127.0.0.1:8774',
       ttsMultittsVoice: '',
-      ttsMultittsParagraphPause: 500,
+      ttsMultittsParagraphPause: 150,
+      ttsSentencePause: 0,
       ttsPlayToken: 0,
       ttsAudioElement: null as HTMLAudioElement | null,
       ttsPrefetchAudio: null as HTMLAudioElement | null,
@@ -3292,6 +3295,10 @@ export default Vue.extend({
         this.ttsPrefetchIndex = -1
       }
     },
+    ttsUpdateSentencePause(ms: number) {
+      this.ttsSentencePause = ms
+      this.ttsSaveSettings()
+    },
     ttsSetSleepTimer(val: string) {
       this.ttsSleepMode = val
       this.ttsClearSleepTimer()
@@ -3338,6 +3345,7 @@ export default Vue.extend({
           if (typeof parsed.multittsUrl === 'string') this.ttsMultittsUrl = parsed.multittsUrl
           if (typeof parsed.multittsVoice === 'string') this.ttsMultittsVoice = parsed.multittsVoice
           if (typeof parsed.multittsParagraphPause === 'number') this.ttsMultittsParagraphPause = parsed.multittsParagraphPause
+          if (typeof parsed.sentencePause === 'number') this.ttsSentencePause = parsed.sentencePause
         }
       } catch (e) {
       }
@@ -3359,6 +3367,7 @@ export default Vue.extend({
           multittsUrl: this.ttsMultittsUrl,
           multittsVoice: this.ttsMultittsVoice,
           multittsParagraphPause: this.ttsMultittsParagraphPause,
+          sentencePause: this.ttsSentencePause,
         }
         localStorage.setItem('komga-epub-tts-settings', JSON.stringify(s))
       } catch (e) {
@@ -3598,12 +3607,16 @@ export default Vue.extend({
         this.ttsPlayWebSpeech(index, item)
       }
     },
-    ttsPlayWebSpeech(index: number, item: { element: HTMLElement, text: string }) {
+    ttsPlayWebSpeech(index: number, item: { element: HTMLElement, text: string, isParagraphEnd?: boolean, isHeading?: boolean }) {
       if (typeof window === 'undefined' || !('speechSynthesis' in window)) return
 
       window.speechSynthesis.cancel()
 
-      const text = item.text.replace(/\[\[.*?\]\]/g, '').trim() || item.text
+      let text = item.text.replace(/\[\[.*?\]\]/g, '').trim() || item.text
+      // 若当前句子不是段落末尾且不是标题，去除句末标点符号以减少语音引擎自带的长停顿
+      if (!item.isHeading && !item.isParagraphEnd) {
+        text = text.replace(/[。！？!?；;]+["'”’）)]*$/, '').trim() || text
+      }
       const utterance = new SpeechSynthesisUtterance(text)
       utterance.rate = this.ttsRate
       utterance.pitch = this.ttsPitch
@@ -3627,7 +3640,14 @@ export default Vue.extend({
           return
         }
 
-        this.ttsPlayItem(this.ttsCurrentIndex + 1)
+        let pauseMs = this.ttsSentencePause || 0
+        if (item.isHeading) {
+          pauseMs = Math.max(pauseMs, 600)
+        } else if (item.isParagraphEnd && this.ttsMultittsParagraphPause > 0) {
+          pauseMs = Math.max(pauseMs, this.ttsMultittsParagraphPause)
+        }
+
+        this.ttsScheduleNextItem(pauseMs)
       }
 
       utterance.onerror = (e) => {
@@ -3733,7 +3753,14 @@ export default Vue.extend({
           return
         }
 
-        this.ttsPlayItem(this.ttsCurrentIndex + 1)
+        let pauseMs = this.ttsSentencePause || 0
+        if (item.isHeading) {
+          pauseMs = Math.max(pauseMs, 600)
+        } else if (item.isParagraphEnd && this.ttsMultittsParagraphPause > 0) {
+          pauseMs = Math.max(pauseMs, this.ttsMultittsParagraphPause)
+        }
+
+        this.ttsScheduleNextItem(pauseMs)
       }
 
       audio.onerror = () => {
@@ -3800,7 +3827,24 @@ export default Vue.extend({
       }
     },
     ttsGetMultiTtsText(item: { element: HTMLElement, text: string, isParagraphEnd?: boolean, isHeading?: boolean }): string {
-      return (item.text || '').replace(/\[\[.*?\]\]/g, '').trim()
+      let text = (item.text || '').replace(/\[\[.*?\]\]/g, '').trim()
+      // 如果当前句子不是段落末尾且不是标题，去除句末标点符号以减少语音引擎自带的长停顿
+      if (!item.isHeading && !item.isParagraphEnd) {
+        text = text.replace(/[。！？!?；;]+["'”’）)]*$/, '').trim() || text
+      }
+      return text
+    },
+    ttsScheduleNextItem(delayMs: number, expectedToken?: number) {
+      if (delayMs > 0) {
+        setTimeout(() => {
+          if (expectedToken !== undefined && this.ttsPlayToken !== expectedToken) return
+          if (this.ttsActive && this.ttsPlaying) {
+            this.ttsPlayItem(this.ttsCurrentIndex + 1)
+          }
+        }, delayMs)
+      } else {
+        this.ttsPlayItem(this.ttsCurrentIndex + 1)
+      }
     },
     ttsPlayMultiTts(index: number, item: { element: HTMLElement, text: string, isParagraphEnd?: boolean, isHeading?: boolean }) {
       if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
@@ -3867,22 +3911,14 @@ export default Vue.extend({
         }
 
         // 段落结尾或标题停顿控制（在前端平滑停顿，避免服务端不支持标记报错）
-        let pauseMs = 0
+        let pauseMs = this.ttsSentencePause || 0
         if (item.isHeading) {
-          pauseMs = Math.max(600, this.ttsMultittsParagraphPause > 0 ? Math.round(this.ttsMultittsParagraphPause * 1.5) : 600)
+          pauseMs = Math.max(pauseMs, 600, this.ttsMultittsParagraphPause > 0 ? Math.round(this.ttsMultittsParagraphPause * 1.5) : 600)
         } else if (item.isParagraphEnd && this.ttsMultittsParagraphPause > 0) {
-          pauseMs = this.ttsMultittsParagraphPause
+          pauseMs = Math.max(pauseMs, this.ttsMultittsParagraphPause)
         }
 
-        if (pauseMs > 0) {
-          setTimeout(() => {
-            if (this.ttsPlayToken === currentToken && this.ttsActive && this.ttsPlaying) {
-              this.ttsPlayItem(this.ttsCurrentIndex + 1)
-            }
-          }, pauseMs)
-        } else {
-          this.ttsPlayItem(this.ttsCurrentIndex + 1)
-        }
+        this.ttsScheduleNextItem(pauseMs, currentToken)
       }
 
       audio.onerror = () => {

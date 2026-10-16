@@ -806,6 +806,8 @@
       "rate": "语速",
       "pitch": "音色 / 音调 (Pitch)",
       "volume": "音量",
+      "sentence_pause": "断句停顿时间",
+      "sentence_pause_hint": "配置句与句（句号、感叹号、问号等）之间的停顿时间",
       "voice": "发音人",
       "voice_default": "系统默认",
       "timer": "定时关闭",

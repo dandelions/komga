@@ -806,6 +806,8 @@
       "rate": "Speed",
       "pitch": "Pitch / Tone",
       "volume": "Volume",
+      "sentence_pause": "Sentence Pause",
+      "sentence_pause_hint": "Adjust pause duration between consecutive sentences",
       "voice": "Voice",
       "voice_default": "System Default",
       "timer": "Sleep Timer",

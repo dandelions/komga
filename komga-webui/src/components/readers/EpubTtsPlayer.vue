@@ -670,6 +670,31 @@
             />
           </div>
 
+          <!-- 断句停顿时间调节 -->
+          <div class="mb-4">
+            <div class="d-flex justify-space-between align-center mb-1">
+              <span class="caption font-weight-bold">
+                <v-icon x-small left>mdi-timer-sand</v-icon>
+                {{ $t('epubreader.tts.sentence_pause') }}
+              </span>
+              <span class="caption font-weight-bold primary--text">{{ sentencePause === 0 ? $t('epubreader.tts.multitts_pause_none') : `${sentencePause} ms` }}</span>
+            </div>
+            <v-slider
+              :value="sentencePause"
+              @change="$emit('update:sentencePause', $event)"
+              min="0"
+              max="500"
+              step="50"
+              dense
+              hide-details
+              ticks="always"
+              tick-size="2"
+            />
+            <div class="caption text--secondary mt-1">
+              {{ $t('epubreader.tts.sentence_pause_hint') }}
+            </div>
+          </div>
+
           <v-divider class="my-3"/>
 
           <!-- 自动翻页与跟随开关 -->
@@ -824,6 +849,10 @@ export default Vue.extend({
       type: Number,
       default: 500,
     },
+    sentencePause: {
+      type: Number,
+      default: 0,
+    },
   },
   data() {
     return {
@@ -910,10 +939,11 @@ export default Vue.extend({
     multittsPauseOptions(): { text: string, value: number }[] {
       return [
         { text: this.$t('epubreader.tts.multitts_pause_none').toString(), value: 0 },
+        { text: this.$t('epubreader.tts.multitts_pause_ms', { ms: 100 }).toString(), value: 100 },
+        { text: this.$t('epubreader.tts.multitts_pause_ms', { ms: 200 }).toString(), value: 200 },
         { text: this.$t('epubreader.tts.multitts_pause_ms', { ms: 300 }).toString(), value: 300 },
         { text: this.$t('epubreader.tts.multitts_pause_ms', { ms: 500 }).toString(), value: 500 },
         { text: this.$t('epubreader.tts.multitts_pause_ms', { ms: 800 }).toString(), value: 800 },
-        { text: this.$t('epubreader.tts.multitts_pause_ms', { ms: 1200 }).toString(), value: 1200 },
       ]
     },
     multittsVoiceDisplayItems(): { label: string, id: string }[] {
