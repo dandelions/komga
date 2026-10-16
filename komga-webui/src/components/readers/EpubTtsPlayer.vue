@@ -417,49 +417,6 @@
               </div>
             </div>
 
-            <!-- MultiTTS 语速与音色调节 -->
-            <div class="mb-3 pa-3 rounded" style="background-color: rgba(var(--v-theme-surface-variant, 128, 128, 128), 0.05); border: 1px solid rgba(128, 128, 128, 0.15);">
-              <div class="mb-3">
-                <div class="d-flex justify-space-between align-center mb-1">
-                  <span class="caption font-weight-bold">
-                    <v-icon x-small left>mdi-speedometer</v-icon>
-                    {{ $t('epubreader.tts.rate') }}
-                  </span>
-                  <span class="caption font-weight-bold primary--text">{{ rate }}x</span>
-                </div>
-                <v-slider
-                  :value="rate"
-                  @change="$emit('update:rate', $event)"
-                  min="0.5"
-                  max="2.5"
-                  step="0.1"
-                  dense
-                  hide-details
-                  ticks="always"
-                  tick-size="2"
-                />
-              </div>
-
-              <div>
-                <div class="d-flex justify-space-between align-center mb-1">
-                  <span class="caption font-weight-bold">
-                    <v-icon x-small left>mdi-waveform</v-icon>
-                    {{ $t('epubreader.tts.pitch') }}
-                  </span>
-                  <span class="caption font-weight-bold primary--text">{{ pitch }}</span>
-                </div>
-                <v-slider
-                  :value="pitch"
-                  @change="$emit('update:pitch', $event)"
-                  min="0.5"
-                  max="1.5"
-                  step="0.1"
-                  dense
-                  hide-details
-                />
-              </div>
-            </div>
-
             <!-- MultiTTS 自定义标记特性说明 -->
             <div class="mb-3 pa-2 rounded" style="background-color: rgba(var(--v-theme-surface-variant, 128, 128, 128), 0.08); border-left: 3px solid var(--v-primary-base, #1976d2);">
               <div class="caption text--secondary d-flex align-center">
