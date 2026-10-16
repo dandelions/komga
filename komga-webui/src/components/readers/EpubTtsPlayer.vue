@@ -564,8 +564,8 @@
             />
           </div>
 
-          <!-- 音调滑块调节 (仅原生 Web Speech 支持) -->
-          <div v-if="engine === 'web-speech'" class="mb-4">
+          <!-- 音调/音色滑块调节 (Web Speech 和 MultiTTS 支持) -->
+          <div v-if="engine === 'web-speech' || engine === 'multitts'" class="mb-4">
             <div class="d-flex justify-space-between align-center mb-1">
               <span class="caption font-weight-bold">
                 <v-icon x-small left>mdi-waveform</v-icon>
@@ -981,6 +981,14 @@ export default Vue.extend({
       params.append('text', 'MultiTTS连接测试成功，正在为您朗读')
       if (this.multittsVoice && this.multittsVoice.trim()) {
         params.append('voice', this.multittsVoice.trim())
+      }
+      if (this.rate !== 1.0) {
+        const speed = Math.min(100, Math.max(0, Math.round(this.rate * 50)))
+        params.append('speed', speed.toString())
+      }
+      if (this.pitch !== 1.0) {
+        const pitch = Math.min(100, Math.max(0, Math.round(this.pitch * 50)))
+        params.append('pitch', pitch.toString())
       }
       const testUrl = `${forwardUrl}?${params.toString()}`
 

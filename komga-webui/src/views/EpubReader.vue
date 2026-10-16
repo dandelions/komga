@@ -3801,6 +3801,10 @@ export default Vue.extend({
         const speed = Math.min(100, Math.max(0, Math.round(this.ttsRate * 50)))
         params.append('speed', speed.toString())
       }
+      if (this.ttsPitch !== 1.0) {
+        const pitch = Math.min(100, Math.max(0, Math.round(this.ttsPitch * 50)))
+        params.append('pitch', pitch.toString())
+      }
 
       const requestUrl = `${forwardUrl}?${params.toString()}`
       const currentToken = this.ttsPlayToken
@@ -3913,6 +3917,10 @@ export default Vue.extend({
       if (this.ttsRate !== 1.0) {
         const speed = Math.min(100, Math.max(0, Math.round(this.ttsRate * 50)))
         params.append('speed', speed.toString())
+      }
+      if (this.ttsPitch !== 1.0) {
+        const pitch = Math.min(100, Math.max(0, Math.round(this.ttsPitch * 50)))
+        params.append('pitch', pitch.toString())
       }
 
       const nextUrl = `${forwardUrl}?${params.toString()}`
