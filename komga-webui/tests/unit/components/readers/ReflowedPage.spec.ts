@@ -596,7 +596,7 @@ describe('ReflowedPage display columns layout', () => {
       reflowColumnGap: 24,
     }
     // Total width 1000, padding 32, available 968. (968 - 24) / 2 = 472
-    const colWidth = computed.columnContentWidth.call(context)
+    const colWidth = methods.columnContentWidth.call(context)
     expect(colWidth).toBe(472)
 
     const navContext = {

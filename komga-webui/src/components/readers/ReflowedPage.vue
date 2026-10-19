@@ -1084,14 +1084,6 @@ export default Vue.extend({
       const totalWidth = (typeof this.pageContentWidth === 'function' ? this.pageContentWidth() : 0) || this.targetWidth || 320
       return Math.max(16, Math.min(40, Math.round(totalWidth * 0.025)))
     },
-    columnContentWidth(): number {
-      const totalWidth = (typeof this.pageContentWidth === 'function' ? this.pageContentWidth() : 0) || this.targetWidth || 320
-      const padding = this.horizontalContentPadding() * 2
-      const availableWidth = Math.max(120, totalWidth - padding)
-      if (!this.isTwoColumns) return availableWidth
-      const gap = this.reflowColumnGap
-      return Math.max(120, Math.floor((availableWidth - gap) / 2))
-    },
     columnPaneStyle(): object {
       const width = this.columnContentWidth()
       return {
@@ -1484,6 +1476,9 @@ export default Vue.extend({
       deep: true,
     },
     effectiveDisplayColumns() {
+      if (this.reflowItems.length > 0) {
+        this.rescaleReflowItems()
+      }
       this.repaginate(false)
     },
     targetWidth() {
@@ -2180,6 +2175,16 @@ export default Vue.extend({
       if (!this.verticalText) return 16
       const targetWidth = (typeof this.pageContentWidth === 'function' ? this.pageContentWidth() : 0) || this.targetWidth
       return Math.max(24, Math.min(36, Math.round(targetWidth * 0.08)))
+    },
+    columnContentWidth(): number {
+      const totalWidth = (typeof this.pageContentWidth === 'function' ? this.pageContentWidth() : 0) || this.targetWidth || 320
+      const padding = (typeof this.horizontalContentPadding === 'function' ? this.horizontalContentPadding() : 16) * 2
+      const availableWidth = Math.max(120, totalWidth - padding)
+      if (!this.isTwoColumns) return availableWidth
+      const gap = typeof this.reflowColumnGap === 'function'
+        ? (this.reflowColumnGap as any)()
+        : (typeof this.reflowColumnGap === 'number' ? this.reflowColumnGap : 20)
+      return Math.max(120, Math.floor((availableWidth - gap) / 2))
     },
     repaginate(resetPage: boolean = true) {
       this.updateViewportMetrics()
@@ -7050,6 +7055,9 @@ export default Vue.extend({
       const val = target.value
       this.pendingDisplayColumns = val === '1' || val === '2' ? val : 'auto'
       this.$emit('display-columns-change', this.pendingDisplayColumns)
+      if (this.reflowItems.length > 0) {
+        this.rescaleReflowItems()
+      }
       this.repaginate()
     },
     setColumnCount(event: Event) {
