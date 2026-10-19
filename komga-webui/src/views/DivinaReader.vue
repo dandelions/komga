@@ -317,6 +317,7 @@
           :magnifier-active="magnifierActive"
           @text-scale-change="setReflowTextScale"
           @processing-mode-change="setReflowProcessingMode"
+          @display-columns-change="setReflowDisplayColumns"
           @column-count-change="setReflowColumnCount"
           @skew-correction-change="setReflowSkewCorrection"
           @auto-skew-correction-change="setReflowAutoSkewCorrection"
@@ -859,6 +860,13 @@
                     label="Vertical direction"
                   />
                 </v-list-item>
+                <v-list-item v-if="!reflowSettings.verticalText">
+                  <settings-select
+                    :items="reflowDisplayColumnOptions"
+                    v-model="reflowSettings.displayColumns"
+                    label="分栏排版"
+                  />
+                </v-list-item>
                 <v-list-item>
                   <settings-select
                     :items="reflowColumnCounts"
@@ -1129,6 +1137,7 @@ function defaultReflowSettings(): any {
     autoCropBorder: true,
     textScale: 40,
     columnCount: 1,
+    displayColumns: 'auto',
     skewCorrection: 0,
     autoSkewCorrection: false,
     threshold: 185,
@@ -1344,6 +1353,11 @@ export default Vue.extend({
         {text: '2', value: 2},
         {text: '3', value: 3},
         {text: '4', value: 4},
+      ],
+      reflowDisplayColumnOptions: [
+        {text: '自动双栏 (Auto)', value: 'auto'},
+        {text: '单栏 (1 Column)', value: '1'},
+        {text: '双栏 (2 Columns)', value: '2'},
       ],
       reflowVerticalDirections: [
         {text: 'Right to left', value: 'rtl'},
@@ -3016,6 +3030,7 @@ export default Vue.extend({
         autoCropBorder: typeof settings.autoCropBorder === 'boolean' ? settings.autoCropBorder : this.reflowSettings.autoCropBorder,
         textScale: this.clampReflowNumber(settings.textScale, 10, 140, this.reflowSettings.textScale),
         columnCount: Math.round(this.clampReflowNumber(settings.columnCount, 1, 4, this.reflowSettings.columnCount)),
+        displayColumns: settings.displayColumns === '1' || settings.displayColumns === '2' ? settings.displayColumns : 'auto',
         skewCorrection: this.normalizedReflowSkewCorrection(settings.skewCorrection),
         autoSkewCorrection: settings.autoSkewCorrection === true,
         threshold: this.clampReflowNumber(settings.threshold, 50, 230, this.reflowSettings.threshold),
@@ -3335,6 +3350,9 @@ export default Vue.extend({
     },
     setReflowProcessingMode(processingMode: string) {
       this.reflowSettings.processingMode = processingMode === 'server' ? 'server' : 'local'
+    },
+    setReflowDisplayColumns(displayColumns: string) {
+      this.reflowSettings.displayColumns = displayColumns === '1' || displayColumns === '2' ? displayColumns : 'auto'
     },
     setReflowColumnCount(columnCount: number) {
       this.reflowSettings.columnCount = Math.round(Math.max(1, Math.min(4, columnCount)))

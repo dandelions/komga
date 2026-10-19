@@ -147,6 +147,14 @@
             <option value="ltr">左到右</option>
           </select>
         </label>
+        <label v-if="!controlVerticalText" class="reflow-column-control">
+          <span>分栏</span>
+          <select :value="controlDisplayColumns" @change="setDisplayColumns">
+            <option value="auto">自动</option>
+            <option value="1">单栏</option>
+            <option value="2">双栏</option>
+          </select>
+        </label>
         <label class="reflow-column-control">
           <span>列数</span>
           <select :value="controlColumnCount" @change="setColumnCount">
@@ -460,37 +468,115 @@
         @dragstart.prevent
       />
     </div>
-    <div v-else class="reflow-wrapper" :class="{'vertical-reflow-wrapper': verticalText}" :style="reflowWrapperStyle" @click="collapseControls">
+    <div
+      v-else
+      class="reflow-wrapper"
+      :class="{
+        'vertical-reflow-wrapper': verticalText,
+        'reflow-two-columns-wrapper': isTwoColumns
+      }"
+      :style="reflowWrapperStyle"
+      @click="collapseControls"
+    >
       <div v-if="paginationItems.length === 0" class="reflow-status">No text blocks detected</div>
-      <template v-for="(item, i) in visibleItems">
-        <span
-          v-if="item.type === 'break'"
-          :key="`break-${i}`"
-          class="line-break"
-        />
-        <span
-          v-else-if="item.type === 'indent'"
-          :key="`indent-${i}`"
-          class="line-indent"
-          :style="indentStyle(item)"
-        />
-        <img
-          v-else-if="item.type === 'word' && item.src"
-          :key="`word-${i}`"
-          :src="item.src"
-          class="word-block"
-          :style="wordBlockStyle(item)"
-          alt=""
-        />
-        <img
-          v-else-if="item.type === 'image' && item.src"
-          :key="`image-${i}`"
-          :src="item.src"
-          class="reflow-image-block"
-          data-reader-magnifiable="true"
-          :style="imageBlockStyle(item)"
-          alt=""
-        />
+      <template v-else-if="isTwoColumns">
+        <div class="reflow-column" :style="columnPaneStyle">
+          <template v-for="(item, i) in displayColumnLeftItems">
+            <span
+              v-if="item.type === 'break'"
+              :key="`l-break-${i}`"
+              class="line-break"
+            />
+            <span
+              v-else-if="item.type === 'indent'"
+              :key="`l-indent-${i}`"
+              class="line-indent"
+              :style="indentStyle(item)"
+            />
+            <img
+              v-else-if="item.type === 'word' && item.src"
+              :key="`l-word-${i}`"
+              :src="item.src"
+              class="word-block"
+              :style="wordBlockStyle(item)"
+              alt=""
+            />
+            <img
+              v-else-if="item.type === 'image' && item.src"
+              :key="`l-image-${i}`"
+              :src="item.src"
+              class="reflow-image-block"
+              data-reader-magnifiable="true"
+              :style="imageBlockStyle(item)"
+              alt=""
+            />
+          </template>
+        </div>
+        <div class="reflow-column-divider" />
+        <div class="reflow-column" :style="columnPaneStyle">
+          <template v-for="(item, i) in displayColumnRightItems">
+            <span
+              v-if="item.type === 'break'"
+              :key="`r-break-${i}`"
+              class="line-break"
+            />
+            <span
+              v-else-if="item.type === 'indent'"
+              :key="`r-indent-${i}`"
+              class="line-indent"
+              :style="indentStyle(item)"
+            />
+            <img
+              v-else-if="item.type === 'word' && item.src"
+              :key="`r-word-${i}`"
+              :src="item.src"
+              class="word-block"
+              :style="wordBlockStyle(item)"
+              alt=""
+            />
+            <img
+              v-else-if="item.type === 'image' && item.src"
+              :key="`r-image-${i}`"
+              :src="item.src"
+              class="reflow-image-block"
+              data-reader-magnifiable="true"
+              :style="imageBlockStyle(item)"
+              alt=""
+            />
+          </template>
+        </div>
+      </template>
+      <template v-else>
+        <template v-for="(item, i) in visibleItems">
+          <span
+            v-if="item.type === 'break'"
+            :key="`break-${i}`"
+            class="line-break"
+          />
+          <span
+            v-else-if="item.type === 'indent'"
+            :key="`indent-${i}`"
+            class="line-indent"
+            :style="indentStyle(item)"
+          />
+          <img
+            v-else-if="item.type === 'word' && item.src"
+            :key="`word-${i}`"
+            :src="item.src"
+            class="word-block"
+            :style="wordBlockStyle(item)"
+            alt=""
+          />
+          <img
+            v-else-if="item.type === 'image' && item.src"
+            :key="`image-${i}`"
+            :src="item.src"
+            class="reflow-image-block"
+            data-reader-magnifiable="true"
+            :style="imageBlockStyle(item)"
+            alt=""
+          />
+        </template>
       </template>
     </div>
     <div
@@ -759,6 +845,7 @@ type ReflowOptionsSnapshot = {
   cropRoisKey: string,
   manualImageRoisKey: string,
   deskewAnalysisRoisKey: string,
+  displayColumns?: string,
 }
 
 const THRESHOLD = 185
@@ -958,11 +1045,72 @@ export default Vue.extend({
       pendingRemoveWatermark: 'none' as DocumentRemoveWatermarkMode,
       pendingImageQuality: DEFAULT_REFLOW_IMAGE_QUALITY,
       pendingBlockSpacing: 6,
+      pendingDisplayColumns: 'auto',
       optionsSnapshot: undefined as ReflowOptionsSnapshot | undefined,
       forceReflowOnce: false,
     }
   },
   computed: {
+    displayColumns(): string {
+      const val = this.options?.displayColumns
+      if (val === '1' || val === 1) return '1'
+      if (val === '2' || val === 2) return '2'
+      return 'auto'
+    },
+    controlDisplayColumns(): string {
+      const val = this.pendingDisplayColumns
+      if (val === '1' || val === 1) return '1'
+      if (val === '2' || val === 2) return '2'
+      return 'auto'
+    },
+    effectiveDisplayColumns(): number {
+      if (this.verticalText) return 1
+      const setting = this.controlDisplayColumns || this.displayColumns
+      if (setting === '1') return 1
+      if (setting === '2') return 2
+      const width = (typeof this.pageContentWidth === 'function' ? this.pageContentWidth() : 0) || this.targetWidth || 0
+      return width >= 900 ? 2 : 1
+    },
+    isTwoColumns(): boolean {
+      return this.effectiveDisplayColumns === 2
+    },
+    displayColumnLeftItems(): ReflowItem[] {
+      return this.pages[this.virtualPageIndex] || []
+    },
+    displayColumnRightItems(): ReflowItem[] {
+      return this.pages[this.virtualPageIndex + 1] || []
+    },
+    reflowColumnGap(): number {
+      const totalWidth = (typeof this.pageContentWidth === 'function' ? this.pageContentWidth() : 0) || this.targetWidth || 320
+      return Math.max(16, Math.min(40, Math.round(totalWidth * 0.025)))
+    },
+    columnContentWidth(): number {
+      const totalWidth = (typeof this.pageContentWidth === 'function' ? this.pageContentWidth() : 0) || this.targetWidth || 320
+      const padding = this.horizontalContentPadding() * 2
+      const availableWidth = Math.max(120, totalWidth - padding)
+      if (!this.isTwoColumns) return availableWidth
+      const gap = this.reflowColumnGap
+      return Math.max(120, Math.floor((availableWidth - gap) / 2))
+    },
+    columnPaneStyle(): object {
+      const width = this.columnContentWidth()
+      return {
+        width: `${width}px`,
+        maxWidth: `${width}px`,
+        flex: `0 0 ${width}px`,
+        height: '100%',
+        minHeight: `${this.pageContentHeight()}px`,
+        display: 'flex',
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        alignItems: 'flex-end',
+        alignContent: 'flex-start',
+        columnGap: `${this.blockSpacing}px`,
+        rowGap: `${Math.round(this.blockSpacing * 1.5)}px`,
+        boxSizing: 'border-box',
+        overflow: 'hidden',
+      }
+    },
     visibleItems(): ReflowItem[] {
       return this.pages[this.virtualPageIndex] || this.paginationItems
     },
@@ -1101,6 +1249,20 @@ export default Vue.extend({
         minHeight: `${this.pageContentHeight()}px`,
         backgroundColor: this.wordOutputBackground(),
       }
+      if (this.isTwoColumns) {
+        return {
+          ...style,
+          display: 'flex',
+          flexDirection: 'row',
+          flexWrap: 'nowrap',
+          justifyContent: 'center',
+          alignItems: 'stretch',
+          gap: `${this.reflowColumnGap}px`,
+          paddingLeft: `${this.horizontalContentPadding()}px`,
+          paddingRight: `${this.horizontalContentPadding()}px`,
+          boxSizing: 'border-box',
+        }
+      }
       if (!this.verticalText) return style
       return {
         ...style,
@@ -1113,8 +1275,11 @@ export default Vue.extend({
       }
     },
     measureWrapperStyle(): object {
+      const measureWidth = this.isTwoColumns
+        ? this.columnContentWidth() + this.horizontalContentPadding() * 2
+        : this.pageContentWidth()
       const style = {
-        width: `${this.pageContentWidth()}px`,
+        width: `${measureWidth}px`,
         columnGap: `${this.blockSpacing}px`,
         rowGap: `${Math.round(this.blockSpacing * 1.5)}px`,
       }
@@ -1134,7 +1299,10 @@ export default Vue.extend({
       return this.page.number % 2 === 0 ? 'even' : 'odd'
     },
     activeVisibleSourcePageNumber(): number {
-      return visibleReflowSourcePageNumber(this.visibleItems, this.page.number)
+      const items = this.isTwoColumns
+        ? [...(this.displayColumnLeftItems || []), ...(this.displayColumnRightItems || [])]
+        : this.visibleItems
+      return visibleReflowSourcePageNumber(items, this.page.number)
     },
     activeVisibleSourcePageUrl(): string {
       if (this.activeVisibleSourcePageNumber === this.page.number) return this.page.url
@@ -1314,6 +1482,9 @@ export default Vue.extend({
         if (this.cropMode) this.ensureCropImage(this.controlSkewCorrection)
       },
       deep: true,
+    },
+    effectiveDisplayColumns() {
+      this.repaginate(false)
     },
     targetWidth() {
       this.updateViewportMetrics()
@@ -1588,6 +1759,7 @@ export default Vue.extend({
       if (force || !previous || snapshot.removeWatermark !== previous.removeWatermark) this.pendingRemoveWatermark = snapshot.removeWatermark
       if (force || !previous || snapshot.imageQuality !== previous.imageQuality) this.pendingImageQuality = snapshot.imageQuality
       if (force || !previous || snapshot.blockSpacing !== previous.blockSpacing) this.pendingBlockSpacing = snapshot.blockSpacing
+      if (force || !previous || snapshot.displayColumns !== previous.displayColumns) this.pendingDisplayColumns = snapshot.displayColumns || 'auto'
       if (force || !previous || snapshot.cropRoisKey !== previous.cropRoisKey) this.syncCropRoisFromOptions()
       if (force || !previous || snapshot.manualImageRoisKey !== previous.manualImageRoisKey) this.syncManualImageRoisFromOptions()
       if (force || !previous || snapshot.deskewAnalysisRoisKey !== previous.deskewAnalysisRoisKey) this.syncDeskewAnalysisRoisFromOptions()
@@ -1616,6 +1788,7 @@ export default Vue.extend({
         imageQuality: this.normalizedImageQuality(this.options.imageQuality),
         algorithmMode: this.reflowAlgorithmMode(),
         blockSpacing: this.clampNumber(this.options.blockSpacing, 0, 24, 6),
+        displayColumns: this.options?.displayColumns === '1' || this.options?.displayColumns === '2' ? this.options.displayColumns : 'auto',
         cropRoisKey: JSON.stringify(this.options.cropRoisByParity || {}),
         manualImageRoisKey: JSON.stringify(this.options.manualImageRoisByPage || {}),
         deskewAnalysisRoisKey: JSON.stringify(this.options.deskewAnalysisRoisByParity || {}),
@@ -2033,6 +2206,9 @@ export default Vue.extend({
       } else if (!this.restoreDisplayedSourcePage()) {
         this.virtualPageIndex = this.clampNumber(this.virtualPageIndex, 0, Math.max(0, this.pages.length - 1), 0)
       }
+      if (this.isTwoColumns) {
+        this.virtualPageIndex = Math.floor(this.virtualPageIndex / 2) * 2
+      }
 
       this.$nextTick(() => {
         const pages = this.paginateItemsFromDom()
@@ -2044,6 +2220,9 @@ export default Vue.extend({
         } else if (!this.restoreDisplayedSourcePage()) {
           this.virtualPageIndex = this.clampNumber(this.virtualPageIndex, 0, Math.max(0, this.pages.length - 1), 0)
         }
+        if (this.isTwoColumns) {
+          this.virtualPageIndex = Math.floor(this.virtualPageIndex / 2) * 2
+        }
       })
     },
     setInitialVirtualPage() {
@@ -2052,9 +2231,16 @@ export default Vue.extend({
         return
       }
       const targetPage = this.displayedSourcePageNumber || this.page.number
-      const preferredIndex = this.startAtEnd ? this.pages.length - 1 : 0
+      const lastIndex = Math.max(0, this.pages.length - 1)
+      const preferredIndex = this.startAtEnd
+        ? (this.isTwoColumns ? Math.floor(lastIndex / 2) * 2 : lastIndex)
+        : 0
       const targetIndex = reflowVirtualPageIndexForSource(this.pages, targetPage, preferredIndex)
-      this.virtualPageIndex = targetIndex >= 0 ? targetIndex : preferredIndex
+      let resolvedIndex = targetIndex >= 0 ? targetIndex : preferredIndex
+      if (this.isTwoColumns) {
+        resolvedIndex = Math.floor(resolvedIndex / 2) * 2
+      }
+      this.virtualPageIndex = resolvedIndex
     },
     restoreDisplayedSourcePage(): boolean {
       if (!this.displayedSourcePageNumber) return false
@@ -2147,7 +2333,9 @@ export default Vue.extend({
       if (items.length === 0) return []
 
       const targetWidth = (typeof this.pageContentWidth === 'function' ? this.pageContentWidth() : 0) || this.targetWidth
-      const contentWidth = Math.max(120, targetWidth - this.horizontalContentPadding() * 2)
+      const contentWidth = typeof this.columnContentWidth === 'function'
+        ? this.columnContentWidth()
+        : Math.max(120, targetWidth - (typeof this.horizontalContentPadding === 'function' ? this.horizontalContentPadding() * 2 : 32))
       const pageHeight = Math.max(120, this.pageContentHeight() - 32)
       const rowGap = Math.max(0, Math.round(this.blockSpacing * 1.5))
       const columnGap = this.blockSpacing
@@ -2252,17 +2440,29 @@ export default Vue.extend({
       return pages
     },
     nextPage() {
-      if (this.virtualPageIndex < this.pages.length - 1) {
-        this.virtualPageIndex++
+      const step = this.isTwoColumns ? 2 : 1
+      if (this.virtualPageIndex + step < this.pages.length) {
+        this.virtualPageIndex += step
         this.syncDisplayedSourcePage()
         this.scrollToTop()
+        return
+      }
+      if (this.isTwoColumns && this.virtualPageIndex < this.pages.length) {
+        this.$emit('source-next', this.streamPageCount)
         return
       }
       this.$emit('source-next', this.streamPageCount)
     },
     previousPage() {
+      const step = this.isTwoColumns ? 2 : 1
+      if (this.virtualPageIndex >= step) {
+        this.virtualPageIndex -= step
+        this.syncDisplayedSourcePage()
+        this.scrollToTop()
+        return
+      }
       if (this.virtualPageIndex > 0) {
-        this.virtualPageIndex--
+        this.virtualPageIndex = 0
         this.syncDisplayedSourcePage()
         this.scrollToTop()
         return
@@ -6305,7 +6505,9 @@ export default Vue.extend({
     },
     scaledImageDimensions(sourceWidth: number, sourceHeight: number): {width: number, height: number} {
       const targetWidth = (typeof this.pageContentWidth === 'function' ? this.pageContentWidth() : 0) || this.targetWidth
-      const maxWidth = Math.max(1, targetWidth - this.horizontalContentPadding() * 2)
+      const maxWidth = typeof this.columnContentWidth === 'function'
+        ? this.columnContentWidth()
+        : Math.max(1, targetWidth - (typeof this.horizontalContentPadding === 'function' ? this.horizontalContentPadding() * 2 : 32))
       const maxHeight = Math.max(80, this.pageContentHeight() - 32)
       return fitReflowImageDimensions(sourceWidth, sourceHeight, maxWidth, maxHeight, this.textScale())
     },
@@ -6842,6 +7044,14 @@ export default Vue.extend({
       const target = event.target as HTMLSelectElement
       this.$emit('rotation-change', this.normalizedRotation(Number(target.value)))
     },
+    setDisplayColumns(event: Event) {
+      const target = event.target as HTMLSelectElement | null
+      if (!target) return
+      const val = target.value
+      this.pendingDisplayColumns = val === '1' || val === '2' ? val : 'auto'
+      this.$emit('display-columns-change', this.pendingDisplayColumns)
+      this.repaginate()
+    },
     setColumnCount(event: Event) {
       const target = event.target as HTMLSelectElement
       this.pendingColumnCount = Math.round(this.clampNumber(Number(target.value), 1, 4, 1))
@@ -6947,6 +7157,7 @@ export default Vue.extend({
       this.pendingBlockSpacing = this.clampNumber(this.controlBlockSpacing + delta, 0, 24, 6)
     },
     applyReflowSettings() {
+      this.$emit('display-columns-change', this.controlDisplayColumns)
       this.$emit('column-count-change', this.controlColumnCount)
       this.$emit('skew-correction-change', this.controlSkewCorrection)
       this.$emit('auto-skew-correction-change', this.controlAutoSkewCorrection)
@@ -7442,6 +7653,25 @@ export default Vue.extend({
   color-scheme: only light;
   forced-color-adjust: none;
   background: #fff;
+}
+
+.reflow-two-columns-wrapper {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  justify-content: center !important;
+  align-items: stretch !important;
+}
+
+.reflow-column {
+  box-sizing: border-box;
+}
+
+.reflow-column-divider {
+  width: 1px;
+  align-self: stretch;
+  background-color: rgba(128, 128, 128, 0.18);
+  margin: 0 4px;
 }
 
 .reflow-wrapper {

@@ -530,3 +530,94 @@ test('K2 reflow does not reserve bottom space for its side toolbar', () => {
 
   expect(pages).toHaveLength(1)
 })
+
+describe('ReflowedPage display columns layout', () => {
+  const computed = (ReflowedPage as any).options.computed
+
+  test('effectiveDisplayColumns switches to two columns on wide screens by default', () => {
+    const wideAuto = {
+      verticalText: false,
+      controlDisplayColumns: 'auto',
+      displayColumns: 'auto',
+      pageContentWidth: () => 1200,
+      targetWidth: 1200,
+    }
+    const wideColumns = computed.effectiveDisplayColumns.call(wideAuto)
+    expect(wideColumns).toBe(2)
+    expect(computed.isTwoColumns.call({effectiveDisplayColumns: wideColumns})).toBe(true)
+
+    const narrowAuto = {
+      verticalText: false,
+      controlDisplayColumns: 'auto',
+      displayColumns: 'auto',
+      pageContentWidth: () => 768,
+      targetWidth: 768,
+    }
+    const narrowColumns = computed.effectiveDisplayColumns.call(narrowAuto)
+    expect(narrowColumns).toBe(1)
+    expect(computed.isTwoColumns.call({effectiveDisplayColumns: narrowColumns})).toBe(false)
+  })
+
+  test('effectiveDisplayColumns respects manual column setting and vertical mode', () => {
+    const manualSingle = {
+      verticalText: false,
+      controlDisplayColumns: '1',
+      displayColumns: '1',
+      pageContentWidth: () => 1400,
+      targetWidth: 1400,
+    }
+    expect(computed.effectiveDisplayColumns.call(manualSingle)).toBe(1)
+
+    const manualDouble = {
+      verticalText: false,
+      controlDisplayColumns: '2',
+      displayColumns: '2',
+      pageContentWidth: () => 600,
+      targetWidth: 600,
+    }
+    expect(computed.effectiveDisplayColumns.call(manualDouble)).toBe(2)
+
+    const verticalWide = {
+      verticalText: true,
+      controlDisplayColumns: '2',
+      displayColumns: '2',
+      pageContentWidth: () => 1400,
+      targetWidth: 1400,
+    }
+    expect(computed.effectiveDisplayColumns.call(verticalWide)).toBe(1)
+  })
+
+  test('two-column mode splits available width and pages advance by 2', () => {
+    const context = {
+      isTwoColumns: true,
+      pageContentWidth: () => 1000,
+      targetWidth: 1000,
+      horizontalContentPadding: () => 16,
+      reflowColumnGap: 24,
+    }
+    // Total width 1000, padding 32, available 968. (968 - 24) / 2 = 472
+    const colWidth = computed.columnContentWidth.call(context)
+    expect(colWidth).toBe(472)
+
+    const navContext = {
+      isTwoColumns: true,
+      pages: [[{type: 'word'}], [{type: 'word'}], [{type: 'word'}], [{type: 'word'}]],
+      virtualPageIndex: 0,
+      syncDisplayedSourcePage: jest.fn(),
+      scrollToTop: jest.fn(),
+      $emit: jest.fn(),
+      streamPageCount: 1,
+    }
+
+    methods.nextPage.call(navContext)
+    expect(navContext.virtualPageIndex).toBe(2)
+
+    methods.previousPage.call(navContext)
+    expect(navContext.virtualPageIndex).toBe(0)
+
+    // Moving previous from index 0 triggers source-previous
+    methods.previousPage.call(navContext)
+    expect(navContext.$emit).toHaveBeenCalledWith('source-previous', 1)
+  })
+})
+
