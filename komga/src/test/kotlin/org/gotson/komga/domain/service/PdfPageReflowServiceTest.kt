@@ -7,6 +7,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.gotson.komga.domain.model.TypedBytes
 import org.gotson.komga.domain.model.makeBook
 import org.junit.jupiter.api.Test
+import org.gotson.komga.infrastructure.files.FileAccessCoordinator
 import java.awt.Color
 import java.awt.RenderingHints
 import java.awt.geom.AffineTransform
@@ -21,8 +22,30 @@ import javax.imageio.ImageIO
 
 class PdfPageReflowServiceTest {
   private val bookLifecycle = mockk<BookLifecycle>()
-  private val pageImageCacheService = PdfPageImageCacheService(bookLifecycle)
+  private val pageImageCacheService = PdfPageImageCacheService(bookLifecycle, FileAccessCoordinator())
   private val pdfPageReflowService = PdfPageReflowService(pageImageCacheService)
+
+  @Test
+  fun `given noisy scanned page when optimizeBackground enabled then text words are reflowed without false image`() {
+    val file = java.io.File("/home/kasm-user/.liveagent/uploads/1793227518676/1.jpg")
+    if (!file.exists()) return
+    val pageBytes = file.readBytes()
+    val book = makeBook("debug-book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/jpeg")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(optimizeBackground = "normalize"),
+      )
+
+    val imageBlocks = response.items.filter { it.type == "image" }
+    val wordBlocks = response.items.filter { it.type == "word" }
+    println("DEBUG_TEST: total items = ${response.items.size}, words = ${wordBlocks.size}, images = ${imageBlocks.size}")
+    assertThat(imageBlocks).isEmpty()
+    assertThat(wordBlocks).hasSizeGreaterThan(300)
+  }
 
   @Test
   fun `given horizontal short glyphs when reflowing page then word blocks preserve line height`() {

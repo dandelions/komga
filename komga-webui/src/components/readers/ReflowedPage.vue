@@ -182,10 +182,10 @@
           <input type="checkbox" :checked="controlMatchBackground" @change="setMatchBackground"/>
         </label>
         <label class="reflow-column-control">
-          <span>去除背景颜色</span>
-          <select :value="controlRemoveBackground" @change="setRemoveBackground">
+          <span>优化背景</span>
+          <select :value="controlOptimizeBackground" @change="setOptimizeBackground">
             <option value="none">关闭</option>
-            <option value="normalize">对齐底色(自适应)</option>
+            <option value="normalize">自适应去噪</option>
             <option value="clean">激进纯化</option>
           </select>
         </label>
@@ -664,6 +664,7 @@ type ReflowOptions = {
   contrastEnhancement: boolean,
   matchBackground: boolean,
   matchBackgroundMode: MatchBackgroundMode,
+  optimizeBackground?: DocumentRemoveBackgroundMode,
   removeBackground?: DocumentRemoveBackgroundMode,
   removeWatermark?: DocumentRemoveWatermarkMode,
   imageQuality: number,
@@ -838,6 +839,7 @@ type ReflowOptionsSnapshot = {
   contrastEnhancement: boolean,
   matchBackground: boolean,
   matchBackgroundMode: MatchBackgroundMode,
+  optimizeBackground: DocumentRemoveBackgroundMode,
   removeBackground: DocumentRemoveBackgroundMode,
   removeWatermark: DocumentRemoveWatermarkMode,
   imageQuality: number,
@@ -1041,6 +1043,7 @@ export default Vue.extend({
       pendingContrastEnhancement: false,
       pendingMatchBackground: false,
       pendingMatchBackgroundMode: 'grayscale' as MatchBackgroundMode,
+      pendingOptimizeBackground: 'none' as DocumentRemoveBackgroundMode,
       pendingRemoveBackground: 'none' as DocumentRemoveBackgroundMode,
       pendingRemoveWatermark: 'none' as DocumentRemoveWatermarkMode,
       pendingImageQuality: DEFAULT_REFLOW_IMAGE_QUALITY,
@@ -1153,11 +1156,15 @@ export default Vue.extend({
       if (this.options.matchBackgroundMode === 'original') return 'original'
       return this.options.matchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale'
     },
-    removeBackground(): DocumentRemoveBackgroundMode {
-      if (this.options.removeBackground === 'clean' || this.options.removeBackground === 'normalize') {
-        return this.options.removeBackground
+    optimizeBackground(): DocumentRemoveBackgroundMode {
+      const mode = this.options.optimizeBackground || this.options.removeBackground
+      if (mode === 'clean' || mode === 'normalize') {
+        return mode
       }
       return 'none'
+    },
+    removeBackground(): DocumentRemoveBackgroundMode {
+      return this.optimizeBackground
     },
     removeWatermark(): DocumentRemoveWatermarkMode {
       if (this.options.removeWatermark === 'light' || this.options.removeWatermark === 'color') {
@@ -1207,11 +1214,17 @@ export default Vue.extend({
       if (this.pendingMatchBackgroundMode === 'original') return 'original'
       return this.pendingMatchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale'
     },
-    controlRemoveBackground(): DocumentRemoveBackgroundMode {
+    controlOptimizeBackground(): DocumentRemoveBackgroundMode {
+      if (this.pendingOptimizeBackground === 'clean' || this.pendingOptimizeBackground === 'normalize') {
+        return this.pendingOptimizeBackground
+      }
       if (this.pendingRemoveBackground === 'clean' || this.pendingRemoveBackground === 'normalize') {
         return this.pendingRemoveBackground
       }
-      return 'none'
+      return this.optimizeBackground
+    },
+    controlRemoveBackground(): DocumentRemoveBackgroundMode {
+      return this.controlOptimizeBackground
     },
     controlRemoveWatermark(): DocumentRemoveWatermarkMode {
       if (this.pendingRemoveWatermark === 'light' || this.pendingRemoveWatermark === 'color') {
@@ -1750,7 +1763,10 @@ export default Vue.extend({
       if (force || !previous || snapshot.contrastEnhancement !== previous.contrastEnhancement) this.pendingContrastEnhancement = snapshot.contrastEnhancement
       if (force || !previous || snapshot.matchBackground !== previous.matchBackground) this.pendingMatchBackground = snapshot.matchBackground
       if (force || !previous || snapshot.matchBackgroundMode !== previous.matchBackgroundMode) this.pendingMatchBackgroundMode = snapshot.matchBackgroundMode
-      if (force || !previous || snapshot.removeBackground !== previous.removeBackground) this.pendingRemoveBackground = snapshot.removeBackground
+      if (force || !previous || snapshot.optimizeBackground !== previous.optimizeBackground || snapshot.removeBackground !== previous.removeBackground) {
+        this.pendingOptimizeBackground = snapshot.optimizeBackground
+        this.pendingRemoveBackground = snapshot.removeBackground
+      }
       if (force || !previous || snapshot.removeWatermark !== previous.removeWatermark) this.pendingRemoveWatermark = snapshot.removeWatermark
       if (force || !previous || snapshot.imageQuality !== previous.imageQuality) this.pendingImageQuality = snapshot.imageQuality
       if (force || !previous || snapshot.blockSpacing !== previous.blockSpacing) this.pendingBlockSpacing = snapshot.blockSpacing
@@ -1774,9 +1790,16 @@ export default Vue.extend({
         matchBackgroundMode: this.options.matchBackgroundMode === 'original'
           ? 'original'
           : this.options.matchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale',
-        removeBackground: this.options.removeBackground === 'clean' || this.options.removeBackground === 'normalize'
-          ? this.options.removeBackground
-          : 'none',
+        optimizeBackground: this.options.optimizeBackground === 'clean' || this.options.optimizeBackground === 'normalize'
+          ? this.options.optimizeBackground
+          : this.options.removeBackground === 'clean' || this.options.removeBackground === 'normalize'
+            ? this.options.removeBackground
+            : 'none',
+        removeBackground: this.options.optimizeBackground === 'clean' || this.options.optimizeBackground === 'normalize'
+          ? this.options.optimizeBackground
+          : this.options.removeBackground === 'clean' || this.options.removeBackground === 'normalize'
+            ? this.options.removeBackground
+            : 'none',
         removeWatermark: this.options.removeWatermark === 'light' || this.options.removeWatermark === 'color'
           ? this.options.removeWatermark
           : 'none',
@@ -2034,6 +2057,7 @@ export default Vue.extend({
       params.set('contrastEnhancement', String(this.contrastEnhancement))
       params.set('matchBackground', String(this.matchBackground))
       params.set('matchBackgroundMode', this.matchBackgroundMode)
+      params.set('optimizeBackground', this.optimizeBackground)
       params.set('removeBackground', this.removeBackground)
       params.set('removeWatermark', this.removeWatermark)
       params.set('imageQuality', String(this.imageQuality))
@@ -2559,6 +2583,7 @@ export default Vue.extend({
         contrastEnhancement: this.controlContrastEnhancement,
         matchBackground: this.controlMatchBackground,
         matchBackgroundMode: this.controlMatchBackgroundMode,
+        optimizeBackground: this.controlOptimizeBackground,
         removeBackground: this.controlRemoveBackground,
         removeWatermark: this.controlRemoveWatermark,
         imageQuality: this.imageQuality,
@@ -2808,15 +2833,16 @@ export default Vue.extend({
       return canvas.toDataURL('image/jpeg', this.imageQuality / 100)
     },
     preprocessSourceCanvas(context: CanvasRenderingContext2D, width: number, height: number) {
-      const removeBg = this.controlRemoveBackground
+      const optBg = this.controlOptimizeBackground
       const removeWm = this.controlRemoveWatermark
-      if (removeBg === 'none' && removeWm === 'none') return
+      if (optBg === 'none' && removeWm === 'none') return
       preprocessDocumentCanvas(context, width, height, {
-        removeBackground: removeBg,
+        optimizeBackground: optBg,
+        removeBackground: optBg,
         removeWatermark: removeWm,
         targetDark: this.darkDisplay,
       })
-      if (removeBg !== 'none') {
+      if (optBg !== 'none') {
         this.pageBackground = this.darkDisplay ? '#000' : '#fff'
       }
     },
@@ -7131,18 +7157,23 @@ export default Vue.extend({
         ? 'original'
         : target.value === 'monochrome' ? 'monochrome' : 'grayscale'
     },
-    setRemoveBackground(event: Event) {
+    setOptimizeBackground(event: Event) {
       const target = event.target as HTMLSelectElement
       const value = target.value === 'clean' || target.value === 'normalize'
         ? target.value
         : 'none'
+      this.pendingOptimizeBackground = value
       this.pendingRemoveBackground = value
+      this.$emit('optimize-background-change', value)
       this.$emit('remove-background-change', value)
       if (this.cropMode || this.deferReflow) {
         this.ensureCropImage(this.controlSkewCorrection)
       } else {
         this.reflow()
       }
+    },
+    setRemoveBackground(event: Event) {
+      this.setOptimizeBackground(event)
     },
     setRemoveWatermark(event: Event) {
       const target = event.target as HTMLSelectElement
@@ -7175,6 +7206,7 @@ export default Vue.extend({
       this.$emit('contrast-enhancement-change', this.controlContrastEnhancement)
       this.$emit('match-background-change', this.controlMatchBackground)
       this.$emit('match-background-mode-change', this.controlMatchBackgroundMode)
+      this.$emit('optimize-background-change', this.controlOptimizeBackground)
       this.$emit('remove-background-change', this.controlRemoveBackground)
       this.$emit('remove-watermark-change', this.controlRemoveWatermark)
       this.$emit('image-quality-change', this.controlImageQuality)

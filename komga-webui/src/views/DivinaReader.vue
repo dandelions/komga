@@ -329,6 +329,7 @@
           @contrast-enhancement-change="setReflowContrastEnhancement"
           @match-background-change="setReflowMatchBackground"
           @match-background-mode-change="setReflowMatchBackgroundMode"
+          @optimize-background-change="setReflowOptimizeBackground"
           @remove-background-change="setReflowRemoveBackground"
           @remove-watermark-change="setReflowRemoveWatermark"
           @block-spacing-change="setReflowBlockSpacing"
@@ -817,9 +818,9 @@
                 </v-list-item>
                 <v-list-item>
                   <settings-select
-                    :items="reflowRemoveBackgroundModes"
-                    v-model="reflowSettings.removeBackground"
-                    label="去除背景颜色"
+                    :items="reflowOptimizeBackgroundModes"
+                    v-model="reflowSettings.optimizeBackground"
+                    label="优化背景"
                   />
                 </v-list-item>
                 <v-list-item>
@@ -1147,6 +1148,7 @@ function defaultReflowSettings(): any {
     contrastEnhancement: false,
     matchBackground: false,
     matchBackgroundMode: 'grayscale',
+    optimizeBackground: 'none',
     removeBackground: 'none',
     removeWatermark: 'none',
     imageQuality: 80,
@@ -1172,6 +1174,7 @@ function defaultReflowSettings(): any {
       contrastEnhancement: false,
       matchBackground: false,
       matchBackgroundMode: 'grayscale',
+      optimizeBackground: 'none',
       removeBackground: 'none',
       removeWatermark: 'none',
       wordGap: 3,
@@ -1372,9 +1375,14 @@ export default Vue.extend({
         {text: '灰阶', value: 'grayscale'},
         {text: '黑白', value: 'monochrome'},
       ],
+      reflowOptimizeBackgroundModes: [
+        {text: '关闭', value: 'none'},
+        {text: '自适应去噪', value: 'normalize'},
+        {text: '激进纯化', value: 'clean'},
+      ],
       reflowRemoveBackgroundModes: [
         {text: '关闭', value: 'none'},
-        {text: '对齐底色(自适应)', value: 'normalize'},
+        {text: '自适应去噪', value: 'normalize'},
         {text: '激进纯化', value: 'clean'},
       ],
       reflowRemoveWatermarkModes: [
@@ -1525,6 +1533,24 @@ export default Vue.extend({
         if (!this.loadingReflowSettings) this.saveReflowSettings()
       },
       deep: true,
+    },
+    'reflowSettings.optimizeBackground'(value) {
+      if (this.reflowSettings.removeBackground !== value) {
+        this.reflowSettings.removeBackground = value
+      }
+      if (this.reflowSettings.k2Settings && this.reflowSettings.k2Settings.optimizeBackground !== value) {
+        this.reflowSettings.k2Settings.optimizeBackground = value
+        this.reflowSettings.k2Settings.removeBackground = value
+      }
+    },
+    'reflowSettings.removeBackground'(value) {
+      if (this.reflowSettings.optimizeBackground !== value) {
+        this.reflowSettings.optimizeBackground = value
+      }
+      if (this.reflowSettings.k2Settings && this.reflowSettings.k2Settings.removeBackground !== value) {
+        this.reflowSettings.k2Settings.optimizeBackground = value
+        this.reflowSettings.k2Settings.removeBackground = value
+      }
     },
   },
   computed: {
@@ -1740,7 +1766,8 @@ export default Vue.extend({
         contrastEnhancement: this.reflowSettings.contrastEnhancement,
         matchBackground: this.reflowSettings.matchBackground,
         matchBackgroundMode: this.reflowSettings.matchBackgroundMode,
-        removeBackground: this.reflowSettings.removeBackground,
+        optimizeBackground: this.reflowSettings.optimizeBackground || this.reflowSettings.removeBackground,
+        removeBackground: this.reflowSettings.optimizeBackground || this.reflowSettings.removeBackground,
         removeWatermark: this.reflowSettings.removeWatermark,
         imageQuality: this.reflowSettings.imageQuality,
         algorithmMode: this.reflowSettings.algorithmMode,
@@ -3042,9 +3069,16 @@ export default Vue.extend({
         matchBackgroundMode: settings.matchBackgroundMode === 'original'
           ? 'original'
           : settings.matchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale',
-        removeBackground: settings.removeBackground === 'clean' || settings.removeBackground === 'normalize'
-          ? settings.removeBackground
-          : 'none',
+        optimizeBackground: settings.optimizeBackground === 'clean' || settings.optimizeBackground === 'normalize'
+          ? settings.optimizeBackground
+          : (settings.removeBackground === 'clean' || settings.removeBackground === 'normalize'
+            ? settings.removeBackground
+            : 'none'),
+        removeBackground: settings.optimizeBackground === 'clean' || settings.optimizeBackground === 'normalize'
+          ? settings.optimizeBackground
+          : (settings.removeBackground === 'clean' || settings.removeBackground === 'normalize'
+            ? settings.removeBackground
+            : 'none'),
         removeWatermark: settings.removeWatermark === 'light' || settings.removeWatermark === 'color'
           ? settings.removeWatermark
           : 'none',
@@ -3075,9 +3109,16 @@ export default Vue.extend({
         matchBackgroundMode: settings.matchBackgroundMode === 'original'
           ? 'original'
           : settings.matchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale',
-        removeBackground: settings.removeBackground === 'clean' || settings.removeBackground === 'normalize'
-          ? settings.removeBackground
-          : 'none',
+        optimizeBackground: settings.optimizeBackground === 'clean' || settings.optimizeBackground === 'normalize'
+          ? settings.optimizeBackground
+          : (settings.removeBackground === 'clean' || settings.removeBackground === 'normalize'
+            ? settings.removeBackground
+            : 'none'),
+        removeBackground: settings.optimizeBackground === 'clean' || settings.optimizeBackground === 'normalize'
+          ? settings.optimizeBackground
+          : (settings.removeBackground === 'clean' || settings.removeBackground === 'normalize'
+            ? settings.removeBackground
+            : 'none'),
         removeWatermark: settings.removeWatermark === 'light' || settings.removeWatermark === 'color'
           ? settings.removeWatermark
           : 'none',
@@ -3389,12 +3430,19 @@ export default Vue.extend({
         ? 'original'
         : matchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale'
     },
-    setReflowRemoveBackground(removeBackground: string) {
-      const mode = removeBackground === 'clean' || removeBackground === 'normalize'
-        ? removeBackground
+    setReflowOptimizeBackground(optimizeBackground: string) {
+      const mode = optimizeBackground === 'clean' || optimizeBackground === 'normalize'
+        ? optimizeBackground
         : 'none'
+      this.reflowSettings.optimizeBackground = mode
       this.reflowSettings.removeBackground = mode
-      if (this.reflowSettings.k2Settings) this.reflowSettings.k2Settings.removeBackground = mode
+      if (this.reflowSettings.k2Settings) {
+        this.reflowSettings.k2Settings.optimizeBackground = mode
+        this.reflowSettings.k2Settings.removeBackground = mode
+      }
+    },
+    setReflowRemoveBackground(removeBackground: string) {
+      this.setReflowOptimizeBackground(removeBackground)
     },
     setReflowRemoveWatermark(removeWatermark: string) {
       const mode = removeWatermark === 'light' || removeWatermark === 'color'
@@ -3435,7 +3483,13 @@ export default Vue.extend({
       Object.keys(normalized).forEach(key => {
         this.$set(this.reflowSettings.k2Settings, key, normalized[key])
       })
-      if (normalized.removeBackground) this.reflowSettings.removeBackground = normalized.removeBackground
+      if (normalized.optimizeBackground) {
+        this.reflowSettings.optimizeBackground = normalized.optimizeBackground
+        this.reflowSettings.removeBackground = normalized.optimizeBackground
+      } else if (normalized.removeBackground) {
+        this.reflowSettings.optimizeBackground = normalized.removeBackground
+        this.reflowSettings.removeBackground = normalized.removeBackground
+      }
       if (normalized.removeWatermark) this.reflowSettings.removeWatermark = normalized.removeWatermark
     },
     cachedReflowEntry(page: PageDtoWithUrl | undefined): any {

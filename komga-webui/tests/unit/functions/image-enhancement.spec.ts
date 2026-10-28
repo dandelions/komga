@@ -173,4 +173,29 @@ describe('image enhancement', () => {
     expect(data[12]).toBe(20) // text preserved
     expect(data[16]).toBe(255)
   })
+
+  test('preprocessDocumentData accepts optimizeBackground option and suppresses bleed-through', () => {
+    // 254 paper, 222 bleed-through ghost text from back page, 20 dark front text
+    const data = grayPixels(254, 222, 20, 254)
+    preprocessDocumentData(data, 4, 1, {
+      optimizeBackground: 'normalize',
+      targetDark: false,
+    })
+    expect(data[0]).toBe(255) // paper is white
+    expect(data[4]).toBe(255) // bleed-through suppressed to clean paper
+    expect(data[8]).toBeLessThan(100) // front text preserved
+    expect(data[12]).toBe(255) // paper is white
+  })
+
+  test('removeDocumentBackground despeckles isolated black noise dots', () => {
+    // 3x3 grid: center pixel (1,1) is isolated dark noise (30), surrounded by white (255)
+    const data = grayPixels(
+      255, 255, 255,
+      255, 30,  255,
+      255, 255, 255,
+    )
+    removeDocumentBackground(data, 3, 3, 'normalize', false)
+    // Center pixel at (1,1) index 4 should be cleaned to 255 by despeckling
+    expect(data[4 * 4]).toBe(255)
+  })
 })

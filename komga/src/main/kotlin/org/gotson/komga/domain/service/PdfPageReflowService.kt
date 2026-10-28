@@ -44,7 +44,7 @@ private const val VERTICAL_PARAGRAPH_BLANK_BLOCKS = 2.0
 private const val EDGE_INK_THRESHOLD = 245
 private const val MAX_EDGE_TRIM = 6
 private const val MAX_EDGE_EXPANSION = 10
-private const val REFLOW_ALGORITHM_VERSION = 13
+private const val REFLOW_ALGORITHM_VERSION = 14
 
 data class PdfPageReflowOptions(
   val targetWidth: Int,
@@ -61,6 +61,9 @@ data class PdfPageReflowOptions(
   val contrastEnhancement: Boolean,
   val matchBackground: Boolean,
   val matchBackgroundMode: String,
+  val optimizeBackground: String = "none",
+  val removeBackground: String = "none",
+  val removeWatermark: String = "none",
   val imageQuality: Int = 80,
   val blockSpacing: Int,
   val verticalText: Boolean,
@@ -278,20 +281,28 @@ class PdfPageReflowService(
           ImageIO.read(ByteArrayInputStream(pageContent.bytes))
             ?: error("Unable to decode rendered PDF page")
         val rotatedImage = rotatedImage(image, options.rotation)
-        val pageBackground = detectPageBackground(rotatedImage)
+        val effectiveOptimizeBackground =
+          if (options.optimizeBackground != "none") options.optimizeBackground else options.removeBackground
+        val optimizedImage =
+          if (effectiveOptimizeBackground != "none") {
+            PdfDocumentImageOptimizer.optimizeBackground(rotatedImage, effectiveOptimizeBackground, options.darkDisplay)
+          } else {
+            rotatedImage
+          }
+        val pageBackground = detectPageBackground(optimizedImage)
         val detectedSkewCorrection =
           if (options.autoSkewCorrection) {
             PdfAutoDeskew.detectAngle(
-              image = rotatedImage,
+              image = optimizedImage,
               threshold = options.threshold,
               verticalText = options.verticalText,
-              analysisRegion = options.deskewAnalysisRegion?.toAutoDeskewRegion(rotatedImage.width, rotatedImage.height),
+              analysisRegion = options.deskewAnalysisRegion?.toAutoDeskewRegion(optimizedImage.width, optimizedImage.height),
             )
           } else {
             0.0
           }
         val effectiveSkewCorrection = (detectedSkewCorrection + options.skewCorrection).coerceIn(-10.0, 10.0)
-        val preparedPage = skewCorrectedImage(rotatedImage, effectiveSkewCorrection, Color.WHITE)
+        val preparedPage = skewCorrectedImage(optimizedImage, effectiveSkewCorrection, Color.WHITE)
         val pageManualImageRegions = manualImageRegions.mapNotNull { it.toRoi(preparedPage.width, preparedPage.height) }
         val regionImages =
           cropRegions
@@ -356,8 +367,16 @@ class PdfPageReflowService(
               ImageIO.read(ByteArrayInputStream(bytes))
                 ?: error("Unable to decode uploaded page image")
             }.map { rotatedImage(it, options.rotation) }
+        val effectiveOptimizeBackground =
+          if (options.optimizeBackground != "none") options.optimizeBackground else options.removeBackground
+        val optimizedImages =
+          if (effectiveOptimizeBackground != "none") {
+            decodedImages.map { PdfDocumentImageOptimizer.optimizeBackground(it, effectiveOptimizeBackground, options.darkDisplay) }
+          } else {
+            decodedImages
+          }
         val results =
-          decodedImages.map { image ->
+          optimizedImages.map { image ->
             reflowImage(
               image = image,
               options = options,
@@ -763,6 +782,7 @@ class PdfPageReflowService(
       mergeImageRegions(tightenedRegions)
         .filterNot { isUnderlinedTextRegion(image, it, threshold) }
         .filterNot { isMergedHorizontalTextRegion(image, it, threshold) }
+        .filterNot { isMonochromeTextRegion(image, it, threshold) }
     val expanded = expandImageRegions(imageRegions, max(2, (tileSize * 0.6).roundToInt()), roi, image.width, image.height)
     return protectImageRegionEdges(image, expanded, threshold, roi)
   }
@@ -1720,6 +1740,15 @@ class PdfPageReflowService(
     }
 
     return if (sampled == 0) 0.0 else colored.toDouble() / sampled
+  }
+
+  private fun isMonochromeTextRegion(
+    image: BufferedImage,
+    region: Roi,
+    threshold: Int,
+  ): Boolean {
+    val stepX = max(1, (region.w / 700.0).roundToInt())
+    return colorCoverage(image, region, stepX) < 0.06 && hasAlignedTextRows(image, region, threshold)
   }
 
   private fun isMergedHorizontalTextRegion(

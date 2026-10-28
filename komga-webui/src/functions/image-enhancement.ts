@@ -25,10 +25,12 @@ export function enhanceTextContrast(
   context.putImageData(imageData, 0, 0)
 }
 
-export type DocumentRemoveBackgroundMode = 'none' | 'normalize' | 'clean'
+export type DocumentOptimizeBackgroundMode = 'none' | 'normalize' | 'clean'
+export type DocumentRemoveBackgroundMode = DocumentOptimizeBackgroundMode
 export type DocumentRemoveWatermarkMode = 'none' | 'light' | 'color'
 
 export type DocumentPreprocessOptions = {
+  optimizeBackground?: DocumentOptimizeBackgroundMode | string,
   removeBackground?: DocumentRemoveBackgroundMode | string,
   removeWatermark?: DocumentRemoveWatermarkMode | string,
   targetDark?: boolean,
@@ -40,13 +42,14 @@ export function preprocessDocumentData(
   height: number,
   options: DocumentPreprocessOptions = {},
 ) {
-  const removeBg = options.removeBackground && options.removeBackground !== 'none'
+  const bgMode = options.optimizeBackground || options.removeBackground
+  const removeBg = bgMode && bgMode !== 'none'
   const removeWm = options.removeWatermark && options.removeWatermark !== 'none'
   if (!removeBg && !removeWm) return
   if (width <= 0 || height <= 0) return
 
-  if (removeBg && options.removeBackground) {
-    removeDocumentBackground(data, width, height, options.removeBackground, options.targetDark)
+  if (removeBg && bgMode) {
+    removeDocumentBackground(data, width, height, bgMode, options.targetDark)
   }
   if (removeWm && options.removeWatermark) {
     removeDocumentWatermark(data, width, height, options.removeWatermark, options.targetDark)
@@ -59,7 +62,8 @@ export function preprocessDocumentCanvas(
   height: number,
   options: DocumentPreprocessOptions = {},
 ) {
-  const removeBg = options.removeBackground && options.removeBackground !== 'none'
+  const bgMode = options.optimizeBackground || options.removeBackground
+  const removeBg = bgMode && bgMode !== 'none'
   const removeWm = options.removeWatermark && options.removeWatermark !== 'none'
   if (!removeBg && !removeWm) return
   if (width <= 0 || height <= 0) return
@@ -383,7 +387,7 @@ export function removeDocumentBackground(
       }
 
       const luma = pixelLuma(data, offset)
-      if (luma >= localBg - 15) {
+      if (luma >= localBg - 36) {
         setGrayPixel(data, offset, targetBg)
         continue
       }
@@ -391,7 +395,7 @@ export function removeDocumentBackground(
       const gain = 255.0 / Math.max(1, localBg)
       let normLuma = clamp(luma * gain, 0, 255)
 
-      if (normLuma >= 235) {
+      if (normLuma >= 225) {
         setGrayPixel(data, offset, targetBg)
         continue
       }
@@ -400,14 +404,68 @@ export function removeDocumentBackground(
         normLuma = 255 - normLuma
         setGrayPixel(data, offset, normLuma)
       } else {
-        data[offset] = Math.round(clamp(data[offset] * gain, 0, 255))
-        data[offset + 1] = Math.round(clamp(data[offset + 1] * gain, 0, 255))
-        data[offset + 2] = Math.round(clamp(data[offset + 2] * gain, 0, 255))
+        const r = data[offset]
+        const g = data[offset + 1]
+        const b = data[offset + 2]
+        const maxC = Math.max(r, g, b)
+        const minC = Math.min(r, g, b)
+        if (maxC - minC >= 20) {
+          data[offset] = Math.round(clamp(r * gain, 0, 255))
+          data[offset + 1] = Math.round(clamp(g * gain, 0, 255))
+          data[offset + 2] = Math.round(clamp(b * gain, 0, 255))
+        } else {
+          const stretched = Math.round(clamp(normLuma * (255 / 200), 0, 255))
+          setGrayPixel(data, offset, stretched)
+        }
         data[offset + 3] = 255
       }
     }
   }
+
+  despeckleDocumentData(data, width, height, targetDark)
 }
+
+function despeckleDocumentData(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+  targetDark: boolean = false,
+) {
+  if (width < 3 || height < 3) return
+  const targetBg = targetDark ? 0 : 255
+  const bgCheck = targetDark ? 20 : 240
+  const lumaBuffer = new Uint8Array(width * height)
+  for (let i = 0; i < width * height; i++) {
+    lumaBuffer[i] = Math.round(pixelLuma(data, i * 4))
+  }
+
+  for (let y = 1; y < height - 1; y++) {
+    const rowOffset = y * width
+    for (let x = 1; x < width - 1; x++) {
+      const idx = rowOffset + x
+      const luma = lumaBuffer[idx]
+      const isForeground = targetDark ? luma > 50 : luma < 200
+      if (!isForeground) continue
+
+      let bgNeighborCount = 0
+      for (let dy = -1; dy <= 1; dy++) {
+        const nRow = (y + dy) * width
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dy === 0 && dx === 0) continue
+          const nLuma = lumaBuffer[nRow + (x + dx)]
+          const isBg = targetDark ? nLuma <= bgCheck : nLuma >= bgCheck
+          if (isBg) bgNeighborCount++
+        }
+      }
+
+      if (bgNeighborCount >= 7) {
+        setGrayPixel(data, idx * 4, targetBg)
+      }
+    }
+  }
+}
+
+export const optimizeDocumentBackground = removeDocumentBackground
 
 export function removeDocumentWatermark(
   data: Uint8ClampedArray,

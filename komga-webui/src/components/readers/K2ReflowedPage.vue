@@ -90,11 +90,11 @@
           </select>
         </label>
         <label class="k2-control k2-compact">
-          <span>去除背景</span>
-          <select :value="removeBackground" @change="setRemoveBackground">
+          <span>优化背景</span>
+          <select :value="optimizeBackground" @change="setOptimizeBackground">
             <option value="none">关闭</option>
-            <option value="normalize">对齐底色</option>
-            <option value="clean">纯化</option>
+            <option value="normalize">自适应去噪</option>
+            <option value="clean">激进纯化</option>
           </select>
         </label>
         <label class="k2-control k2-compact">
@@ -263,6 +263,7 @@
 import Vue from 'vue'
 import {PageDtoWithUrl} from '@/types/komga-books'
 import {
+  DocumentOptimizeBackgroundMode,
   DocumentRemoveBackgroundMode,
   DocumentRemoveWatermarkMode,
   enhanceTextContrast,
@@ -290,6 +291,7 @@ type K2Settings = {
   contrastEnhancement: boolean,
   matchBackground: boolean,
   matchBackgroundMode: MatchBackgroundMode,
+  optimizeBackground?: DocumentOptimizeBackgroundMode,
   removeBackground?: DocumentRemoveBackgroundMode,
   removeWatermark?: DocumentRemoveWatermarkMode,
   wordGap: number,
@@ -386,6 +388,7 @@ export default Vue.extend({
     contrastEnhancement: false,
     matchBackground: false,
     matchBackgroundMode: 'grayscale' as MatchBackgroundMode,
+    optimizeBackground: 'none' as DocumentOptimizeBackgroundMode,
     removeBackground: 'none' as DocumentRemoveBackgroundMode,
     removeWatermark: 'none' as DocumentRemoveWatermarkMode,
     wordGap: DEFAULT_WORD_GAP,
@@ -695,9 +698,12 @@ export default Vue.extend({
       this.matchBackgroundMode = this.settings.matchBackgroundMode === 'original'
         ? 'original'
         : this.settings.matchBackgroundMode === 'monochrome' ? 'monochrome' : 'grayscale'
-      this.removeBackground = this.settings.removeBackground === 'clean' || this.settings.removeBackground === 'normalize'
-        ? this.settings.removeBackground
+      const bgMode = this.settings.optimizeBackground || this.settings.removeBackground
+      const mode = bgMode === 'clean' || bgMode === 'normalize'
+        ? bgMode
         : 'none'
+      this.optimizeBackground = mode
+      this.removeBackground = mode
       this.removeWatermark = this.settings.removeWatermark === 'light' || this.settings.removeWatermark === 'color'
         ? this.settings.removeWatermark
         : 'none'
@@ -713,6 +719,7 @@ export default Vue.extend({
         contrastEnhancement: this.contrastEnhancement,
         matchBackground: this.matchBackground,
         matchBackgroundMode: this.matchBackgroundMode,
+        optimizeBackground: this.optimizeBackground,
         removeBackground: this.removeBackground,
         removeWatermark: this.removeWatermark,
         wordGap: this.wordGap,
@@ -937,13 +944,15 @@ export default Vue.extend({
       context.fillRect(0, 0, width, height)
     },
     preprocessSourceCanvas(context: CanvasRenderingContext2D, width: number, height: number) {
-      if (this.removeBackground === 'none' && this.removeWatermark === 'none') return
+      const bgMode = this.optimizeBackground || this.removeBackground
+      if (bgMode === 'none' && this.removeWatermark === 'none') return
       preprocessDocumentCanvas(context, width, height, {
-        removeBackground: this.removeBackground,
+        optimizeBackground: bgMode,
+        removeBackground: bgMode,
         removeWatermark: this.removeWatermark,
         targetDark: this.darkDisplay,
       })
-      if (this.removeBackground !== 'none') {
+      if (bgMode !== 'none') {
         this.pageBackground = this.darkDisplay ? '#000' : '#fff'
       }
     },
@@ -2609,13 +2618,18 @@ export default Vue.extend({
         : target.value === 'monochrome' ? 'monochrome' : 'grayscale'
       this.emitSettingsChange()
     },
-    setRemoveBackground(event: Event) {
+    setOptimizeBackground(event: Event) {
       const target = event.target as HTMLSelectElement
-      this.removeBackground = target.value === 'clean' || target.value === 'normalize'
+      const mode = target.value === 'clean' || target.value === 'normalize'
         ? target.value
         : 'none'
+      this.optimizeBackground = mode
+      this.removeBackground = mode
       this.emitSettingsChange()
       this.reflow()
+    },
+    setRemoveBackground(event: Event) {
+      this.setOptimizeBackground(event)
     },
     setRemoveWatermark(event: Event) {
       const target = event.target as HTMLSelectElement

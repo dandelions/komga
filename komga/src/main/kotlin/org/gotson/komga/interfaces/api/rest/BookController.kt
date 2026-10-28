@@ -596,6 +596,12 @@ class BookController(
     matchBackground: Boolean,
     @RequestParam(value = "matchBackgroundMode", defaultValue = "grayscale")
     matchBackgroundMode: String,
+    @RequestParam(value = "optimizeBackground", defaultValue = "none")
+    optimizeBackground: String,
+    @RequestParam(value = "removeBackground", defaultValue = "none")
+    removeBackground: String,
+    @RequestParam(value = "removeWatermark", defaultValue = "none")
+    removeWatermark: String,
     @RequestParam(value = "imageQuality", defaultValue = "80")
     imageQuality: Int,
     @RequestParam(value = "blockSpacing", defaultValue = "6")
@@ -632,6 +638,7 @@ class BookController(
 
       try {
         val page = if (zeroBasedIndex) pageNumber + 1 else pageNumber
+        val effectiveOptimizeBackground = if (optimizeBackground != "none") optimizeBackground else removeBackground
         val options =
           PdfPageReflowOptions(
             targetWidth = targetWidth,
@@ -648,6 +655,9 @@ class BookController(
             contrastEnhancement = contrastEnhancement,
             matchBackground = matchBackground,
             matchBackgroundMode = normalizePdfReflowTextMode(matchBackgroundMode),
+            optimizeBackground = effectiveOptimizeBackground,
+            removeBackground = effectiveOptimizeBackground,
+            removeWatermark = removeWatermark,
             imageQuality = normalizePdfReflowImageQuality(imageQuality),
             blockSpacing = blockSpacing,
             verticalText = verticalText,
@@ -746,6 +756,12 @@ class BookController(
     matchBackground: Boolean,
     @RequestParam(value = "matchBackgroundMode", defaultValue = "grayscale")
     matchBackgroundMode: String,
+    @RequestParam(value = "optimizeBackground", defaultValue = "none")
+    optimizeBackground: String,
+    @RequestParam(value = "removeBackground", defaultValue = "none")
+    removeBackground: String,
+    @RequestParam(value = "removeWatermark", defaultValue = "none")
+    removeWatermark: String,
     @RequestParam(value = "imageQuality", defaultValue = "80")
     imageQuality: Int,
     @RequestParam(value = "blockSpacing", defaultValue = "6")
@@ -774,6 +790,7 @@ class BookController(
 
       try {
         val page = if (zeroBasedIndex) pageNumber + 1 else pageNumber
+        val effectiveOptimizeBackground = if (optimizeBackground != "none") optimizeBackground else removeBackground
         val response =
           pdfPageReflowService.reflowPreparedImages(
             pageNumber = page,
@@ -794,6 +811,9 @@ class BookController(
                 contrastEnhancement = contrastEnhancement,
                 matchBackground = matchBackground,
                 matchBackgroundMode = normalizePdfReflowTextMode(matchBackgroundMode),
+                optimizeBackground = effectiveOptimizeBackground,
+                removeBackground = effectiveOptimizeBackground,
+                removeWatermark = removeWatermark,
                 imageQuality = normalizePdfReflowImageQuality(imageQuality),
                 blockSpacing = blockSpacing,
                 verticalText = verticalText,
