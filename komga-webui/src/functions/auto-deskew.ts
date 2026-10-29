@@ -86,16 +86,43 @@ function collectInkPoints(
   const top = Math.max(1, Math.floor((region?.y || 0) * step))
   const right = Math.min(width - 1, Math.ceil((region ? region.x + region.w : Math.ceil(width / step)) * step))
   const bottom = Math.min(height - 1, Math.ceil((region ? region.y + region.h : Math.ceil(height / step)) * step))
+  const darkBackground = isDarkBackground(pixels, width, height, left, top, right, bottom)
   const points = [] as InkPoint[]
   for (let y = top; y < bottom; y += step) {
     for (let x = left; x < right; x += step) {
       const offset = (y * width + x) * 4
       if (pixels[offset + 3] < 24) continue
       const luma = pixels[offset] * 0.299 + pixels[offset + 1] * 0.587 + pixels[offset + 2] * 0.114
-      if (luma <= threshold) points.push({x: x / step, y: y / step})
+      const effectiveLuma = darkBackground ? 255 - luma : luma
+      if (effectiveLuma <= threshold) points.push({x: x / step, y: y / step})
     }
   }
   return points
+}
+
+function isDarkBackground(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  left: number,
+  top: number,
+  right: number,
+  bottom: number,
+): boolean {
+  const stepX = Math.max(1, Math.floor((right - left) / 24))
+  const stepY = Math.max(1, Math.floor((bottom - top) / 24))
+  let darkCount = 0
+  let total = 0
+  for (let y = top; y < bottom; y += stepY) {
+    for (let x = left; x < right; x += stepX) {
+      const offset = (y * width + x) * 4
+      if (pixels[offset + 3] < 24) continue
+      const luma = pixels[offset] * 0.299 + pixels[offset + 1] * 0.587 + pixels[offset + 2] * 0.114
+      if (luma < 128) darkCount++
+      total++
+    }
+  }
+  return total > 0 && darkCount / total > 0.5
 }
 
 function largestTextRegion(points: InkPoint[], width: number, height: number): DeskewRegion | undefined {

@@ -281,11 +281,13 @@ class PdfPageReflowService(
           ImageIO.read(ByteArrayInputStream(pageContent.bytes))
             ?: error("Unable to decode rendered PDF page")
         val rotatedImage = rotatedImage(image, options.rotation)
+        val rawBackground = detectPageBackground(rotatedImage)
+        val sourceDark = isDarkColor(rawBackground)
         val effectiveOptimizeBackground =
           if (options.optimizeBackground != "none") options.optimizeBackground else options.removeBackground
         val optimizedImage =
           if (effectiveOptimizeBackground != "none") {
-            PdfDocumentImageOptimizer.optimizeBackground(rotatedImage, effectiveOptimizeBackground, options.darkDisplay)
+            PdfDocumentImageOptimizer.optimizeBackground(rotatedImage, effectiveOptimizeBackground, targetDark = sourceDark)
           } else {
             rotatedImage
           }
@@ -302,14 +304,15 @@ class PdfPageReflowService(
             0.0
           }
         val effectiveSkewCorrection = (detectedSkewCorrection + options.skewCorrection).coerceIn(-10.0, 10.0)
-        val preparedPage = skewCorrectedImage(optimizedImage, effectiveSkewCorrection, Color.WHITE)
+        val pageBackgroundColor = parsePageBackgroundColor(pageBackground, defaultDark = sourceDark)
+        val preparedPage = skewCorrectedImage(optimizedImage, effectiveSkewCorrection, pageBackgroundColor)
         val pageManualImageRegions = manualImageRegions.mapNotNull { it.toRoi(preparedPage.width, preparedPage.height) }
         val regionImages =
           cropRegions
             .mapNotNull { it.toRoi(preparedPage.width, preparedPage.height) }
             .ifEmpty { listOf(null) }
             .map { region ->
-              val source = if (region == null) preparedPage else copyImageRegion(preparedPage, region, Color.WHITE)
+              val source = if (region == null) preparedPage else copyImageRegion(preparedPage, region, pageBackgroundColor)
               val sourceManualRegions = manualImageRegionsForSource(pageManualImageRegions, region, source.width, source.height)
               val downscaled = downscaleServerImage(source)
               Triple(downscaled, false, scaleRegions(sourceManualRegions, source.width, source.height, downscaled.width, downscaled.height))
@@ -371,7 +374,10 @@ class PdfPageReflowService(
           if (options.optimizeBackground != "none") options.optimizeBackground else options.removeBackground
         val optimizedImages =
           if (effectiveOptimizeBackground != "none") {
-            decodedImages.map { PdfDocumentImageOptimizer.optimizeBackground(it, effectiveOptimizeBackground, options.darkDisplay) }
+            decodedImages.map {
+              val isSourceDark = isDarkColor(detectPageBackground(it))
+              PdfDocumentImageOptimizer.optimizeBackground(it, effectiveOptimizeBackground, targetDark = isSourceDark)
+            }
           } else {
             decodedImages
           }
@@ -4642,6 +4648,37 @@ class PdfPageReflowService(
 
     if (count == 0L) return "#fff"
     return "rgb(${r / count}, ${g / count}, ${b / count})"
+  }
+
+  private fun parsePageBackgroundColor(color: String, defaultDark: Boolean = false): Color {
+    val trimmed = color.trim()
+    if (trimmed.startsWith("rgb(", ignoreCase = true) && trimmed.endsWith(")")) {
+      val parts = trimmed.substring(4, trimmed.length - 1).split(",").mapNotNull { it.trim().toIntOrNull() }
+      if (parts.size >= 3) {
+        return Color(parts[0].coerceIn(0, 255), parts[1].coerceIn(0, 255), parts[2].coerceIn(0, 255))
+      }
+    }
+    if (trimmed.startsWith("#")) {
+      val hex = trimmed.substring(1)
+      if (hex.length == 3) {
+        val r = hex.substring(0, 1).repeat(2).toIntOrNull(16) ?: 255
+        val g = hex.substring(1, 2).repeat(2).toIntOrNull(16) ?: 255
+        val b = hex.substring(2, 3).repeat(2).toIntOrNull(16) ?: 255
+        return Color(r, g, b)
+      } else if (hex.length == 6) {
+        val r = hex.substring(0, 2).toIntOrNull(16) ?: 255
+        val g = hex.substring(2, 4).toIntOrNull(16) ?: 255
+        val b = hex.substring(4, 6).toIntOrNull(16) ?: 255
+        return Color(r, g, b)
+      }
+    }
+    return if (defaultDark) Color.BLACK else Color.WHITE
+  }
+
+  private fun isDarkColor(color: String): Boolean {
+    val parsed = parsePageBackgroundColor(color, defaultDark = false)
+    val luma = 0.299 * parsed.red + 0.587 * parsed.green + 0.114 * parsed.blue
+    return luma < 128.0
   }
 
   private fun estimateBackgroundLuma(

@@ -33,15 +33,36 @@ class PdfAutoDeskewTest {
     assertThat(PdfAutoDeskew.detectAngle(image, threshold = 185, verticalText = false)).isZero()
   }
 
+  @Test
+  fun `given inverted dark background text when detecting angle then inverse correction is returned`() {
+    val image = rotatedTextPage(2.4, vertical = false, dark = true)
+
+    val angle = PdfAutoDeskew.detectAngle(image, threshold = 185, verticalText = false)
+
+    assertThat(angle).isBetween(-2.7, -2.1)
+  }
+
+  @Test
+  fun `given inverted vertical text when detecting angle then inverse correction is returned`() {
+    val image = rotatedTextPage(-1.8, vertical = true, dark = true)
+
+    val angle = PdfAutoDeskew.detectAngle(image, threshold = 185, verticalText = true)
+
+    assertThat(angle).isBetween(1.5, 2.1)
+  }
+
   private fun rotatedTextPage(
     angle: Double,
     vertical: Boolean,
+    dark: Boolean = false,
   ): BufferedImage {
     val source = BufferedImage(420, 520, BufferedImage.TYPE_INT_RGB)
+    val bgColor = if (dark) Color.BLACK else Color.WHITE
+    val fgColor = if (dark) Color.WHITE else Color.BLACK
     source.createGraphics().use { graphics ->
-      graphics.color = Color.WHITE
+      graphics.color = bgColor
       graphics.fillRect(0, 0, source.width, source.height)
-      graphics.color = Color.BLACK
+      graphics.color = fgColor
       if (vertical) {
         repeat(8) { column ->
           repeat(15) { glyph -> graphics.fillRect(85 + column * 34, 70 + glyph * 25, 14, 14) }
@@ -56,7 +77,7 @@ class PdfAutoDeskewTest {
     val output = BufferedImage(source.width, source.height, BufferedImage.TYPE_INT_RGB)
     output.createGraphics().use { graphics ->
       graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
-      graphics.color = Color.WHITE
+      graphics.color = bgColor
       graphics.fillRect(0, 0, output.width, output.height)
       val transform = AffineTransform.getRotateInstance(Math.toRadians(angle), output.width / 2.0, output.height / 2.0)
       graphics.drawImage(source, transform, null)

@@ -102,6 +102,7 @@ object PdfAutoDeskew {
     val top = max(1, (region?.y ?: 0) * step)
     val right = min(image.width - 1, ((region?.let { it.x + it.w } ?: ceil(image.width.toDouble() / step).toInt())) * step)
     val bottom = min(image.height - 1, ((region?.let { it.y + it.h } ?: ceil(image.height.toDouble() / step).toInt())) * step)
+    val darkBackground = isDarkBackground(image, left, top, right, bottom)
     val points = mutableListOf<DeskewPoint>()
     for (y in top until bottom step step) {
       for (x in left until right step step) {
@@ -112,10 +113,38 @@ object PdfAutoDeskew {
         val green = color ushr 8 and 0xff
         val blue = color and 0xff
         val luma = red * 0.299 + green * 0.587 + blue * 0.114
-        if (luma <= threshold) points += DeskewPoint(x / step, y / step)
+        val effectiveLuma = if (darkBackground) 255.0 - luma else luma
+        if (effectiveLuma <= threshold) points += DeskewPoint(x / step, y / step)
       }
     }
     return points
+  }
+
+  private fun isDarkBackground(
+    image: BufferedImage,
+    left: Int,
+    top: Int,
+    right: Int,
+    bottom: Int,
+  ): Boolean {
+    val stepX = max(1, (right - left) / 24)
+    val stepY = max(1, (bottom - top) / 24)
+    var darkCount = 0
+    var total = 0
+    for (y in top until bottom step stepY) {
+      for (x in left until right step stepX) {
+        val color = image.getRGB(x, y)
+        val alpha = color ushr 24 and 0xff
+        if (alpha < 24) continue
+        val red = color ushr 16 and 0xff
+        val green = color ushr 8 and 0xff
+        val blue = color and 0xff
+        val luma = red * 0.299 + green * 0.587 + blue * 0.114
+        if (luma < 128.0) darkCount++
+        total++
+      }
+    }
+    return total > 0 && darkCount.toDouble() / total > 0.5
   }
 
   private fun limitPoints(points: List<DeskewPoint>): List<DeskewPoint> {

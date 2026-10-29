@@ -946,14 +946,15 @@ export default Vue.extend({
     preprocessSourceCanvas(context: CanvasRenderingContext2D, width: number, height: number) {
       const bgMode = this.optimizeBackground || this.removeBackground
       if (bgMode === 'none' && this.removeWatermark === 'none') return
+      const sourceDark = this.sourceBackgroundLuma() < 128
       preprocessDocumentCanvas(context, width, height, {
         optimizeBackground: bgMode,
         removeBackground: bgMode,
         removeWatermark: this.removeWatermark,
-        targetDark: this.darkDisplay,
+        targetDark: sourceDark,
       })
       if (bgMode !== 'none') {
-        this.pageBackground = this.darkDisplay ? '#000' : '#fff'
+        this.pageBackground = sourceDark ? '#000' : '#fff'
       }
     },
     enhanceSourceCanvas(context: CanvasRenderingContext2D, width: number, height: number) {

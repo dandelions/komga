@@ -1695,4 +1695,40 @@ class PdfPageReflowServiceTest {
     val firstWord = wordBlocks.first()
     assertThat(firstWord.w).isGreaterThan(200)
   }
+
+  @Test
+  fun `given darkDisplay and optimizeBackground with autoSkewCorrection when reflowing page then skew correction is not distorted`() {
+    val width = 420
+    val height = 520
+    val image = BufferedImage(width, height, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, width, height)
+    graphics.color = Color.BLACK
+    repeat(12) { row ->
+      repeat(14) { glyph -> graphics.fillRect(60 + glyph * 22, 60 + row * 32, 14, 14) }
+    }
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    val pageBytes = output.toByteArray()
+
+    val book = makeBook("deskew-dark-book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions().copy(
+          autoSkewCorrection = true,
+          optimizeBackground = "normalize",
+          darkDisplay = true,
+        ),
+      )
+
+    val wordBlocks = response.items.filter { it.type == "word" }
+    assertThat(wordBlocks).isNotEmpty
+  }
 }

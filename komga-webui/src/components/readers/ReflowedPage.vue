@@ -2596,7 +2596,7 @@ export default Vue.extend({
         marginLeft: this.options.marginLeft,
         cropRois: this.currentReflowCropRois(this.pageParity),
         darkDisplay: this.darkDisplay,
-        deskewDetectionVersion: 9,
+        deskewDetectionVersion: 10,
         imageExclusionVersion: 4,
         detectionScaleVersion: 4,
         darkWordRenderVersion: 6,
@@ -2836,14 +2836,15 @@ export default Vue.extend({
       const optBg = this.controlOptimizeBackground
       const removeWm = this.controlRemoveWatermark
       if (optBg === 'none' && removeWm === 'none') return
+      const sourceDark = this.sourceBackgroundLuma() < 128
       preprocessDocumentCanvas(context, width, height, {
         optimizeBackground: optBg,
         removeBackground: optBg,
         removeWatermark: removeWm,
-        targetDark: this.darkDisplay,
+        targetDark: sourceDark,
       })
       if (optBg !== 'none') {
-        this.pageBackground = this.darkDisplay ? '#000' : '#fff'
+        this.pageBackground = sourceDark ? '#000' : '#fff'
       }
     },
     enhanceSourceCanvas(context: CanvasRenderingContext2D, width: number, height: number) {

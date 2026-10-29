@@ -1,10 +1,22 @@
 import {detectAutoDeskewAngle} from '@/functions/auto-deskew'
 
-function rotatedTextPage(angle: number, vertical: boolean = false): {pixels: Uint8ClampedArray, width: number, height: number} {
+function rotatedTextPage(
+  angle: number,
+  vertical: boolean = false,
+  dark: boolean = false,
+): {pixels: Uint8ClampedArray, width: number, height: number} {
   const width = 420
   const height = 520
   const pixels = new Uint8ClampedArray(width * height * 4)
-  pixels.fill(255)
+  const bg = dark ? 0 : 255
+  const fg = dark ? 255 : 0
+  for (let i = 0; i < width * height; i++) {
+    const offset = i * 4
+    pixels[offset] = bg
+    pixels[offset + 1] = bg
+    pixels[offset + 2] = bg
+    pixels[offset + 3] = 255
+  }
   const radians = angle * Math.PI / 180
   const cosine = Math.cos(radians)
   const sine = Math.sin(radians)
@@ -17,9 +29,9 @@ function rotatedTextPage(angle: number, vertical: boolean = false): {pixels: Uin
     const y = Math.round(centerY + dx * sine + dy * cosine)
     if (x < 0 || x >= width || y < 0 || y >= height) return
     const offset = (y * width + x) * 4
-    pixels[offset] = 0
-    pixels[offset + 1] = 0
-    pixels[offset + 2] = 0
+    pixels[offset] = fg
+    pixels[offset + 1] = fg
+    pixels[offset + 2] = fg
     pixels[offset + 3] = 255
   }
 
@@ -57,5 +69,15 @@ describe('automatic deskew detection', () => {
   test('keeps an already aligned page unchanged', () => {
     const page = rotatedTextPage(0)
     expect(detectAutoDeskewAngle(page.pixels, page.width, page.height, 185, false)).toBe(0)
+  })
+
+  test('returns the inverse correction for inverted (dark background white text) page', () => {
+    const page = rotatedTextPage(2.4, false, true)
+    expect(detectAutoDeskewAngle(page.pixels, page.width, page.height, 185, false)).toBeCloseTo(-2.4, 0)
+  })
+
+  test('returns the inverse correction for inverted vertical text', () => {
+    const page = rotatedTextPage(-1.8, true, true)
+    expect(detectAutoDeskewAngle(page.pixels, page.width, page.height, 185, true)).toBeCloseTo(1.8, 0)
   })
 })

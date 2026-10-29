@@ -1780,7 +1780,7 @@ export default Vue.extend({
         cropRoisByParity: this.reflowSettings.cropRoisByParity,
         manualImageRoisByPage: this.reflowSettings.manualImageRoisByPage,
         darkDisplay: this.nightDisplay,
-        deskewDetectionVersion: 9,
+        deskewDetectionVersion: 10,
         imageExclusionVersion: 3,
         detectionScaleVersion: 1,
         darkWordRenderVersion: 2,
