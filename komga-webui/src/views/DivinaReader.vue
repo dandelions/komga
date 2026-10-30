@@ -800,181 +800,196 @@
                 </v-list-item>
               </template>
               <template v-if="isPdf && reflowEnabled">
-                <v-list-item>
-                  <settings-select
-                    :items="reflowProcessingModes"
-                    v-model="reflowSettings.processingMode"
-                    label="重排位置"
-                  />
-                </v-list-item>
-                <v-list-item>
-                  <settings-switch v-model="reflowSettings.autoCropBorder" label="Auto crop borders"/>
-                </v-list-item>
-                <v-list-item>
-                  <settings-switch v-model="reflowSettings.contrastEnhancement" label="文字/背景增强"/>
-                </v-list-item>
-                <v-list-item>
-                  <settings-switch v-model="reflowSettings.matchBackground" label="背景跟随底色"/>
-                </v-list-item>
-                <v-list-item>
-                  <settings-select
-                    :items="reflowOptimizeBackgroundModes"
-                    v-model="reflowSettings.optimizeBackground"
-                    label="优化背景"
-                  />
-                </v-list-item>
-                <v-list-item>
-                  <settings-select
-                    :items="reflowRemoveWatermarkModes"
-                    v-model="reflowSettings.removeWatermark"
-                    label="去除水印"
-                  />
-                </v-list-item>
-                <v-list-item>
-                  <settings-select
-                    :items="reflowMatchBackgroundModes"
-                    v-model="reflowSettings.matchBackgroundMode"
-                    label="文字显示"
-                  />
-                </v-list-item>
-                <v-list-item>
-                  <settings-select
-                    :items="reflowImageQualities"
-                    v-model="reflowSettings.imageQuality"
-                    label="字块质量"
-                  />
-                </v-list-item>
-                <v-list-item>
-                  <settings-select
-                    :items="reflowAlgorithmModes"
-                    v-model="reflowSettings.algorithmMode"
-                    label="图片/文字算法"
-                  />
-                </v-list-item>
-                <v-list-item>
-                  <settings-switch v-model="reflowSettings.verticalText" label="Vertical text"/>
-                </v-list-item>
-                <v-list-item v-if="reflowSettings.verticalText">
-                  <settings-select
-                    :items="reflowVerticalDirections"
-                    v-model="reflowSettings.verticalDirection"
-                    label="Vertical direction"
-                  />
-                </v-list-item>
-                <v-list-item v-if="!reflowSettings.verticalText">
-                  <settings-select
-                    :items="reflowDisplayColumnOptions"
-                    v-model="reflowSettings.displayColumns"
-                    label="分栏排版"
-                  />
-                </v-list-item>
-                <v-list-item>
-                  <settings-select
-                    :items="reflowColumnCounts"
-                    v-model="reflowSettings.columnCount"
-                    label="Columns"
-                  />
-                </v-list-item>
-                <v-list-item>
-                  <v-slider
-                    v-model="reflowSettings.textScale"
-                    label="Text size"
-                    min="10"
-                    max="140"
-                    thumb-label
-                    suffix="%"
-                  />
-                </v-list-item>
-                <v-list-item>
-                  <v-slider
-                    v-model="reflowSettings.strokeStrength"
-                    label="Stroke"
-                    min="0.1"
-                    max="3"
-                    step="0.1"
-                    thumb-label
-                  />
-                </v-list-item>
-                <v-list-item>
-                  <v-slider
-                    v-model="reflowSettings.blockSpacing"
-                    label="Spacing"
-                    min="0"
-                    max="24"
-                    step="1"
-                    thumb-label
-                    suffix="px"
-                  />
-                </v-list-item>
-                <v-list-item>
-                  <v-slider
-                    v-model="reflowSettings.threshold"
-                    label="Threshold"
-                    min="50"
-                    max="230"
-                    thumb-label
-                  />
-                </v-list-item>
-                <v-list-item>
-                  <v-slider
-                    v-model="reflowSettings.columnGap"
-                    label="Col Gap"
-                    min="5"
-                    max="80"
-                    thumb-label
-                    suffix="px"
-                  />
-                </v-list-item>
-                <v-list-item>
-                  <v-slider
-                    v-model="reflowSettings.wordGap"
-                    label="Word Gap"
-                    min="1"
-                    max="30"
-                    thumb-label
-                    suffix="px"
-                  />
-                </v-list-item>
-                <v-list-item>
-                  <v-slider
-                    v-model="reflowSettings.marginTop"
-                    label="Top crop"
-                    min="0"
-                    max="45"
-                    thumb-label
-                    suffix="%"
-                  />
-                </v-list-item>
-                <v-list-item>
-                  <v-slider
-                    v-model="reflowSettings.marginRight"
-                    label="Right crop"
-                    min="0"
-                    max="45"
-                    thumb-label
-                    suffix="%"
-                  />
-                </v-list-item>
-                <v-list-item>
-                  <v-slider
-                    v-model="reflowSettings.marginBottom"
-                    label="Bottom crop"
-                    min="0"
-                    max="45"
-                    thumb-label
-                    suffix="%"
-                  />
-                </v-list-item>
-                <v-list-item>
-                  <v-slider
-                    v-model="reflowSettings.marginLeft"
-                    label="Left crop"
-                    min="0"
-                    max="45"
-                    thumb-label
-                    suffix="%"
-                  />
-                </v-list-item>
+                <v-tabs v-model="reflowSheetTab" grow dense class="px-2 pt-1">
+                  <v-tab href="#tab-layout">排版</v-tab>
+                  <v-tab href="#tab-display">画面</v-tab>
+                  <v-tab href="#tab-advanced">裁切与高级</v-tab>
+                </v-tabs>
+                <v-tabs-items v-model="reflowSheetTab" class="reflow-tabs-items">
+                  <v-tab-item value="tab-layout">
+                    <v-list-item v-if="reflowSettings.verticalText">
+                      <settings-select
+                        :items="reflowVerticalDirections"
+                        v-model="reflowSettings.verticalDirection"
+                        label="Vertical direction"
+                      />
+                    </v-list-item>
+                    <v-list-item v-if="!reflowSettings.verticalText">
+                      <settings-select
+                        :items="reflowDisplayColumnOptions"
+                        v-model="reflowSettings.displayColumns"
+                        label="分栏排版"
+                      />
+                    </v-list-item>
+                    <v-list-item>
+                      <settings-select
+                        :items="reflowColumnCounts"
+                        v-model="reflowSettings.columnCount"
+                        label="Columns"
+                      />
+                    </v-list-item>
+                    <v-list-item>
+                      <settings-switch v-model="reflowSettings.verticalText" label="Vertical text"/>
+                    </v-list-item>
+                    <v-list-item>
+                      <v-slider
+                        v-model="reflowSettings.textScale"
+                        label="Text size"
+                        min="10"
+                        max="140"
+                        thumb-label
+                        suffix="%"
+                      />
+                    </v-list-item>
+                    <v-list-item>
+                      <v-slider
+                        v-model="reflowSettings.blockSpacing"
+                        label="Spacing"
+                        min="0"
+                        max="24"
+                        step="1"
+                        thumb-label
+                        suffix="px"
+                      />
+                    </v-list-item>
+                    <v-list-item>
+                      <v-slider
+                        v-model="reflowSettings.columnGap"
+                        label="Col Gap"
+                        min="5"
+                        max="80"
+                        thumb-label
+                        suffix="px"
+                      />
+                    </v-list-item>
+                    <v-list-item>
+                      <v-slider
+                        v-model="reflowSettings.wordGap"
+                        label="Word Gap"
+                        min="1"
+                        max="30"
+                        thumb-label
+                        suffix="px"
+                      />
+                    </v-list-item>
+                  </v-tab-item>
+
+                  <v-tab-item value="tab-display">
+                    <v-list-item>
+                      <settings-switch v-model="reflowSettings.contrastEnhancement" label="文字/背景增强"/>
+                    </v-list-item>
+                    <v-list-item>
+                      <settings-switch v-model="reflowSettings.matchBackground" label="背景跟随底色"/>
+                    </v-list-item>
+                    <v-list-item>
+                      <settings-select
+                        :items="reflowOptimizeBackgroundModes"
+                        v-model="reflowSettings.optimizeBackground"
+                        label="优化背景"
+                      />
+                    </v-list-item>
+                    <v-list-item>
+                      <settings-select
+                        :items="reflowRemoveWatermarkModes"
+                        v-model="reflowSettings.removeWatermark"
+                        label="去除水印"
+                      />
+                    </v-list-item>
+                    <v-list-item>
+                      <settings-select
+                        :items="reflowMatchBackgroundModes"
+                        v-model="reflowSettings.matchBackgroundMode"
+                        label="文字显示"
+                      />
+                    </v-list-item>
+                    <v-list-item>
+                      <settings-select
+                        :items="reflowImageQualities"
+                        v-model="reflowSettings.imageQuality"
+                        label="字块质量"
+                      />
+                    </v-list-item>
+                    <v-list-item>
+                      <settings-select
+                        :items="reflowAlgorithmModes"
+                        v-model="reflowSettings.algorithmMode"
+                        label="图片/文字算法"
+                      />
+                    </v-list-item>
+                    <v-list-item>
+                      <v-slider
+                        v-model="reflowSettings.strokeStrength"
+                        label="Stroke"
+                        min="0.1"
+                        max="3"
+                        step="0.1"
+                        thumb-label
+                      />
+                    </v-list-item>
+                    <v-list-item>
+                      <v-slider
+                        v-model="reflowSettings.threshold"
+                        label="Threshold"
+                        min="50"
+                        max="230"
+                        thumb-label
+                      />
+                    </v-list-item>
+                  </v-tab-item>
+
+                  <v-tab-item value="tab-advanced">
+                    <v-list-item>
+                      <settings-select
+                        :items="reflowProcessingModes"
+                        v-model="reflowSettings.processingMode"
+                        label="重排位置"
+                      />
+                    </v-list-item>
+                    <v-list-item>
+                      <settings-switch v-model="reflowSettings.autoCropBorder" label="Auto crop borders"/>
+                    </v-list-item>
+                    <v-list-item>
+                      <v-slider
+                        v-model="reflowSettings.marginTop"
+                        label="Top crop"
+                        min="0"
+                        max="45"
+                        thumb-label
+                        suffix="%"
+                      />
+                    </v-list-item>
+                    <v-list-item>
+                      <v-slider
+                        v-model="reflowSettings.marginRight"
+                        label="Right crop"
+                        min="0"
+                        max="45"
+                        thumb-label
+                        suffix="%"
+                      />
+                    </v-list-item>
+                    <v-list-item>
+                      <v-slider
+                        v-model="reflowSettings.marginBottom"
+                        label="Bottom crop"
+                        min="0"
+                        max="45"
+                        thumb-label
+                        suffix="%"
+                      />
+                    </v-list-item>
+                    <v-list-item>
+                      <v-slider
+                        v-model="reflowSettings.marginLeft"
+                        label="Left crop"
+                        min="0"
+                        max="45"
+                        thumb-label
+                        suffix="%"
+                      />
+                    </v-list-item>
+                  </v-tab-item>
+                </v-tabs-items>
               </template>
             </template>
 
@@ -1288,6 +1303,7 @@ export default Vue.extend({
       reflowPrefetchPages: [] as number[],
       reflowPrefetchTimer: undefined as number | undefined,
       reflowSettings: defaultReflowSettings(),
+      reflowSheetTab: 'tab-layout',
       goToPage: 1,
       settings: {
         pageLayout: PagedReaderLayout.SINGLE_PAGE,
@@ -4271,6 +4287,12 @@ export default Vue.extend({
 .reader-night-mode .reader-frame img.k2-word {
   background: var(--reflow-text-background);
   filter: var(--reflow-text-filter);
+}
+
+.reflow-tabs-items {
+  max-height: min(480px, calc(100vh - 280px));
+  max-height: min(480px, calc(100dvh - 280px));
+  overflow-y: auto;
 }
 
 </style>

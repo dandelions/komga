@@ -119,161 +119,201 @@
           </label>
           <span v-if="transferStatsLabel" class="reflow-transfer-stats">{{ transferStatsLabel }}</span>
         </div>
-        <label class="reflow-font-control reflow-wide-control">
-          <span>文字大小</span>
-          <button type="button" class="reflow-step-control" @click="adjustTextScale(-5)">-</button>
-          <input
-            type="range"
-            min="10"
-            max="140"
-            step="5"
-            :value="textScalePercent"
-            @input="setTextScale"
-          />
-          <button type="button" class="reflow-step-control" @click="adjustTextScale(5)">+</button>
-          <span class="reflow-font-value">{{ textScalePercent }}%</span>
-        </label>
-        <label class="reflow-column-control">
-          <span>排列模式</span>
-          <select :value="controlVerticalText ? 'vertical' : 'horizontal'" @change="setVerticalText">
-            <option value="horizontal">横排</option>
-            <option value="vertical">竖排</option>
-          </select>
-        </label>
-        <label v-if="controlVerticalText" class="reflow-column-control">
-          <span>方向</span>
-          <select :value="controlVerticalDirection" @change="setVerticalDirection">
-            <option value="rtl">右到左</option>
-            <option value="ltr">左到右</option>
-          </select>
-        </label>
-        <label v-if="!controlVerticalText" class="reflow-column-control">
-          <span>分栏</span>
-          <select :value="controlDisplayColumns" @change="setDisplayColumns">
-            <option value="auto">自动</option>
-            <option value="1">单栏</option>
-            <option value="2">双栏</option>
-          </select>
-        </label>
-        <label class="reflow-column-control">
-          <span>列数</span>
-          <select :value="controlColumnCount" @change="setColumnCount">
-            <option value="1">1</option>
-            <option value="2">2</option>
-            <option value="3">3</option>
-            <option value="4">4</option>
-          </select>
-        </label>
-        <label class="reflow-column-control">
-          <span>旋转</span>
-          <select :value="normalizedRotation(rotation)" @change="setRotation">
-            <option value="-90">-90°</option>
-            <option value="0">0°</option>
-            <option value="90">+90°</option>
-            <option value="180">180°</option>
-          </select>
-        </label>
-        <label class="reflow-column-control reflow-checkbox-control">
-          <span>文字/背景增强</span>
-          <input type="checkbox" :checked="controlContrastEnhancement" @change="setContrastEnhancement"/>
-        </label>
-        <label class="reflow-column-control reflow-checkbox-control">
-          <span>背景跟随底色</span>
-          <input type="checkbox" :checked="controlMatchBackground" @change="setMatchBackground"/>
-        </label>
-        <label class="reflow-column-control">
-          <span>优化背景</span>
-          <select :value="controlOptimizeBackground" @change="setOptimizeBackground">
-            <option value="none">关闭</option>
-            <option value="normalize">自适应去噪</option>
-            <option value="clean">激进纯化</option>
-          </select>
-        </label>
-        <label class="reflow-column-control">
-          <span>去除水印</span>
-          <select :value="controlRemoveWatermark" @change="setRemoveWatermark">
-            <option value="none">关闭</option>
-            <option value="light">浅色水印抑制</option>
-            <option value="color">彩色印章抑制</option>
-          </select>
-        </label>
-        <label class="reflow-column-control">
-          <span>文字显示</span>
-          <select :value="controlMatchBackgroundMode" @change="setMatchBackgroundMode">
-            <option value="original">原图</option>
-            <option value="grayscale">灰阶</option>
-            <option value="monochrome">黑白</option>
-          </select>
-        </label>
-        <label class="reflow-column-control">
-          <span>字块质量</span>
-          <select :value="controlImageQuality" @change="setImageQuality">
-            <option v-for="quality in imageQualityOptions" :key="quality" :value="quality">{{ quality }}%</option>
-          </select>
-        </label>
-        <label class="reflow-column-control">
-          <span>图片/文字算法</span>
-          <select :value="reflowAlgorithmMode()" @change="setAlgorithmMode">
-            <option value="original">原始算法</option>
-            <option value="koreader">KOReader 风格优化</option>
-          </select>
-        </label>
-        <label class="reflow-stroke-control">
-          <span>字体宽度</span>
-          <button type="button" class="reflow-step-control" @click="adjustStrokeStrength(-0.1)">-</button>
-          <input
-            type="range"
-            min="0.1"
-            max="3"
-            step="0.1"
-            :value="controlStrokeStrength"
-            @input="setStrokeStrength"
-          />
-          <button type="button" class="reflow-step-control" @click="adjustStrokeStrength(0.1)">+</button>
-          <span class="reflow-font-value">{{ controlStrokeStrength }}</span>
-        </label>
-        <label class="reflow-spacing-control">
-          <span>字体间隔</span>
-          <button type="button" class="reflow-step-control" @click="adjustBlockSpacing(-1)">-</button>
-          <input
-            type="range"
-            min="0"
-            max="24"
-            step="1"
-            :value="controlBlockSpacing"
-            @input="setBlockSpacing"
-          />
-          <button type="button" class="reflow-step-control" @click="adjustBlockSpacing(1)">+</button>
-          <span class="reflow-font-value">{{ controlBlockSpacing }}</span>
-        </label>
-        <div class="reflow-action-controls">
-          <span class="reflow-parity-label">{{ pageParityLabel }}</span>
-          <label class="reflow-skew-control">
-            <span>手动纠斜</span>
-            <button type="button" class="reflow-step-control" @click="adjustSkewCorrection(-0.5)">-</button>
-            <input
-              type="range"
-              min="-10"
-              max="10"
-              step="0.5"
-              :value="controlSkewCorrection"
-              @input="setSkewCorrection"
-            />
-            <button type="button" class="reflow-step-control" @click="adjustSkewCorrection(0.5)">+</button>
-            <span class="reflow-font-value">{{ controlSkewCorrectionLabel }}</span>
-          </label>
-          <label class="reflow-column-control reflow-checkbox-control">
-            <span>自动纠斜</span>
-            <input type="checkbox" :checked="controlAutoSkewCorrection" @change="setAutoSkewCorrection"/>
-          </label>
+        <div class="reflow-tab-bar" role="tablist">
           <button
             type="button"
-            class="reflow-control"
-            :disabled="!controlAutoSkewCorrection"
-            @click="toggleDeskewAnalysisRegionMode"
+            class="reflow-tab-btn"
+            :class="{'reflow-tab-active': reflowControlsTab === 'layout'}"
+            role="tab"
+            :aria-selected="reflowControlsTab === 'layout'"
+            @click="setReflowControlsTab('layout')"
           >
-            {{ deskewAnalysisAreaLabel }}
+            排版
           </button>
+          <button
+            type="button"
+            class="reflow-tab-btn"
+            :class="{'reflow-tab-active': reflowControlsTab === 'display'}"
+            role="tab"
+            :aria-selected="reflowControlsTab === 'display'"
+            @click="setReflowControlsTab('display')"
+          >
+            画面
+          </button>
+          <button
+            type="button"
+            class="reflow-tab-btn"
+            :class="{'reflow-tab-active': reflowControlsTab === 'deskew'}"
+            role="tab"
+            :aria-selected="reflowControlsTab === 'deskew'"
+            @click="setReflowControlsTab('deskew')"
+          >
+            纠斜
+          </button>
+        </div>
+        <div class="reflow-tab-content">
+          <div v-show="reflowControlsTab === 'layout'" class="reflow-tab-panel">
+            <label class="reflow-font-control reflow-wide-control">
+              <span>文字大小</span>
+              <button type="button" class="reflow-step-control" @click="adjustTextScale(-5)">-</button>
+              <input
+                type="range"
+                min="10"
+                max="140"
+                step="5"
+                :value="textScalePercent"
+                @input="setTextScale"
+              />
+              <button type="button" class="reflow-step-control" @click="adjustTextScale(5)">+</button>
+              <span class="reflow-font-value">{{ textScalePercent }}%</span>
+            </label>
+            <label class="reflow-column-control">
+              <span>排列模式</span>
+              <select :value="controlVerticalText ? 'vertical' : 'horizontal'" @change="setVerticalText">
+                <option value="horizontal">横排</option>
+                <option value="vertical">竖排</option>
+              </select>
+            </label>
+            <label v-if="controlVerticalText" class="reflow-column-control">
+              <span>方向</span>
+              <select :value="controlVerticalDirection" @change="setVerticalDirection">
+                <option value="rtl">右到左</option>
+                <option value="ltr">左到右</option>
+              </select>
+            </label>
+            <label v-if="!controlVerticalText" class="reflow-column-control">
+              <span>分栏</span>
+              <select :value="controlDisplayColumns" @change="setDisplayColumns">
+                <option value="auto">自动</option>
+                <option value="1">单栏</option>
+                <option value="2">双栏</option>
+              </select>
+            </label>
+            <label class="reflow-column-control">
+              <span>列数</span>
+              <select :value="controlColumnCount" @change="setColumnCount">
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+              </select>
+            </label>
+            <label class="reflow-column-control">
+              <span>旋转</span>
+              <select :value="normalizedRotation(rotation)" @change="setRotation">
+                <option value="-90">-90°</option>
+                <option value="0">0°</option>
+                <option value="90">+90°</option>
+                <option value="180">180°</option>
+              </select>
+            </label>
+            <label class="reflow-spacing-control">
+              <span>字体间隔</span>
+              <button type="button" class="reflow-step-control" @click="adjustBlockSpacing(-1)">-</button>
+              <input
+                type="range"
+                min="0"
+                max="24"
+                step="1"
+                :value="controlBlockSpacing"
+                @input="setBlockSpacing"
+              />
+              <button type="button" class="reflow-step-control" @click="adjustBlockSpacing(1)">+</button>
+              <span class="reflow-font-value">{{ controlBlockSpacing }}</span>
+            </label>
+          </div>
+          <div v-show="reflowControlsTab === 'display'" class="reflow-tab-panel">
+            <label class="reflow-column-control reflow-checkbox-control">
+              <span>文字/背景增强</span>
+              <input type="checkbox" :checked="controlContrastEnhancement" @change="setContrastEnhancement"/>
+            </label>
+            <label class="reflow-column-control reflow-checkbox-control">
+              <span>背景跟随底色</span>
+              <input type="checkbox" :checked="controlMatchBackground" @change="setMatchBackground"/>
+            </label>
+            <label class="reflow-column-control">
+              <span>优化背景</span>
+              <select :value="controlOptimizeBackground" @change="setOptimizeBackground">
+                <option value="none">关闭</option>
+                <option value="normalize">自适应去噪</option>
+                <option value="clean">激进纯化</option>
+              </select>
+            </label>
+            <label class="reflow-column-control">
+              <span>去除水印</span>
+              <select :value="controlRemoveWatermark" @change="setRemoveWatermark">
+                <option value="none">关闭</option>
+                <option value="light">浅色水印抑制</option>
+                <option value="color">彩色印章抑制</option>
+              </select>
+            </label>
+            <label class="reflow-column-control">
+              <span>文字显示</span>
+              <select :value="controlMatchBackgroundMode" @change="setMatchBackgroundMode">
+                <option value="original">原图</option>
+                <option value="grayscale">灰阶</option>
+                <option value="monochrome">黑白</option>
+              </select>
+            </label>
+            <label class="reflow-column-control">
+              <span>字块质量</span>
+              <select :value="controlImageQuality" @change="setImageQuality">
+                <option v-for="quality in imageQualityOptions" :key="quality" :value="quality">{{ quality }}%</option>
+              </select>
+            </label>
+            <label class="reflow-column-control">
+              <span>图片/文字算法</span>
+              <select :value="reflowAlgorithmMode()" @change="setAlgorithmMode">
+                <option value="original">原始算法</option>
+                <option value="koreader">KOReader 风格优化</option>
+              </select>
+            </label>
+            <label class="reflow-stroke-control">
+              <span>字体宽度</span>
+              <button type="button" class="reflow-step-control" @click="adjustStrokeStrength(-0.1)">-</button>
+              <input
+                type="range"
+                min="0.1"
+                max="3"
+                step="0.1"
+                :value="controlStrokeStrength"
+                @input="setStrokeStrength"
+              />
+              <button type="button" class="reflow-step-control" @click="adjustStrokeStrength(0.1)">+</button>
+              <span class="reflow-font-value">{{ controlStrokeStrength }}</span>
+            </label>
+          </div>
+          <div v-show="reflowControlsTab === 'deskew'" class="reflow-tab-panel">
+            <div class="reflow-action-controls">
+              <span class="reflow-parity-label">{{ pageParityLabel }}</span>
+              <label class="reflow-skew-control">
+                <span>手动纠斜</span>
+                <button type="button" class="reflow-step-control" @click="adjustSkewCorrection(-0.5)">-</button>
+                <input
+                  type="range"
+                  min="-10"
+                  max="10"
+                  step="0.5"
+                  :value="controlSkewCorrection"
+                  @input="setSkewCorrection"
+                />
+                <button type="button" class="reflow-step-control" @click="adjustSkewCorrection(0.5)">+</button>
+                <span class="reflow-font-value">{{ controlSkewCorrectionLabel }}</span>
+              </label>
+              <label class="reflow-column-control reflow-checkbox-control">
+                <span>自动纠斜</span>
+                <input type="checkbox" :checked="controlAutoSkewCorrection" @change="setAutoSkewCorrection"/>
+              </label>
+              <button
+                type="button"
+                class="reflow-control"
+                :disabled="!controlAutoSkewCorrection"
+                @click="toggleDeskewAnalysisRegionMode"
+              >
+                {{ deskewAnalysisAreaLabel }}
+              </button>
+            </div>
+          </div>
         </div>
       </template>
     </div>
@@ -990,6 +1030,7 @@ export default Vue.extend({
       reflowRunning: false,
       reflowPending: false,
       controlsCollapsed: true,
+      reflowControlsTab: 'layout' as 'layout' | 'display' | 'deskew',
       controlsPosition: {x: 0, y: 0},
       controlsDragStart: {x: 0, y: 0},
       controlsDragOrigin: {x: 0, y: 0},
@@ -1636,6 +1677,10 @@ export default Vue.extend({
       if (!this.controlsCollapsed) return
       this.controlsCollapsed = false
     },
+    setReflowControlsTab(tab: 'layout' | 'display' | 'deskew') {
+      this.reflowControlsTab = tab
+      this.$nextTick(this.constrainControlsPosition)
+    },
     collapseControls(): boolean {
       if (this.controlsCollapsed || this.cropMode) return false
       this.updateControlsSide()
@@ -1713,7 +1758,7 @@ export default Vue.extend({
       const viewport = this.controlsViewportSize()
       const controls = this.$refs.reflowControls as HTMLElement | undefined
       const fallbackWidth = this.controlsCollapsed ? 22 : Math.min(300, Math.max(22, viewport.width - 24))
-      const fallbackHeight = this.controlsCollapsed ? 52 : Math.min(520, Math.max(52, viewport.height - 24))
+      const fallbackHeight = this.controlsCollapsed ? 52 : Math.min(360, Math.max(52, viewport.height - 24))
       const width = controls?.offsetWidth || fallbackWidth
       const height = controls?.offsetHeight || fallbackHeight
       const minY = Math.max(0, Math.round(this.controlsTopOffset))
@@ -7860,6 +7905,8 @@ export default Vue.extend({
   width: min(300px, calc(100vw - 24px));
   width: min(300px, calc(100dvw - 24px));
   min-height: 0;
+  max-height: calc(100vh - 24px);
+  max-height: calc(100dvh - 24px);
   padding: 8px;
   box-sizing: border-box;
   background: rgba(248, 250, 252, 0.42);
@@ -7945,8 +7992,82 @@ export default Vue.extend({
   cursor: grabbing;
 }
 
-.reflow-controls:not(.reflow-controls-collapsed) > label,
-.reflow-controls:not(.reflow-controls-collapsed) > .reflow-action-controls {
+.reflow-controls:not(.reflow-controls-collapsed) label,
+.reflow-controls:not(.reflow-controls-collapsed) .reflow-action-controls {
+.reflow-tab-bar {
+  display: flex;
+  width: 100%;
+  flex: 0 0 auto;
+  gap: 4px;
+  padding: 3px;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 6px;
+  box-sizing: border-box;
+}
+
+.reflow-tab-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 28px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #555555;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 28px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.reflow-tab-btn:hover {
+  background: rgba(255, 255, 255, 0.5);
+  color: #111111;
+}
+
+.reflow-tab-btn.reflow-tab-active {
+  background: #ffffff;
+  color: #1976d2;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  font-weight: 700;
+}
+
+.reflow-tab-content {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
+  gap: 6px;
+  max-height: calc(100vh - 160px);
+  max-height: calc(100dvh - 160px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 2px;
+}
+
+.reflow-tab-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.reflow-controls::-webkit-scrollbar,
+.reflow-tab-content::-webkit-scrollbar {
+  width: 4px;
+}
+
+.reflow-controls::-webkit-scrollbar-thumb,
+.reflow-tab-content::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+
   width: 100%;
   min-width: 0;
   flex: 0 0 auto;
@@ -8231,6 +8352,30 @@ export default Vue.extend({
 .reflowed-page-dark .reflow-controls {
   background: rgba(30, 30, 30, 0.42);
   border-bottom-color: rgba(255, 255, 255, 0.14);
+}
+
+.reflowed-page-dark .reflow-tab-bar {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.reflowed-page-dark .reflow-tab-btn {
+  color: #bbbbbb;
+}
+
+.reflowed-page-dark .reflow-tab-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+.reflowed-page-dark .reflow-tab-btn.reflow-tab-active {
+  background: #2a2d34;
+  color: #90caf9;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+
+.reflowed-page-dark .reflow-controls::-webkit-scrollbar-thumb,
+.reflowed-page-dark .reflow-tab-content::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
 }
 
 .reflowed-page-dark .reflow-controls-collapsed {

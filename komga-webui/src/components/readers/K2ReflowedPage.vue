@@ -27,135 +27,178 @@
         <v-icon small>{{ controlsSide === 'left' ? 'mdi-chevron-right' : 'mdi-chevron-left' }}</v-icon>
       </button>
       <template v-else>
-        <button
-          type="button"
-          class="k2-action k2-drag-handle"
-          title="拖动重排工具栏"
-          aria-label="拖动重排工具栏"
-          @pointerdown.stop="startControlsDrag"
-        >
-          <v-icon small>mdi-drag</v-icon>
-        </button>
-        <label class="k2-control k2-wide-control">
-          <span>Text</span>
-          <button type="button" @click="adjustTextScale(-5)">-</button>
-          <input type="range" min="20" max="160" step="5" :value="textScalePercent" @input="setTextScale"/>
-          <button type="button" @click="adjustTextScale(5)">+</button>
-          <span class="k2-value">{{ textScalePercent }}%</span>
-        </label>
-        <label class="k2-control k2-compact">
-          <span>Columns</span>
-          <select :value="maxColumns" @change="setMaxColumns">
-            <option value="1">1</option>
-            <option value="2">2</option>
-            <option value="3">3</option>
-            <option value="4">4</option>
-          </select>
-        </label>
-        <label class="k2-control k2-compact">
-          <span>旋转</span>
-          <select :value="normalizedRotation(rotation)" @change="setRotation">
-            <option value="-90">-90°</option>
-            <option value="0">0°</option>
-            <option value="90">+90°</option>
-            <option value="180">180°</option>
-          </select>
-        </label>
-        <label class="k2-control k2-compact">
-          <span>Threshold</span>
-          <input type="range" min="50" max="230" step="1" :value="threshold" @input="setThreshold"/>
-          <span class="k2-value">{{ threshold }}</span>
-        </label>
-        <label class="k2-control k2-compact">
-          <span>Stroke</span>
-          <button type="button" @click="adjustStrokeStrength(-0.1)">-</button>
-          <input type="range" min="0" max="3" step="0.1" :value="strokeStrength" @input="setStrokeStrength"/>
-          <button type="button" @click="adjustStrokeStrength(0.1)">+</button>
-          <span class="k2-value">{{ strokeStrength }}</span>
-        </label>
-        <label class="k2-control k2-compact k2-checkbox-control">
-          <span>增强</span>
-          <input type="checkbox" :checked="contrastEnhancement" @change="setContrastEnhancement"/>
-        </label>
-        <label class="k2-control k2-compact k2-checkbox-control">
-          <span>背景</span>
-          <input type="checkbox" :checked="matchBackground" @change="setMatchBackground"/>
-        </label>
-        <label class="k2-control k2-compact">
-          <span>文字显示</span>
-          <select :value="matchBackgroundMode" @change="setMatchBackgroundMode">
-            <option value="original">原图</option>
-            <option value="grayscale">灰阶</option>
-            <option value="monochrome">黑白</option>
-          </select>
-        </label>
-        <label class="k2-control k2-compact">
-          <span>优化背景</span>
-          <select :value="optimizeBackground" @change="setOptimizeBackground">
-            <option value="none">关闭</option>
-            <option value="normalize">自适应去噪</option>
-            <option value="clean">激进纯化</option>
-          </select>
-        </label>
-        <label class="k2-control k2-compact">
-          <span>去除水印</span>
-          <select :value="removeWatermark" @change="setRemoveWatermark">
-            <option value="none">关闭</option>
-            <option value="light">浅色抑制</option>
-            <option value="color">彩色抑制</option>
-          </select>
-        </label>
-        <label class="k2-control k2-compact">
-          <span>Word gap</span>
-          <input type="number" min="1" max="30" step="1" :value="wordGap" @input="setWordGap"/>
-        </label>
-        <label class="k2-control k2-compact">
-          <span>Padding</span>
-          <input type="number" min="0" max="48" step="1" :value="outputPadding" @input="setOutputPadding"/>
-        </label>
-        <div class="k2-action-controls">
-          <button type="button" class="k2-action" @click="toggleCropMode">{{ selectAreaLabel }}</button>
-          <button type="button" class="k2-action" :disabled="!cropRoi && !cropMode" @click="resetCrop">
-            Reset {{ pageParityLabel }} area
+        <div class="k2-top-controls">
+          <button
+            type="button"
+            class="k2-action k2-drag-handle"
+            title="拖动重排工具栏"
+            aria-label="拖动重排工具栏"
+            @pointerdown.stop="startControlsDrag"
+          >
+            <v-icon small>mdi-drag</v-icon>
           </button>
-          <button type="button" class="k2-action" @click="exitK2Reflow">Exit K2</button>
+          <button type="button" class="k2-action k2-compact-action" title="返回" aria-label="返回" @click="('back-to-book')">
+            <v-icon small>mdi-arrow-left</v-icon>
+          </button>
+          <button type="button" class="k2-action k2-collapse-action" title="隐藏重排设置" aria-label="隐藏重排设置" @click="collapseControls">
+            <v-icon small>mdi-chevron-double-up</v-icon>
+          </button>
+          <button type="button" class="k2-action" title="目录" aria-label="目录" @click="('show-pdf-toc')">
+            <v-icon small>mdi-menu</v-icon>
+          </button>
+          <button
+            type="button"
+            class="k2-action"
+            :title="nightDisplay ? '白天模式' : '黑夜模式'"
+            :aria-label="nightDisplay ? '白天模式' : '黑夜模式'"
+            @click="('toggle-night-display')"
+          >
+            <v-icon small>{{ nightDisplay ? 'mdi-white-balance-sunny' : 'mdi-weather-night' }}</v-icon>
+          </button>
+          <button
+            type="button"
+            class="k2-action"
+            :class="{'k2-magnifier-active': magnifierActive}"
+            :title="magnifierActive ? '关闭局部放大镜' : '选择放大镜直径'"
+            :aria-label="magnifierActive ? '关闭局部放大镜' : '选择放大镜直径'"
+            @click="handleMagnifierClick"
+            @pointerdown.stop="startMagnifierPress"
+            @pointerup.stop="finishMagnifierPress"
+            @pointercancel.stop="cancelMagnifierPress"
+            @pointerleave.stop="cancelMagnifierPress"
+            @contextmenu.prevent
+          >
+            <v-icon small>{{ magnifierActive ? 'mdi-magnify-close' : 'mdi-magnify-plus-outline' }}</v-icon>
+          </button>
+          <button type="button" class="k2-action k2-apply-action" @click="applyK2Reflow">
+            <v-icon small>mdi-refresh</v-icon>
+            <span>重排</span>
+          </button>
         </div>
-        <button type="button" class="k2-action" @click="$emit('back-to-book')">
-          Back to details
-        </button>
-        <button type="button" class="k2-action" @click="$emit('show-pdf-toc')">
-          {{ $t('browse_book.pdf_toc') }}
-        </button>
-        <button
-          type="button"
-          class="k2-action"
-          :title="nightDisplay ? '白天模式' : '黑夜模式'"
-          :aria-label="nightDisplay ? '白天模式' : '黑夜模式'"
-          @click="$emit('toggle-night-display')"
-        >
-          <v-icon small>{{ nightDisplay ? 'mdi-white-balance-sunny' : 'mdi-weather-night' }}</v-icon>
-        </button>
-        <button
-          type="button"
-          class="k2-action"
-          :class="{'k2-magnifier-active': magnifierActive}"
-          :title="magnifierActive ? '关闭局部放大镜' : '选择放大镜直径'"
-          :aria-label="magnifierActive ? '关闭局部放大镜' : '选择放大镜直径'"
-          @click="handleMagnifierClick"
-          @pointerdown.stop="startMagnifierPress"
-          @pointerup.stop="finishMagnifierPress"
-          @pointercancel.stop="cancelMagnifierPress"
-          @pointerleave.stop="cancelMagnifierPress"
-          @contextmenu.prevent
-        >
-          <v-icon small>{{ magnifierActive ? 'mdi-magnify-close' : 'mdi-magnify-plus-outline' }}</v-icon>
-        </button>
-        <button type="button" class="k2-action k2-apply-action" @click="applyK2Reflow">
-          重排
-        </button>
-        <button type="button" class="k2-action k2-collapse-action" @click="collapseControls">
-          Hide controls
-        </button>
+        <div class="k2-tab-bar" role="tablist">
+          <button
+            type="button"
+            class="k2-tab-btn"
+            :class="{'k2-tab-active': k2ControlsTab === 'layout'}"
+            role="tab"
+            :aria-selected="k2ControlsTab === 'layout'"
+            @click="setK2ControlsTab('layout')"
+          >
+            排版
+          </button>
+          <button
+            type="button"
+            class="k2-tab-btn"
+            :class="{'k2-tab-active': k2ControlsTab === 'display'}"
+            role="tab"
+            :aria-selected="k2ControlsTab === 'display'"
+            @click="setK2ControlsTab('display')"
+          >
+            画面
+          </button>
+          <button
+            type="button"
+            class="k2-tab-btn"
+            :class="{'k2-tab-active': k2ControlsTab === 'crop'}"
+            role="tab"
+            :aria-selected="k2ControlsTab === 'crop'"
+            @click="setK2ControlsTab('crop')"
+          >
+            裁切
+          </button>
+        </div>
+        <div class="k2-tab-content">
+          <div v-show="k2ControlsTab === 'layout'" class="k2-tab-panel">
+            <label class="k2-control k2-wide-control">
+              <span>Text</span>
+              <button type="button" @click="adjustTextScale(-5)">-</button>
+              <input type="range" min="20" max="160" step="5" :value="textScalePercent" @input="setTextScale"/>
+              <button type="button" @click="adjustTextScale(5)">+</button>
+              <span class="k2-value">{{ textScalePercent }}%</span>
+            </label>
+            <label class="k2-control k2-compact">
+              <span>Columns</span>
+              <select :value="maxColumns" @change="setMaxColumns">
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+              </select>
+            </label>
+            <label class="k2-control k2-compact">
+              <span>旋转</span>
+              <select :value="normalizedRotation(rotation)" @change="setRotation">
+                <option value="-90">-90°</option>
+                <option value="0">0°</option>
+                <option value="90">+90°</option>
+                <option value="180">180°</option>
+              </select>
+            </label>
+            <label class="k2-control k2-compact">
+              <span>Word gap</span>
+              <input type="number" min="1" max="30" step="1" :value="wordGap" @input="setWordGap"/>
+            </label>
+            <label class="k2-control k2-compact">
+              <span>Padding</span>
+              <input type="number" min="0" max="48" step="1" :value="outputPadding" @input="setOutputPadding"/>
+            </label>
+          </div>
+          <div v-show="k2ControlsTab === 'display'" class="k2-tab-panel">
+            <label class="k2-control k2-compact k2-checkbox-control">
+              <span>增强</span>
+              <input type="checkbox" :checked="contrastEnhancement" @change="setContrastEnhancement"/>
+            </label>
+            <label class="k2-control k2-compact k2-checkbox-control">
+              <span>背景</span>
+              <input type="checkbox" :checked="matchBackground" @change="setMatchBackground"/>
+            </label>
+            <label class="k2-control k2-compact">
+              <span>文字显示</span>
+              <select :value="matchBackgroundMode" @change="setMatchBackgroundMode">
+                <option value="original">原图</option>
+                <option value="grayscale">灰阶</option>
+                <option value="monochrome">黑白</option>
+              </select>
+            </label>
+            <label class="k2-control k2-compact">
+              <span>优化背景</span>
+              <select :value="optimizeBackground" @change="setOptimizeBackground">
+                <option value="none">关闭</option>
+                <option value="normalize">自适应去噪</option>
+                <option value="clean">激进纯化</option>
+              </select>
+            </label>
+            <label class="k2-control k2-compact">
+              <span>去除水印</span>
+              <select :value="removeWatermark" @change="setRemoveWatermark">
+                <option value="none">关闭</option>
+                <option value="light">浅色抑制</option>
+                <option value="color">彩色抑制</option>
+              </select>
+            </label>
+            <label class="k2-control k2-compact">
+              <span>Threshold</span>
+              <input type="range" min="50" max="230" step="1" :value="threshold" @input="setThreshold"/>
+              <span class="k2-value">{{ threshold }}</span>
+            </label>
+            <label class="k2-control k2-compact">
+              <span>Stroke</span>
+              <button type="button" @click="adjustStrokeStrength(-0.1)">-</button>
+              <input type="range" min="0" max="3" step="0.1" :value="strokeStrength" @input="setStrokeStrength"/>
+              <button type="button" @click="adjustStrokeStrength(0.1)">+</button>
+              <span class="k2-value">{{ strokeStrength }}</span>
+            </label>
+          </div>
+          <div v-show="k2ControlsTab === 'crop'" class="k2-tab-panel">
+            <div class="k2-action-controls">
+              <button type="button" class="k2-action" @click="toggleCropMode">{{ selectAreaLabel }}</button>
+              <button type="button" class="k2-action" :disabled="!cropRoi && !cropMode" @click="resetCrop">
+                Reset {{ pageParityLabel }} area
+              </button>
+              <button type="button" class="k2-action" @click="exitK2Reflow">Exit K2</button>
+            </div>
+          </div>
+        </div>
       </template>
     </div>
 
@@ -367,6 +410,7 @@ export default Vue.extend({
     objectUrl: '',
     objectUrlSource: '',
     controlsCollapsed: true,
+    k2ControlsTab: 'layout' as 'layout' | 'display' | 'crop',
     controlsPosition: {x: 0, y: 0},
     controlsDragStart: {x: 0, y: 0},
     controlsDragOrigin: {x: 0, y: 0},
@@ -573,6 +617,10 @@ export default Vue.extend({
       if (!this.controlsCollapsed) return
       this.controlsCollapsed = false
     },
+    setK2ControlsTab(tab: 'layout' | 'display' | 'crop') {
+      this.k2ControlsTab = tab
+      this.$nextTick(this.constrainControlsPosition)
+    },
     collapseControls(): boolean {
       if (this.controlsCollapsed || this.cropMode) return false
       this.updateControlsSide()
@@ -651,7 +699,7 @@ export default Vue.extend({
       const viewport = this.controlsViewportSize()
       const controls = this.$refs.k2Controls as HTMLElement | undefined
       const fallbackWidth = this.controlsCollapsed ? 22 : Math.min(300, Math.max(22, viewport.width - 24))
-      const fallbackHeight = this.controlsCollapsed ? 52 : Math.min(520, Math.max(52, viewport.height - 24))
+      const fallbackHeight = this.controlsCollapsed ? 52 : Math.min(360, Math.max(52, viewport.height - 24))
       const width = controls?.offsetWidth || fallbackWidth
       const height = controls?.offsetHeight || fallbackHeight
       const minY = Math.max(0, Math.round(this.controlsTopOffset))
@@ -2812,6 +2860,8 @@ export default Vue.extend({
   width: min(300px, calc(100vw - 24px));
   width: min(300px, calc(100dvw - 24px));
   min-height: 0;
+  max-height: calc(100vh - 24px);
+  max-height: calc(100dvh - 24px);
   padding: 8px;
   box-sizing: border-box;
   background: rgba(250, 250, 250, 0.42);
@@ -2964,6 +3014,122 @@ export default Vue.extend({
   background: rgba(30, 30, 30, 0.42);
   border-bottom-color: rgba(255, 255, 255, 0.14);
 }
+
+.k2-reflowed-page-dark .k2-tab-bar {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.k2-reflowed-page-dark .k2-tab-btn {
+  color: #bbbbbb;
+}
+
+.k2-reflowed-page-dark .k2-tab-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+.k2-reflowed-page-dark .k2-tab-btn.k2-tab-active {
+  background: #2a2d34;
+  color: #90caf9;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+
+.k2-reflowed-page-dark .k2-controls::-webkit-scrollbar-thumb,
+.k2-reflowed-page-dark .k2-tab-content::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+}
+.k2-top-controls {
+  flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  overflow: visible;
+}
+
+.k2-compact-action {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+}
+
+.k2-tab-bar {
+  display: flex;
+  width: 100%;
+  flex: 0 0 auto;
+  gap: 4px;
+  padding: 3px;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 6px;
+  box-sizing: border-box;
+}
+
+.k2-tab-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 28px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #555555;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 28px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.k2-tab-btn:hover {
+  background: rgba(255, 255, 255, 0.5);
+  color: #111111;
+}
+
+.k2-tab-btn.k2-tab-active {
+  background: #ffffff;
+  color: #1976d2;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  font-weight: 700;
+}
+
+.k2-tab-content {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
+  gap: 6px;
+  max-height: calc(100vh - 160px);
+  max-height: calc(100dvh - 160px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 2px;
+}
+
+.k2-tab-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.k2-controls::-webkit-scrollbar,
+.k2-tab-content::-webkit-scrollbar {
+  width: 4px;
+}
+
+.k2-controls::-webkit-scrollbar-thumb,
+.k2-tab-content::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+
 
 .k2-reflowed-page-dark .k2-controls-collapsed {
   background: transparent;
