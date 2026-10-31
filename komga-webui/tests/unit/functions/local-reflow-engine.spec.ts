@@ -104,6 +104,96 @@ describe('local-reflow-engine', () => {
       expect(slicePixels[centerIdx + 1]).toBe(0)
       expect(slicePixels[centerIdx + 2]).toBe(0)
     })
+
+    test('repairs an enclosed inverted region with offsetY padding', () => {
+      const sliceWidth = 20
+      const sliceHeight = 25
+      const offsetY = 5
+      const slicePixels = new Uint8ClampedArray(sliceWidth * sliceHeight * 4)
+      slicePixels.fill(255)
+
+      const sourceWidth = 20
+      const sourceHeight = 20
+      const sourcePixels = new Uint8ClampedArray(sourceWidth * sourceHeight * 4)
+      sourcePixels.fill(255)
+
+      for (let y = 7 + offsetY; y <= 13 + offsetY; y++) {
+        for (let x = 7; x <= 13; x++) {
+          if (x === 7 || x === 13 || y === 7 + offsetY || y === 13 + offsetY) {
+            const idx = (y * sliceWidth + x) * 4
+            slicePixels[idx] = 0
+            slicePixels[idx + 1] = 0
+            slicePixels[idx + 2] = 0
+          }
+        }
+      }
+
+      for (let y = 8; y <= 12; y++) {
+        for (let x = 8; x <= 12; x++) {
+          const idx = (y * sourceWidth + x) * 4
+          sourcePixels[idx] = 0
+          sourcePixels[idx + 1] = 0
+          sourcePixels[idx + 2] = 0
+        }
+      }
+
+      repairInvertedGlyphComponents(
+        slicePixels,
+        sliceWidth,
+        sliceHeight,
+        sourcePixels,
+        sourceWidth,
+        {x: 0, y: 0, w: sourceWidth, h: sourceHeight},
+        255,
+        185,
+        false,
+        0,
+        offsetY,
+      )
+
+      const centerIdx = ((10 + offsetY) * sliceWidth + 10) * 4
+      expect(slicePixels[centerIdx]).toBe(0)
+    })
+
+    test('does not fill white stroke inside dark inverted region with black', () => {
+      const width = 20
+      const height = 20
+      const slicePixels = new Uint8ClampedArray(width * height * 4)
+      const sourcePixels = new Uint8ClampedArray(width * height * 4)
+
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const idx = (y * width + x) * 4
+          const isWhiteStroke = x >= 8 && x <= 12 && y >= 6 && y <= 14
+          const val = isWhiteStroke ? 255 : 0
+          slicePixels[idx] = val
+          slicePixels[idx + 1] = val
+          slicePixels[idx + 2] = val
+          slicePixels[idx + 3] = 255
+          sourcePixels[idx] = val
+          sourcePixels[idx + 1] = val
+          sourcePixels[idx + 2] = val
+          sourcePixels[idx + 3] = 255
+        }
+      }
+
+      repairInvertedGlyphComponents(
+        slicePixels,
+        width,
+        height,
+        sourcePixels,
+        width,
+        {x: 0, y: 0, w: width, h: height},
+        255,
+        185,
+        false,
+        0,
+        0,
+      )
+
+      const centerIdx = (10 * width + 10) * 4
+      expect(slicePixels[centerIdx]).toBe(255)
+    })
   })
 
   describe('reflowPageFromPixels', () => {

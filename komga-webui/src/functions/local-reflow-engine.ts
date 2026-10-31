@@ -301,6 +301,8 @@ export function repairInvertedGlyphComponents(
   sourceBgLuma: number,
   threshold: number,
   darkDisplay: boolean,
+  offsetX: number = 0,
+  offsetY: number = 0,
 ) {
   if (sliceWidth < 3 || sliceHeight < 3) return
   const fgThreshold = Math.min(245, clamp(threshold, 50, 230) + 18)
@@ -344,10 +346,12 @@ export function repairInvertedGlyphComponents(
       component[compCount++] = idx
       const x = idx % sliceWidth
       const y = Math.floor(idx / sliceWidth)
+      const sourceX = x - offsetX
+      const sourceY = y - offsetY
 
-      if (x >= 0 && x < sourceRoi.w && y >= 0 && y < sourceRoi.h) {
+      if (sourceX >= 0 && sourceX < sourceRoi.w && sourceY >= 0 && sourceY < sourceRoi.h) {
         sourcePixelsCount++
-        const srcIdx = ((sourceRoi.y + y) * sourceStride + (sourceRoi.x + x)) * 4
+        const srcIdx = ((sourceRoi.y + sourceY) * sourceStride + (sourceRoi.x + sourceX)) * 4
         const sLuma = pixelLuma(sourcePixels[srcIdx], sourcePixels[srcIdx + 1], sourcePixels[srcIdx + 2])
         const sDelta = sourceDark ? sLuma - sourceBgLuma : sourceBgLuma - sLuma
         if (sDelta > sourceInkDelta) sourceInkPixelsCount++
@@ -1123,21 +1127,15 @@ export function reflowPageFromPixels(
           }
         }
 
-        // Apply server-identical inverted glyph repair
-        repairInvertedGlyphComponents(
-          sliceData,
-          sliceW,
-          sliceH,
-          workPixels,
-          workW,
-          adjusted,
-          pageBgLuma,
-          threshold,
-          options.darkDisplay,
-        )
-
         // Color processing: dark display, contrast enhancement, match background
-        if (options.darkDisplay || options.contrastEnhancement || options.matchBackground || options.optimizeBackground) {
+        const normalizeColors =
+          options.darkDisplay ||
+          options.contrastEnhancement ||
+          options.matchBackground ||
+          options.matchBackgroundMode !== 'original' ||
+          (options.optimizeBackground && options.optimizeBackground !== 'none')
+
+        if (normalizeColors) {
           const bgVal = options.darkDisplay ? 0 : 255
           const fgVal = options.darkDisplay ? 255 : 0
           const inkThresh = adaptiveInkThreshold(threshold, pageBgLuma)
@@ -1163,14 +1161,34 @@ export function reflowPageFromPixels(
                 sliceData[pIdx] = output
                 sliceData[pIdx + 1] = output
                 sliceData[pIdx + 2] = output
+              } else if (options.darkDisplay) {
+                const inverted = 255 - luma
+                sliceData[pIdx] = inverted
+                sliceData[pIdx + 1] = inverted
+                sliceData[pIdx + 2] = inverted
               }
-            } else if (options.matchBackground || options.contrastEnhancement || (options.optimizeBackground && options.optimizeBackground !== 'none')) {
+            } else {
               sliceData[pIdx] = bgVal
               sliceData[pIdx + 1] = bgVal
               sliceData[pIdx + 2] = bgVal
             }
           }
         }
+
+        // Apply server-identical inverted glyph repair AFTER color normalization
+        repairInvertedGlyphComponents(
+          sliceData,
+          sliceW,
+          sliceH,
+          workPixels,
+          workW,
+          adjusted,
+          pageBgLuma,
+          threshold,
+          options.darkDisplay,
+          0,
+          0,
+        )
 
         const dataUrl = rgbaToBmpDataUrl(sliceData, sliceW, sliceH, sliceW, 0, 0)
         items.push({

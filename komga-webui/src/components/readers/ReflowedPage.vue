@@ -6359,6 +6359,8 @@ export default Vue.extend({
             edgeBackgroundLuma,
             this.clampNumber(this.options.threshold, 50, 230, THRESHOLD),
             this.darkDisplay,
+            0,
+            offsetY,
           )
           sliceContext.putImageData(sliceImgData, 0, 0)
           this.clearDirtyBlockEdges(
@@ -6838,6 +6840,21 @@ export default Vue.extend({
           )
           this.boldenSourceCanvas(sliceContext, renderBlock.outputWidth, renderBlock.outputHeight)
           this.finishWordSlice(sliceContext, renderBlock.outputWidth, renderBlock.outputHeight)
+          const sliceImgData = sliceContext.getImageData(0, 0, renderBlock.outputWidth, renderBlock.outputHeight)
+          repairInvertedGlyphComponents(
+            sliceImgData.data,
+            renderBlock.outputWidth,
+            renderBlock.outputHeight,
+            sourceImageData.data,
+            sourceCanvas.width,
+            source,
+            edgeBackgroundLuma,
+            this.clampNumber(this.options.threshold, 50, 230, THRESHOLD),
+            this.darkDisplay,
+            offsetX,
+            offsetY,
+          )
+          sliceContext.putImageData(sliceImgData, 0, 0)
           this.clearDirtyBlockEdges(
             sliceContext,
             renderBlock.outputWidth,

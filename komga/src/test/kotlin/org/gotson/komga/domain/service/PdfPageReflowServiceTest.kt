@@ -345,6 +345,38 @@ class PdfPageReflowServiceTest {
   }
 
   @Test
+  fun `given inverted white stroke on dark region when copying slice then white stroke is preserved`() {
+    val page = BufferedImage(15, 15, BufferedImage.TYPE_INT_ARGB)
+    val pageGraphics = page.createGraphics()
+    pageGraphics.color = Color.WHITE
+    pageGraphics.fillRect(0, 0, 15, 15)
+    pageGraphics.color = Color.BLACK
+    pageGraphics.fillRect(2, 2, 11, 11)
+    pageGraphics.color = Color.WHITE
+    pageGraphics.fillRect(6, 4, 3, 7)
+    pageGraphics.dispose()
+
+    val copyMethod = PdfPageReflowService::class.java.declaredMethods.first { it.name == "copyPaddedSlice" }
+    val roiType = copyMethod.parameterTypes[1]
+    val roi = roiType.getDeclaredConstructor(Int::class.java, Int::class.java, Int::class.java, Int::class.java).apply { isAccessible = true }.newInstance(2, 2, 11, 11)
+    copyMethod.isAccessible = true
+    val output =
+      copyMethod.invoke(
+        pdfPageReflowService,
+        page,
+        roi,
+        11,
+        11,
+        0,
+        0,
+        defaultOptions().copy(strokeStrength = 0.0, contrastEnhancement = true, matchBackground = true, matchBackgroundMode = "monochrome", darkDisplay = false),
+      ) as BufferedImage
+
+    val centerLuma = 0.299 * (output.getRGB(5, 5) ushr 16 and 0xff) + 0.587 * (output.getRGB(5, 5) ushr 8 and 0xff) + 0.114 * (output.getRGB(5, 5) and 0xff)
+    assertThat(centerLuma).isGreaterThan(200.0)
+  }
+
+  @Test
   fun `given stronger stroke when reflowing page then returned word image is bolder`() {
     val pageBytes = horizontalShortGlyphPage()
     val book = makeBook("book")

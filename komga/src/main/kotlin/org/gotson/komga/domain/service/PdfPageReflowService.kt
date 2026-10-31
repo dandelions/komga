@@ -4132,8 +4132,9 @@ class PdfPageReflowService(
         null,
       )
       graphics.dispose()
+      val backgroundLuma = estimateBackgroundLuma(image, Roi(0, 0, image.width, image.height))
       applyStrokeStrength(output, options, sourceExteriorPaperMask(image, source, outputWidth, outputHeight, offsetX, offsetY, options))
-      repairInvertedGlyphComponents(output, image, source, offsetX, offsetY, estimateBackgroundLuma(image, source), options)
+      repairInvertedGlyphComponents(output, image, source, offsetX, offsetY, backgroundLuma, options)
       return output
     }
 
@@ -4170,7 +4171,7 @@ class PdfPageReflowService(
     }
 
     applyStrokeStrength(output, options, sourceExteriorPaperMask(image, source, outputWidth, outputHeight, offsetX, offsetY, options))
-    repairInvertedGlyphComponents(output, image, source, offsetX, offsetY, estimateBackgroundLuma(image, source), options)
+    repairInvertedGlyphComponents(output, image, source, offsetX, offsetY, backgroundLuma, options)
     return output
   }
 
