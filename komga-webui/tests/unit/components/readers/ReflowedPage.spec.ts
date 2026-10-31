@@ -663,5 +663,82 @@ describe('ReflowedPage display columns layout', () => {
     expect(fallback.h).toBe(300)
     expect(sliceContext.drawImage).toHaveBeenCalled()
   })
+
+  test('adaptiveInkThreshold and buildDetectionInkMap support dark background', () => {
+    const pageInstance: any = {
+      clampNumber: methods.clampNumber,
+      adaptiveInkThreshold: methods.adaptiveInkThreshold,
+      estimateSliceBackgroundLuma: () => 15, // dark background
+      detectionStrokeRadius: () => 0,
+      reflowAlgorithmMode: () => 'original',
+    }
+
+    const thresh = pageInstance.adaptiveInkThreshold(185, 15)
+    expect(thresh).toBeGreaterThan(15)
+
+    // Create 10x10 dark image with white text in the center
+    const width = 10
+    const height = 10
+    const pixels = new Uint8ClampedArray(width * height * 4)
+    // fill dark background (luma ~15)
+    for (let i = 0; i < width * height; i++) {
+      pixels[i * 4] = 15
+      pixels[i * 4 + 1] = 15
+      pixels[i * 4 + 2] = 15
+      pixels[i * 4 + 3] = 255
+    }
+    // white pixel at (5, 5)
+    const whiteIdx = (5 * width + 5) * 4
+    pixels[whiteIdx] = 240
+    pixels[whiteIdx + 1] = 240
+    pixels[whiteIdx + 2] = 240
+
+    const inkMap = methods.buildDetectionInkMap.call(pageInstance, pixels, width, height, 185)
+    // Dark background pixel should NOT be ink
+    expect(inkMap[0]).toBe(0)
+    // White pixel should be ink
+    expect(inkMap[5 * width + 5]).toBe(1)
+  })
+
+  test('imageBlockStyle renders inline image as inline-block', () => {
+    const pageInstance: any = {
+      imageBlockDisplayDimensions: methods.imageBlockDisplayDimensions,
+      scaledImageDimensions: methods.scaledImageDimensions,
+      imageBlockStyle: methods.imageBlockStyle,
+      pageContentWidth: () => 800,
+      targetWidth: 800,
+      pageContentHeight: () => 1000,
+      textScale: () => 1,
+    }
+
+    const blockImg: any = {
+      type: 'image',
+      src: 'mock',
+      w: 400,
+      h: 300,
+      width: 400,
+      height: 300,
+      sourceWidth: 400,
+      sourceHeight: 300,
+      isInline: false,
+    }
+    const blockStyle = pageInstance.imageBlockStyle(blockImg)
+    expect(blockStyle.display).toBeUndefined()
+
+    const inlineImg: any = {
+      type: 'image',
+      src: 'mock',
+      w: 50,
+      h: 40,
+      width: 50,
+      height: 40,
+      sourceWidth: 50,
+      sourceHeight: 40,
+      isInline: true,
+    }
+    const inlineStyle = pageInstance.imageBlockStyle(inlineImg)
+    expect(inlineStyle.display).toBe('inline-block')
+    expect(inlineStyle.verticalAlign).toBe('middle')
+  })
 })
 

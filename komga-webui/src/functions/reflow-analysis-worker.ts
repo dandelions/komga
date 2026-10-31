@@ -99,12 +99,30 @@ function detectInkRoi(pixels: Uint8ClampedArray, width: number, height: number, 
   let right = -1
   let bottom = -1
 
+  let edgeLumaSum = 0
+  let edgeCount = 0
+  const samplePointsX = [0, 1, 2, Math.max(0, width - 3), Math.max(0, width - 2), Math.max(0, width - 1)]
+  for (const x of samplePointsX) {
+    for (let y = 0; y < Math.min(height, 5); y++) {
+      const offset = (y * width + x) * 4
+      if (pixels[offset + 3] === 0) continue
+      edgeLumaSum += 0.299 * pixels[offset] + 0.587 * pixels[offset + 1] + 0.114 * pixels[offset + 2]
+      edgeCount++
+    }
+  }
+  const bgLuma = edgeCount > 0 ? edgeLumaSum / edgeCount : 255
+  const isDark = bgLuma < 128
+  const inkThreshold = isDark
+    ? Math.min(240, Math.max(bgLuma + 18, 255 - threshold))
+    : Math.min(threshold, Math.max(50, bgLuma - 18))
+
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const offset = (y * width + x) * 4
       if (pixels[offset + 3] === 0) continue
       const luma = 0.299 * pixels[offset] + 0.587 * pixels[offset + 1] + 0.114 * pixels[offset + 2]
-      if (luma >= threshold) continue
+      const isInk = isDark ? luma > inkThreshold : luma < inkThreshold
+      if (!isInk) continue
       left = Math.min(left, x)
       top = Math.min(top, y)
       right = Math.max(right, x)

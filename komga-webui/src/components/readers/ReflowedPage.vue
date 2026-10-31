@@ -799,6 +799,7 @@ type RenderedImageBlock = ImageRegion & {
   sourceHeight: number,
   width: number,
   height: number,
+  isInline?: boolean,
 }
 
 type LineBreakItem = {
@@ -2720,12 +2721,28 @@ export default Vue.extend({
     },
     imageBlockStyle(item: RenderedImageBlock): object {
       const dimensions = this.imageBlockDisplayDimensions(item)
+      if (item.isInline) {
+        return {
+          display: 'inline-block',
+          width: `${dimensions.width}px`,
+          height: `${dimensions.height}px`,
+          verticalAlign: 'middle',
+          alignSelf: 'auto',
+          margin: '0 4px',
+        }
+      }
       return {
         width: `${dimensions.width}px`,
         height: `${dimensions.height}px`,
       }
     },
     imageBlockDisplayDimensions(item: RenderedImageBlock): {width: number, height: number} {
+      if (item.isInline && item.width && item.height) {
+        return {
+          width: Math.round(item.width),
+          height: Math.round(item.height),
+        }
+      }
       return this.scaledImageDimensions(
         item.sourceWidth || item.w || item.width,
         item.sourceHeight || item.h || item.height,
@@ -4442,9 +4459,14 @@ export default Vue.extend({
       return tightened.w * tightened.h < region.w * region.h * 0.96 ? tightened : region
     },
     adaptiveInkThreshold(threshold: number, backgroundLuma: number): number {
-      if (backgroundLuma <= 80) return threshold
-      const gap = Math.max(12, Math.min(28, backgroundLuma * 0.10))
-      return this.clampNumber(Math.round(Math.min(threshold, backgroundLuma - gap)), 1, 254, threshold)
+      if (backgroundLuma < 128) {
+        const delta = Math.max(16, 255 - threshold)
+        const gap = Math.max(12, Math.min(30, Math.round((128 - backgroundLuma) * 0.15 + 12)))
+        return this.clampNumber(Math.min(240, Math.max(backgroundLuma + gap, backgroundLuma + delta)), 30, 220, threshold)
+      }
+      const gap = Math.max(12, Math.min(28, Math.round(backgroundLuma * 0.10)))
+      const shift = Math.round((backgroundLuma - 128) * 0.15)
+      return this.clampNumber(Math.min(threshold + shift, backgroundLuma - gap), 50, 230, threshold)
     },
     isNeutralImageBackgroundPixel(
       pixels: Uint8ClampedArray,
@@ -4903,7 +4925,7 @@ export default Vue.extend({
         const offset = i * 4
         if (pixels[offset + 3] === 0) continue
         const luma = 0.299 * pixels[offset] + 0.587 * pixels[offset + 1] + 0.114 * pixels[offset + 2]
-        if (isDark ? luma > 255 - effectiveThreshold : luma < effectiveThreshold) ink[i] = 1
+        if (isDark ? luma > effectiveThreshold : luma < effectiveThreshold) ink[i] = 1
       }
 
       if (this.reflowAlgorithmMode() === 'koreader') return ink

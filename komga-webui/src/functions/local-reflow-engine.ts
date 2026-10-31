@@ -53,6 +53,7 @@ export type LocalReflowItem = {
   height?: number,
   width?: number,
   sourceWidth?: number,
+  isInline?: boolean,
 }
 
 export type LocalReflowResult = {
@@ -89,12 +90,13 @@ export function isDarkColor(hexColor: string): boolean {
 
 export function adaptiveInkThreshold(threshold: number, backgroundLuma: number): number {
   if (backgroundLuma < 128) {
-    const darkThreshold = 255 - threshold
-    const shift = Math.round((128 - backgroundLuma) * 0.25)
-    return clamp(darkThreshold + shift, 30, 220)
+    const delta = Math.max(16, 255 - threshold)
+    const gap = Math.max(12, Math.min(30, Math.round((128 - backgroundLuma) * 0.15 + 12)))
+    return clamp(Math.min(240, Math.max(backgroundLuma + gap, backgroundLuma + delta)), 30, 220)
   }
+  const gap = Math.max(12, Math.min(28, Math.round(backgroundLuma * 0.10)))
   const shift = Math.round((backgroundLuma - 128) * 0.15)
-  return clamp(threshold + shift, 50, 230)
+  return clamp(Math.min(threshold + shift, backgroundLuma - gap), 50, 230)
 }
 
 export function detectPageBackgroundFromPixels(pixels: Uint8ClampedArray, width: number, height: number): string {
@@ -131,18 +133,33 @@ export function detectPageBackgroundFromPixels(pixels: Uint8ClampedArray, width:
 }
 
 export function estimatePageBackgroundLuma(pixels: Uint8ClampedArray, width: number, height: number): number {
-  let sum = 0
-  let count = 0
-  const step = Math.max(2, Math.floor(Math.sqrt((width * height) / 10000)))
+  const bins = new Array(32).fill(0)
+  const sums = new Array(32).fill(0)
+  const totalPixels = Math.max(1, width * height)
+  const step = Math.max(1, Math.floor(Math.sqrt(totalPixels / 16000)))
+
   for (let y = 0; y < height; y += step) {
     for (let x = 0; x < width; x += step) {
       const idx = (y * width + x) * 4
       if (pixels[idx + 3] === 0) continue
-      sum += pixelLuma(pixels[idx], pixels[idx + 1], pixels[idx + 2])
-      count++
+      const luma = pixelLuma(pixels[idx], pixels[idx + 1], pixels[idx + 2])
+      const bin = Math.max(0, Math.min(bins.length - 1, Math.floor(luma / 8)))
+      bins[bin]++
+      sums[bin] += luma
     }
   }
-  return count > 0 ? sum / count : 255
+
+  let bestBin = -1
+  let bestCount = 0
+  for (let i = 0; i < bins.length; i++) {
+    if (bins[i] > bestCount) {
+      bestCount = bins[i]
+      bestBin = i
+    }
+  }
+
+  if (bestBin < 0 || bestCount === 0) return 255
+  return Math.round(sums[bestBin] / bestCount)
 }
 
 export function rgbaToBmpDataUrl(
@@ -399,7 +416,7 @@ export function buildInkMap(
       const idx = (y * width + x) * 4
       if (pixels[idx + 3] === 0) continue
       const luma = pixelLuma(pixels[idx], pixels[idx + 1], pixels[idx + 2])
-      if (isDark ? luma > 255 - inkThresh : luma < inkThresh) {
+      if (isDark ? luma > inkThresh : luma < inkThresh) {
         ink[y * width + x] = 1
       }
     }
@@ -479,11 +496,14 @@ export function detectImageRegions(
   height: number,
   roi: Roi,
   threshold: number,
+  backgroundLuma: number = 255,
 ): ImageRegion[] {
   const tileSize = 24
   const tilesX = Math.ceil(roi.w / tileSize)
   const tilesY = Math.ceil(roi.h / tileSize)
   const isImageTile = new Uint8Array(tilesX * tilesY)
+  const isDark = backgroundLuma < 128
+  const inkThreshold = adaptiveInkThreshold(threshold, backgroundLuma)
 
   for (let ty = 0; ty < tilesY; ty++) {
     for (let tx = 0; tx < tilesX; tx++) {
@@ -508,7 +528,8 @@ export function detectImageRegions(
           sumLuma += luma
           sumLumaSq += luma * luma
           total++
-          if (luma < threshold) darkCount++
+          const isInk = isDark ? luma > inkThreshold : luma < inkThreshold
+          if (isInk) darkCount++
           const maxC = Math.max(r, g, b)
           const minC = Math.min(r, g, b)
           if (maxC - minC > 30) colorCount++
@@ -852,11 +873,13 @@ export function adjustBlockEdges(
   const top = original.y
   const bottom = original.y + original.h
 
+  const inkThreshold = adaptiveInkThreshold(185, bgLuma)
+  const isDark = bgLuma < 128
   const isInk = (x: number, y: number): boolean => {
     if (x < 0 || x >= width || y < 0 || y >= height) return false
     const idx = (y * width + x) * 4
     const luma = pixelLuma(pixels[idx], pixels[idx + 1], pixels[idx + 2])
-    return bgLuma < 128 ? luma > 140 : luma < 185
+    return isDark ? luma > inkThreshold : luma < inkThreshold
   }
 
   const verticalLineHasInk = (x: number, y0: number, y1: number): boolean => {
@@ -985,7 +1008,7 @@ export function reflowPageFromPixels(
   const effectiveRoi = detectRoi(ink, workW, workH, options)
 
   // 6. Detect image regions
-  const detectedImages = detectImageRegions(workPixels, workW, workH, effectiveRoi, threshold)
+  const detectedImages = detectImageRegions(workPixels, workW, workH, effectiveRoi, threshold, pageBgLuma)
   const allImageRegions = [...detectedImages, ...manualImageRegions.map(r => ({
     x: Math.round(r.x * scale),
     y: Math.round(r.y * scale),
@@ -1038,7 +1061,7 @@ export function reflowPageFromPixels(
             sliceData[pIdx + 2] = output
           }
         } else {
-          const isInk = sourceDark ? luma > 255 - inkThresh : luma < inkThresh
+          const isInk = sourceDark ? luma > inkThresh : luma < inkThresh
           if (!isInk && ((options.optimizeBackground && options.optimizeBackground !== 'none') || options.matchBackground)) {
             sliceData[pIdx] = bgVal
             sliceData[pIdx + 1] = bgVal
@@ -1051,23 +1074,27 @@ export function reflowPageFromPixels(
     const dataUrl = rgbaToBmpDataUrl(sliceData, sliceW, sliceH, sliceW, 0, 0)
     if (isInline) {
       return {
-        type: 'word',
+        type: 'image',
+        isInline: true,
         src: dataUrl,
         x: reg.x,
         y: reg.y,
         w: sliceW,
         h: sliceH,
         height: sliceH * textScale,
+        width: sliceW * textScale,
       }
     }
     return {
       type: 'image',
+      isInline: false,
       src: dataUrl,
       x: reg.x,
       y: reg.y,
       w: sliceW,
       h: sliceH,
       width: Math.min(options.targetWidth, sliceW * textScale),
+      height: sliceH * textScale,
     }
   }
 
@@ -1078,6 +1105,10 @@ export function reflowPageFromPixels(
     const avgColLineH = lines.length > 0
       ? lines.reduce((acc, l) => acc + (l.end - l.start), 0) / lines.length
       : 36
+    const maxInlineH = avgColLineH * 2.0
+    const isInlineRegion = (reg: Roi): boolean => {
+      return reg.h <= maxInlineH && reg.w <= colWidth * 0.85
+    }
 
     const colImages = allImageRegions
       .map((reg, idx) => ({reg, idx}))
@@ -1092,13 +1123,13 @@ export function reflowPageFromPixels(
       const blockImagesBefore = colImages
         .filter(({reg, idx}) => {
           if (usedImageIndices.has(idx)) return false
-          const isBlock = reg.w > colWidth * 0.65 || reg.h > avgColLineH * 2.2
-          return isBlock && (reg.y + reg.h <= line.start + 6)
+          const isBlock = !isInlineRegion(reg)
+          return isBlock && (reg.y + reg.h <= line.start + 6 || reg.y <= line.start)
         })
         .sort((a, b) => a.reg.y - b.reg.y)
 
       blockImagesBefore.forEach(({reg, idx}) => {
-        if (items.length > 0) items.push({type: 'break'})
+        if (items.length > 0 && items[items.length - 1].type !== 'break') items.push({type: 'break'})
         items.push(renderImageSlice(reg, false))
         items.push({type: 'break'})
         usedImageIndices.add(idx)
@@ -1107,8 +1138,7 @@ export function reflowPageFromPixels(
       // 2. Identify inline images inside this line
       const inlineImagesInLine = colImages.filter(({reg, idx}) => {
         if (usedImageIndices.has(idx)) return false
-        const isInline = reg.w <= colWidth * 0.65 && reg.h <= avgColLineH * 2.5
-        return isInline && reg.y < line.end && reg.y + reg.h > line.start
+        return isInlineRegion(reg) && reg.y < line.end && reg.y + reg.h > line.start
       })
       inlineImagesInLine.forEach(({idx}) => usedImageIndices.add(idx))
 
@@ -1117,7 +1147,7 @@ export function reflowPageFromPixels(
 
       // Paragraph break check
       if (lineIdx > 0 && line.start - prevLineBottom > (line.end - line.start) * 0.7) {
-        items.push({type: 'break'})
+        if (items.length > 0 && items[items.length - 1].type !== 'break') items.push({type: 'break'})
         items.push({type: 'indent', width: 24, sourceWidth: 24})
       }
       prevLineBottom = line.end
@@ -1175,7 +1205,7 @@ export function reflowPageFromPixels(
             const pIdx = i * 4
             const luma = pixelLuma(sliceData[pIdx], sliceData[pIdx + 1], sliceData[pIdx + 2])
             if (options.matchBackgroundMode === 'monochrome') {
-              const isWordInk = sourceDark ? luma > 255 - inkThresh : luma < inkThresh
+              const isWordInk = sourceDark ? luma > inkThresh : luma < inkThresh
               const val = isWordInk ? fgVal : bgVal
               sliceData[pIdx] = val
               sliceData[pIdx + 1] = val
@@ -1196,20 +1226,27 @@ export function reflowPageFromPixels(
                 sliceData[pIdx + 2] = output
               }
             } else if (options.darkDisplay) {
-              const isWordInk = sourceDark ? luma > 255 - inkThresh : luma < inkThresh
+              const isWordInk = sourceDark ? luma > inkThresh : luma < inkThresh
               if (isWordInk) {
-                const inverted = 255 - luma
-                sliceData[pIdx] = inverted
-                sliceData[pIdx + 1] = inverted
-                sliceData[pIdx + 2] = inverted
+                const val = sourceDark ? luma : 255 - luma
+                sliceData[pIdx] = val
+                sliceData[pIdx + 1] = val
+                sliceData[pIdx + 2] = val
               } else {
                 sliceData[pIdx] = bgVal
                 sliceData[pIdx + 1] = bgVal
                 sliceData[pIdx + 2] = bgVal
               }
             } else {
-              const isWordInk = sourceDark ? luma > 255 - inkThresh : luma < inkThresh
-              if (!isWordInk) {
+              const isWordInk = sourceDark ? luma > inkThresh : luma < inkThresh
+              if (isWordInk) {
+                if (sourceDark) {
+                  const val = 255 - luma
+                  sliceData[pIdx] = val
+                  sliceData[pIdx + 1] = val
+                  sliceData[pIdx + 2] = val
+                }
+              } else {
                 sliceData[pIdx] = bgVal
                 sliceData[pIdx + 1] = bgVal
                 sliceData[pIdx + 2] = bgVal

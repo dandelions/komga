@@ -1231,15 +1231,27 @@ export default Vue.extend({
       const pixels = imageData.data
       const ink = new Uint8Array(width * height)
       const threshold = this.clampNumber(this.threshold, 50, 230, DEFAULT_THRESHOLD)
+      const isDark = this.pageBackground ? this.isDarkPageBackground(this.pageBackground) : false
+      const effectiveThreshold = isDark ? Math.max(30, 255 - threshold) : threshold
 
       for (let i = 0; i < width * height; i++) {
         const offset = i * 4
         if (pixels[offset + 3] === 0) continue
         const luma = 0.299 * pixels[offset] + 0.587 * pixels[offset + 1] + 0.114 * pixels[offset + 2]
-        if (luma < threshold) ink[i] = 1
+        if (isDark ? luma > effectiveThreshold : luma < effectiveThreshold) ink[i] = 1
       }
 
       return ink
+    },
+    isDarkPageBackground(color: string): boolean {
+      const match = color.match(/\d+/g)
+      if (match && match.length >= 3) {
+        const r = parseInt(match[0], 10)
+        const g = parseInt(match[1], 10)
+        const b = parseInt(match[2], 10)
+        return (0.299 * r + 0.587 * g + 0.114 * b) < 128
+      }
+      return false
     },
     detectImageRegions(pixels: Uint8ClampedArray, width: number, height: number, roi: Roi, threshold: number): ImageRegion[] {
       const tileSize = Math.max(12, Math.min(28, Math.round(Math.min(roi.w, roi.h) / 64)))

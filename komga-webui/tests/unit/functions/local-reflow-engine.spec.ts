@@ -359,11 +359,60 @@ describe('local-reflow-engine', () => {
       }
 
       const result = reflowPageFromPixels(pixels, width, height, options, [], manualImageRegions)
-      const words = result.items.filter(it => it.type === 'word')
+      const contentItems = result.items.filter(it => it.type === 'word' || (it.type === 'image' && it.isInline))
       // Word 1, Inline formula, Word 2
-      expect(words.length).toBe(3)
-      expect(words[0].x).toBeLessThan(words[1].x!)
-      expect(words[1].x).toBeLessThan(words[2].x!)
+      expect(contentItems.length).toBe(3)
+      expect(contentItems[0].type).toBe('word')
+      expect(contentItems[1].type).toBe('image')
+      expect(contentItems[1].isInline).toBe(true)
+      expect(contentItems[2].type).toBe('word')
+      expect(contentItems[0].x).toBeLessThan(contentItems[1].x!)
+      expect(contentItems[1].x).toBeLessThan(contentItems[2].x!)
+    })
+
+    test('detects white text on dark background in dark mode', () => {
+      const width = 100
+      const height = 100
+      const pixels = new Uint8ClampedArray(width * height * 4)
+      pixels.fill(15) // Dark background
+
+      // Draw bright text in center: x: 30..70, y: 40..60
+      for (let y = 40; y < 60; y++) {
+        for (let x = 30; x < 70; x++) {
+          const idx = (y * width + x) * 4
+          pixels[idx] = 230
+          pixels[idx + 1] = 230
+          pixels[idx + 2] = 230
+        }
+      }
+
+      const options: LocalReflowOptions = {
+        targetWidth: 400,
+        autoCropBorder: false,
+        textScale: 100,
+        columnCount: 1,
+        skewCorrection: 0,
+        threshold: 185,
+        columnGap: 15,
+        wordGap: 3,
+        strokeStrength: 0.1,
+        contrastEnhancement: false,
+        matchBackground: false,
+        matchBackgroundMode: 'grayscale',
+        blockSpacing: 6,
+        verticalText: false,
+        verticalDirection: 'rtl',
+        marginTop: 0,
+        marginRight: 0,
+        marginBottom: 0,
+        marginLeft: 0,
+        darkDisplay: true,
+      }
+
+      const result = reflowPageFromPixels(pixels, width, height, options)
+      expect(result.items.length).toBeGreaterThan(0)
+      const wordItems = result.items.filter(it => it.type === 'word')
+      expect(wordItems.length).toBeGreaterThanOrEqual(1)
     })
 
     test('falls back to whole page/ROI image item when no text lines are detected', () => {
