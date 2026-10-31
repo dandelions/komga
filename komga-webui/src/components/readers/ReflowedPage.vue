@@ -890,6 +890,7 @@ type ReflowOptionsSnapshot = {
   manualImageRoisKey: string,
   deskewAnalysisRoisKey: string,
   displayColumns?: string,
+  formulaProtection?: boolean,
 }
 
 const THRESHOLD = 185
@@ -1857,6 +1858,7 @@ export default Vue.extend({
         cropRoisKey: JSON.stringify(this.options.cropRoisByParity || {}),
         manualImageRoisKey: JSON.stringify(this.options.manualImageRoisByPage || {}),
         deskewAnalysisRoisKey: JSON.stringify(this.options.deskewAnalysisRoisByParity || {}),
+        formulaProtection: this.options?.formulaProtection !== false,
       }
     },
     async reflow() {
@@ -1969,6 +1971,7 @@ export default Vue.extend({
             marginLeft: this.clampPercent(this.options.marginLeft),
             darkDisplay: this.darkDisplay,
             rotation: this.normalizedRotation(this.rotation),
+            formulaProtection: this.options?.formulaProtection !== false,
           }
           const manualRegions = this.currentManualImageRois()
           const workerResult = await this.runLocalWorkerReflow(
@@ -5840,7 +5843,7 @@ export default Vue.extend({
         }
       }
 
-      const lines = [] as Line[]
+      const rawLines = [] as Line[]
       let inLine = false
       let lineStart = roi.y
       for (let y = roi.y; y < roi.y + roi.h; y++) {
@@ -5849,10 +5852,34 @@ export default Vue.extend({
           lineStart = y
         } else if (inLine && rowInk[y] <= 1) {
           inLine = false
-          if (this.isValidTextLine(rowInk, lineStart, y, column)) lines.push({start: lineStart, end: y})
+          if (this.isValidTextLine(rowInk, lineStart, y, column)) rawLines.push({start: lineStart, end: y})
         }
       }
-      if (inLine && this.isValidTextLine(rowInk, lineStart, roi.y + roi.h, column)) lines.push({start: lineStart, end: roi.y + roi.h})
+      if (inLine && this.isValidTextLine(rowInk, lineStart, roi.y + roi.h, column)) rawLines.push({start: lineStart, end: roi.y + roi.h})
+      if (rawLines.length <= 1) return rawLines
+
+      const heights = rawLines.map(l => l.end - l.start).filter(h => h >= 16)
+      const avgHeight = heights.length > 0 ? heights.reduce((a, b) => a + b, 0) / heights.length : 36
+      const formulaProtection = this.options?.formulaProtection !== false
+      const maxFormulaGap = formulaProtection ? Math.max(12, Math.round(avgHeight * 0.22)) : 0
+
+      const lines = [] as Line[]
+      let cur = rawLines[0]
+      for (let i = 1; i < rawLines.length; i++) {
+        const next = rawLines[i]
+        const gap = next.start - cur.end
+        const curH = cur.end - cur.start
+        const nextH = next.end - next.start
+        const isThinBar = curH <= 8 || nextH <= 8
+
+        if (formulaProtection && gap <= maxFormulaGap && (isThinBar || gap <= 8)) {
+          cur = {start: cur.start, end: next.end}
+        } else {
+          lines.push(cur)
+          cur = next
+        }
+      }
+      lines.push(cur)
       return lines
     },
     isValidTextLine(rowInk: number[], start: number, end: number, column: Column): boolean {
@@ -5953,7 +5980,12 @@ export default Vue.extend({
       const singleGlyphWidthLimit = glyphHeight * (hasSmallFragment || hasNarrowVerticalStroke ? 2.25 : 1.42)
       if (union.w > singleGlyphWidthLimit) return false
 
-      const aligned = overlap >= minHeight * 0.2 || centerGap <= glyphHeight * 0.56 || hasSmallFragment || hasNarrowVerticalStroke
+      const formulaProtection = this.options?.formulaProtection !== false
+      const aligned = overlap >= minHeight * 0.2 ||
+        centerGap <= glyphHeight * (formulaProtection ? 0.75 : 0.56) ||
+        hasSmallFragment ||
+        hasNarrowVerticalStroke ||
+        (formulaProtection && (left.y <= right.y + right.h && left.y + left.h >= right.y))
       if (!aligned) return false
 
       const strictGapLimit = Math.max(3, Math.min(glyphHeight * 0.24, wordGap * 2.2))

@@ -167,5 +167,112 @@ describe('local-reflow-engine', () => {
       expect(wordItems[0].src).toBeDefined()
       expect(wordItems[0].src?.startsWith('data:image/bmp;base64,')).toBe(true)
     })
+
+    test('applies high contrast bleaching and ink boost when contrastEnhancement is enabled', () => {
+      const width = 100
+      const height = 100
+      const pixels = new Uint8ClampedArray(width * height * 4)
+      pixels.fill(220) // Faded grayish scan background
+
+      // Draw word in the center
+      for (let y = 40; y < 60; y++) {
+        for (let x = 30; x < 70; x++) {
+          const idx = (y * width + x) * 4
+          pixels[idx] = 120 // Faded gray text
+          pixels[idx + 1] = 120
+          pixels[idx + 2] = 120
+        }
+      }
+
+      const options: LocalReflowOptions = {
+        targetWidth: 400,
+        autoCropBorder: false,
+        textScale: 100,
+        columnCount: 1,
+        skewCorrection: 0,
+        threshold: 185,
+        columnGap: 15,
+        wordGap: 3,
+        strokeStrength: 0.1,
+        contrastEnhancement: true,
+        matchBackground: false,
+        matchBackgroundMode: 'grayscale',
+        blockSpacing: 6,
+        verticalText: false,
+        verticalDirection: 'rtl',
+        marginTop: 0,
+        marginRight: 0,
+        marginBottom: 0,
+        marginLeft: 0,
+        darkDisplay: false,
+        formulaProtection: true,
+      }
+
+      const result = reflowPageFromPixels(pixels, width, height, options)
+      // When contrast enhancement is on, page background is bleached to pure white
+      expect(result.pageBackground).toBe('#ffffff')
+      expect(result.items.length).toBeGreaterThan(0)
+    })
+
+    test('inserts inline formula in-place between words', () => {
+      const width = 200
+      const height = 100
+      const pixels = new Uint8ClampedArray(width * height * 4)
+      pixels.fill(255)
+
+      // Word 1: x: 10..30, y: 35..65
+      for (let y = 35; y < 65; y++) {
+        for (let x = 10; x < 30; x++) {
+          const idx = (y * width + x) * 4
+          pixels[idx] = 0
+          pixels[idx + 1] = 0
+          pixels[idx + 2] = 0
+        }
+      }
+
+      // Word 2: x: 80..100, y: 35..65
+      for (let y = 35; y < 65; y++) {
+        for (let x = 80; x < 100; x++) {
+          const idx = (y * width + x) * 4
+          pixels[idx] = 0
+          pixels[idx + 1] = 0
+          pixels[idx + 2] = 0
+        }
+      }
+
+      // Manual formula region between word 1 and word 2: x: 40..60, y: 30..70
+      const manualImageRegions = [{x: 40, y: 30, w: 20, h: 40}]
+
+      const options: LocalReflowOptions = {
+        targetWidth: 400,
+        autoCropBorder: false,
+        textScale: 100,
+        columnCount: 1,
+        skewCorrection: 0,
+        threshold: 185,
+        columnGap: 15,
+        wordGap: 3,
+        strokeStrength: 0.1,
+        contrastEnhancement: false,
+        matchBackground: false,
+        matchBackgroundMode: 'grayscale',
+        blockSpacing: 6,
+        verticalText: false,
+        verticalDirection: 'rtl',
+        marginTop: 0,
+        marginRight: 0,
+        marginBottom: 0,
+        marginLeft: 0,
+        darkDisplay: false,
+        formulaProtection: true,
+      }
+
+      const result = reflowPageFromPixels(pixels, width, height, options, [], manualImageRegions)
+      const words = result.items.filter(it => it.type === 'word')
+      // Word 1, Inline formula, Word 2
+      expect(words.length).toBe(3)
+      expect(words[0].x).toBeLessThan(words[1].x!)
+      expect(words[1].x).toBeLessThan(words[2].x!)
+    })
   })
 })

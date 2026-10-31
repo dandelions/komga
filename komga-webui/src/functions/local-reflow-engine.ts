@@ -1,4 +1,5 @@
 import {detectAutoDeskewAngle} from './auto-deskew'
+import {removeDocumentBackground} from './image-enhancement'
 
 export type Roi = {
   x: number,
@@ -38,6 +39,7 @@ export type LocalReflowOptions = {
   marginLeft: number,
   darkDisplay: boolean,
   rotation?: number,
+  formulaProtection?: boolean,
 }
 
 export type LocalReflowItem = {
@@ -596,6 +598,7 @@ export function detectLines(
   width: number,
   column: {start: number, end: number},
   roi: Roi,
+  options?: LocalReflowOptions,
 ): Array<{start: number, end: number}> {
   const colWidth = column.end - column.start
   const rowInk = new Int32Array(roi.h)
@@ -609,7 +612,7 @@ export function detectLines(
     rowInk[y] = count
   }
 
-  const lines: Array<{start: number, end: number}> = []
+  const rawLines: Array<{start: number, end: number}> = []
   let inLine = false
   let lineStart = 0
   const noiseThreshold = Math.max(1, Math.round(colWidth * 0.01))
@@ -623,14 +626,48 @@ export function detectLines(
     } else {
       if (inLine) {
         inLine = false
-        if (y - lineStart >= 6) {
-          lines.push({start: roi.y + lineStart, end: roi.y + y})
+        if (y - lineStart >= 3) {
+          rawLines.push({start: roi.y + lineStart, end: roi.y + y})
         }
       }
     }
   }
-  if (inLine && roi.h - lineStart >= 6) {
-    lines.push({start: roi.y + lineStart, end: roi.y + roi.h})
+  if (inLine && roi.h - lineStart >= 3) {
+    rawLines.push({start: roi.y + lineStart, end: roi.y + roi.h})
+  }
+
+  if (rawLines.length <= 1) return rawLines
+
+  // Estimate typical text line height
+  const heights = rawLines.map(l => l.end - l.start).filter(h => h >= 16)
+  const avgHeight = heights.length > 0 ? heights.reduce((a, b) => a + b, 0) / heights.length : 36
+
+  // Merge intra-formula / fraction lines where gap is small
+  const formulaProtection = options?.formulaProtection !== false
+  const maxFormulaGap = formulaProtection ? Math.max(12, Math.round(avgHeight * 0.22)) : 0
+
+  const lines: Array<{start: number, end: number}> = []
+  let cur = rawLines[0]
+
+  for (let i = 1; i < rawLines.length; i++) {
+    const next = rawLines[i]
+    const gap = next.start - cur.end
+    const curH = cur.end - cur.start
+    const nextH = next.end - next.start
+    const isThinBar = curH <= 8 || nextH <= 8
+
+    if (formulaProtection && gap <= maxFormulaGap && (isThinBar || gap <= 8)) {
+      // Merge into a single line to preserve fraction / formula integrity
+      cur = {start: cur.start, end: next.end}
+    } else {
+      if (cur.end - cur.start >= 6) {
+        lines.push(cur)
+      }
+      cur = next
+    }
+  }
+  if (cur.end - cur.start >= 6) {
+    lines.push(cur)
   }
 
   return lines
@@ -707,7 +744,9 @@ export function detectWords(
   for (let i = 1; i < rawBlocks.length; i++) {
     const next = rawBlocks[i]
     const gap = next.x - (cur.x + cur.w)
-    if (gap <= maxGap && Math.abs((cur.y + cur.h / 2) - (next.y + next.h / 2)) <= lineH * 0.6) {
+    const verticalMatch = Math.abs((cur.y + cur.h / 2) - (next.y + next.h / 2)) <= lineH * 0.75 ||
+      (cur.y <= next.y + next.h && cur.y + cur.h >= next.y)
+    if (gap <= maxGap && verticalMatch) {
       const minX = Math.min(cur.x, next.x)
       const maxX = Math.max(cur.x + cur.w, next.x + next.w)
       const minY = Math.min(cur.y, next.y)
@@ -782,9 +821,18 @@ export function reflowPageFromPixels(
   const startedAt = Date.now()
 
   // 1. Detect background
-  const pageBackground = detectPageBackgroundFromPixels(sourcePixels, sourceW, sourceH)
+  let pageBackground = detectPageBackgroundFromPixels(sourcePixels, sourceW, sourceH)
   const pageBgLuma = estimatePageBackgroundLuma(sourcePixels, sourceW, sourceH)
   const sourceDark = isDarkColor(pageBackground)
+
+  const isHighContrast = options.contrastEnhancement ||
+    options.optimizeBackground === 'clean' ||
+    options.optimizeBackground === 'normalize' ||
+    options.matchBackgroundMode === 'monochrome'
+
+  if (isHighContrast) {
+    pageBackground = options.darkDisplay ? '#000000' : '#ffffff'
+  }
 
   // 2. Downscale if excessively large (aligned with downscaleServerImage)
   const maxPixels = LOCAL_REFLOW_MAX_PIXELS
@@ -820,6 +868,12 @@ export function reflowPageFromPixels(
         workPixels[dIdx + 3] = sourcePixels[sIdx + 3]
       }
     }
+  } else if (options.optimizeBackground && options.optimizeBackground !== 'none') {
+    workPixels = new Uint8ClampedArray(sourcePixels)
+  }
+
+  if (options.optimizeBackground && options.optimizeBackground !== 'none') {
+    removeDocumentBackground(workPixels, workW, workH, options.optimizeBackground, options.darkDisplay)
   }
 
   // 3. Auto deskew if requested
@@ -859,26 +913,113 @@ export function reflowPageFromPixels(
   const items: LocalReflowItem[] = []
   const textScale = clamp((options.textScale || 100) / 100, 0.2, 2.5)
 
-  // Append leading images
-  allImageRegions.forEach(reg => {
-    if (reg.y < effectiveRoi.y + 10) {
-      items.push({
-        type: 'image',
-        src: rgbaToBmpDataUrl(workPixels, reg.w, reg.h, workW, reg.x, reg.y),
-        w: reg.w,
-        h: reg.h,
-        width: Math.min(options.targetWidth, reg.w * textScale),
-      })
-      items.push({type: 'break'})
+  const usedImageIndices = new Set<number>()
+
+  const renderImageSlice = (reg: Roi, isInline: boolean): LocalReflowItem => {
+    const sliceW = Math.max(1, reg.w)
+    const sliceH = Math.max(1, reg.h)
+    const sliceData = new Uint8ClampedArray(sliceW * sliceH * 4)
+
+    for (let y = 0; y < sliceH; y++) {
+      const sy = Math.min(workH - 1, reg.y + y)
+      const srcIdx = (sy * workW + reg.x) * 4
+      const dstIdx = y * sliceW * 4
+      for (let b = 0; b < sliceW * 4; b++) {
+        sliceData[dstIdx + b] = workPixels[srcIdx + b]
+      }
     }
-  })
+
+    if (isHighContrast) {
+      const bgVal = options.darkDisplay ? 0 : 255
+      const inkThresh = adaptiveInkThreshold(threshold, pageBgLuma)
+      for (let i = 0; i < sliceW * sliceH; i++) {
+        const pIdx = i * 4
+        const luma = pixelLuma(sliceData[pIdx], sliceData[pIdx + 1], sliceData[pIdx + 2])
+        const isInk = sourceDark ? luma > 255 - inkThresh : luma < inkThresh
+        if (!isInk && (options.contrastEnhancement || (options.optimizeBackground && options.optimizeBackground !== 'none') || options.matchBackground)) {
+          sliceData[pIdx] = bgVal
+          sliceData[pIdx + 1] = bgVal
+          sliceData[pIdx + 2] = bgVal
+        } else if (isInk && options.contrastEnhancement) {
+          const delta = sourceDark ? luma - pageBgLuma : pageBgLuma - luma
+          const maxDelta = sourceDark ? 255 - pageBgLuma : pageBgLuma
+          const contrastRange = Math.max(24, maxDelta * 0.45)
+          const normalized = clamp((delta - 10) / contrastRange, 0, 1)
+          const foreground = Math.pow(normalized, 0.55)
+          const output = options.darkDisplay ? Math.round(255 * foreground) : Math.round(255 * (1 - foreground))
+          sliceData[pIdx] = output
+          sliceData[pIdx + 1] = output
+          sliceData[pIdx + 2] = output
+        }
+      }
+    }
+
+    const dataUrl = rgbaToBmpDataUrl(sliceData, sliceW, sliceH, sliceW, 0, 0)
+    if (isInline) {
+      return {
+        type: 'word',
+        src: dataUrl,
+        x: reg.x,
+        y: reg.y,
+        w: sliceW,
+        h: sliceH,
+        height: sliceH * textScale,
+      }
+    }
+    return {
+      type: 'image',
+      src: dataUrl,
+      x: reg.x,
+      y: reg.y,
+      w: sliceW,
+      h: sliceH,
+      width: Math.min(options.targetWidth, sliceW * textScale),
+    }
+  }
 
   let prevLineBottom = 0
   columns.forEach(col => {
-    const lines = detectLines(textInk, workW, col, effectiveRoi)
+    const colWidth = col.end - col.start
+    const lines = detectLines(textInk, workW, col, effectiveRoi, options)
+    const avgColLineH = lines.length > 0
+      ? lines.reduce((acc, l) => acc + (l.end - l.start), 0) / lines.length
+      : 36
+
+    const colImages = allImageRegions
+      .map((reg, idx) => ({reg, idx}))
+      .filter(({reg, idx}) => {
+        if (usedImageIndices.has(idx)) return false
+        const cx = reg.x + reg.w / 2
+        return (cx >= col.start && cx <= col.end) || (reg.x <= col.start && reg.x + reg.w >= col.end)
+      })
+
     lines.forEach((line, lineIdx) => {
+      // 1. Insert block images appearing above this line
+      const blockImagesBefore = colImages
+        .filter(({reg, idx}) => {
+          if (usedImageIndices.has(idx)) return false
+          const isBlock = reg.w > colWidth * 0.65 || reg.h > avgColLineH * 2.2
+          return isBlock && (reg.y + reg.h <= line.start + 6)
+        })
+        .sort((a, b) => a.reg.y - b.reg.y)
+
+      blockImagesBefore.forEach(({reg, idx}) => {
+        if (items.length > 0) items.push({type: 'break'})
+        items.push(renderImageSlice(reg, false))
+        items.push({type: 'break'})
+        usedImageIndices.add(idx)
+      })
+
+      // 2. Identify inline images inside this line
+      const inlineImagesInLine = colImages.filter(({reg, idx}) => {
+        if (usedImageIndices.has(idx)) return false
+        const isInline = reg.w <= colWidth * 0.65 && reg.h <= avgColLineH * 2.5
+        return isInline && reg.y < line.end && reg.y + reg.h > line.start
+      })
+      inlineImagesInLine.forEach(({idx}) => usedImageIndices.add(idx))
+
       const words = detectWords(textInk, workW, col, line, options.wordGap || 3)
-      if (words.length === 0) return
+      if (words.length === 0 && inlineImagesInLine.length === 0) return
 
       // Paragraph break check
       if (lineIdx > 0 && line.start - prevLineBottom > (line.end - line.start) * 0.7) {
@@ -887,7 +1028,23 @@ export function reflowPageFromPixels(
       }
       prevLineBottom = line.end
 
-      words.forEach(word => {
+      type LineUnit = {kind: 'word', word: WordBlock} | {kind: 'inline-img', reg: Roi}
+      const lineUnits: LineUnit[] = [
+        ...words.map(w => ({kind: 'word' as const, word: w})),
+        ...inlineImagesInLine.map(item => ({kind: 'inline-img' as const, reg: item.reg})),
+      ].sort((a, b) => {
+        const ax = a.kind === 'word' ? a.word.x : a.reg.x
+        const bx = b.kind === 'word' ? b.word.x : b.reg.x
+        return ax - bx
+      })
+
+      lineUnits.forEach(unit => {
+        if (unit.kind === 'inline-img') {
+          items.push(renderImageSlice(unit.reg, true))
+          return
+        }
+
+        const word = unit.word
         const adjusted = adjustBlockEdges(workPixels, workW, workH, word, pageBgLuma)
         if (adjusted.w < 2 || adjusted.h < 2) return
 
@@ -919,7 +1076,7 @@ export function reflowPageFromPixels(
         )
 
         // Color processing: dark display, contrast enhancement, match background
-        if (options.darkDisplay || options.contrastEnhancement || options.matchBackground) {
+        if (options.darkDisplay || options.contrastEnhancement || options.matchBackground || options.optimizeBackground) {
           const bgVal = options.darkDisplay ? 0 : 255
           const fgVal = options.darkDisplay ? 255 : 0
           const inkThresh = adaptiveInkThreshold(threshold, pageBgLuma)
@@ -929,12 +1086,24 @@ export function reflowPageFromPixels(
             const luma = pixelLuma(sliceData[pIdx], sliceData[pIdx + 1], sliceData[pIdx + 2])
             const isWordInk = sourceDark ? luma > 255 - inkThresh : luma < inkThresh
             if (isWordInk) {
-              if (options.contrastEnhancement || options.matchBackgroundMode === 'monochrome') {
+              if (options.matchBackgroundMode === 'monochrome') {
                 sliceData[pIdx] = fgVal
                 sliceData[pIdx + 1] = fgVal
                 sliceData[pIdx + 2] = fgVal
+              } else if (options.contrastEnhancement) {
+                const delta = sourceDark ? luma - pageBgLuma : pageBgLuma - luma
+                const maxDelta = sourceDark ? 255 - pageBgLuma : pageBgLuma
+                const contrastRange = Math.max(24, maxDelta * 0.45)
+                const normalized = clamp((delta - 10) / contrastRange, 0, 1)
+                const foreground = Math.pow(normalized, 0.55)
+                const output = options.darkDisplay
+                  ? Math.round(255 * foreground)
+                  : Math.round(255 * (1 - foreground))
+                sliceData[pIdx] = output
+                sliceData[pIdx + 1] = output
+                sliceData[pIdx + 2] = output
               }
-            } else if (options.matchBackground) {
+            } else if (options.matchBackground || options.contrastEnhancement || (options.optimizeBackground && options.optimizeBackground !== 'none')) {
               sliceData[pIdx] = bgVal
               sliceData[pIdx + 1] = bgVal
               sliceData[pIdx + 2] = bgVal
@@ -954,19 +1123,25 @@ export function reflowPageFromPixels(
         })
       })
     })
+
+    // Trailing images for this column
+    colImages.forEach(({reg, idx}) => {
+      if (!usedImageIndices.has(idx)) {
+        if (items.length > 0) items.push({type: 'break'})
+        items.push(renderImageSlice(reg, false))
+        items.push({type: 'break'})
+        usedImageIndices.add(idx)
+      }
+    })
   })
 
-  // Append remaining images
-  allImageRegions.forEach(reg => {
-    if (reg.y >= effectiveRoi.y + 10) {
+  // Append any remaining image regions outside columns
+  allImageRegions.forEach((reg, idx) => {
+    if (!usedImageIndices.has(idx)) {
+      if (items.length > 0) items.push({type: 'break'})
+      items.push(renderImageSlice(reg, false))
       items.push({type: 'break'})
-      items.push({
-        type: 'image',
-        src: rgbaToBmpDataUrl(workPixels, reg.w, reg.h, workW, reg.x, reg.y),
-        w: reg.w,
-        h: reg.h,
-        width: Math.min(options.targetWidth, reg.w * textScale),
-      })
+      usedImageIndices.add(idx)
     }
   })
 
