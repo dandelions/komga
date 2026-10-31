@@ -1,4 +1,5 @@
 import {
+  calculateEnhancedForeground,
   enhanceTextContrastData,
   preprocessDocumentData,
   removeDocumentBackground,
@@ -90,6 +91,67 @@ describe('image enhancement', () => {
     enhanceTextContrastData(data, 3, 1, {matchBackgroundMode: 'monochrome', backgroundLuma: 255})
 
     expect(Array.from(data.filter((_, index) => index % 4 === 0))).toEqual([255, 0, 0])
+  })
+
+  test('calculateEnhancedForeground produces smooth S-curve without jump or infinite derivative at foot', () => {
+    // Delta <= baseMinDelta (8) is completely bleached to 0
+    expect(calculateEnhancedForeground(0, 255, 8)).toBe(0)
+    expect(calculateEnhancedForeground(8, 255, 8)).toBe(0)
+
+    // Just above foot (delta = 9): smooth transition, no cliff discontinuity
+    const nearFoot = calculateEnhancedForeground(9, 255, 8)
+    expect(nearFoot).toBeGreaterThan(0)
+    expect(nearFoot).toBeLessThan(0.01)
+
+    // Midtone transition: smoothly increases
+    const quarter = calculateEnhancedForeground(40, 255, 8)
+    const mid = calculateEnhancedForeground(80, 255, 8)
+    expect(quarter).toBeGreaterThan(nearFoot)
+    expect(mid).toBeGreaterThan(quarter)
+
+    // Deep ink: reaches 1.0 (pure dark ink)
+    expect(calculateEnhancedForeground(200, 255, 8)).toBe(1)
+  })
+
+  test('contrast enhancement enabled bleaches background while preserving smooth antialiasing without clipping thin strokes', () => {
+    // 255 (paper), 249 (slight paper tint), 235 (faint thin stroke/antialiased edge), 180 (stroke edge), 40 (core ink)
+    const data = grayPixels(255, 249, 235, 180, 40)
+
+    enhanceTextContrastData(data, 5, 1, {enabled: true, backgroundLuma: 255})
+
+    const result = Array.from(data.filter((_, index) => index % 4 === 0))
+    // Paper and faint tint are bleached to pure white (255)
+    expect(result[0]).toBe(255)
+    expect(result[1]).toBe(255)
+
+    // Faint thin stroke (235) is smoothly preserved (not clipped to 255, and not crushed to 0)
+    expect(result[2]).toBeLessThan(255)
+    expect(result[2]).toBeGreaterThan(200)
+
+    // Stroke edge (180) is darkened with smooth transition
+    expect(result[3]).toBeLessThan(result[2])
+    expect(result[3]).toBeGreaterThan(50)
+
+    // Core ink (40) is boosted to rich dark black
+    expect(result[4]).toBeLessThan(10)
+  })
+
+  test('contrast enhancement enabled in darkDisplay mode renders smooth antialiasing against black background', () => {
+    const data = grayPixels(255, 249, 235, 180, 40)
+
+    enhanceTextContrastData(data, 5, 1, {enabled: true, nightDisplay: true, backgroundLuma: 255})
+
+    const result = Array.from(data.filter((_, index) => index % 4 === 0))
+    // Background becomes pure black (0)
+    expect(result[0]).toBe(0)
+    expect(result[1]).toBe(0)
+
+    // Faint stroke is smoothly visible against dark background
+    expect(result[2]).toBeGreaterThan(0)
+    expect(result[2]).toBeLessThan(55)
+
+    // Dark core becomes bright white ink
+    expect(result[4]).toBeGreaterThan(245)
   })
 
   test('removeDocumentBackground clean purifies tinted background to pure white while preserving text', () => {

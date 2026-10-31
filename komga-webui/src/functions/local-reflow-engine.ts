@@ -1,5 +1,5 @@
 import {detectAutoDeskewAngle} from './auto-deskew'
-import {removeDocumentBackground} from './image-enhancement'
+import {calculateEnhancedForeground, removeDocumentBackground} from './image-enhancement'
 
 export type Roi = {
   x: number,
@@ -997,24 +997,31 @@ export function reflowPageFromPixels(
     if (isHighContrast) {
       const bgVal = options.darkDisplay ? 0 : 255
       const inkThresh = adaptiveInkThreshold(threshold, pageBgLuma)
+      const baseMinDelta = 8
+      const maxDelta = sourceDark ? 255 - pageBgLuma : pageBgLuma
       for (let i = 0; i < sliceW * sliceH; i++) {
         const pIdx = i * 4
         const luma = pixelLuma(sliceData[pIdx], sliceData[pIdx + 1], sliceData[pIdx + 2])
-        const isInk = sourceDark ? luma > 255 - inkThresh : luma < inkThresh
-        if (!isInk && (options.contrastEnhancement || (options.optimizeBackground && options.optimizeBackground !== 'none') || options.matchBackground)) {
-          sliceData[pIdx] = bgVal
-          sliceData[pIdx + 1] = bgVal
-          sliceData[pIdx + 2] = bgVal
-        } else if (isInk && options.contrastEnhancement) {
+        if (options.contrastEnhancement) {
           const delta = sourceDark ? luma - pageBgLuma : pageBgLuma - luma
-          const maxDelta = sourceDark ? 255 - pageBgLuma : pageBgLuma
-          const contrastRange = Math.max(24, maxDelta * 0.45)
-          const normalized = clamp((delta - 10) / contrastRange, 0, 1)
-          const foreground = Math.pow(normalized, 0.55)
-          const output = options.darkDisplay ? Math.round(255 * foreground) : Math.round(255 * (1 - foreground))
-          sliceData[pIdx] = output
-          sliceData[pIdx + 1] = output
-          sliceData[pIdx + 2] = output
+          if (delta <= baseMinDelta) {
+            sliceData[pIdx] = bgVal
+            sliceData[pIdx + 1] = bgVal
+            sliceData[pIdx + 2] = bgVal
+          } else {
+            const foreground = calculateEnhancedForeground(delta, maxDelta, baseMinDelta)
+            const output = options.darkDisplay ? Math.round(255 * foreground) : Math.round(255 * (1 - foreground))
+            sliceData[pIdx] = output
+            sliceData[pIdx + 1] = output
+            sliceData[pIdx + 2] = output
+          }
+        } else {
+          const isInk = sourceDark ? luma > 255 - inkThresh : luma < inkThresh
+          if (!isInk && ((options.optimizeBackground && options.optimizeBackground !== 'none') || options.matchBackground)) {
+            sliceData[pIdx] = bgVal
+            sliceData[pIdx + 1] = bgVal
+            sliceData[pIdx + 2] = bgVal
+          }
         }
       }
     }
@@ -1139,38 +1146,52 @@ export function reflowPageFromPixels(
           const bgVal = options.darkDisplay ? 0 : 255
           const fgVal = options.darkDisplay ? 255 : 0
           const inkThresh = adaptiveInkThreshold(threshold, pageBgLuma)
+          const baseMinDelta = 8
+          const maxDelta = sourceDark ? 255 - pageBgLuma : pageBgLuma
 
           for (let i = 0; i < sliceW * sliceH; i++) {
             const pIdx = i * 4
             const luma = pixelLuma(sliceData[pIdx], sliceData[pIdx + 1], sliceData[pIdx + 2])
-            const isWordInk = sourceDark ? luma > 255 - inkThresh : luma < inkThresh
-            if (isWordInk) {
-              if (options.matchBackgroundMode === 'monochrome') {
-                sliceData[pIdx] = fgVal
-                sliceData[pIdx + 1] = fgVal
-                sliceData[pIdx + 2] = fgVal
-              } else if (options.contrastEnhancement) {
-                const delta = sourceDark ? luma - pageBgLuma : pageBgLuma - luma
-                const maxDelta = sourceDark ? 255 - pageBgLuma : pageBgLuma
-                const contrastRange = Math.max(24, maxDelta * 0.45)
-                const normalized = clamp((delta - 10) / contrastRange, 0, 1)
-                const foreground = Math.pow(normalized, 0.55)
+            if (options.matchBackgroundMode === 'monochrome') {
+              const isWordInk = sourceDark ? luma > 255 - inkThresh : luma < inkThresh
+              const val = isWordInk ? fgVal : bgVal
+              sliceData[pIdx] = val
+              sliceData[pIdx + 1] = val
+              sliceData[pIdx + 2] = val
+            } else if (options.contrastEnhancement) {
+              const delta = sourceDark ? luma - pageBgLuma : pageBgLuma - luma
+              if (delta <= baseMinDelta) {
+                sliceData[pIdx] = bgVal
+                sliceData[pIdx + 1] = bgVal
+                sliceData[pIdx + 2] = bgVal
+              } else {
+                const foreground = calculateEnhancedForeground(delta, maxDelta, baseMinDelta)
                 const output = options.darkDisplay
                   ? Math.round(255 * foreground)
                   : Math.round(255 * (1 - foreground))
                 sliceData[pIdx] = output
                 sliceData[pIdx + 1] = output
                 sliceData[pIdx + 2] = output
-              } else if (options.darkDisplay) {
+              }
+            } else if (options.darkDisplay) {
+              const isWordInk = sourceDark ? luma > 255 - inkThresh : luma < inkThresh
+              if (isWordInk) {
                 const inverted = 255 - luma
                 sliceData[pIdx] = inverted
                 sliceData[pIdx + 1] = inverted
                 sliceData[pIdx + 2] = inverted
+              } else {
+                sliceData[pIdx] = bgVal
+                sliceData[pIdx + 1] = bgVal
+                sliceData[pIdx + 2] = bgVal
               }
             } else {
-              sliceData[pIdx] = bgVal
-              sliceData[pIdx + 1] = bgVal
-              sliceData[pIdx + 2] = bgVal
+              const isWordInk = sourceDark ? luma > 255 - inkThresh : luma < inkThresh
+              if (!isWordInk) {
+                sliceData[pIdx] = bgVal
+                sliceData[pIdx + 1] = bgVal
+                sliceData[pIdx + 2] = bgVal
+              }
             }
           }
         }

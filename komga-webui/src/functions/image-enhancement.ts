@@ -73,6 +73,14 @@ export function preprocessDocumentCanvas(
   context.putImageData(imageData, 0, 0)
 }
 
+export function calculateEnhancedForeground(delta: number, maxDelta: number, baseMinDelta: number): number {
+  if (delta <= baseMinDelta) return 0
+  const contrastRange = Math.max(24, maxDelta * 0.55)
+  const norm = clamp((delta - baseMinDelta) / contrastRange, 0, 1)
+  const smooth = norm * norm * (3 - 2 * norm)
+  return Math.pow(smooth, 0.8)
+}
+
 export function enhanceTextContrastData(
   data: Uint8ClampedArray,
   width: number,
@@ -90,10 +98,9 @@ export function enhanceTextContrastData(
     : options.matchBackgroundMode === 'original' ? 'original' : 'grayscale'
   const needsForegroundMask = options.matchBackground || (outputMode === 'original' && (targetDark || options.enabled === true))
   const matchedForeground = needsForegroundMask ? matchedForegroundMask(data, width, height, stats) : undefined
-  const baseMinDelta = options.enabled ? 10 : 0
+  const baseMinDelta = options.enabled ? 8 : 0
   const maxDelta = stats.sourceDark ? 255 - stats.background : stats.background
   const binaryMinDelta = Math.min(12, Math.max(3, maxDelta * 0.025))
-  const contrastRange = Math.max(24, maxDelta * (options.enabled ? 0.32 : 0.55))
   const invertForeground = targetDark !== stats.sourceDark
 
   for (let i = 0; i < width * height; i++) {
@@ -128,8 +135,7 @@ export function enhanceTextContrastData(
           else setGrayPixel(data, offset, backgroundValue)
           continue
         }
-        const normalized = clamp((delta - baseMinDelta) / contrastRange, 0, 1)
-        const foreground = Math.pow(normalized, 0.55)
+        const foreground = calculateEnhancedForeground(delta, maxDelta, baseMinDelta)
         outputLuma = targetDark
           ? 255 * foreground
           : 255 * (1 - foreground)
@@ -151,8 +157,7 @@ export function enhanceTextContrastData(
         setGrayPixel(data, offset, backgroundValue)
         continue
       }
-      const normalized = clamp((delta - baseMinDelta) / contrastRange, 0, 1)
-      const foreground = Math.pow(normalized, 0.55)
+      const foreground = calculateEnhancedForeground(delta, maxDelta, baseMinDelta)
       const output = targetDark
         ? Math.round(255 * foreground)
         : Math.round(255 * (1 - foreground))

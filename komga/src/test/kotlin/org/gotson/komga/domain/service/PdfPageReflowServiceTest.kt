@@ -313,6 +313,36 @@ class PdfPageReflowServiceTest {
   }
 
   @Test
+  fun `given contrastEnhancement enabled without monochrome then copyPaddedSlice preserves smooth antialiased grayscale`() {
+    val page = BufferedImage(5, 5, BufferedImage.TYPE_INT_ARGB)
+    val pageGraphics = page.createGraphics()
+    pageGraphics.color = Color.WHITE
+    pageGraphics.fillRect(0, 0, 5, 5)
+    page.setRGB(2, 2, Color(180, 180, 180).rgb)
+    pageGraphics.dispose()
+
+    val copyMethod = PdfPageReflowService::class.java.declaredMethods.first { it.name == "copyPaddedSlice" }
+    val roiType = copyMethod.parameterTypes[1]
+    val roi = roiType.getDeclaredConstructor(Int::class.java, Int::class.java, Int::class.java, Int::class.java).apply { isAccessible = true }.newInstance(0, 0, 5, 5)
+    copyMethod.isAccessible = true
+    val output =
+      copyMethod.invoke(
+        pdfPageReflowService,
+        page,
+        roi,
+        5,
+        5,
+        0,
+        0,
+        defaultOptions().copy(strokeStrength = 0.0, contrastEnhancement = true, matchBackground = false, matchBackgroundMode = "grayscale", darkDisplay = false),
+      ) as BufferedImage
+
+    val centerLuma = 0.299 * (output.getRGB(2, 2) ushr 16 and 0xff) + 0.587 * (output.getRGB(2, 2) ushr 8 and 0xff) + 0.114 * (output.getRGB(2, 2) and 0xff)
+    assertThat(centerLuma).isGreaterThan(50.0)
+    assertThat(centerLuma).isLessThan(220.0)
+  }
+
+  @Test
   fun `given source ink replaced by an enclosed opposite-polarity block then server repair restores current foreground`() {
     listOf(false, true).forEach { darkDisplay ->
       val source = BufferedImage(7, 7, BufferedImage.TYPE_INT_ARGB)

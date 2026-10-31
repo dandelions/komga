@@ -4081,12 +4081,14 @@ class PdfPageReflowService(
             background
           } else if (options.matchBackgroundMode == "original") {
             originalTextColor(rgb, backgroundLuma, options)
-          } else if (options.matchBackgroundMode == "monochrome" || options.contrastEnhancement) {
+          } else if (options.matchBackgroundMode == "monochrome") {
             if (matched == true || isInk(rgb, inkThreshold)) {
               if (options.darkDisplay) Color.WHITE else Color.BLACK
             } else {
               background
             }
+          } else if (options.contrastEnhancement) {
+            contrastEnhancedTextColor(rgb, backgroundLuma, options.darkDisplay)
           } else {
             grayscaleTextColor(rgb, backgroundLuma, options.darkDisplay)
           }
@@ -4157,12 +4159,14 @@ class PdfPageReflowService(
             background
           } else if (options.matchBackgroundMode == "original") {
             originalTextColor(rgb, backgroundLuma, options)
-          } else if (options.matchBackgroundMode == "monochrome" || options.contrastEnhancement) {
+          } else if (options.matchBackgroundMode == "monochrome") {
             if (matched == true || isInk(rgb, inkThreshold)) {
               if (options.darkDisplay) Color.WHITE else Color.BLACK
             } else {
               background
             }
+          } else if (options.contrastEnhancement) {
+            contrastEnhancedTextColor(rgb, backgroundLuma, options.darkDisplay)
           } else {
             grayscaleTextColor(rgb, backgroundLuma, options.darkDisplay)
           }
@@ -4753,6 +4757,29 @@ class PdfPageReflowService(
     return foreground
   }
 
+  private fun contrastEnhancedTextColor(
+    rgb: Int,
+    backgroundLuma: Double,
+    darkDisplay: Boolean,
+  ): Color {
+    val sourceDark = backgroundLuma < 128.0
+    val sourceLuma = clamp(pixelLuma(rgb), 0.0, 255.0)
+    val delta = if (sourceDark) sourceLuma - backgroundLuma else backgroundLuma - sourceLuma
+    val baseMinDelta = 8.0
+    if (delta <= baseMinDelta) {
+      val bg = if (darkDisplay) 0 else 255
+      return Color(bg, bg, bg)
+    }
+    val maxDelta = if (sourceDark) 255.0 - backgroundLuma else backgroundLuma
+    val contrastRange = max(24.0, maxDelta * 0.55)
+    val norm = clamp((delta - baseMinDelta) / contrastRange, 0.0, 1.0)
+    val smooth = norm * norm * (3.0 - 2.0 * norm)
+    val fg = smooth.pow(0.8)
+    val outputLuma = if (darkDisplay) 255.0 * fg else 255.0 * (1.0 - fg)
+    val value = clamp(outputLuma.roundToInt(), 0, 255)
+    return Color(value, value, value)
+  }
+
   private fun grayscaleTextColor(
     rgb: Int,
     backgroundLuma: Double,
@@ -4776,12 +4803,14 @@ class PdfPageReflowService(
     val outputLuma =
       if (options.contrastEnhancement) {
         val delta = if (sourceDark) sourceLuma - backgroundLuma else backgroundLuma - sourceLuma
-        val baseMinDelta = 10.0
+        val baseMinDelta = 8.0
         if (delta <= baseMinDelta) return Color(rgb, true)
         val maxDelta = if (sourceDark) 255.0 - backgroundLuma else backgroundLuma
-        val contrastRange = max(24.0, maxDelta * 0.32)
-        val foreground = clamp((delta - baseMinDelta) / contrastRange, 0.0, 1.0).pow(0.55)
-        if (options.darkDisplay) 255.0 * foreground else 255.0 * (1.0 - foreground)
+        val contrastRange = max(24.0, maxDelta * 0.55)
+        val norm = clamp((delta - baseMinDelta) / contrastRange, 0.0, 1.0)
+        val smooth = norm * norm * (3.0 - 2.0 * norm)
+        val fg = smooth.pow(0.8)
+        if (options.darkDisplay) 255.0 * fg else 255.0 * (1.0 - fg)
       } else if (options.darkDisplay != sourceDark) {
         255.0 - sourceLuma
       } else {
