@@ -1,5 +1,6 @@
 package org.gotson.komga.infrastructure.jooq.main
 
+import org.gotson.komga.application.query.buildPage
 import org.gotson.komga.application.query.isEmpty
 import org.gotson.komga.domain.model.BookSearch
 import org.gotson.komga.domain.model.ContentRestrictions
@@ -319,25 +320,18 @@ class BookDtoDao(
 
     val count =
       if (includeTotal) {
-        if (pageable.isUnpaged) fetchedDtos.size else dslRO.fetchCount(query)
+        if (pageable.isUnpaged) null else dslRO.fetchCount(query)
       } else null
 
     val hasNextPage = !includeTotal && pageable.isPaged && fetchedDtos.size > pageable.pageSize
     val dtos = if (hasNextPage) fetchedDtos.take(pageable.pageSize) else fetchedDtos
     val total =
-      count?.toLong()
+      count
         ?: if (pageable.isPaged)
-          pageable.offset + dtos.size + (if (hasNextPage) 1 else 0)
+          (pageable.offset + dtos.size + (if (hasNextPage) 1 else 0)).toInt()
         else
-          dtos.size.toLong()
-    return PageImpl(
-      dtos,
-      if (pageable.isPaged)
-        PageRequest.of(pageable.pageNumber, pageable.pageSize, Sort.unsorted())
-      else
-        PageRequest.of(0, maxOf(total.toInt(), 20), Sort.unsorted()),
-      total,
-    )
+          dtos.size
+    return buildPage(dtos, pageable, total, Sort.unsorted())
   }
 
   override fun findAllDuplicates(
