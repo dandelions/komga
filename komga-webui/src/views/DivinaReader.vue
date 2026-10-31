@@ -801,12 +801,12 @@
               </template>
               <template v-if="isPdf && reflowEnabled">
                 <v-tabs v-model="reflowSheetTab" grow dense class="px-2 pt-1">
-                  <v-tab href="#tab-layout">排版</v-tab>
-                  <v-tab href="#tab-display">画面</v-tab>
-                  <v-tab href="#tab-advanced">裁切与高级</v-tab>
+                  <v-tab>排版</v-tab>
+                  <v-tab>画面</v-tab>
+                  <v-tab>裁切与高级</v-tab>
                 </v-tabs>
                 <v-tabs-items v-model="reflowSheetTab" class="reflow-tabs-items">
-                  <v-tab-item value="tab-layout">
+                  <v-tab-item>
                     <v-list-item v-if="reflowSettings.verticalText">
                       <settings-select
                         :items="reflowVerticalDirections"
@@ -834,7 +834,7 @@
                     <v-list-item>
                       <v-slider
                         v-model="reflowSettings.textScale"
-                        label="Text size"
+                        label="文字大小"
                         min="10"
                         max="140"
                         thumb-label
@@ -874,7 +874,7 @@
                     </v-list-item>
                   </v-tab-item>
 
-                  <v-tab-item value="tab-display">
+                  <v-tab-item>
                     <v-list-item>
                       <settings-switch v-model="reflowSettings.contrastEnhancement" label="文字/背景增强"/>
                     </v-list-item>
@@ -937,7 +937,7 @@
                     </v-list-item>
                   </v-tab-item>
 
-                  <v-tab-item value="tab-advanced">
+                  <v-tab-item>
                     <v-list-item>
                       <settings-select
                         :items="reflowProcessingModes"
@@ -1303,7 +1303,7 @@ export default Vue.extend({
       reflowPrefetchPages: [] as number[],
       reflowPrefetchTimer: undefined as number | undefined,
       reflowSettings: defaultReflowSettings(),
-      reflowSheetTab: 'tab-layout',
+      reflowSheetTab: 0,
       goToPage: 1,
       settings: {
         pageLayout: PagedReaderLayout.SINGLE_PAGE,

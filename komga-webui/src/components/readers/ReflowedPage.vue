@@ -7994,6 +7994,12 @@ export default Vue.extend({
 
 .reflow-controls:not(.reflow-controls-collapsed) label,
 .reflow-controls:not(.reflow-controls-collapsed) .reflow-action-controls {
+  width: 100%;
+  min-width: 0;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+}
+
 .reflow-tab-bar {
   display: flex;
   width: 100%;
@@ -8066,12 +8072,6 @@ export default Vue.extend({
 .reflow-tab-content::-webkit-scrollbar-thumb {
   background: rgba(0, 0, 0, 0.2);
   border-radius: 4px;
-}
-
-  width: 100%;
-  min-width: 0;
-  flex: 0 0 auto;
-  box-sizing: border-box;
 }
 
 .reflow-controls:not(.reflow-controls-collapsed) input[type="range"] {
@@ -8208,24 +8208,28 @@ export default Vue.extend({
 }
 
 .reflow-font-control {
-  flex: 0 0 300px;
-  min-width: 300px;
+  width: 100%;
+  min-width: 0;
+  flex: 0 0 auto;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   color: #212121;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
 }
 
 .reflow-wide-control {
-  flex-basis: 300px;
+  flex-basis: auto;
+  min-width: 0;
 }
 
 .reflow-font-control input {
-  flex: 1;
-  min-width: 120px;
+  flex: 1 1 0;
+  min-width: 40px;
+  width: 100%;
 }
 
 .reflow-step-control {
@@ -8244,35 +8248,40 @@ export default Vue.extend({
 .reflow-stroke-control,
 .reflow-spacing-control,
 .reflow-skew-control {
+  width: 100%;
+  min-width: 0;
+  flex: 0 0 auto;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   color: #212121;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
 }
 
 .reflow-stroke-control {
-  flex: 0 0 280px;
-  min-width: 260px;
+  flex-basis: auto;
+  min-width: 0;
 }
 
 .reflow-spacing-control {
-  flex: 0 0 280px;
-  min-width: 260px;
+  flex-basis: auto;
+  min-width: 0;
 }
 
 .reflow-skew-control {
-  flex: 0 0 260px;
-  min-width: 240px;
+  flex-basis: auto;
+  min-width: 0;
 }
 
 .reflow-stroke-control input,
 .reflow-spacing-control input,
 .reflow-skew-control input {
-  flex: 1;
-  min-width: 100px;
+  flex: 1 1 0;
+  min-width: 40px;
+  width: 100%;
 }
 
 .reflow-skew-control input:disabled {

@@ -37,13 +37,13 @@
           >
             <v-icon small>mdi-drag</v-icon>
           </button>
-          <button type="button" class="k2-action k2-compact-action" title="返回" aria-label="返回" @click="('back-to-book')">
+          <button type="button" class="k2-action k2-compact-action" title="返回" aria-label="返回" @click="$emit('back-to-book')">
             <v-icon small>mdi-arrow-left</v-icon>
           </button>
           <button type="button" class="k2-action k2-collapse-action" title="隐藏重排设置" aria-label="隐藏重排设置" @click="collapseControls">
             <v-icon small>mdi-chevron-double-up</v-icon>
           </button>
-          <button type="button" class="k2-action" title="目录" aria-label="目录" @click="('show-pdf-toc')">
+          <button type="button" class="k2-action" title="目录" aria-label="目录" @click="$emit('show-pdf-toc')">
             <v-icon small>mdi-menu</v-icon>
           </button>
           <button
@@ -51,7 +51,7 @@
             class="k2-action"
             :title="nightDisplay ? '白天模式' : '黑夜模式'"
             :aria-label="nightDisplay ? '白天模式' : '黑夜模式'"
-            @click="('toggle-night-display')"
+            @click="$emit('toggle-night-display')"
           >
             <v-icon small>{{ nightDisplay ? 'mdi-white-balance-sunny' : 'mdi-weather-night' }}</v-icon>
           </button>
@@ -110,7 +110,7 @@
         <div class="k2-tab-content">
           <div v-show="k2ControlsTab === 'layout'" class="k2-tab-panel">
             <label class="k2-control k2-wide-control">
-              <span>Text</span>
+              <span>文字大小</span>
               <button type="button" @click="adjustTextScale(-5)">-</button>
               <input type="range" min="20" max="160" step="5" :value="textScalePercent" @input="setTextScale"/>
               <button type="button" @click="adjustTextScale(5)">+</button>
