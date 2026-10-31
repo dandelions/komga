@@ -639,5 +639,29 @@ describe('ReflowedPage display columns layout', () => {
     expect(pageInstance.pendingContrastEnhancement).toBe(true)
     expect(pageInstance.$emit).toHaveBeenCalledWith('contrast-enhancement-change', true)
   })
+
+  test('renderFallbackImageItem creates a fallback image item when no text lines are detected', async () => {
+    const canvas = {width: 200, height: 300} as HTMLCanvasElement
+    const sliceCanvas = {width: 0, height: 0} as HTMLCanvasElement
+    const sliceContext = {
+      drawImage: jest.fn(),
+    } as any
+
+    const pageInstance: any = {
+      clampRoi: (roi: any) => roi,
+      targetWidth: 500,
+      textScale: () => 1,
+      reflowSliceDataUrl: () => 'data:image/png;base64,mock',
+      renderFallbackImageItem: methods.renderFallbackImageItem,
+    }
+
+    const fallback = pageInstance.renderFallbackImageItem(canvas, sliceCanvas, sliceContext)
+    expect(fallback).toBeDefined()
+    expect(fallback.type).toBe('image')
+    expect(fallback.src).toBe('data:image/png;base64,mock')
+    expect(fallback.w).toBe(200)
+    expect(fallback.h).toBe(300)
+    expect(sliceContext.drawImage).toHaveBeenCalled()
+  })
 })
 

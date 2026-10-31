@@ -693,6 +693,28 @@ export function detectLines(
     rawLines.push({start: roi.y + lineStart, end: roi.y + roi.h})
   }
 
+  // If no lines found with standard noiseThreshold, try a relaxed pass for faint/sparse text
+  if (rawLines.length === 0 && roi.h > 10) {
+    for (let y = 0; y < roi.h; y++) {
+      if (rowInk[y] > 0) {
+        if (!inLine) {
+          inLine = true
+          lineStart = y
+        }
+      } else {
+        if (inLine) {
+          inLine = false
+          if (y - lineStart >= 2) {
+            rawLines.push({start: roi.y + lineStart, end: roi.y + y})
+          }
+        }
+      }
+    }
+    if (inLine && roi.h - lineStart >= 2) {
+      rawLines.push({start: roi.y + lineStart, end: roi.y + roi.h})
+    }
+  }
+
   if (rawLines.length <= 1) return rawLines
 
   // Estimate typical text line height
@@ -1244,6 +1266,15 @@ export function reflowPageFromPixels(
       usedImageIndices.add(idx)
     }
   })
+
+  // Fallback: If no text blocks or images detected (e.g. pure illustration, cover, unusual background),
+  // emit a fallback whole-ROI / whole-page image item so the page is never blank or showing "no text blocks detected".
+  if (items.length === 0) {
+    const fallbackRoi: Roi = effectiveRoi && effectiveRoi.w >= 2 && effectiveRoi.h >= 2
+      ? effectiveRoi
+      : {x: 0, y: 0, w: workW, h: workH}
+    items.push(renderImageSlice(fallbackRoi, false))
+  }
 
   return {
     pageBackground,

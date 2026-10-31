@@ -365,6 +365,41 @@ describe('local-reflow-engine', () => {
       expect(words[0].x).toBeLessThan(words[1].x!)
       expect(words[1].x).toBeLessThan(words[2].x!)
     })
+
+    test('falls back to whole page/ROI image item when no text lines are detected', () => {
+      const width = 100
+      const height = 100
+      const pixels = new Uint8ClampedArray(width * height * 4)
+      pixels.fill(255) // Pure blank image without any text blocks
+
+      const options: LocalReflowOptions = {
+        targetWidth: 400,
+        autoCropBorder: false,
+        textScale: 100,
+        columnCount: 1,
+        skewCorrection: 0,
+        threshold: 185,
+        columnGap: 15,
+        wordGap: 3,
+        strokeStrength: 0.1,
+        contrastEnhancement: false,
+        matchBackground: false,
+        matchBackgroundMode: 'grayscale',
+        blockSpacing: 6,
+        verticalText: false,
+        verticalDirection: 'rtl',
+        marginTop: 0,
+        marginRight: 0,
+        marginBottom: 0,
+        marginLeft: 0,
+        darkDisplay: false,
+      }
+
+      const result = reflowPageFromPixels(pixels, width, height, options)
+      expect(result.items.length).toBe(1)
+      expect(result.items[0].type).toBe('image')
+      expect(result.items[0].src).toBeDefined()
+    })
   })
 
   describe('rotatePixels', () => {

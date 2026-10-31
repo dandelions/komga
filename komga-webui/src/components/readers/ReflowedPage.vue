@@ -2051,13 +2051,28 @@ export default Vue.extend({
             manualImageRegions,
           )
           const imageRegions = this.applyManualImageRegions(detectedImageRegions, manualImageRegions)
-          regionItems.push(this.renderReflowItems(sourceCanvas, lines, imageRegions, manualImageRegions))
+          regionItems.push(await this.renderReflowItems(
+            sourceCanvas,
+            lines,
+            imageRegions,
+            manualImageRegions,
+            requestId,
+            effectiveDetectionRoi,
+          ))
           await this.yieldLocalReflowFrame(requestId)
           if (requestId !== this.requestId) return
         }
         if (requestId !== this.requestId) return
         this.transferStats = this.localTransferStats()
         this.reflowItems = this.joinRegionReflowItems(regionItems)
+        if (this.reflowItems.length === 0 && canvas.width >= 2 && canvas.height >= 2) {
+          const sliceCanvas = document.createElement('canvas')
+          const sliceContext = this.canvasContext(sliceCanvas, true)
+          if (sliceContext) {
+            const fallback = this.renderFallbackImageItem(canvas, sliceCanvas, sliceContext)
+            if (fallback) this.reflowItems = [fallback]
+          }
+        }
         this.repaginate()
         this.lastDetectionKey = detectionKey
         this.emitReflowed()
@@ -2072,10 +2087,12 @@ export default Vue.extend({
     async yieldLocalReflowFrame(requestId: number): Promise<void> {
       if (requestId !== this.requestId) return
       await new Promise<void>(resolve => {
-        if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+        if (typeof setTimeout !== 'undefined') {
+          setTimeout(resolve, 0)
+        } else if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
           window.requestAnimationFrame(() => resolve())
         } else {
-          window.setTimeout(resolve, 0)
+          resolve()
         }
       })
     },
@@ -4879,11 +4896,14 @@ export default Vue.extend({
     },
     buildDetectionInkMap(pixels: Uint8ClampedArray, width: number, height: number, threshold: number): Uint8Array {
       const ink = new Uint8Array(width * height)
+      const backgroundLuma = this.estimateSliceBackgroundLuma(pixels, width, height)
+      const effectiveThreshold = this.adaptiveInkThreshold(threshold, backgroundLuma)
+      const isDark = backgroundLuma < 128
       for (let i = 0; i < width * height; i++) {
         const offset = i * 4
         if (pixels[offset + 3] === 0) continue
         const luma = 0.299 * pixels[offset] + 0.587 * pixels[offset + 1] + 0.114 * pixels[offset + 2]
-        if (luma < threshold) ink[i] = 1
+        if (isDark ? luma > 255 - effectiveThreshold : luma < effectiveThreshold) ink[i] = 1
       }
 
       if (this.reflowAlgorithmMode() === 'koreader') return ink
@@ -5878,6 +5898,18 @@ export default Vue.extend({
         }
       }
       if (inLine && this.isValidTextLine(rowInk, lineStart, roi.y + roi.h, column)) rawLines.push({start: lineStart, end: roi.y + roi.h})
+      if (rawLines.length === 0 && roi.h > 10) {
+        for (let y = roi.y; y < roi.y + roi.h; y++) {
+          if (!inLine && rowInk[y] > 0) {
+            inLine = true
+            lineStart = y
+          } else if (inLine && rowInk[y] === 0) {
+            inLine = false
+            if (y - lineStart >= 2) rawLines.push({start: lineStart, end: y})
+          }
+        }
+        if (inLine && roi.y + roi.h - lineStart >= 2) rawLines.push({start: lineStart, end: roi.y + roi.h})
+      }
       if (rawLines.length <= 1) return rawLines
 
       const heights = rawLines.map(l => l.end - l.start).filter(h => h >= 16)
@@ -6275,12 +6307,14 @@ export default Vue.extend({
       const coveredWidth = thinBlocks.reduce((sum, block) => sum + block.w, 0)
       return right - left >= Math.max(120, glyphHeight * 4) && coveredWidth >= Math.max(48, glyphHeight * 2)
     },
-    renderReflowItems(
+    async renderReflowItems(
       sourceCanvas: HTMLCanvasElement,
       lines: WordLine[],
       imageRegions: ImageRegion[],
       manualImageRegions: ImageRegion[] = [],
-    ): ReflowItem[] {
+      requestId?: number,
+      effectiveRoi?: Roi,
+    ): Promise<ReflowItem[]> {
       const sourceContext = this.canvasContext(sourceCanvas)
       if (!sourceContext) return []
       const sourceImageData = sourceContext.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height)
@@ -6293,12 +6327,27 @@ export default Vue.extend({
       imageRegions.forEach(region => imageItemsByRegion.set(region, this.renderImageBlock(sourceCanvas, sliceCanvas, sliceContext, region)))
 
       if (this.verticalText) {
-        return this.renderVerticalReflowItems(sourceCanvas, sourceImageData, edgeBackgroundLuma, sliceCanvas, sliceContext, lines, imageRegions, imageItemsByRegion)
+        return await this.renderVerticalReflowItems(
+          sourceCanvas,
+          sourceImageData,
+          edgeBackgroundLuma,
+          sliceCanvas,
+          sliceContext,
+          lines,
+          imageRegions,
+          imageItemsByRegion,
+          requestId,
+          effectiveRoi,
+        )
       }
 
       const glyphHeight = this.horizontalGlyphSourceHeight(lines)
       const imageSlots = this.horizontalImageSlots(imageRegions, lines)
-      lines.forEach((line, index) => {
+      let wordCounter = 0
+
+      for (let index = 0; index < lines.length; index++) {
+        if (requestId !== undefined && requestId !== this.requestId) return []
+        const line = lines[index]
         this.appendImageItems(rendered, sourceCanvas, sliceCanvas, sliceContext, imageSlots[index], imageItemsByRegion)
         const previousLine = lines[index - 1]
         const manualImageTrailingBlank = Boolean(
@@ -6335,12 +6384,13 @@ export default Vue.extend({
             {start: block.x, end: block.x + block.w},
           ))
         })
-        if (adjustedBlocks.length === 0) return
+        if (adjustedBlocks.length === 0) continue
 
         const outputTop = Math.min(...adjustedBlocks.map(adjusted => adjusted.block.y))
         const outputBottom = Math.max(...adjustedBlocks.map(adjusted => adjusted.block.y + adjusted.block.h))
         const outputHeight = outputBottom - outputTop
-        adjustedBlocks.forEach(({block: renderBlock, dirtyEdges}) => {
+        for (let bIdx = 0; bIdx < adjustedBlocks.length; bIdx++) {
+          const {block: renderBlock, dirtyEdges} = adjustedBlocks[bIdx]
           const offsetY = renderBlock.y - outputTop
           sliceCanvas.width = renderBlock.w
           sliceCanvas.height = outputHeight
@@ -6378,9 +6428,23 @@ export default Vue.extend({
             src: this.reflowSliceDataUrl(sliceCanvas),
             height: outputHeight * this.textScale(),
           })
-        })
-      })
+          wordCounter++
+          if (wordCounter % 8 === 0 && requestId !== undefined) {
+            await this.yieldLocalReflowFrame(requestId)
+            if (requestId !== this.requestId) return []
+          }
+        }
+        if (requestId !== undefined) {
+          await this.yieldLocalReflowFrame(requestId)
+          if (requestId !== this.requestId) return []
+        }
+      }
       this.appendImageItems(rendered, sourceCanvas, sliceCanvas, sliceContext, imageSlots[lines.length], imageItemsByRegion)
+
+      if (rendered.length === 0) {
+        const fallback = this.renderFallbackImageItem(sourceCanvas, sliceCanvas, sliceContext, effectiveRoi)
+        if (fallback) rendered.push(fallback)
+      }
 
       return rendered
     },
@@ -6792,7 +6856,7 @@ export default Vue.extend({
     horizontalGlyphSidePadding(glyphHeight: number): number {
       return Math.max(2, Math.min(6, Math.round(glyphHeight * 0.1)))
     },
-    renderVerticalReflowItems(
+    async renderVerticalReflowItems(
       sourceCanvas: HTMLCanvasElement,
       sourceImageData: ImageData,
       edgeBackgroundLuma: number,
@@ -6801,11 +6865,16 @@ export default Vue.extend({
       lines: WordLine[],
       imageRegions: ImageRegion[],
       imageItemsByRegion: Map<ImageRegion, RenderedImageBlock | undefined>,
-    ): ReflowItem[] {
+      requestId?: number,
+      effectiveRoi?: Roi,
+    ): Promise<ReflowItem[]> {
       const rendered = [] as ReflowItem[]
       const imageSlots = this.verticalImageSlots(imageRegions, lines)
+      let wordCounter = 0
 
-      lines.forEach((line, index) => {
+      for (let index = 0; index < lines.length; index++) {
+        if (requestId !== undefined && requestId !== this.requestId) return []
+        const line = lines[index]
         this.appendImageItems(rendered, sourceCanvas, sliceCanvas, sliceContext, imageSlots[index], imageItemsByRegion)
         const startParagraph = this.isVerticalParagraphStart(line, lines[index - 1])
         if (startParagraph && rendered.length > 0) this.appendBreakIfNeeded(rendered)
@@ -6817,8 +6886,9 @@ export default Vue.extend({
         )
         if (indent > 0) rendered.push({type: 'indent', sourceWidth: indent, width: this.scaledVerticalIndentHeight(indent)})
 
-        line.words.forEach(block => {
-          if (block.w < 2 || block.h < 2 || this.isRuleLikeBlock(block)) return
+        for (let bIdx = 0; bIdx < line.words.length; bIdx++) {
+          const block = line.words[bIdx]
+          if (block.w < 2 || block.h < 2 || this.isRuleLikeBlock(block)) continue
           const renderBlock = this.paddedVerticalGlyphBlock(block, sourceCanvas.width, sourceCanvas.height)
           const adjusted = this.adjustBlockEdges(sourceImageData, renderBlock.source, false, true, edgeBackgroundLuma)
           const source = adjusted.block
@@ -6871,11 +6941,65 @@ export default Vue.extend({
             src: this.reflowSliceDataUrl(sliceCanvas),
             height: renderBlock.outputHeight * this.textScale(),
           })
-        })
-      })
+          wordCounter++
+          if (wordCounter % 8 === 0 && requestId !== undefined) {
+            await this.yieldLocalReflowFrame(requestId)
+            if (requestId !== this.requestId) return []
+          }
+        }
+        if (requestId !== undefined) {
+          await this.yieldLocalReflowFrame(requestId)
+          if (requestId !== this.requestId) return []
+        }
+      }
       this.appendImageItems(rendered, sourceCanvas, sliceCanvas, sliceContext, imageSlots[lines.length], imageItemsByRegion)
 
+      if (rendered.length === 0) {
+        const fallback = this.renderFallbackImageItem(sourceCanvas, sliceCanvas, sliceContext, effectiveRoi)
+        if (fallback) rendered.push(fallback)
+      }
+
       return rendered
+    },
+    renderFallbackImageItem(
+      sourceCanvas: HTMLCanvasElement,
+      sliceCanvas: HTMLCanvasElement,
+      sliceContext: CanvasRenderingContext2D,
+      roi?: Roi,
+    ): ReflowItem | undefined {
+      const source = roi && roi.w >= 2 && roi.h >= 2
+        ? this.clampRoi(roi, sourceCanvas.width, sourceCanvas.height)
+        : {x: 0, y: 0, w: sourceCanvas.width, h: sourceCanvas.height}
+      if (source.w < 2 || source.h < 2) return undefined
+
+      const maxDim = 2048
+      const scale = Math.min(1, maxDim / Math.max(source.w, source.h))
+      const outW = Math.max(1, Math.round(source.w * scale))
+      const outH = Math.max(1, Math.round(source.h * scale))
+
+      sliceCanvas.width = outW
+      sliceCanvas.height = outH
+      sliceContext.drawImage(
+        sourceCanvas,
+        source.x,
+        source.y,
+        source.w,
+        source.h,
+        0,
+        0,
+        outW,
+        outH,
+      )
+      const dataUrl = this.reflowSliceDataUrl(sliceCanvas)
+      return {
+        type: 'image',
+        src: dataUrl,
+        x: source.x,
+        y: source.y,
+        w: source.w,
+        h: source.h,
+        width: Math.min(this.targetWidth, source.w * this.textScale()),
+      }
     },
     verticalImageSlots(imageRegions: ImageRegion[], lines: WordLine[]): ImageRegion[][] {
       const slots = Array.from({length: lines.length + 1}, () => [] as ImageRegion[])

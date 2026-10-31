@@ -838,6 +838,14 @@ export default Vue.extend({
         if (requestId !== this.requestId) return
 
         this.items = this.renderK2Items(canvas, lines, scaledImageRegions)
+        if (this.items.length === 0 && canvas.width >= 2 && canvas.height >= 2) {
+          const sliceCanvas = document.createElement('canvas')
+          const sliceContext = this.canvasContext(sliceCanvas, true)
+          if (sliceContext) {
+            const fallback = this.renderFallbackImageItem(canvas, sliceCanvas, sliceContext, roi)
+            if (fallback) this.items = [fallback]
+          }
+        }
         this.repaginate()
       } catch (e) {
         if (requestId !== this.requestId) return
@@ -2203,6 +2211,49 @@ export default Vue.extend({
       this.appendK2ImageItems(items, sourceCanvas, sliceCanvas, sliceContext, imageSlots[lines.length])
 
       return items
+    },
+    renderFallbackImageItem(
+      sourceCanvas: HTMLCanvasElement,
+      sliceCanvas: HTMLCanvasElement,
+      sliceContext: CanvasRenderingContext2D,
+      roi?: Roi,
+    ): K2Item | undefined {
+      const source = roi && roi.w >= 2 && roi.h >= 2
+        ? this.clampRoi(roi, sourceCanvas.width, sourceCanvas.height)
+        : {x: 0, y: 0, w: sourceCanvas.width, h: sourceCanvas.height}
+      if (source.w < 2 || source.h < 2) return undefined
+
+      const maxDim = 2048
+      const scale = Math.min(1, maxDim / Math.max(source.w, source.h))
+      const outW = Math.max(1, Math.round(source.w * scale))
+      const outH = Math.max(1, Math.round(source.h * scale))
+
+      sliceCanvas.width = outW
+      sliceCanvas.height = outH
+      sliceContext.drawImage(
+        sourceCanvas,
+        source.x,
+        source.y,
+        source.w,
+        source.h,
+        0,
+        0,
+        outW,
+        outH,
+      )
+      const dataUrl = sliceCanvas.toDataURL('image/png')
+      const targetWidth = (typeof this.pageContentWidth === 'function' ? this.pageContentWidth() : 0) || this.targetWidth
+      const displayScale = Math.min(1, targetWidth / Math.max(1, outW))
+      return {
+        type: 'image',
+        src: dataUrl,
+        x: source.x,
+        y: source.y,
+        w: source.w,
+        h: source.h,
+        width: Math.max(1, Math.round(outW * displayScale)),
+        height: Math.max(1, Math.round(outH * displayScale)),
+      }
     },
     horizontalImageSlots(imageRegions: ImageRegion[], lines: WordLine[]): ImageRegion[][] {
       const slots = Array.from({length: lines.length + 1}, () => [] as ImageRegion[])
