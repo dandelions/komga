@@ -679,6 +679,8 @@ import {
 import {mergeVerticalColumnBands} from '@/functions/vertical-reflow'
 import type {ReflowAnalysisWorkerResponse, ReflowWorkerRoi} from '@/functions/reflow-analysis-worker'
 import {createReflowAnalysisWorker} from '@/functions/reflow-analysis-worker-factory'
+import type {LocalReflowOptions, LocalReflowResult} from '@/functions/local-reflow-engine'
+import {repairInvertedGlyphComponents} from '@/functions/local-reflow-engine'
 import {
   contiguousReflowPageCount,
   fitReflowImageDimensions,
@@ -1936,6 +1938,58 @@ export default Vue.extend({
         const skewCorrection = this.effectiveSkewCorrection(autoSkewCorrection, this.controlSkewCorrection)
         const deskewedCanvas = skewCorrection === 0 ? canvas : this.skewCorrectedCanvas(canvas, skewCorrection)
         const cropRois = this.reflowCropRois()
+
+        const deskewedContext = this.canvasContext(deskewedCanvas, true)
+        if (deskewedContext && this.supportsLocalAnalysisWorker()) {
+          const deskewedImageData = deskewedContext.getImageData(0, 0, deskewedCanvas.width, deskewedCanvas.height)
+          const workerOptions: LocalReflowOptions = {
+            targetWidth: this.targetWidth,
+            autoCropBorder: this.controlAutoCropBorder,
+            textScale: this.textScalePercent,
+            columnCount: this.controlColumnCount,
+            skewCorrection: this.controlSkewCorrection,
+            autoSkewCorrection: this.controlAutoSkewCorrection,
+            threshold: this.clampNumber(this.options.threshold, 50, 230, THRESHOLD),
+            columnGap: this.reflowColumnGap,
+            wordGap: this.clampNumber(this.options.wordGap, 1, 30, WORD_GAP),
+            strokeStrength: this.controlStrokeStrength,
+            contrastEnhancement: this.controlContrastEnhancement,
+            matchBackground: this.controlMatchBackground,
+            matchBackgroundMode: this.controlMatchBackgroundMode,
+            optimizeBackground: this.controlOptimizeBackground,
+            removeBackground: this.controlRemoveBackground,
+            removeWatermark: this.controlRemoveWatermark,
+            imageQuality: this.controlImageQuality,
+            blockSpacing: this.controlBlockSpacing,
+            verticalText: this.controlVerticalText,
+            verticalDirection: this.controlVerticalDirection,
+            marginTop: this.clampPercent(this.options.marginTop),
+            marginRight: this.clampPercent(this.options.marginRight),
+            marginBottom: this.clampPercent(this.options.marginBottom),
+            marginLeft: this.clampPercent(this.options.marginLeft),
+            darkDisplay: this.darkDisplay,
+            rotation: this.normalizedRotation(this.rotation),
+          }
+          const manualRegions = this.currentManualImageRois()
+          const workerResult = await this.runLocalWorkerReflow(
+            deskewedImageData,
+            workerOptions,
+            cropRois.filter((r): r is Roi => !!r),
+            manualRegions,
+            requestId,
+          )
+          if (requestId !== this.requestId) return
+          if (workerResult && workerResult.items && workerResult.items.length > 0) {
+            this.pageBackground = workerResult.pageBackground || this.pageBackground
+            this.transferStats = this.localTransferStats()
+            this.reflowItems = workerResult.items as ReflowItem[]
+            this.repaginate()
+            this.lastDetectionKey = detectionKey
+            this.emitReflowed()
+            return
+          }
+        }
+
         const regionItems = [] as ReflowItem[][]
         for (const roi of cropRois) {
           const regionSource = this.reflowRegionSource(deskewedCanvas, roi)
@@ -2002,6 +2056,64 @@ export default Vue.extend({
     },
     supportsLocalAnalysisWorker(): boolean {
       return typeof Worker !== 'undefined' && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function'
+    },
+    async runLocalWorkerReflow(
+      imageData: ImageData,
+      options: LocalReflowOptions,
+      cropRois: Roi[],
+      manualImageRegions: Roi[],
+      requestId: number,
+    ): Promise<LocalReflowResult | undefined> {
+      if (!this.supportsLocalAnalysisWorker()) return undefined
+      this.terminateLocalAnalysisWorker()
+      try {
+        const worker = createReflowAnalysisWorker()
+        if (!worker) return undefined
+        this.localAnalysisWorker = worker
+        const pixels = new Uint8ClampedArray(imageData.data)
+        return await new Promise<LocalReflowResult | undefined>((resolve) => {
+          const finish = () => {
+            if (this.localAnalysisWorker === worker) this.localAnalysisWorker = undefined
+            worker.terminate()
+          }
+          worker.onmessage = (event: MessageEvent<ReflowAnalysisWorkerResponse>) => {
+            const response = event.data
+            if (!response || response.requestId !== requestId) return
+            finish()
+            if (response.type === 'error') {
+              resolve(undefined)
+            } else if (response.type === 'reflowed' && response.items) {
+              resolve({
+                pageBackground: response.pageBackground || '#ffffff',
+                sourceWidth: imageData.width,
+                sourceHeight: imageData.height,
+                detectedAutoSkew: response.detectedAutoSkew || 0,
+                processingTimeMs: response.processingTimeMs || 0,
+                items: response.items,
+              })
+            } else {
+              resolve(undefined)
+            }
+          }
+          worker.onerror = () => {
+            finish()
+            resolve(undefined)
+          }
+          worker.postMessage({
+            type: 'reflow',
+            requestId,
+            pixels,
+            width: imageData.width,
+            height: imageData.height,
+            options,
+            cropRois,
+            manualImageRegions,
+          }, [pixels.buffer])
+        })
+      } catch (_) {
+        this.terminateLocalAnalysisWorker()
+        return undefined
+      }
     },
     terminateLocalAnalysisWorker() {
       if (!this.localAnalysisWorker) return
@@ -6182,6 +6294,19 @@ export default Vue.extend({
           sliceContext.drawImage(sourceCanvas, renderBlock.x, renderBlock.y, renderBlock.w, renderBlock.h, 0, offsetY, renderBlock.w, renderBlock.h)
           this.boldenSourceCanvas(sliceContext, renderBlock.w, outputHeight)
           this.finishWordSlice(sliceContext, renderBlock.w, outputHeight)
+          const sliceImgData = sliceContext.getImageData(0, 0, renderBlock.w, outputHeight)
+          repairInvertedGlyphComponents(
+            sliceImgData.data,
+            renderBlock.w,
+            outputHeight,
+            sourceImageData.data,
+            sourceCanvas.width,
+            renderBlock,
+            edgeBackgroundLuma,
+            this.clampNumber(this.options.threshold, 50, 230, THRESHOLD),
+            this.darkDisplay,
+          )
+          sliceContext.putImageData(sliceImgData, 0, 0)
           this.clearDirtyBlockEdges(
             sliceContext,
             renderBlock.w,

@@ -227,3 +227,75 @@ describe('DivinaReader image magnifier', () => {
     }
   })
 })
+
+describe('DivinaReader reflow prefetch and LRU cache', () => {
+  test('scheduleNextReflowPrefetch prioritizes current page and does not prefetch when current page is uncached', () => {
+    const reader: any = {
+      reflowCropMode: false,
+      page: 5,
+      pagesCount: 20,
+      pages: Array.from({length: 20}, (_, i) => ({number: i + 1})),
+      cachedReflowItems: jest.fn((page) => (page.number === 5 ? undefined : [{type: 'word'}])),
+      reflowPrefetchPages: [6],
+    }
+
+    methods.scheduleNextReflowPrefetch.call(reader)
+    expect(reader.reflowPrefetchPages).toEqual([])
+  })
+
+  test('scheduleNextReflowPrefetch schedules timer when current page is cached', () => {
+    jest.useFakeTimers()
+    try {
+      const reader: any = {
+        reflowCropMode: false,
+        page: 5,
+        pagesCount: 20,
+        pages: Array.from({length: 20}, (_, i) => ({number: i + 1})),
+        cachedReflowItems: jest.fn((page) => (page.number === 5 ? [{type: 'word'}] : undefined)),
+        reflowPrefetchPages: [],
+        reflowPrefetchTimer: undefined,
+      }
+
+      methods.scheduleNextReflowPrefetch.call(reader)
+      expect(reader.reflowPrefetchTimer).toBeDefined()
+
+      jest.advanceTimersByTime(500)
+      expect(reader.reflowPrefetchPages).toEqual([6])
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  test('pruneReflowCache evicts least recently accessed entries outside active window when over capacity', () => {
+    const reflowCache: Record<string, any> = {}
+    const cacheKey = 'v1'
+
+    // Create 18 cache entries (pages 1..18)
+    for (let p = 1; p <= 18; p++) {
+      reflowCache[`${p}|${cacheKey}`] = {
+        items: [{type: 'word'}],
+        pageBackground: '#fff',
+        lastAccessed: p * 1000, // page 1 is oldest accessed, page 18 newest
+      }
+    }
+
+    const deletedKeys: string[] = []
+    const reader: any = {
+      reflowCache,
+      reflowCacheKey: cacheKey,
+      reflowRootPage: 15,
+      page: 15,
+      pagesCount: 20,
+      $delete: jest.fn((obj, key) => {
+        deletedKeys.push(key)
+        delete obj[key]
+      }),
+    }
+
+    methods.pruneReflowCache.call(reader)
+
+    expect(deletedKeys).toEqual([`1|${cacheKey}`, `2|${cacheKey}`])
+    expect(Object.keys(reflowCache).length).toBe(16)
+    expect(reflowCache[`15|${cacheKey}`]).toBeDefined()
+  })
+})

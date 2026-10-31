@@ -1113,10 +1113,11 @@ const MAGNIFIER_DIAMETER_OPTIONS = [
   {text: '中（184 px）', value: 184},
   {text: '大（240 px）', value: 240},
 ]
-const REFLOW_CACHE_BEHIND_COUNT = 2
+const REFLOW_CACHE_BEHIND_COUNT = 3
 const REFLOW_CONTINUATION_COUNT = 4
-const REFLOW_PREFETCH_AHEAD_COUNT = 1
-const REFLOW_PREFETCH_DELAY_MS = 750
+const REFLOW_PREFETCH_AHEAD_COUNT = 2
+const REFLOW_PREFETCH_DELAY_MS = 500
+const MAX_REFLOW_CACHE_ENTRIES = 16
 const MAX_REFLOW_CROP_REGIONS = 8
 
 function defaultCropRegionsByParity(enabled: boolean = false): any {
@@ -1531,8 +1532,12 @@ export default Vue.extend({
           this.markProgress(val)
           this.goToPage = val
           this.updateRoute()
-          if (this.reflowMode) this.scheduleNextReflowPrefetch()
-          else this.clearReflowPrefetch()
+          if (this.reflowMode) {
+            this.clearReflowPrefetch()
+            this.scheduleNextReflowPrefetch()
+          } else {
+            this.clearReflowPrefetch()
+          }
         }
       },
       immediate: true,
@@ -3510,7 +3515,12 @@ export default Vue.extend({
     },
     cachedReflowEntry(page: PageDtoWithUrl | undefined): any {
       if (!page || this.reflowCropMode) return undefined
-      return this.reflowCache[this.reflowCacheEntryKey(page.number, this.reflowCacheKey)]
+      const key = this.reflowCacheEntryKey(page.number, this.reflowCacheKey)
+      const entry = this.reflowCache[key]
+      if (entry && !Array.isArray(entry)) {
+        entry.lastAccessed = Date.now()
+      }
+      return entry
     },
     cachedReflowItems(page: PageDtoWithUrl | undefined): any[] | undefined {
       const entry = this.cachedReflowEntry(page)
@@ -3534,9 +3544,12 @@ export default Vue.extend({
         items: payload.items,
         pageBackground: payload.pageBackground || '',
         transferStats: payload.transferStats,
+        lastAccessed: Date.now(),
       })
       this.pruneReflowCache()
-      if (payload.pageNumber === this.reflowRootPage || wasPrefetched) this.scheduleNextReflowPrefetch()
+      if (payload.pageNumber === this.reflowRootPage || payload.pageNumber === this.page || wasPrefetched) {
+        this.scheduleNextReflowPrefetch()
+      }
     },
     reflowPageUrl(page: PageDtoWithUrl | undefined): string {
       if (!page) return ''
@@ -3609,6 +3622,17 @@ export default Vue.extend({
       })
     },
     pruneReflowCache() {
+      const currentKeys: string[] = []
+      Object.keys(this.reflowCache).forEach(key => {
+        const separator = key.indexOf('|')
+        const cacheKey = key.substring(separator + 1)
+        if (cacheKey !== this.reflowCacheKey) {
+          this.$delete(this.reflowCache, key)
+        } else {
+          currentKeys.push(key)
+        }
+      })
+
       const firstRetainedPage = Math.max(1, Math.min(this.reflowRootPage, this.page) - REFLOW_CACHE_BEHIND_COUNT)
       const lastRetainedPage = Math.min(
         this.pagesCount,
@@ -3617,16 +3641,29 @@ export default Vue.extend({
           this.page + REFLOW_PREFETCH_AHEAD_COUNT,
         ),
       )
-      Object.keys(this.reflowCache).forEach(key => {
-        const separator = key.indexOf('|')
-        const pageNumber = Number(key.substring(0, separator))
-        const cacheKey = key.substring(separator + 1)
-        const outsideActiveWindow = pageNumber < firstRetainedPage || pageNumber > lastRetainedPage
-        if (
-          cacheKey !== this.reflowCacheKey ||
-          outsideActiveWindow
-        ) this.$delete(this.reflowCache, key)
-      })
+
+      if (currentKeys.length > MAX_REFLOW_CACHE_ENTRIES) {
+        const evictableEntries = currentKeys
+          .map(key => {
+            const separator = key.indexOf('|')
+            const pageNumber = Number(key.substring(0, separator))
+            const entry = this.reflowCache[key]
+            const inActiveWindow = pageNumber >= firstRetainedPage && pageNumber <= lastRetainedPage
+            return {
+              key,
+              pageNumber,
+              inActiveWindow,
+              lastAccessed: Number(entry?.lastAccessed) || 0,
+            }
+          })
+          .filter(item => !item.inActiveWindow)
+          .sort((a, b) => a.lastAccessed - b.lastAccessed)
+
+        const excessCount = currentKeys.length - MAX_REFLOW_CACHE_ENTRIES
+        for (let i = 0; i < excessCount && i < evictableEntries.length; i++) {
+          this.$delete(this.reflowCache, evictableEntries[i].key)
+        }
+      }
     },
     clearReflowPrefetch() {
       if (this.reflowPrefetchTimer !== undefined) {
@@ -3664,6 +3701,12 @@ export default Vue.extend({
         return
       }
 
+      const currentPageDone = !!this.cachedReflowItems(this.pages[sourcePage - 1])
+      if (!currentPageDone) {
+        this.reflowPrefetchPages = []
+        return
+      }
+
       const startPrefetch = () => {
         this.reflowPrefetchTimer = undefined
         if (this.page !== sourcePage || this.reflowCropMode) return
@@ -3674,8 +3717,7 @@ export default Vue.extend({
         this.reflowPrefetchPages = [nextPage]
       }
 
-      if (nextPage === sourcePage + 1) startPrefetch()
-      else this.reflowPrefetchTimer = window.setTimeout(startPrefetch, REFLOW_PREFETCH_DELAY_MS)
+      this.reflowPrefetchTimer = window.setTimeout(startPrefetch, REFLOW_PREFETCH_DELAY_MS)
     },
     setReflowVisiblePage(pageNumber: number) {
       const normalized = Math.max(1, Math.min(this.pagesCount, Math.round(Number(pageNumber) || this.page)))

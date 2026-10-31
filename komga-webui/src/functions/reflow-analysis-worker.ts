@@ -1,3 +1,10 @@
+import {
+  reflowPageFromPixels,
+  LocalReflowOptions,
+  LocalReflowItem,
+  Roi,
+} from './local-reflow-engine'
+
 export type ReflowWorkerRoi = {
   x: number,
   y: number,
@@ -5,7 +12,7 @@ export type ReflowWorkerRoi = {
   h: number,
 }
 
-export type ReflowAnalysisWorkerRequest = {
+export type ReflowAnalysisWorkerAnalyzeRequest = {
   type: 'analyze',
   requestId: number,
   pixels: Uint8ClampedArray,
@@ -14,26 +21,75 @@ export type ReflowAnalysisWorkerRequest = {
   threshold: number,
 }
 
+export type ReflowAnalysisWorkerReflowRequest = {
+  type: 'reflow',
+  requestId: number,
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  options: LocalReflowOptions,
+  cropRois?: Roi[],
+  manualImageRegions?: Roi[],
+}
+
+export type ReflowAnalysisWorkerRequest =
+  | ReflowAnalysisWorkerAnalyzeRequest
+  | ReflowAnalysisWorkerReflowRequest
+
 export type ReflowAnalysisWorkerResponse = {
-  type: 'analyzed' | 'error',
+  type: 'analyzed' | 'reflowed' | 'error',
   requestId: number,
   roi?: ReflowWorkerRoi,
+  items?: LocalReflowItem[],
+  pageBackground?: string,
+  detectedAutoSkew?: number,
+  processingTimeMs?: number,
   message?: string,
 }
 
 self.onmessage = (event: MessageEvent<ReflowAnalysisWorkerRequest>) => {
   const request = event.data
-  if (request.type !== 'analyze') return
+  if (!request) return
 
-  try {
-    const roi = detectInkRoi(request.pixels, request.width, request.height, request.threshold)
-    postMessage({type: 'analyzed', requestId: request.requestId, roi} as ReflowAnalysisWorkerResponse)
-  } catch (error) {
-    postMessage({
-      type: 'error',
-      requestId: request.requestId,
-      message: error instanceof Error ? error.message : String(error),
-    } as ReflowAnalysisWorkerResponse)
+  if (request.type === 'analyze') {
+    try {
+      const roi = detectInkRoi(request.pixels, request.width, request.height, request.threshold)
+      postMessage({type: 'analyzed', requestId: request.requestId, roi} as ReflowAnalysisWorkerResponse)
+    } catch (error) {
+      postMessage({
+        type: 'error',
+        requestId: request.requestId,
+        message: error instanceof Error ? error.message : String(error),
+      } as ReflowAnalysisWorkerResponse)
+    }
+    return
+  }
+
+  if (request.type === 'reflow') {
+    try {
+      const result = reflowPageFromPixels(
+        request.pixels,
+        request.width,
+        request.height,
+        request.options,
+        request.cropRois || [],
+        request.manualImageRegions || [],
+      )
+      postMessage({
+        type: 'reflowed',
+        requestId: request.requestId,
+        items: result.items,
+        pageBackground: result.pageBackground,
+        detectedAutoSkew: result.detectedAutoSkew,
+        processingTimeMs: result.processingTimeMs,
+      } as ReflowAnalysisWorkerResponse)
+    } catch (error) {
+      postMessage({
+        type: 'error',
+        requestId: request.requestId,
+        message: error instanceof Error ? error.message : String(error),
+      } as ReflowAnalysisWorkerResponse)
+    }
   }
 }
 
