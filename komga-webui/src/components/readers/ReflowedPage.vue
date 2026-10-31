@@ -221,10 +221,14 @@
               <button type="button" class="reflow-step-control" @click="adjustBlockSpacing(1)">+</button>
               <span class="reflow-font-value">{{ controlBlockSpacing }}</span>
             </label>
+            <label class="reflow-column-control reflow-checkbox-control">
+              <span>公式保护与原位排版</span>
+              <input type="checkbox" :checked="controlFormulaProtection" @change="setFormulaProtection"/>
+            </label>
           </div>
           <div v-show="reflowControlsTab === 'display'" class="reflow-tab-panel">
             <label class="reflow-column-control reflow-checkbox-control">
-              <span>文字/背景增强</span>
+              <span>高对比度漂白与字迹增强</span>
               <input type="checkbox" :checked="controlContrastEnhancement" @change="setContrastEnhancement"/>
             </label>
             <label class="reflow-column-control reflow-checkbox-control">
@@ -620,7 +624,7 @@
       </template>
     </div>
     <div
-      v-if="paginationItems.length > 0"
+      v-if="!preload && paginationItems.length > 0"
       ref="measureWrapper"
       class="reflow-measure-wrapper"
       :class="{'vertical-reflow-wrapper': verticalText}"
@@ -1085,6 +1089,7 @@ export default Vue.extend({
       pendingVerticalDirection: 'rtl' as VerticalDirection,
       pendingStrokeStrength: 0.1,
       pendingContrastEnhancement: false,
+      pendingFormulaProtection: true,
       pendingMatchBackground: false,
       pendingMatchBackgroundMode: 'grayscale' as MatchBackgroundMode,
       pendingOptimizeBackground: 'none' as DocumentRemoveBackgroundMode,
@@ -1250,6 +1255,9 @@ export default Vue.extend({
     },
     controlContrastEnhancement(): boolean {
       return this.pendingContrastEnhancement === true
+    },
+    controlFormulaProtection(): boolean {
+      return this.pendingFormulaProtection !== false
     },
     controlMatchBackground(): boolean {
       return this.pendingMatchBackground === true
@@ -1809,6 +1817,7 @@ export default Vue.extend({
       if (force || !previous || snapshot.verticalDirection !== previous.verticalDirection) this.pendingVerticalDirection = snapshot.verticalDirection
       if (force || !previous || snapshot.strokeStrength !== previous.strokeStrength) this.pendingStrokeStrength = snapshot.strokeStrength
       if (force || !previous || snapshot.contrastEnhancement !== previous.contrastEnhancement) this.pendingContrastEnhancement = snapshot.contrastEnhancement
+      if (force || !previous || snapshot.formulaProtection !== previous.formulaProtection) this.pendingFormulaProtection = snapshot.formulaProtection !== false
       if (force || !previous || snapshot.matchBackground !== previous.matchBackground) this.pendingMatchBackground = snapshot.matchBackground
       if (force || !previous || snapshot.matchBackgroundMode !== previous.matchBackgroundMode) this.pendingMatchBackgroundMode = snapshot.matchBackgroundMode
       if (force || !previous || snapshot.optimizeBackground !== previous.optimizeBackground || snapshot.removeBackground !== previous.removeBackground) {
@@ -1922,28 +1931,23 @@ export default Vue.extend({
         await this.yieldLocalReflowFrame(requestId)
         if (requestId !== this.requestId) return
         this.imageSize = {w: image.naturalWidth, h: image.naturalHeight}
-        const canvas = document.createElement('canvas')
-        canvas.width = image.naturalWidth
-        canvas.height = image.naturalHeight
-        const context = this.canvasContext(canvas, true)
-        if (!context) throw new Error('Canvas is unavailable')
-        context.drawImage(image, 0, 0)
-        this.pageBackground = this.detectPageBackground(context, canvas.width, canvas.height)
-        this.preprocessSourceCanvas(context, canvas.width, canvas.height)
-        const autoSkewCorrection = this.controlAutoSkewCorrection
-          ? this.detectCanvasAutoSkew(context, canvas.width, canvas.height, this.currentDeskewAnalysisRoi())
-          : 0
-        this.detectedAutoSkewCorrection = autoSkewCorrection
-        this.enhanceSourceCanvas(context, canvas.width, canvas.height)
-        await this.yieldLocalReflowFrame(requestId)
-        if (requestId !== this.requestId) return
-        const skewCorrection = this.effectiveSkewCorrection(autoSkewCorrection, this.controlSkewCorrection)
-        const deskewedCanvas = skewCorrection === 0 ? canvas : this.skewCorrectedCanvas(canvas, skewCorrection)
+        const rotation = this.normalizedRotation(this.rotation)
+        const canvas = rotation !== 0
+          ? this.rotatedImageCanvas(image, rotation)
+          : (() => {
+              const c = document.createElement('canvas')
+              c.width = image.naturalWidth
+              c.height = image.naturalHeight
+              const ctx = this.canvasContext(c, true)
+              ctx?.drawImage(image, 0, 0)
+              return c
+            })()
         const cropRois = this.reflowCropRois()
 
-        const deskewedContext = this.canvasContext(deskewedCanvas, true)
-        if (deskewedContext && this.supportsLocalAnalysisWorker()) {
-          const deskewedImageData = deskewedContext.getImageData(0, 0, deskewedCanvas.width, deskewedCanvas.height)
+        if (this.supportsLocalAnalysisWorker()) {
+          const context = this.canvasContext(canvas, true)
+          if (!context) throw new Error('Canvas is unavailable')
+          const imageData = context.getImageData(0, 0, canvas.width, canvas.height)
           const workerOptions: LocalReflowOptions = {
             targetWidth: this.targetWidth,
             autoCropBorder: this.controlAutoCropBorder,
@@ -1970,12 +1974,13 @@ export default Vue.extend({
             marginBottom: this.clampPercent(this.options.marginBottom),
             marginLeft: this.clampPercent(this.options.marginLeft),
             darkDisplay: this.darkDisplay,
-            rotation: this.normalizedRotation(this.rotation),
+            rotation: 0,
             formulaProtection: this.options?.formulaProtection !== false,
+            deskewAnalysisRoi: this.currentDeskewAnalysisRoi(),
           }
           const manualRegions = this.currentManualImageRois()
           const workerResult = await this.runLocalWorkerReflow(
-            deskewedImageData,
+            imageData,
             workerOptions,
             cropRois.filter((r): r is Roi => !!r),
             manualRegions,
@@ -1984,14 +1989,31 @@ export default Vue.extend({
           if (requestId !== this.requestId) return
           if (workerResult && workerResult.items && workerResult.items.length > 0) {
             this.pageBackground = workerResult.pageBackground || this.pageBackground
+            this.detectedAutoSkewCorrection = workerResult.detectedAutoSkew || 0
             this.transferStats = this.localTransferStats()
             this.reflowItems = workerResult.items as ReflowItem[]
-            this.repaginate()
+            if (!this.preload) {
+              this.repaginate()
+            }
             this.lastDetectionKey = detectionKey
             this.emitReflowed()
             return
           }
         }
+
+        const context = this.canvasContext(canvas, true)
+        if (!context) throw new Error('Canvas is unavailable')
+        this.pageBackground = this.detectPageBackground(context, canvas.width, canvas.height)
+        this.preprocessSourceCanvas(context, canvas.width, canvas.height)
+        const autoSkewCorrection = this.controlAutoSkewCorrection
+          ? this.detectCanvasAutoSkew(context, canvas.width, canvas.height, this.currentDeskewAnalysisRoi())
+          : 0
+        this.detectedAutoSkewCorrection = autoSkewCorrection
+        this.enhanceSourceCanvas(context, canvas.width, canvas.height)
+        await this.yieldLocalReflowFrame(requestId)
+        if (requestId !== this.requestId) return
+        const skewCorrection = this.effectiveSkewCorrection(autoSkewCorrection, this.controlSkewCorrection)
+        const deskewedCanvas = skewCorrection === 0 ? canvas : this.skewCorrectedCanvas(canvas, skewCorrection)
 
         const regionItems = [] as ReflowItem[][]
         for (const roi of cropRois) {
@@ -2073,7 +2095,7 @@ export default Vue.extend({
         const worker = createReflowAnalysisWorker()
         if (!worker) return undefined
         this.localAnalysisWorker = worker
-        const pixels = new Uint8ClampedArray(imageData.data)
+        const pixels = imageData.data
         return await new Promise<LocalReflowResult | undefined>((resolve) => {
           const finish = () => {
             if (this.localAnalysisWorker === worker) this.localAnalysisWorker = undefined
@@ -2129,7 +2151,7 @@ export default Vue.extend({
       try {
         const worker = createReflowAnalysisWorker()
         this.localAnalysisWorker = worker
-        const pixels = new Uint8ClampedArray(imageData.data)
+        const pixels = imageData.data
         return await new Promise<Roi | undefined>((resolve, reject) => {
           const finish = () => {
             if (this.localAnalysisWorker === worker) this.localAnalysisWorker = undefined
@@ -7346,9 +7368,15 @@ export default Vue.extend({
       const target = event.target as HTMLSelectElement
       this.$emit('algorithm-mode-change', target.value === 'koreader' ? 'koreader' : 'original')
     },
+    setFormulaProtection(event: Event) {
+      const target = event.target as HTMLInputElement
+      this.pendingFormulaProtection = target.checked
+      this.$emit('formula-protection-change', target.checked)
+    },
     setContrastEnhancement(event: Event) {
       const target = event.target as HTMLInputElement
       this.pendingContrastEnhancement = target.checked
+      this.$emit('contrast-enhancement-change', target.checked)
     },
     setMatchBackground(event: Event) {
       const target = event.target as HTMLInputElement
@@ -7406,6 +7434,7 @@ export default Vue.extend({
       this.$emit('vertical-text-change', this.controlVerticalText)
       this.$emit('vertical-direction-change', this.controlVerticalDirection)
       this.$emit('stroke-strength-change', this.controlStrokeStrength)
+      this.$emit('formula-protection-change', this.controlFormulaProtection)
       this.$emit('contrast-enhancement-change', this.controlContrastEnhancement)
       this.$emit('match-background-change', this.controlMatchBackground)
       this.$emit('match-background-mode-change', this.controlMatchBackgroundMode)

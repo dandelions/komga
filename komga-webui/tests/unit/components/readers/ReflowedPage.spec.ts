@@ -10,6 +10,7 @@ type WordBlock = {
 
 const methods = (ReflowedPage as any).options.methods
 const k2Methods = (K2ReflowedPage as any).options.methods
+const computed = (ReflowedPage as any).options.computed
 const edgeAnalyzer = Object.assign({}, methods)
 const lineAnalyzer = Object.assign({}, methods, {verticalText: false})
 const detectionAnalyzer = Object.assign({}, methods, {
@@ -618,6 +619,25 @@ describe('ReflowedPage display columns layout', () => {
     // Moving previous from index 0 triggers source-previous
     methods.previousPage.call(navContext)
     expect(navContext.$emit).toHaveBeenCalledWith('source-previous', 1)
+  })
+
+  test('formula protection and contrast enhancement controls in ReflowedPage', () => {
+    const pageInstance: any = {
+      pendingFormulaProtection: true,
+      pendingContrastEnhancement: false,
+      $emit: jest.fn(),
+    }
+
+    expect(computed.controlFormulaProtection.call(pageInstance)).toBe(true)
+    expect(computed.controlContrastEnhancement.call(pageInstance)).toBe(false)
+
+    methods.setFormulaProtection.call(pageInstance, {target: {checked: false}})
+    expect(pageInstance.pendingFormulaProtection).toBe(false)
+    expect(pageInstance.$emit).toHaveBeenCalledWith('formula-protection-change', false)
+
+    methods.setContrastEnhancement.call(pageInstance, {target: {checked: true}})
+    expect(pageInstance.pendingContrastEnhancement).toBe(true)
+    expect(pageInstance.$emit).toHaveBeenCalledWith('contrast-enhancement-change', true)
   })
 })
 

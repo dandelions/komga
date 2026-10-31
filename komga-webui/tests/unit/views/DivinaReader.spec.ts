@@ -298,4 +298,46 @@ describe('DivinaReader reflow prefetch and LRU cache', () => {
     expect(Object.keys(reflowCache).length).toBe(16)
     expect(reflowCache[`15|${cacheKey}`]).toBeDefined()
   })
+
+  test('setReflowFormulaProtection updates formula protection settings', () => {
+    const reader: any = {
+      reflowSettings: {
+        formulaProtection: false,
+        k2Settings: {
+          formulaProtection: false,
+        },
+      },
+    }
+
+    methods.setReflowFormulaProtection.call(reader, true)
+    expect(reader.reflowSettings.formulaProtection).toBe(true)
+    expect(reader.reflowSettings.k2Settings.formulaProtection).toBe(true)
+  })
+
+  test('showSettings watcher clears prefetch when opened and schedules when closed', () => {
+    const reader: any = {
+      reflowMode: true,
+      reflowCropMode: false,
+      clearReflowPrefetch: jest.fn(),
+      scheduleNextReflowPrefetch: jest.fn(),
+    }
+
+    watchers.showSettings.call(reader, true)
+    expect(reader.clearReflowPrefetch).toHaveBeenCalledTimes(1)
+    expect(reader.scheduleNextReflowPrefetch).not.toHaveBeenCalled()
+
+    watchers.showSettings.call(reader, false)
+    expect(reader.scheduleNextReflowPrefetch).toHaveBeenCalledTimes(1)
+  })
+
+  test('scheduleNextReflowPrefetch does not run while showSettings is true', () => {
+    const reader: any = {
+      reflowCropMode: false,
+      showSettings: true,
+      reflowPrefetchPages: [1, 2],
+    }
+
+    methods.scheduleNextReflowPrefetch.call(reader)
+    expect(reader.reflowPrefetchPages).toEqual([])
+  })
 })

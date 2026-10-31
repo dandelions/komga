@@ -5,6 +5,7 @@ import {
   reflowPageFromPixels,
   detectPageBackgroundFromPixels,
   buildInkMap,
+  rotatePixels,
   LocalReflowOptions,
 } from '@/functions/local-reflow-engine'
 
@@ -273,6 +274,33 @@ describe('local-reflow-engine', () => {
       expect(words.length).toBe(3)
       expect(words[0].x).toBeLessThan(words[1].x!)
       expect(words[1].x).toBeLessThan(words[2].x!)
+    })
+  })
+
+  describe('rotatePixels', () => {
+    test('returns same buffer when rotation angle is negligible', () => {
+      const pixels = new Uint8ClampedArray(40)
+      const out = rotatePixels(pixels, 10, 1, 0)
+      expect(out).toBe(pixels)
+    })
+
+    test('correctly rotates pixel array for deskew angle', () => {
+      const width = 20
+      const height = 20
+      const pixels = new Uint8ClampedArray(width * height * 4)
+      pixels.fill(255)
+      // Draw a horizontal bar in center
+      for (let x = 5; x < 15; x++) {
+        const idx = (10 * width + x) * 4
+        pixels[idx] = 0
+        pixels[idx + 1] = 0
+        pixels[idx + 2] = 0
+      }
+      const rotated = rotatePixels(pixels, width, height, 2.5, '#ffffff')
+      expect(rotated.length).toBe(pixels.length)
+      // Check center pixel is preserved as ink
+      const centerIdx = (10 * width + 10) * 4
+      expect(rotated[centerIdx]).toBe(0)
     })
   })
 })

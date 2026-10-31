@@ -40,6 +40,7 @@ export type LocalReflowOptions = {
   darkDisplay: boolean,
   rotation?: number,
   formulaProtection?: boolean,
+  deskewAnalysisRoi?: Roi | null,
 }
 
 export type LocalReflowItem = {
@@ -196,6 +197,58 @@ export function rgbaToBmpDataUrl(
     binary += String.fromCharCode.apply(null, buffer.subarray(i, Math.min(i + chunkSize, len)) as any)
   }
   return 'data:image/bmp;base64,' + (typeof btoa === 'function' ? btoa(binary) : Buffer.from(buffer).toString('base64'))
+}
+
+export function rotatePixels(
+  pixels: Uint8ClampedArray | Uint8Array,
+  width: number,
+  height: number,
+  degrees: number,
+  bgColor: string = '#ffffff',
+): Uint8ClampedArray {
+  if (Math.abs(degrees) < 0.05) {
+    return pixels instanceof Uint8ClampedArray ? pixels : new Uint8ClampedArray(pixels)
+  }
+  const rad = degrees * Math.PI / 180
+  const cos = Math.cos(rad)
+  const sin = Math.sin(rad)
+  const cx = width / 2
+  const cy = height / 2
+  const output = new Uint8ClampedArray(pixels.length)
+
+  let bgR = 255
+  let bgG = 255
+  let bgB = 255
+  if (bgColor && bgColor.startsWith('#') && bgColor.length >= 7) {
+    bgR = parseInt(bgColor.slice(1, 3), 16) || 255
+    bgG = parseInt(bgColor.slice(3, 5), 16) || 255
+    bgB = parseInt(bgColor.slice(5, 7), 16) || 255
+  }
+
+  for (let y = 0; y < height; y++) {
+    const dy = y - cy
+    const rowOffset = y * width * 4
+    for (let x = 0; x < width; x++) {
+      const dx = x - cx
+      const srcX = Math.round(cx + dx * cos + dy * sin)
+      const srcY = Math.round(cy - dx * sin + dy * cos)
+      const outIdx = rowOffset + x * 4
+
+      if (srcX >= 0 && srcX < width && srcY >= 0 && srcY < height) {
+        const srcIdx = (srcY * width + srcX) * 4
+        output[outIdx] = pixels[srcIdx]
+        output[outIdx + 1] = pixels[srcIdx + 1]
+        output[outIdx + 2] = pixels[srcIdx + 2]
+        output[outIdx + 3] = pixels[srcIdx + 3]
+      } else {
+        output[outIdx] = bgR
+        output[outIdx + 1] = bgG
+        output[outIdx + 2] = bgB
+        output[outIdx + 3] = 255
+      }
+    }
+  }
+  return output
 }
 
 export function exteriorPaperMask(
@@ -886,10 +939,18 @@ export function reflowPageFromPixels(
       workH,
       thresh,
       options.verticalText,
+      (options.deskewAnalysisRoi || options.deskewAnalysisRegion) || undefined,
     )
   }
 
-  // 4. Build ink map
+  // 4. Deskew rotation
+  const manualSkew = options.skewCorrection || 0
+  const effectiveSkew = Math.round(clamp(manualSkew + detectedAutoSkew, -10, 10) * 10) / 10
+  if (Math.abs(effectiveSkew) >= 0.1) {
+    workPixels = rotatePixels(workPixels, workW, workH, effectiveSkew, pageBackground)
+  }
+
+  // 5. Build ink map
   const threshold = clamp(options.threshold || 185, 50, 230)
   const strokeStrength = options.strokeStrength || 0
   const ink = buildInkMap(workPixels, workW, workH, threshold, strokeStrength, pageBgLuma)

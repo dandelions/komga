@@ -326,6 +326,7 @@
           @stroke-strength-change="setReflowStrokeStrength"
           @image-quality-change="setReflowImageQuality"
           @algorithm-mode-change="setReflowAlgorithmMode"
+          @formula-protection-change="setReflowFormulaProtection"
           @contrast-enhancement-change="setReflowContrastEnhancement"
           @match-background-change="setReflowMatchBackground"
           @match-background-mode-change="setReflowMatchBackgroundMode"
@@ -675,7 +676,7 @@
               />
             </v-list-item>
             <v-list-item v-if="!activeReflowMode">
-              <settings-switch v-model="readerContrastEnhancement" label="文字/背景增强"/>
+              <settings-switch v-model="readerContrastEnhancement" label="高对比度漂白与字迹增强"/>
             </v-list-item>
             <v-list-item v-if="isPdf">
               <div class="reader-rotation-setting">
@@ -832,6 +833,9 @@
                       <settings-switch v-model="reflowSettings.verticalText" label="Vertical text"/>
                     </v-list-item>
                     <v-list-item>
+                      <settings-switch v-model="reflowSettings.formulaProtection" label="公式保护与原位排版"/>
+                    </v-list-item>
+                    <v-list-item>
                       <v-slider
                         v-model="reflowSettings.textScale"
                         label="文字大小"
@@ -876,7 +880,7 @@
 
                   <v-tab-item>
                     <v-list-item>
-                      <settings-switch v-model="reflowSettings.contrastEnhancement" label="文字/背景增强"/>
+                      <settings-switch v-model="reflowSettings.contrastEnhancement" label="高对比度漂白与字迹增强"/>
                     </v-list-item>
                     <v-list-item>
                       <settings-switch v-model="reflowSettings.matchBackground" label="背景跟随底色"/>
@@ -1572,6 +1576,13 @@ export default Vue.extend({
       if (this.reflowSettings.k2Settings && this.reflowSettings.k2Settings.removeBackground !== value) {
         this.reflowSettings.k2Settings.optimizeBackground = value
         this.reflowSettings.k2Settings.removeBackground = value
+      }
+    },
+    showSettings(visible: boolean) {
+      if (visible) {
+        this.clearReflowPrefetch()
+      } else if (this.reflowMode && !this.reflowCropMode) {
+        this.scheduleNextReflowPrefetch()
       }
     },
   },
@@ -3148,6 +3159,7 @@ export default Vue.extend({
           : 'none',
         wordGap: Math.round(this.clampReflowNumber(settings.wordGap, 1, 30, this.reflowSettings.k2Settings.wordGap)),
         outputPadding: Math.round(this.clampReflowNumber(settings.outputPadding, 0, 48, this.reflowSettings.k2Settings.outputPadding)),
+        formulaProtection: settings.formulaProtection !== false,
       }
     },
     normalizedReflowCropRois(cropRoisByParity: any): Record<string, any> {
@@ -3443,6 +3455,12 @@ export default Vue.extend({
     setReflowAlgorithmMode(algorithmMode: string) {
       this.reflowSettings.algorithmMode = algorithmMode === 'koreader' ? 'koreader' : 'original'
     },
+    setReflowFormulaProtection(formulaProtection: boolean) {
+      this.reflowSettings.formulaProtection = formulaProtection !== false
+      if (this.reflowSettings.k2Settings) {
+        this.reflowSettings.k2Settings.formulaProtection = formulaProtection !== false
+      }
+    },
     setReflowContrastEnhancement(contrastEnhancement: boolean) {
       this.reflowSettings.contrastEnhancement = contrastEnhancement === true
     },
@@ -3515,6 +3533,9 @@ export default Vue.extend({
         this.reflowSettings.removeBackground = normalized.removeBackground
       }
       if (normalized.removeWatermark) this.reflowSettings.removeWatermark = normalized.removeWatermark
+      if (typeof normalized.formulaProtection === 'boolean') {
+        this.reflowSettings.formulaProtection = normalized.formulaProtection
+      }
     },
     cachedReflowEntry(page: PageDtoWithUrl | undefined): any {
       if (!page || this.reflowCropMode) return undefined
@@ -3680,7 +3701,7 @@ export default Vue.extend({
         window.clearTimeout(this.reflowPrefetchTimer)
         this.reflowPrefetchTimer = undefined
       }
-      if (this.reflowCropMode) {
+      if (this.reflowCropMode || this.showSettings) {
         this.reflowPrefetchPages = []
         return
       }

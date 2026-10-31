@@ -142,10 +142,14 @@
               <span>Padding</span>
               <input type="number" min="0" max="48" step="1" :value="outputPadding" @input="setOutputPadding"/>
             </label>
+            <label class="k2-control k2-compact k2-checkbox-control">
+              <span>公式保护</span>
+              <input type="checkbox" :checked="formulaProtection" @change="setFormulaProtection"/>
+            </label>
           </div>
           <div v-show="k2ControlsTab === 'display'" class="k2-tab-panel">
             <label class="k2-control k2-compact k2-checkbox-control">
-              <span>增强</span>
+              <span>高对比度增强</span>
               <input type="checkbox" :checked="contrastEnhancement" @change="setContrastEnhancement"/>
             </label>
             <label class="k2-control k2-compact k2-checkbox-control">
@@ -339,6 +343,7 @@ type K2Settings = {
   removeWatermark?: DocumentRemoveWatermarkMode,
   wordGap: number,
   outputPadding: number,
+  formulaProtection?: boolean,
 }
 type MatchBackgroundMode = 'original' | 'monochrome' | 'grayscale'
 type DetectionCanvasSource = { canvas: HTMLCanvasElement, scale: number }
@@ -437,6 +442,7 @@ export default Vue.extend({
     removeWatermark: 'none' as DocumentRemoveWatermarkMode,
     wordGap: DEFAULT_WORD_GAP,
     outputPadding: DEFAULT_OUTPUT_PADDING,
+    formulaProtection: true,
     magnifierPressTimer: undefined as number | undefined,
     magnifierLongPressTriggered: false,
   }),
@@ -757,6 +763,7 @@ export default Vue.extend({
         : 'none'
       this.wordGap = Math.round(this.clampNumber(Number(this.settings.wordGap), 1, 30, DEFAULT_WORD_GAP))
       this.outputPadding = Math.round(this.clampNumber(Number(this.settings.outputPadding), 0, 48, DEFAULT_OUTPUT_PADDING))
+      this.formulaProtection = this.settings.formulaProtection !== false
     },
     emitSettingsChange() {
       this.$emit('settings-change', {
@@ -772,6 +779,7 @@ export default Vue.extend({
         removeWatermark: this.removeWatermark,
         wordGap: this.wordGap,
         outputPadding: this.outputPadding,
+        formulaProtection: this.formulaProtection,
       } as K2Settings)
     },
     async reflow() {
@@ -1923,7 +1931,33 @@ export default Vue.extend({
       }
 
       if (inRow && this.validRow(rowInk, start, roi.y + roi.h, column)) rows.push({start, end: roi.y + roi.h, rowInk})
-      return rows
+      if (rows.length <= 1) return rows
+
+      const formulaProtection = this.formulaProtection !== false
+      if (!formulaProtection) return rows
+
+      const heights = rows.map(r => r.end - r.start).filter(h => h >= 16)
+      const avgHeight = heights.length > 0 ? heights.reduce((a, b) => a + b, 0) / heights.length : 36
+      const maxFormulaGap = Math.max(12, Math.round(avgHeight * 0.22))
+
+      const mergedRows = [] as TextRow[]
+      let cur = rows[0]
+      for (let i = 1; i < rows.length; i++) {
+        const next = rows[i]
+        const gap = next.start - cur.end
+        const curH = cur.end - cur.start
+        const nextH = next.end - next.start
+        const isThinBar = curH <= 8 || nextH <= 8
+
+        if (gap <= maxFormulaGap && (isThinBar || gap <= 8)) {
+          cur = {start: cur.start, end: next.end, rowInk: cur.rowInk}
+        } else {
+          mergedRows.push(cur)
+          cur = next
+        }
+      }
+      mergedRows.push(cur)
+      return mergedRows
     },
     validRow(rowInk: number[], start: number, end: number, column: Column): boolean {
       const height = end - start
@@ -2648,6 +2682,11 @@ export default Vue.extend({
     },
     adjustStrokeStrength(delta: number) {
       this.strokeStrength = Math.round(this.clampNumber(this.strokeStrength + delta, 0, 3, 0.8) * 10) / 10
+      this.emitSettingsChange()
+    },
+    setFormulaProtection(event: Event) {
+      const target = event.target as HTMLInputElement
+      this.formulaProtection = target.checked
       this.emitSettingsChange()
     },
     setContrastEnhancement(event: Event) {
