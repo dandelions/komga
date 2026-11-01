@@ -41,11 +41,15 @@ export type LocalReflowOptions = {
   rotation?: number,
   formulaProtection?: boolean,
   deskewAnalysisRoi?: Roi | null,
+  renderMode?: 'sprite' | 'slices',
 }
 
 export type LocalReflowItem = {
   type: 'word' | 'image' | 'break' | 'indent',
   src?: string,
+  pageTextureUrl?: string,
+  workWidth?: number,
+  workHeight?: number,
   x?: number,
   y?: number,
   w?: number,
@@ -60,6 +64,9 @@ export type LocalReflowResult = {
   pageBackground: string,
   sourceWidth: number,
   sourceHeight: number,
+  workWidth?: number,
+  workHeight?: number,
+  pageTextureUrl?: string,
   detectedAutoSkew: number,
   processingTimeMs: number,
   items: LocalReflowItem[],
@@ -912,6 +919,92 @@ export function adjustBlockEdges(
   return {x: left, y: top, w: Math.max(1, right - left), h: Math.max(1, bottom - top)}
 }
 
+export function applyGlobalPageTextureProcessing(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  options: LocalReflowOptions,
+  pageBgLuma: number,
+  sourceDark: boolean,
+  threshold: number,
+): Uint8ClampedArray {
+  const normalizeColors =
+    options.darkDisplay ||
+    options.contrastEnhancement ||
+    options.matchBackground ||
+    options.matchBackgroundMode !== 'original' ||
+    (options.optimizeBackground && options.optimizeBackground !== 'none')
+
+  if (!normalizeColors) {
+    return pixels
+  }
+
+  const output = new Uint8ClampedArray(pixels)
+  const bgVal = options.darkDisplay ? 0 : 255
+  const fgVal = options.darkDisplay ? 255 : 0
+  const inkThresh = adaptiveInkThreshold(threshold, pageBgLuma)
+  const baseMinDelta = 8
+  const maxDelta = sourceDark ? 255 - pageBgLuma : pageBgLuma
+
+  const total = width * height
+  for (let i = 0; i < total; i++) {
+    const pIdx = i * 4
+    if (output[pIdx + 3] === 0) continue
+    const luma = pixelLuma(output[pIdx], output[pIdx + 1], output[pIdx + 2])
+
+    if (options.matchBackgroundMode === 'monochrome') {
+      const isWordInk = sourceDark ? luma > inkThresh : luma < inkThresh
+      const val = isWordInk ? fgVal : bgVal
+      output[pIdx] = val
+      output[pIdx + 1] = val
+      output[pIdx + 2] = val
+    } else if (options.contrastEnhancement) {
+      const delta = sourceDark ? luma - pageBgLuma : pageBgLuma - luma
+      if (delta <= baseMinDelta) {
+        output[pIdx] = bgVal
+        output[pIdx + 1] = bgVal
+        output[pIdx + 2] = bgVal
+      } else {
+        const foreground = calculateEnhancedForeground(delta, maxDelta, baseMinDelta)
+        const val = options.darkDisplay
+          ? Math.round(255 * foreground)
+          : Math.round(255 * (1 - foreground))
+        output[pIdx] = val
+        output[pIdx + 1] = val
+        output[pIdx + 2] = val
+      }
+    } else if (options.darkDisplay) {
+      const isWordInk = sourceDark ? luma > inkThresh : luma < inkThresh
+      if (isWordInk) {
+        const val = sourceDark ? luma : 255 - luma
+        output[pIdx] = val
+        output[pIdx + 1] = val
+        output[pIdx + 2] = val
+      } else {
+        output[pIdx] = bgVal
+        output[pIdx + 1] = bgVal
+        output[pIdx + 2] = bgVal
+      }
+    } else {
+      const isWordInk = sourceDark ? luma > inkThresh : luma < inkThresh
+      if (isWordInk) {
+        if (sourceDark) {
+          const val = 255 - luma
+          output[pIdx] = val
+          output[pIdx + 1] = val
+          output[pIdx + 2] = val
+        }
+      } else {
+        output[pIdx] = bgVal
+        output[pIdx + 1] = bgVal
+        output[pIdx + 2] = bgVal
+      }
+    }
+  }
+
+  return output
+}
+
 export function reflowPageFromPixels(
   sourcePixels: Uint8ClampedArray,
   sourceW: number,
@@ -1022,6 +1115,21 @@ export function reflowPageFromPixels(
   const columns = detectHorizontalColumns(textInk, workW, workH, effectiveRoi, options.columnCount || 1)
   const items: LocalReflowItem[] = []
   const textScale = clamp((options.textScale || 100) / 100, 0.2, 2.5)
+
+  const isSpriteMode = options.renderMode === 'sprite'
+  let pageTextureUrl = ''
+  if (isSpriteMode) {
+    const texturePixels = applyGlobalPageTextureProcessing(
+      workPixels,
+      workW,
+      workH,
+      options,
+      pageBgLuma,
+      sourceDark,
+      threshold,
+    )
+    pageTextureUrl = rgbaToBmpDataUrl(texturePixels, workW, workH, workW, 0, 0)
+  }
 
   const usedImageIndices = new Set<number>()
 
@@ -1175,6 +1283,23 @@ export function reflowPageFromPixels(
         // Slice word pixels
         const sliceW = adjusted.w
         const sliceH = adjusted.h
+
+        if (isSpriteMode) {
+          items.push({
+            type: 'word',
+            pageTextureUrl,
+            workWidth: workW,
+            workHeight: workH,
+            x: adjusted.x,
+            y: adjusted.y,
+            w: sliceW,
+            h: sliceH,
+            width: sliceW * textScale,
+            height: sliceH * textScale,
+          })
+          return
+        }
+
         const sliceData = new Uint8ClampedArray(sliceW * sliceH * 4)
 
         for (let y = 0; y < sliceH; y++) {
@@ -1317,6 +1442,9 @@ export function reflowPageFromPixels(
     pageBackground,
     sourceWidth: sourceW,
     sourceHeight: sourceH,
+    workWidth: workW,
+    workHeight: workH,
+    pageTextureUrl: isSpriteMode ? pageTextureUrl : undefined,
     detectedAutoSkew,
     processingTimeMs: Date.now() - startedAt,
     items,

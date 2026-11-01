@@ -44,6 +44,9 @@ export type ReflowAnalysisWorkerResponse = {
   pageBackground?: string,
   detectedAutoSkew?: number,
   processingTimeMs?: number,
+  workWidth?: number,
+  workHeight?: number,
+  pageTextureUrl?: string,
   message?: string,
 }
 
@@ -82,6 +85,9 @@ self.onmessage = (event: MessageEvent<ReflowAnalysisWorkerRequest>) => {
         pageBackground: result.pageBackground,
         detectedAutoSkew: result.detectedAutoSkew,
         processingTimeMs: result.processingTimeMs,
+        workWidth: result.workWidth,
+        workHeight: result.workHeight,
+        pageTextureUrl: result.pageTextureUrl,
       } as ReflowAnalysisWorkerResponse)
     } catch (error) {
       postMessage({

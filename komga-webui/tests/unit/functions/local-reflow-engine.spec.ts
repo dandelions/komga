@@ -259,6 +259,62 @@ describe('local-reflow-engine', () => {
       expect(wordItems[0].src?.startsWith('data:image/bmp;base64,')).toBe(true)
     })
 
+    test('extracts lightweight word geometry coordinates in sprite mode without per-word slice generation', () => {
+      const width = 100
+      const height = 100
+      const pixels = new Uint8ClampedArray(width * height * 4)
+      pixels.fill(255) // White background
+
+      // Draw horizontal line of text
+      for (let y = 30; y < 50; y++) {
+        for (let x = 20; x < 80; x++) {
+          const idx = (y * width + x) * 4
+          pixels[idx] = 0
+          pixels[idx + 1] = 0
+          pixels[idx + 2] = 0
+        }
+      }
+
+      const options = {
+        targetWidth: 800,
+        autoCropBorder: false,
+        textScale: 100,
+        columnCount: 1,
+        skewCorrection: 0,
+        threshold: 185,
+        columnGap: 15,
+        wordGap: 3,
+        strokeStrength: 0.1,
+        contrastEnhancement: false,
+        matchBackground: false,
+        matchBackgroundMode: 'grayscale' as const,
+        blockSpacing: 6,
+        verticalText: false,
+        verticalDirection: 'rtl' as const,
+        marginTop: 0,
+        marginRight: 0,
+        marginBottom: 0,
+        marginLeft: 0,
+        darkDisplay: false,
+        renderMode: 'sprite' as const,
+      }
+
+      const result = reflowPageFromPixels(pixels, width, height, options)
+      expect(result.pageTextureUrl).toBeDefined()
+      expect(result.pageTextureUrl?.startsWith('data:image/bmp;base64,')).toBe(true)
+      expect(result.workWidth).toBe(width)
+      expect(result.workHeight).toBe(height)
+
+      const wordItems = result.items.filter(it => it.type === 'word')
+      expect(wordItems.length).toBeGreaterThanOrEqual(1)
+      expect(wordItems[0].src).toBeUndefined()
+      expect(wordItems[0].pageTextureUrl).toBe(result.pageTextureUrl)
+      expect(wordItems[0].x).toBeDefined()
+      expect(wordItems[0].y).toBeDefined()
+      expect(wordItems[0].w).toBeDefined()
+      expect(wordItems[0].h).toBeDefined()
+    })
+
     test('applies high contrast bleaching and ink boost when contrastEnhancement is enabled', () => {
       const width = 100
       const height = 100

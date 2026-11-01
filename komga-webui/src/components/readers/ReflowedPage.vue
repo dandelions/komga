@@ -537,6 +537,12 @@
               class="line-indent"
               :style="indentStyle(item)"
             />
+            <span
+              v-else-if="item.type === 'word' && isSpriteWordItem(item)"
+              :key="`l-word-${i}`"
+              class="word-block word-block-sprite"
+              :style="wordBlockStyle(item)"
+            />
             <img
               v-else-if="item.type === 'word' && item.src"
               :key="`l-word-${i}`"
@@ -570,6 +576,12 @@
               class="line-indent"
               :style="indentStyle(item)"
             />
+            <span
+              v-else-if="item.type === 'word' && isSpriteWordItem(item)"
+              :key="`r-word-${i}`"
+              class="word-block word-block-sprite"
+              :style="wordBlockStyle(item)"
+            />
             <img
               v-else-if="item.type === 'word' && item.src"
               :key="`r-word-${i}`"
@@ -602,6 +614,12 @@
             :key="`indent-${i}`"
             class="line-indent"
             :style="indentStyle(item)"
+          />
+          <span
+            v-else-if="item.type === 'word' && isSpriteWordItem(item)"
+            :key="`word-${i}`"
+            class="word-block word-block-sprite"
+            :style="wordBlockStyle(item)"
           />
           <img
             v-else-if="item.type === 'word' && item.src"
@@ -642,6 +660,12 @@
           :key="`measure-indent-${i}`"
           class="line-indent"
           :style="indentStyle(item)"
+        />
+        <span
+          v-else-if="item.type === 'word' && isSpriteWordItem(item)"
+          :key="`measure-word-${i}`"
+          class="word-block word-block-sprite"
+          :style="wordBlockStyle(item)"
         />
         <img
           v-else-if="item.type === 'word' && item.src"
@@ -788,8 +812,12 @@ type ImageRegion = Roi
 
 type RenderedWordBlock = WordBlock & {
   type: 'word',
-  src: string,
+  src?: string,
+  pageTextureUrl?: string,
+  workWidth?: number,
+  workHeight?: number,
   height: number,
+  width?: number,
 }
 
 type RenderedImageBlock = ImageRegion & {
@@ -838,6 +866,9 @@ type ReflowCachePayload = {
   cacheKey: string,
   items: ReflowItem[],
   pageBackground: string,
+  pageTextureUrl?: string,
+  workWidth?: number,
+  workHeight?: number,
   transferStats?: ReflowTransferStats,
   networkTransferBytes?: number,
 }
@@ -1014,6 +1045,9 @@ export default Vue.extend({
       viewportHeight: 0,
       pageBackground: '#fff',
       lastDetectionKey: '',
+      localPageTextureUrl: '',
+      localTextureWidth: 0,
+      localTextureHeight: 0,
       objectUrl: '',
       objectUrlSource: '',
       objectUrlBytes: 0,
@@ -1978,6 +2012,7 @@ export default Vue.extend({
             rotation: 0,
             formulaProtection: this.options?.formulaProtection !== false,
             deskewAnalysisRoi: this.currentDeskewAnalysisRoi(),
+            renderMode: 'sprite',
           }
           const manualRegions = this.currentManualImageRois()
           const workerResult = await this.runLocalWorkerReflow(
@@ -1992,6 +2027,12 @@ export default Vue.extend({
             this.pageBackground = workerResult.pageBackground || this.pageBackground
             this.detectedAutoSkewCorrection = workerResult.detectedAutoSkew || 0
             this.transferStats = this.localTransferStats()
+            if (this.localPageTextureUrl && this.localPageTextureUrl !== workerResult.pageTextureUrl && this.localPageTextureUrl.startsWith('blob:')) {
+              URL.revokeObjectURL(this.localPageTextureUrl)
+            }
+            this.localPageTextureUrl = workerResult.pageTextureUrl || ''
+            this.localTextureWidth = workerResult.workWidth || imageData.width
+            this.localTextureHeight = workerResult.workHeight || imageData.height
             this.reflowItems = workerResult.items as ReflowItem[]
             if (!this.preload) {
               this.repaginate()
@@ -2130,6 +2171,9 @@ export default Vue.extend({
                 pageBackground: response.pageBackground || '#ffffff',
                 sourceWidth: imageData.width,
                 sourceHeight: imageData.height,
+                workWidth: response.workWidth,
+                workHeight: response.workHeight,
+                pageTextureUrl: response.pageTextureUrl,
                 detectedAutoSkew: response.detectedAutoSkew || 0,
                 processingTimeMs: response.processingTimeMs || 0,
                 items: response.items,
@@ -2223,6 +2267,7 @@ export default Vue.extend({
         const payload = JSON.parse(text) as ServerReflowResponse
         if (requestId !== this.requestId) return
 
+        this.revokeLocalPageTextureUrl()
         this.imageSize = {w: payload.sourceWidth || 0, h: payload.sourceHeight || 0}
         this.pageBackground = payload.pageBackground || '#fff'
         this.reflowItems = Array.isArray(payload.items) ? payload.items : []
@@ -2701,8 +2746,34 @@ export default Vue.extend({
     scrollToTop() {
       this.$nextTick(() => window.scrollTo({top: 0, left: 0, behavior: 'auto'}))
     },
+    isSpriteWordItem(item: ReflowItem): boolean {
+      if (item.type !== 'word') return false
+      return !!((item as any).pageTextureUrl || this.localPageTextureUrl) && (item as any).w !== undefined && (item as any).h !== undefined
+    },
     wordBlockStyle(item: RenderedWordBlock): object {
       const dimensions = this.wordBlockDisplayDimensions(item)
+      if (this.isSpriteWordItem(item)) {
+        const textureUrl = item.pageTextureUrl || this.localPageTextureUrl
+        const textureW = item.workWidth || this.localTextureWidth || 1
+        const textureH = item.workHeight || this.localTextureHeight || 1
+        const sliceW = Math.max(1, item.w)
+        const sliceH = Math.max(1, item.h)
+        const scaleX = dimensions.width / sliceW
+        const scaleY = dimensions.height / sliceH
+        const bgWidth = Math.round(textureW * scaleX)
+        const bgHeight = Math.round(textureH * scaleY)
+        const bgPosX = Math.round((item.x || 0) * scaleX)
+        const bgPosY = Math.round((item.y || 0) * scaleY)
+        return {
+          display: 'inline-block',
+          width: `${dimensions.width}px`,
+          height: `${dimensions.height}px`,
+          backgroundImage: `url(${textureUrl})`,
+          backgroundPosition: `-${bgPosX}px -${bgPosY}px`,
+          backgroundSize: `${bgWidth}px ${bgHeight}px`,
+          backgroundRepeat: 'no-repeat',
+        }
+      }
       return {
         width: `${dimensions.width}px`,
         height: `${dimensions.height}px`,
@@ -3459,8 +3530,17 @@ export default Vue.extend({
       if (normalized === 270) return -90
       return 0
     },
+    revokeLocalPageTextureUrl() {
+      if (this.localPageTextureUrl && this.localPageTextureUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(this.localPageTextureUrl)
+      }
+      this.localPageTextureUrl = ''
+      this.localTextureWidth = 0
+      this.localTextureHeight = 0
+    },
     revokeObjectUrl(cancelCropRequests: boolean = true) {
       this.revokeCropObjectUrl(cancelCropRequests)
+      this.revokeLocalPageTextureUrl()
       if (this.objectUrl) URL.revokeObjectURL(this.objectUrl)
       this.objectUrl = ''
       this.objectUrlSource = ''
@@ -8185,6 +8265,11 @@ export default Vue.extend({
   font-size: 12px;
   text-align: center;
   word-break: break-word;
+}
+
+.word-block-sprite {
+  background-repeat: no-repeat;
+  box-sizing: border-box;
 }
 
 .word-block {

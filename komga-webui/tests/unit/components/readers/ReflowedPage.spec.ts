@@ -740,5 +740,90 @@ describe('ReflowedPage display columns layout', () => {
     expect(inlineStyle.display).toBe('inline-block')
     expect(inlineStyle.verticalAlign).toBe('middle')
   })
+
+  test('isSpriteWordItem identifies sprite word blocks correctly', () => {
+    const pageInstance: any = {
+      localPageTextureUrl: '',
+      isSpriteWordItem: methods.isSpriteWordItem,
+    }
+
+    expect(pageInstance.isSpriteWordItem({type: 'image', w: 10, h: 10})).toBe(false)
+    expect(pageInstance.isSpriteWordItem({type: 'word', src: 'slice.bmp'})).toBe(false)
+    expect(pageInstance.isSpriteWordItem({type: 'word', pageTextureUrl: 'texture.bmp', w: 20, h: 10})).toBe(true)
+
+    pageInstance.localPageTextureUrl = 'local-texture.bmp'
+    expect(pageInstance.isSpriteWordItem({type: 'word', w: 20, h: 10})).toBe(true)
+  })
+
+  test('wordBlockStyle generates correct background positioning for sprite word blocks', () => {
+    const pageInstance: any = {
+      localPageTextureUrl: 'data:image/bmp;base64,texture123',
+      localTextureWidth: 1000,
+      localTextureHeight: 2000,
+      isSpriteWordItem: methods.isSpriteWordItem,
+      wordBlockDisplayDimensions: methods.wordBlockDisplayDimensions,
+      wordBlockStyle: methods.wordBlockStyle,
+      pageContentWidth: () => 800,
+      horizontalContentPadding: () => 16,
+      targetWidth: 800,
+      textScale: () => 1,
+    }
+
+    const spriteWord: any = {
+      type: 'word',
+      pageTextureUrl: 'data:image/bmp;base64,texture123',
+      workWidth: 1000,
+      workHeight: 2000,
+      x: 100,
+      y: 200,
+      w: 50,
+      h: 25,
+    }
+
+    const style = pageInstance.wordBlockStyle(spriteWord)
+    expect(style.display).toBe('inline-block')
+    expect(style.width).toBe('50px')
+    expect(style.height).toBe('25px')
+    expect(style.backgroundImage).toBe('url(data:image/bmp;base64,texture123)')
+    expect(style.backgroundPosition).toBe('-100px -200px')
+    expect(style.backgroundSize).toBe('1000px 2000px')
+    expect(style.backgroundRepeat).toBe('no-repeat')
+
+    const serverWord: any = {
+      type: 'word',
+      src: 'data:image/bmp;base64,slice123',
+      w: 50,
+      h: 25,
+    }
+    // Without sprite texture on item and with empty localPageTextureUrl
+    pageInstance.localPageTextureUrl = ''
+    const serverStyle = pageInstance.wordBlockStyle(serverWord)
+    expect(serverStyle.backgroundImage).toBeUndefined()
+    expect(serverStyle.width).toBe('50px')
+    expect(serverStyle.height).toBe('25px')
+  })
+
+  test('revokeLocalPageTextureUrl properly revokes blob URLs and clears state', () => {
+    const originalRevoke = URL.revokeObjectURL
+    const revokedUrls: string[] = []
+    URL.revokeObjectURL = (url: string) => revokedUrls.push(url)
+
+    try {
+      const pageInstance: any = {
+        localPageTextureUrl: 'blob:http://localhost/123-abc',
+        localTextureWidth: 800,
+        localTextureHeight: 1200,
+        revokeLocalPageTextureUrl: methods.revokeLocalPageTextureUrl,
+      }
+
+      pageInstance.revokeLocalPageTextureUrl()
+      expect(revokedUrls).toEqual(['blob:http://localhost/123-abc'])
+      expect(pageInstance.localPageTextureUrl).toBe('')
+      expect(pageInstance.localTextureWidth).toBe(0)
+      expect(pageInstance.localTextureHeight).toBe(0)
+    } finally {
+      URL.revokeObjectURL = originalRevoke
+    }
+  })
 })
 
