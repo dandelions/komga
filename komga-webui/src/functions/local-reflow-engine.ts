@@ -637,11 +637,8 @@ export function detectHorizontalColumns(
   height: number,
   roi: Roi,
   columnCountSetting: number,
+  imageRegions?: Roi[],
 ): Array<{start: number, end: number}> {
-  if (columnCountSetting === 1) {
-    return [{start: roi.x, end: roi.x + roi.w}]
-  }
-
   const colInk = new Int32Array(roi.w)
   for (let x = 0; x < roi.w; x++) {
     const gx = roi.x + x
@@ -652,7 +649,58 @@ export function detectHorizontalColumns(
     colInk[x] = count
   }
 
-  if (columnCountSetting === 2) {
+  if (imageRegions && imageRegions.length > 0) {
+    for (const reg of imageRegions) {
+      const rxStart = Math.max(0, reg.x - roi.x)
+      const rxEnd = Math.min(roi.w, reg.x + reg.w - roi.x)
+      for (let x = rxStart; x < rxEnd; x++) {
+        colInk[x] += reg.h
+      }
+    }
+  }
+
+  let firstInk = 0
+  while (firstInk < roi.w && colInk[firstInk] <= 1) firstInk++
+  let lastInk = roi.w - 1
+  while (lastInk >= 0 && colInk[lastInk] <= 1) lastInk--
+  if (firstInk >= lastInk) return [{start: roi.x, end: roi.x + roi.w}]
+
+  const noiseLimit = Math.max(1, Math.round(roi.h * 0.003))
+  const minGutterWidth = Math.max(20, Math.round(roi.w * 0.015))
+
+  const splitPoints: number[] = []
+  let inGutter = false
+  let gutterStart = 0
+  for (let x = firstInk; x <= lastInk; x++) {
+    if (colInk[x] <= noiseLimit) {
+      if (!inGutter) {
+        inGutter = true
+        gutterStart = x
+      }
+    } else {
+      if (inGutter) {
+        inGutter = false
+        const gutterWidth = x - gutterStart
+        if (gutterWidth >= minGutterWidth) {
+          const leftWidth = gutterStart - firstInk
+          const rightWidth = lastInk - x
+          if (columnCountSetting >= 2) {
+            const split = Math.round((gutterStart + x) / 2)
+            splitPoints.push(split)
+          } else if (roi.w >= 400 && roi.h >= 400 && gutterWidth >= Math.max(50, Math.round(roi.w * 0.03))) {
+            const maxMarginalWidth = Math.max(40, Math.round(roi.w * 0.12))
+            const isMarginal = leftWidth <= maxMarginalWidth || rightWidth <= maxMarginalWidth
+            if (isMarginal) {
+              const split = Math.round((gutterStart + x) / 2)
+              splitPoints.push(split)
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (columnCountSetting === 2 && splitPoints.length === 0) {
     const mid = Math.floor(roi.w / 2)
     const searchRange = Math.floor(roi.w * 0.2)
     let bestSplit = mid
@@ -670,14 +718,25 @@ export function detectHorizontalColumns(
     }
 
     if (minInk <= roi.h * 0.05) {
-      return [
-        {start: roi.x, end: roi.x + bestSplit},
-        {start: roi.x + bestSplit, end: roi.x + roi.w},
-      ]
+      splitPoints.push(bestSplit)
     }
   }
 
-  return [{start: roi.x, end: roi.x + roi.w}]
+  if (splitPoints.length === 0) {
+    return [{start: roi.x, end: roi.x + roi.w}]
+  }
+
+  const boundaries = [0, ...splitPoints, roi.w]
+  const columns: Array<{start: number, end: number}> = []
+  for (let i = 0; i < boundaries.length - 1; i++) {
+    const bStart = boundaries[i]
+    const bEnd = boundaries[i + 1]
+    if (bEnd - bStart >= 8) {
+      columns.push({start: roi.x + bStart, end: roi.x + bEnd})
+    }
+  }
+
+  return columns.length > 0 ? columns : [{start: roi.x, end: roi.x + roi.w}]
 }
 
 export function detectLines(
@@ -1193,7 +1252,19 @@ export function reflowPageFromPixels(
   const ink = buildInkMap(workPixels, workW, workH, threshold, strokeStrength, pageBgLuma)
 
   // 5. Detect ROI
-  const effectiveRoi = detectRoi(ink, workW, workH, options)
+  const scaledCropRois = cropRois
+    .map(r => ({
+      x: clamp(Math.round(r.x * scale), 0, workW - 1),
+      y: clamp(Math.round(r.y * scale), 0, workH - 1),
+      w: clamp(Math.round(r.w * scale), 1, workW),
+      h: clamp(Math.round(r.h * scale), 1, workH),
+    }))
+    .filter(r => r.w >= 8 && r.h >= 8)
+
+  const effectiveRois = scaledCropRois.length > 0
+    ? scaledCropRois
+    : [detectRoi(ink, workW, workH, options)]
+  const effectiveRoi = effectiveRois[0]
 
   // 6. Detect image regions
   const detectedImages = detectImageRegions(workPixels, workW, workH, effectiveRoi, threshold, pageBgLuma)
@@ -1207,7 +1278,7 @@ export function reflowPageFromPixels(
   const textInk = maskInkRegions(ink, workW, workH, allImageRegions)
 
   // 7. Extract text columns, lines, and words
-  const columns = detectHorizontalColumns(textInk, workW, workH, effectiveRoi, options.columnCount || 1)
+  const columns = detectHorizontalColumns(ink, workW, workH, effectiveRoi, options.columnCount || 1, allImageRegions)
   const items: LocalReflowItem[] = []
   const textScale = clamp((options.textScale || 100) / 100, 0.2, 2.5)
 
@@ -1334,7 +1405,14 @@ export function reflowPageFromPixels(
       })
     })
     const effectiveColStart = Number.isFinite(colTextLeft) ? colTextLeft : col.start
-    const effectiveColEnd = colTextRight > effectiveColStart ? colTextRight : col.end
+    const substantialLineEnds = linesWords
+      .filter(ws => ws.length >= 5)
+      .map(ws => ws[ws.length - 1].x + ws[ws.length - 1].w)
+      .sort((a, b) => a - b)
+    const robustColEnd = substantialLineEnds.length > 0
+      ? substantialLineEnds[Math.floor(substantialLineEnds.length * 0.9)]
+      : colTextRight
+    const effectiveColEnd = Math.min(col.end, Math.max(robustColEnd, effectiveColStart))
 
     let prevLine: {start: number, end: number} | null = null
     let prevWords: WordBlock[] | null = null
