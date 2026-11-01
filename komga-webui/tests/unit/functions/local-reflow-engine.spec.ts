@@ -505,6 +505,59 @@ describe('local-reflow-engine', () => {
       expect(result.items[0].type).toBe('image')
       expect(result.items[0].src).toBeDefined()
     })
+
+    test('preserves paragraph flow without inserting breaks between normal continuous lines', () => {
+      const width = 300
+      const height = 200
+      const pixels = new Uint8ClampedArray(width * height * 4)
+      pixels.fill(255)
+
+      const drawWord = (x0: number, y0: number, w: number, h: number) => {
+        for (let y = y0; y < y0 + h; y++) {
+          for (let x = x0; x < x0 + w; x++) {
+            // Draw stroke outline rather than solid ink block
+            if (x === x0 || x === x0 + w - 1 || y === y0 || y === y0 + h - 1 || x === x0 + Math.floor(w / 2)) {
+              const idx = (y * width + x) * 4
+              pixels[idx] = 0; pixels[idx + 1] = 0; pixels[idx + 2] = 0
+            }
+          }
+        }
+      }
+
+      // Line 1: words at x=30, 60, 90, 120, 150, 180, 210, 240 (w=20, h=18), y=20
+      for (let x = 30; x <= 240; x += 30) {
+        drawWord(x, 20, 20, 18)
+      }
+
+      // Line 2: words at x=30, 60, 90, 120, 150, 180, 210, 240 (w=20, h=18), y=50
+      for (let x = 30; x <= 240; x += 30) {
+        drawWord(x, 50, 20, 18)
+      }
+
+      // Line 3: words at x=30, 60, 90 (ends early at x=110), y=80
+      for (let x = 30; x <= 90; x += 30) {
+        drawWord(x, 80, 20, 18)
+      }
+
+      // Line 4 (new paragraph, indented at x=70): words at x=70, 100, 130, 160, 190, 220, y=110
+      for (let x = 70; x <= 220; x += 30) {
+        drawWord(x, 110, 20, 18)
+      }
+
+      const options = {
+        targetWidth: 600,
+        renderMode: 'sprite' as const,
+        textScale: 100,
+      } as LocalReflowOptions
+
+      const result = reflowPageFromPixels(pixels, width, height, options)
+      const breaks = result.items.filter(it => it.type === 'break')
+      const indents = result.items.filter(it => it.type === 'indent')
+
+      // Exactly 1 break and 1 indent should be inserted before Line 4 (the new paragraph)
+      expect(breaks.length).toBe(1)
+      expect(indents.length).toBe(1)
+    })
   })
 
   describe('rotatePixels', () => {

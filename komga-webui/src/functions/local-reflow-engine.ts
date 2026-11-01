@@ -1206,7 +1206,6 @@ export function reflowPageFromPixels(
     }
   }
 
-  let prevLineBottom = 0
   columns.forEach(col => {
     const colWidth = col.end - col.start
     const lines = detectLines(textInk, workW, col, effectiveRoi, options)
@@ -1226,6 +1225,25 @@ export function reflowPageFromPixels(
         return (cx >= col.start && cx <= col.end) || (reg.x <= col.start && reg.x + reg.w >= col.end)
       })
 
+    let colTextLeft = Infinity
+    let colTextRight = 0
+    const linesWords: WordBlock[][] = []
+    lines.forEach(line => {
+      const words = detectWords(textInk, workW, col, line, options.wordGap || 3)
+      linesWords.push(words)
+      words.forEach(w => {
+        if (w.w >= 2 && w.h >= 2) {
+          colTextLeft = Math.min(colTextLeft, w.x)
+          colTextRight = Math.max(colTextRight, w.x + w.w)
+        }
+      })
+    })
+    const effectiveColStart = Number.isFinite(colTextLeft) ? colTextLeft : col.start
+    const effectiveColEnd = colTextRight > effectiveColStart ? colTextRight : col.end
+
+    let prevLine: {start: number, end: number} | null = null
+    let prevWords: WordBlock[] | null = null
+
     lines.forEach((line, lineIdx) => {
       // 1. Insert block images appearing above this line
       const blockImagesBefore = colImages
@@ -1236,12 +1254,16 @@ export function reflowPageFromPixels(
         })
         .sort((a, b) => a.reg.y - b.reg.y)
 
-      blockImagesBefore.forEach(({reg, idx}) => {
-        if (items.length > 0 && items[items.length - 1].type !== 'break') items.push({type: 'break'})
-        items.push(renderImageSlice(reg, false))
-        items.push({type: 'break'})
-        usedImageIndices.add(idx)
-      })
+      if (blockImagesBefore.length > 0) {
+        blockImagesBefore.forEach(({reg, idx}) => {
+          if (items.length > 0 && items[items.length - 1].type !== 'break') items.push({type: 'break'})
+          items.push(renderImageSlice(reg, false))
+          items.push({type: 'break'})
+          usedImageIndices.add(idx)
+        })
+        prevLine = null
+        prevWords = null
+      }
 
       // 2. Identify inline images inside this line
       const inlineImagesInLine = colImages.filter(({reg, idx}) => {
@@ -1250,15 +1272,67 @@ export function reflowPageFromPixels(
       })
       inlineImagesInLine.forEach(({idx}) => usedImageIndices.add(idx))
 
-      const words = detectWords(textInk, workW, col, line, options.wordGap || 3)
+      const words = linesWords[lineIdx] || []
       if (words.length === 0 && inlineImagesInLine.length === 0) return
 
-      // Paragraph break check
-      if (lineIdx > 0 && line.start - prevLineBottom > (line.end - line.start) * 0.7) {
-        if (items.length > 0 && items[items.length - 1].type !== 'break') items.push({type: 'break'})
-        items.push({type: 'indent', width: 24, sourceWidth: 24})
+      // Paragraph break & indent detection
+      let isNewParagraph = false
+      let indentWidth = 0
+
+      if (words.length > 0) {
+        const firstWord = words[0]
+        const currentIndent = Math.max(0, firstWord.x - effectiveColStart)
+        const currentHeight = firstWord.h || (line.end - line.start)
+        const glyphWidth = Math.max(8, currentHeight)
+        const indentThreshold = Math.max(12, currentHeight * 1.4)
+
+        const isIndent = prevWords && prevWords.length > 0
+          ? currentIndent > Math.max(0, prevWords[0].x - effectiveColStart) + indentThreshold
+          : (lineIdx === 0 && currentIndent >= indentThreshold)
+
+        let previousEndedEarly = false
+        if (prevWords && prevWords.length > 0) {
+          const prevLastWord = prevWords[prevWords.length - 1]
+          const trailingBlank = effectiveColEnd - (prevLastWord.x + prevLastWord.w)
+          const blankThreshold = Math.max(12, glyphWidth * 2.0)
+          previousEndedEarly = trailingBlank >= blankThreshold
+        }
+
+        let hasParagraphGap = false
+        if (prevLine) {
+          const gap = line.start - prevLine.end
+          hasParagraphGap = gap >= currentHeight * 1.8
+        }
+
+        isNewParagraph = isIndent || previousEndedEarly || hasParagraphGap
+
+        if (isNewParagraph) {
+          const maxParagraphIndent = Math.max(currentHeight * 5, (effectiveColEnd - effectiveColStart) * 0.18)
+          if (currentIndent >= Math.max(8, currentHeight * 0.3) && currentIndent <= maxParagraphIndent) {
+            indentWidth = currentIndent
+          } else if (previousEndedEarly || hasParagraphGap) {
+            indentWidth = Math.round(glyphWidth * 2)
+          } else if (isIndent) {
+            indentWidth = currentIndent
+          }
+        }
       }
-      prevLineBottom = line.end
+
+      if (isNewParagraph && items.length > 0) {
+        if (items[items.length - 1].type !== 'break') items.push({type: 'break'})
+      }
+      if (isNewParagraph && indentWidth > 0) {
+        items.push({
+          type: 'indent',
+          width: Math.round(indentWidth * textScale),
+          sourceWidth: indentWidth,
+        })
+      }
+
+      prevLine = line
+      if (words.length > 0) {
+        prevWords = words
+      }
 
       type LineUnit = {kind: 'word', word: WordBlock} | {kind: 'inline-img', reg: Roi}
       const lineUnits: LineUnit[] = [
