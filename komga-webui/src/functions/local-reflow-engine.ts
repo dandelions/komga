@@ -780,6 +780,73 @@ export function detectLines(
   return lines
 }
 
+export function shouldMergeHorizontalGlyphFragments(
+  left: WordBlock,
+  right: WordBlock,
+  glyphHeight: number,
+  wordGapOption: number = 3,
+): boolean {
+  const rawGap = right.x - (left.x + left.w)
+  if (rawGap < 0) return false
+  const gap = rawGap
+
+  const minX = Math.min(left.x, right.x)
+  const maxX = Math.max(left.x + left.w, right.x + right.w)
+  const unionW = maxX - minX
+
+  // If both are horizontal dash / rule fragments (like em-dash "——"), allow merging up to 2.5 * glyphHeight
+  const isDashFragment = left.h <= 8 && right.h <= 8 && Math.abs(left.y - right.y) <= 4
+  if (isDashFragment) {
+    return gap <= 6 && unionW <= glyphHeight * 2.5
+  }
+
+  // Two complete CJK characters (both have normal square character width >= 0.62 * glyphHeight and height >= 0.65 * glyphHeight)
+  // should NEVER be merged into a single unbreakable block, because CJK characters must reflow individually!
+  const leftIsFullGlyph = left.w >= glyphHeight * 0.62 && left.h >= glyphHeight * 0.65
+  const rightIsFullGlyph = right.w >= glyphHeight * 0.62 && right.h >= glyphHeight * 0.65
+  if (leftIsFullGlyph && rightIsFullGlyph) {
+    return false
+  }
+
+  // Normal Chinese characters are square glyphs (width is ~1.0x height, rarely exceeds 1.15x).
+  // Any merged block exceeding 1.15x glyphHeight indicates cross-character merging and must be rejected.
+  const maxUnionW = glyphHeight * 1.15
+  if (unionW > maxUnionW) return false
+
+  // Vertical overlap or alignment check
+  const overlap = Math.max(0, Math.min(left.y + left.h, right.y + right.h) - Math.max(left.y, right.y))
+  const minHeight = Math.max(1, Math.min(left.h, right.h))
+  const leftCenter = left.y + left.h / 2
+  const rightCenter = right.y + right.h / 2
+  const centerGap = Math.abs(leftCenter - rightCenter)
+
+  const isSmallFragment =
+    left.w <= glyphHeight * 0.38 ||
+    right.w <= glyphHeight * 0.38 ||
+    left.h <= glyphHeight * 0.58 ||
+    right.h <= glyphHeight * 0.58
+  const isNarrowVerticalStroke =
+    (left.w <= Math.max(4, glyphHeight * 0.18) && left.h >= glyphHeight * 0.42) ||
+    (right.w <= Math.max(4, glyphHeight * 0.18) && right.h >= glyphHeight * 0.42)
+
+  const aligned =
+    overlap >= minHeight * 0.2 ||
+    centerGap <= glyphHeight * 0.56 ||
+    isSmallFragment ||
+    isNarrowVerticalStroke
+  if (!aligned) return false
+
+  // Gap between internal glyph strokes/components is very small (typically <= 3px).
+  // Character-to-character gap in typesetting is usually >= 4px.
+  const maxAllowedGap = isNarrowVerticalStroke
+    ? Math.max(3, Math.min(5, Math.round(glyphHeight * 0.12)))
+    : isSmallFragment
+      ? Math.max(2, Math.min(4, Math.round(glyphHeight * 0.10)))
+      : 2
+
+  return gap <= maxAllowedGap
+}
+
 export function detectWords(
   ink: Uint8Array,
   width: number,
@@ -837,7 +904,21 @@ export function detectWords(
     const bx = column.start + wordStart
     const bw = colW - wordStart
     if (bw >= 2) {
-      rawBlocks.push({x: bx, y: line.start, w: bw, h: lineH})
+      let top = line.end
+      let bottom = line.start
+      for (let y = line.start; y < line.end; y++) {
+        for (let px = bx; px < bx + bw; px++) {
+          if (ink[y * width + px] === 1) {
+            if (y < top) top = y
+            if (y > bottom) bottom = y
+          }
+        }
+      }
+      if (bottom >= top) {
+        rawBlocks.push({x: bx, y: top, w: bw, h: bottom - top + 1})
+      } else {
+        rawBlocks.push({x: bx, y: line.start, w: bw, h: lineH})
+      }
     }
   }
 
@@ -846,14 +927,10 @@ export function detectWords(
 
   const merged: WordBlock[] = []
   let cur = rawBlocks[0]
-  const maxGap = Math.max(2, Math.min(lineH * 0.45, wordGapOption * 3.5))
 
   for (let i = 1; i < rawBlocks.length; i++) {
     const next = rawBlocks[i]
-    const gap = next.x - (cur.x + cur.w)
-    const verticalMatch = Math.abs((cur.y + cur.h / 2) - (next.y + next.h / 2)) <= lineH * 0.75 ||
-      (cur.y <= next.y + next.h && cur.y + cur.h >= next.y)
-    if (gap <= maxGap && verticalMatch) {
+    if (shouldMergeHorizontalGlyphFragments(cur, next, lineH, wordGapOption)) {
       const minX = Math.min(cur.x, next.x)
       const maxX = Math.max(cur.x + cur.w, next.x + next.w)
       const minY = Math.min(cur.y, next.y)

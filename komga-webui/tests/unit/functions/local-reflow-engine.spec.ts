@@ -558,6 +558,44 @@ describe('local-reflow-engine', () => {
       expect(breaks.length).toBe(1)
       expect(indents.length).toBe(1)
     })
+
+    test('splits continuous CJK characters into individual reflowable word tokens instead of giant unbreakable lines', () => {
+      const width = 300
+      const height = 100
+      const pixels = new Uint8ClampedArray(width * height * 4)
+      pixels.fill(255)
+
+      const drawCharacter = (x0: number, y0: number, w: number, h: number) => {
+        for (let y = y0; y < y0 + h; y++) {
+          for (let x = x0; x < x0 + w; x++) {
+            if (x === x0 || x === x0 + w - 1 || y === y0 || y === y0 + h - 1 || x === x0 + Math.floor(w / 2)) {
+              const idx = (y * width + x) * 4
+              pixels[idx] = 0; pixels[idx + 1] = 0; pixels[idx + 2] = 0
+            }
+          }
+        }
+      }
+
+      // Draw 6 continuous characters (each w=20, h=22, gap=5px between characters)
+      // They should NOT be merged into a single 150px wide giant block
+      for (let i = 0; i < 6; i++) {
+        drawCharacter(20 + i * 25, 30, 20, 22)
+      }
+
+      const options = {
+        targetWidth: 400,
+        renderMode: 'sprite' as const,
+        textScale: 100,
+      } as LocalReflowOptions
+
+      const result = reflowPageFromPixels(pixels, width, height, options)
+      const wordItems = result.items.filter(it => it.type === 'word')
+      // All 6 characters should remain separate individual reflowable word blocks
+      expect(wordItems.length).toBe(6)
+      wordItems.forEach(item => {
+        expect(item.w).toBeLessThanOrEqual(25)
+      })
+    })
   })
 
   describe('rotatePixels', () => {
