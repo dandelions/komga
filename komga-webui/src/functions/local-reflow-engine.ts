@@ -75,8 +75,8 @@ export type LocalReflowResult = {
 const EDGE_INK_THRESHOLD = 245
 const MAX_EDGE_TRIM = 6
 const MAX_EDGE_EXPANSION = 10
-const LOCAL_REFLOW_MAX_SIDE = 2800
-const LOCAL_REFLOW_MAX_PIXELS = 5_000_000
+const LOCAL_REFLOW_MAX_SIDE = 3600
+const LOCAL_REFLOW_MAX_PIXELS = 8_000_000
 
 export function clamp(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, v))
@@ -601,7 +601,9 @@ export function detectImageRegions(
         const ry = roi.y + minTy * tileSize
         const rw = Math.min(roi.x + roi.w - rx, (maxTx - minTx + 1) * tileSize)
         const rh = Math.min(roi.y + roi.h - ry, (maxTy - minTy + 1) * tileSize)
-        if (rw >= 40 && rh >= 40) {
+        const minWidth = Math.max(44, Math.round(roi.w * 0.08))
+        const minHeight = Math.max(36, Math.round(roi.h * 0.04))
+        if (rw >= minWidth && rh >= minHeight) {
           regions.push({x: rx, y: ry, w: rw, h: rh})
         }
       }
@@ -845,6 +847,22 @@ export function shouldMergeHorizontalGlyphFragments(
       : 2
 
   return gap <= maxAllowedGap
+}
+
+export function expandShortHorizontalGlyphBlock(
+  block: WordBlock,
+  glyphHeight: number,
+  sourceHeight: number,
+): WordBlock {
+  if (block.h >= glyphHeight * 0.45 || block.w < glyphHeight * 0.45) return block
+  const targetHeight = Math.max(1, Math.round(glyphHeight))
+  const center = block.y + block.h / 2
+  const y = clamp(Math.floor(center - targetHeight / 2), 0, Math.max(0, sourceHeight - targetHeight))
+  return {
+    ...block,
+    y,
+    h: Math.min(sourceHeight - y, targetHeight),
+  }
 }
 
 export function detectWords(
@@ -1389,8 +1407,8 @@ export function reflowPageFromPixels(
             indentWidth = currentIndent
           } else if (previousEndedEarly || hasParagraphGap) {
             indentWidth = Math.round(glyphWidth * 2)
-          } else if (isIndent) {
-            indentWidth = currentIndent
+          } else {
+            indentWidth = 0
           }
         }
       }
@@ -1399,9 +1417,11 @@ export function reflowPageFromPixels(
         if (items[items.length - 1].type !== 'break') items.push({type: 'break'})
       }
       if (isNewParagraph && indentWidth > 0) {
+        const scaled = indentWidth * textScale
+        const maxIndent = (options.targetWidth || 0) > 32 ? Math.max(0, ((options.targetWidth || 0) - 32) * 0.45) : scaled
         items.push({
           type: 'indent',
-          width: Math.round(indentWidth * textScale),
+          width: Math.min(maxIndent, scaled),
           sourceWidth: indentWidth,
         })
       }
@@ -1410,6 +1430,21 @@ export function reflowPageFromPixels(
       if (words.length > 0) {
         prevWords = words
       }
+
+      // 1. Expand short horizontal glyphs and adjust edges for all words in line
+      const adjustedWordsMap = new Map<WordBlock, WordBlock>()
+      words.forEach(w => {
+        const expanded = expandShortHorizontalGlyphBlock(w, avgColLineH, workH)
+        const adjusted = adjustBlockEdges(workPixels, workW, workH, expanded, pageBgLuma)
+        if (adjusted.w >= 2 && adjusted.h >= 2) {
+          adjustedWordsMap.set(w, adjusted)
+        }
+      })
+
+      const lineAdjustedWords = Array.from(adjustedWordsMap.values())
+      const outputTop = lineAdjustedWords.length > 0 ? Math.min(...lineAdjustedWords.map(b => b.y)) : line.start
+      const outputBottom = lineAdjustedWords.length > 0 ? Math.max(...lineAdjustedWords.map(b => b.y + b.h)) : line.end
+      const outputHeight = Math.max(1, outputBottom - outputTop)
 
       type LineUnit = {kind: 'word', word: WordBlock} | {kind: 'inline-img', reg: Roi}
       const lineUnits: LineUnit[] = [
@@ -1428,12 +1463,13 @@ export function reflowPageFromPixels(
         }
 
         const word = unit.word
-        const adjusted = adjustBlockEdges(workPixels, workW, workH, word, pageBgLuma)
-        if (adjusted.w < 2 || adjusted.h < 2) return
+        const adjusted = adjustedWordsMap.get(word)
+        if (!adjusted) return
 
         // Slice word pixels
         const sliceW = adjusted.w
-        const sliceH = adjusted.h
+        const sliceH = outputHeight
+        const offsetY = adjusted.y - outputTop
 
         if (isSpriteMode) {
           items.push({
@@ -1442,7 +1478,7 @@ export function reflowPageFromPixels(
             workWidth: workW,
             workHeight: workH,
             x: adjusted.x,
-            y: adjusted.y,
+            y: outputTop,
             w: sliceW,
             h: sliceH,
             width: sliceW * textScale,
@@ -1453,10 +1489,10 @@ export function reflowPageFromPixels(
 
         const sliceData = new Uint8ClampedArray(sliceW * sliceH * 4)
 
-        for (let y = 0; y < sliceH; y++) {
+        for (let y = 0; y < adjusted.h; y++) {
           const sy = adjusted.y + y
           const srcIdx = (sy * workW + adjusted.x) * 4
-          const dstIdx = y * sliceW * 4
+          const dstIdx = (offsetY + y) * sliceW * 4
           for (let b = 0; b < sliceW * 4; b++) {
             sliceData[dstIdx + b] = workPixels[srcIdx + b]
           }

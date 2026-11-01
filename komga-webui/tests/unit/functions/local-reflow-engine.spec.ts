@@ -596,6 +596,68 @@ describe('local-reflow-engine', () => {
         expect(item.w).toBeLessThanOrEqual(25)
       })
     })
+
+    test('clamps indent width so it never exceeds 45% of targetWidth', () => {
+      const width = 400
+      const height = 100
+      const pixels = new Uint8ClampedArray(width * height * 4)
+      pixels.fill(255)
+
+      // Draw a line of text starting with moderate indent
+      for (let x = 60; x < 200; x++) {
+        for (let y = 30; y < 45; y++) {
+          const idx = (y * width + x) * 4
+          pixels[idx] = 0; pixels[idx + 1] = 0; pixels[idx + 2] = 0
+        }
+      }
+
+      const options = {
+        targetWidth: 100, // Very narrow screen
+        renderMode: 'sprite' as const,
+        textScale: 100,
+      } as LocalReflowOptions
+
+      const result = reflowPageFromPixels(pixels, width, height, options)
+      const indents = result.items.filter(it => it.type === 'indent')
+      indents.forEach(indent => {
+        expect(indent.width).toBeLessThanOrEqual(Math.max(0, (100 - 32) * 0.45))
+      })
+    })
+
+    test('words in the same line share normalized outputTop and outputHeight', () => {
+      const width = 300
+      const height = 100
+      const pixels = new Uint8ClampedArray(width * height * 4)
+      pixels.fill(255)
+
+      // Word 1: height 15 (y: 25..40)
+      for (let y = 25; y < 40; y++) {
+        for (let x = 20; x < 40; x++) {
+          const idx = (y * width + x) * 4
+          pixels[idx] = 0; pixels[idx + 1] = 0; pixels[idx + 2] = 0
+        }
+      }
+      // Word 2: height 25 (y: 20..45)
+      for (let y = 20; y < 45; y++) {
+        for (let x = 50; x < 70; x++) {
+          const idx = (y * width + x) * 4
+          pixels[idx] = 0; pixels[idx + 1] = 0; pixels[idx + 2] = 0
+        }
+      }
+
+      const options = {
+        targetWidth: 400,
+        renderMode: 'sprite' as const,
+        textScale: 100,
+      } as LocalReflowOptions
+
+      const result = reflowPageFromPixels(pixels, width, height, options)
+      const words = result.items.filter(it => it.type === 'word')
+      expect(words.length).toBe(2)
+      // Both words in the same line must share identical y and h (normalized line bounds)
+      expect(words[0].y).toBe(words[1].y)
+      expect(words[0].h).toBe(words[1].h)
+    })
   })
 
   describe('rotatePixels', () => {

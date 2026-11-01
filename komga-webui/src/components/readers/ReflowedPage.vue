@@ -2631,7 +2631,7 @@ export default Vue.extend({
         if (currentLine.length === 0) return
         const lineHeight = Math.max(1, currentLineHeight)
         if (currentPage.length > 0 && currentPageHeight + lineHeight + rowGap > pageHeight) pushPage()
-        currentPage.push(...currentLine, {type: 'break'})
+        currentPage.push(...currentLine)
         currentPageHeight += lineHeight + rowGap
         currentLine = []
         currentLineWidth = 0
@@ -2649,6 +2649,7 @@ export default Vue.extend({
       items.forEach(item => {
         if (item.type === 'break') {
           pushLine()
+          currentPage.push({type: 'break'})
           return
         }
         if (item.type === 'indent') {
@@ -2887,7 +2888,7 @@ export default Vue.extend({
         imageExclusionVersion: 4,
         detectionScaleVersion: 4,
         darkWordRenderVersion: 6,
-        wordSegmentationVersion: 2,
+        wordSegmentationVersion: 3,
       })
     },
     emitReflowed(networkTransferBytes?: number) {
