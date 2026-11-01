@@ -2887,6 +2887,7 @@ export default Vue.extend({
         imageExclusionVersion: 4,
         detectionScaleVersion: 4,
         darkWordRenderVersion: 6,
+        wordSegmentationVersion: 2,
       })
     },
     emitReflowed(networkTransferBytes?: number) {
@@ -8268,6 +8269,7 @@ export default Vue.extend({
 }
 
 .word-block-sprite {
+  flex: 0 0 auto;
   background-repeat: no-repeat;
   box-sizing: border-box;
 }
