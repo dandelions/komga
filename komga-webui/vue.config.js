@@ -21,6 +21,15 @@ module.exports = {
   },
 
   // custom rule for readium and r2d2bc css that needs to be made available, but untouched
+  chainWebpack: config => {
+    config.plugin('fork-ts-checker').tap(args => {
+      if (args && args[0] && args[0].typescript) {
+        args[0].typescript.memoryLimit = 4096
+      }
+      return args
+    })
+  },
+
   configureWebpack: {
     module: {
       rules: [
