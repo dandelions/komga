@@ -763,4 +763,57 @@ describe('local-reflow-engine', () => {
       expect(lines[1].end).toBe(56)
     })
   })
+
+  describe('multiple cropRois', () => {
+    test('extracts items from all crop regions when multiple cropRois are specified', () => {
+      const width = 800
+      const height = 400
+      const pixels = new Uint8ClampedArray(width * height * 4)
+      pixels.fill(255) // white background
+
+      // Region 1 (left): x: 50..350, y: 50..200 -> text line
+      for (let y = 60; y < 90; y++) {
+        for (let x = 60; x < 200; x++) {
+          const idx = (y * width + x) * 4
+          pixels[idx] = 0
+          pixels[idx + 1] = 0
+          pixels[idx + 2] = 0
+        }
+      }
+
+      // Region 2 (right): x: 450..750, y: 50..200 -> text line
+      for (let y = 60; y < 90; y++) {
+        for (let x = 460; x < 600; x++) {
+          const idx = (y * width + x) * 4
+          pixels[idx] = 0
+          pixels[idx + 1] = 0
+          pixels[idx + 2] = 0
+        }
+      }
+
+      const cropRois = [
+        {x: 50, y: 50, w: 300, h: 200},
+        {x: 450, y: 50, w: 300, h: 200},
+      ]
+
+      const result = reflowPageFromPixels(
+        pixels,
+        width,
+        height,
+        {targetWidth: 600, renderMode: 'slices'} as any,
+        cropRois,
+      )
+
+      const wordItems = result.items.filter(it => it.type === 'word')
+      expect(wordItems.length).toBeGreaterThanOrEqual(2)
+
+      // Ensure words from left region exist
+      const leftWords = wordItems.filter(w => (w as any).x >= 50 && (w as any).x < 350)
+      expect(leftWords.length).toBeGreaterThan(0)
+
+      // Ensure words from right region exist (not dropped!)
+      const rightWords = wordItems.filter(w => (w as any).x >= 450 && (w as any).x < 750)
+      expect(rightWords.length).toBeGreaterThan(0)
+    })
+  })
 })

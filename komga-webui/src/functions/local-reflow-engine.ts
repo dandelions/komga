@@ -1267,21 +1267,7 @@ export function reflowPageFromPixels(
   const effectiveRois = scaledCropRois.length > 0
     ? scaledCropRois
     : [detectRoi(ink, workW, workH, options)]
-  const effectiveRoi = effectiveRois[0]
 
-  // 6. Detect image regions
-  const detectedImages = detectImageRegions(workPixels, workW, workH, effectiveRoi, threshold, pageBgLuma)
-  const allImageRegions = [...detectedImages, ...manualImageRegions.map(r => ({
-    x: Math.round(r.x * scale),
-    y: Math.round(r.y * scale),
-    w: Math.round(r.w * scale),
-    h: Math.round(r.h * scale),
-  }))]
-
-  const textInk = maskInkRegions(ink, workW, workH, allImageRegions)
-
-  // 7. Extract text columns, lines, and words
-  const columns = detectHorizontalColumns(ink, workW, workH, effectiveRoi, options.columnCount || 1, allImageRegions)
   const items: LocalReflowItem[] = []
   const textScale = clamp((options.textScale || 100) / 100, 0.2, 2.5)
 
@@ -1374,6 +1360,27 @@ export function reflowPageFromPixels(
       height: sliceH * textScale,
     }
   }
+
+  effectiveRois.forEach((effectiveRoi, roiIdx) => {
+    // 6. Detect image regions
+    const detectedImages = detectImageRegions(workPixels, workW, workH, effectiveRoi, threshold, pageBgLuma)
+    const roiManualImages = manualImageRegions
+      .map(r => ({
+        x: Math.round(r.x * scale),
+        y: Math.round(r.y * scale),
+        w: Math.round(r.w * scale),
+        h: Math.round(r.h * scale),
+      }))
+      .filter(r =>
+        r.x + r.w > effectiveRoi.x && r.x < effectiveRoi.x + effectiveRoi.w &&
+        r.y + r.h > effectiveRoi.y && r.y < effectiveRoi.y + effectiveRoi.h,
+      )
+    const allImageRegions = [...detectedImages, ...roiManualImages]
+
+    const textInk = maskInkRegions(ink, workW, workH, allImageRegions)
+
+    // 7. Extract text columns, lines, and words
+    const columns = detectHorizontalColumns(ink, workW, workH, effectiveRoi, options.columnCount || 1, allImageRegions)
 
   columns.forEach((col, colIdx) => {
     const colWidth = col.end - col.start
@@ -1691,21 +1698,26 @@ export function reflowPageFromPixels(
     }
   })
 
-  // Append any remaining image regions outside columns
-  allImageRegions.forEach((reg, idx) => {
-    if (!usedImageIndices.has(idx)) {
-      if (items.length > 0) items.push({type: 'break'})
-      items.push(renderImageSlice(reg, false))
+    // Append any remaining image regions outside columns
+    allImageRegions.forEach((reg, idx) => {
+      if (!usedImageIndices.has(idx)) {
+        if (items.length > 0 && items[items.length - 1].type !== 'break') items.push({type: 'break'})
+        items.push(renderImageSlice(reg, false))
+        items.push({type: 'break'})
+        usedImageIndices.add(idx)
+      }
+    })
+
+    if (roiIdx < effectiveRois.length - 1 && items.length > 0 && items[items.length - 1].type !== 'break') {
       items.push({type: 'break'})
-      usedImageIndices.add(idx)
     }
   })
 
   // Fallback: If no text blocks or images detected (e.g. pure illustration, cover, unusual background),
   // emit a fallback whole-ROI / whole-page image item so the page is never blank or showing "no text blocks detected".
   if (items.length === 0) {
-    const fallbackRoi: Roi = effectiveRoi && effectiveRoi.w >= 2 && effectiveRoi.h >= 2
-      ? effectiveRoi
+    const fallbackRoi: Roi = effectiveRois[0] && effectiveRois[0].w >= 2 && effectiveRois[0].h >= 2
+      ? effectiveRois[0]
       : {x: 0, y: 0, w: workW, h: workH}
     items.push(renderImageSlice(fallbackRoi, false))
   }

@@ -1174,7 +1174,7 @@ export default Vue.extend({
       return this.effectiveDisplayColumns === 2
     },
     displayColumnLeftItems(): ReflowItem[] {
-      return this.pages[this.virtualPageIndex] || (this.virtualPageIndex === 0 ? this.paginationItems : [])
+      return this.pages[this.virtualPageIndex] || []
     },
     displayColumnRightItems(): ReflowItem[] {
       return this.pages[this.virtualPageIndex + 1] || []
@@ -2904,7 +2904,7 @@ export default Vue.extend({
         imageExclusionVersion: 4,
         detectionScaleVersion: 4,
         darkWordRenderVersion: 6,
-        wordSegmentationVersion: 5,
+        wordSegmentationVersion: 6,
       })
     },
     emitReflowed(networkTransferBytes?: number) {
