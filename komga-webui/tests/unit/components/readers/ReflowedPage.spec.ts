@@ -825,5 +825,71 @@ describe('ReflowedPage display columns layout', () => {
       URL.revokeObjectURL = originalRevoke
     }
   })
+
+  test('restores cached texture URL and dimensions on cache hit', async () => {
+    const pageInstance: any = {
+      requestId: 1,
+      error: false,
+      errorMessage: '',
+      forceReflowOnce: false,
+      cachedItems: [{type: 'word', w: 10, h: 10}],
+      cachedPageBackground: '#f0f0f0',
+      cachedTransferStats: {transferred: 100},
+      cachedPageTextureUrl: 'data:image/bmp;base64,texture123',
+      cachedWorkWidth: 1080,
+      cachedWorkHeight: 1920,
+      localPageTextureUrl: '',
+      localTextureWidth: 0,
+      localTextureHeight: 0,
+      reflowItems: [],
+      pageBackground: '',
+      transferStats: undefined,
+      loading: true,
+      lastDetectionKey: '',
+      reflowDetectionKey: () => 'key-1',
+      revokeObjectUrl: jest.fn(),
+      repaginate: jest.fn(),
+      runReflow: methods.runReflow,
+    }
+
+    await pageInstance.runReflow()
+    expect(pageInstance.localPageTextureUrl).toBe('data:image/bmp;base64,texture123')
+    expect(pageInstance.localTextureWidth).toBe(1080)
+    expect(pageInstance.localTextureHeight).toBe(1920)
+    expect(pageInstance.pageBackground).toBe('#f0f0f0')
+    expect(pageInstance.loading).toBe(false)
+  })
+
+  test('emitReflowed and currentCachePayload include pageTextureUrl, workWidth and workHeight', () => {
+    let emittedPayload: any = null
+    const pageInstance: any = {
+      page: {number: 5},
+      cacheKey: 'cache-5',
+      reflowItems: [{type: 'word', w: 20, h: 20}],
+      pageBackground: '#ffffff',
+      localPageTextureUrl: 'data:image/bmp;base64,test-texture',
+      localTextureWidth: 1200,
+      localTextureHeight: 1800,
+      transferStats: {transferred: 200},
+      $emit: (event: string, payload: any) => {
+        if (event === 'reflowed') emittedPayload = payload
+      },
+      emitReflowed: methods.emitReflowed,
+      currentCachePayload: methods.currentCachePayload,
+    }
+
+    pageInstance.emitReflowed(500)
+    expect(emittedPayload).toBeDefined()
+    expect(emittedPayload.pageTextureUrl).toBe('data:image/bmp;base64,test-texture')
+    expect(emittedPayload.workWidth).toBe(1200)
+    expect(emittedPayload.workHeight).toBe(1800)
+    expect(emittedPayload.networkTransferBytes).toBe(500)
+
+    const cachePayload = pageInstance.currentCachePayload()
+    expect(cachePayload).toBeDefined()
+    expect(cachePayload.pageTextureUrl).toBe('data:image/bmp;base64,test-texture')
+    expect(cachePayload.workWidth).toBe(1200)
+    expect(cachePayload.workHeight).toBe(1800)
+  })
 })
 

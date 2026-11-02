@@ -302,6 +302,9 @@
           :options="reflowOptions"
           :cached-items="cachedReflowItems(reflowRootPageDto)"
           :cached-page-background="cachedReflowBackground(reflowRootPageDto)"
+          :cached-page-texture-url="cachedReflowTextureUrl(reflowRootPageDto)"
+          :cached-work-width="cachedReflowWorkWidth(reflowRootPageDto)"
+          :cached-work-height="cachedReflowWorkHeight(reflowRootPageDto)"
           :cached-transfer-stats="cachedReflowTransferStats(reflowRootPageDto)"
           :session-transfer-bytes="reflowSessionTransferBytes"
           :session-reflow-transfer-bytes="reflowSessionResponseTransferBytes"
@@ -365,6 +368,9 @@
           :options="reflowOptions"
           :cached-items="cachedReflowItems(prefetchPage)"
           :cached-page-background="cachedReflowBackground(prefetchPage)"
+          :cached-page-texture-url="cachedReflowTextureUrl(prefetchPage)"
+          :cached-work-width="cachedReflowWorkWidth(prefetchPage)"
+          :cached-work-height="cachedReflowWorkHeight(prefetchPage)"
           :cached-transfer-stats="cachedReflowTransferStats(prefetchPage)"
           :cache-key="reflowCacheKey"
           :night-display="nightDisplay"
@@ -1644,14 +1650,36 @@ export default Vue.extend({
         .map(pageNumber => this.pages[pageNumber - 1])
         .filter((page): page is PageDtoWithUrl => !!page)
     },
-    reflowContinuationPages(): Array<{pageNumber: number, pageUrl: string, items: any[]}> {
-      const continuation = [] as Array<{pageNumber: number, pageUrl: string, items: any[]}>
+    reflowContinuationPages(): Array<{
+      pageNumber: number,
+      pageUrl: string,
+      items: any[],
+      pageTextureUrl?: string,
+      workWidth?: number,
+      workHeight?: number,
+    }> {
+      const continuation = [] as Array<{
+        pageNumber: number,
+        pageUrl: string,
+        items: any[],
+        pageTextureUrl?: string,
+        workWidth?: number,
+        workHeight?: number,
+      }>
       for (let offset = 1; offset <= REFLOW_CONTINUATION_COUNT; offset++) {
         const pageNumber = this.reflowRootPage + offset
         const page = this.pages[pageNumber - 1]
+        const entry = this.cachedReflowEntry(page)
         const items = this.cachedReflowItems(page)
         if (!page || !items) break
-        continuation.push({pageNumber, pageUrl: page.url, items})
+        continuation.push({
+          pageNumber,
+          pageUrl: page.url,
+          items,
+          pageTextureUrl: entry?.pageTextureUrl,
+          workWidth: entry?.workWidth,
+          workHeight: entry?.workHeight,
+        })
       }
       return continuation
     },
@@ -3555,11 +3583,33 @@ export default Vue.extend({
       const entry = this.cachedReflowEntry(page)
       return Array.isArray(entry) ? '' : entry?.pageBackground || ''
     },
+    cachedReflowTextureUrl(page: PageDtoWithUrl | undefined): string {
+      const entry = this.cachedReflowEntry(page)
+      return Array.isArray(entry) ? '' : entry?.pageTextureUrl || ''
+    },
+    cachedReflowWorkWidth(page: PageDtoWithUrl | undefined): number | undefined {
+      const entry = this.cachedReflowEntry(page)
+      return Array.isArray(entry) ? undefined : entry?.workWidth
+    },
+    cachedReflowWorkHeight(page: PageDtoWithUrl | undefined): number | undefined {
+      const entry = this.cachedReflowEntry(page)
+      return Array.isArray(entry) ? undefined : entry?.workHeight
+    },
     cachedReflowTransferStats(page: PageDtoWithUrl | undefined): any {
       const entry = this.cachedReflowEntry(page)
       return Array.isArray(entry) ? undefined : entry?.transferStats
     },
-    cacheReflowPage(payload: {pageNumber: number, cacheKey: string, items: any[], pageBackground?: string, transferStats?: any, networkTransferBytes?: number}) {
+    cacheReflowPage(payload: {
+      pageNumber: number,
+      cacheKey: string,
+      items: any[],
+      pageBackground?: string,
+      pageTextureUrl?: string,
+      workWidth?: number,
+      workHeight?: number,
+      transferStats?: any,
+      networkTransferBytes?: number,
+    }) {
       this.recordReflowTransfer(payload.networkTransferBytes)
       if (payload.cacheKey !== this.reflowCacheKey) return
       const wasPrefetched = this.reflowPrefetchPages.includes(payload.pageNumber)
@@ -3567,6 +3617,9 @@ export default Vue.extend({
       this.$set(this.reflowCache, this.reflowCacheEntryKey(payload.pageNumber, payload.cacheKey), {
         items: payload.items,
         pageBackground: payload.pageBackground || '',
+        pageTextureUrl: payload.pageTextureUrl,
+        workWidth: payload.workWidth,
+        workHeight: payload.workHeight,
         transferStats: payload.transferStats,
         lastAccessed: Date.now(),
       })

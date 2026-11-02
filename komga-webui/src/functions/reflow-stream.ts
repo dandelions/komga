@@ -7,6 +7,9 @@ export type ReflowContinuationPage<T extends ReflowStreamItem> = {
   pageNumber: number,
   pageUrl?: string,
   items: T[],
+  pageTextureUrl?: string,
+  workWidth?: number,
+  workHeight?: number,
 }
 
 export function mergeReflowContinuationItems<T extends ReflowStreamItem>(
@@ -20,7 +23,13 @@ export function mergeReflowContinuationItems<T extends ReflowStreamItem>(
 
   for (const continuation of continuationPages) {
     if (continuation.pageNumber !== expectedPageNumber || !Array.isArray(continuation.items)) break
-    const continuationItems = continuation.items.map(item => ({...item, sourcePageNumber: continuation.pageNumber} as T))
+    const continuationItems = continuation.items.map(item => ({
+      ...item,
+      sourcePageNumber: continuation.pageNumber,
+      pageTextureUrl: (item as any).pageTextureUrl || continuation.pageTextureUrl,
+      workWidth: (item as any).workWidth || continuation.workWidth,
+      workHeight: (item as any).workHeight || continuation.workHeight,
+    } as T))
     while (continuationItems[0]?.type === 'break') continuationItems.shift()
     while (continuationItems[continuationItems.length - 1]?.type === 'break') continuationItems.pop()
     if (continuationItems.length > 0) {

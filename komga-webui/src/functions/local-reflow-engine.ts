@@ -639,6 +639,10 @@ export function detectHorizontalColumns(
   columnCountSetting: number,
   imageRegions?: Roi[],
 ): Array<{start: number, end: number}> {
+  if (columnCountSetting === 1) {
+    return [{start: roi.x, end: roi.x + roi.w}]
+  }
+
   const colInk = new Int32Array(roi.w)
   for (let x = 0; x < roi.w; x++) {
     const gx = roi.x + x
@@ -1372,7 +1376,7 @@ export function reflowPageFromPixels(
     }
   }
 
-  columns.forEach(col => {
+  columns.forEach((col, colIdx) => {
     const colWidth = col.end - col.start
     const lines = detectLines(textInk, workW, col, effectiveRoi, options)
     const avgColLineH = lines.length > 0
@@ -1682,6 +1686,10 @@ export function reflowPageFromPixels(
         usedImageIndices.add(idx)
       }
     })
+
+    if (colIdx < columns.length - 1 && items.length > 0 && items[items.length - 1].type !== 'break') {
+      items.push({type: 'break'})
+    }
   })
 
   // Append any remaining image regions outside columns

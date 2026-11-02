@@ -5,6 +5,7 @@ import {
   reflowPageFromPixels,
   detectPageBackgroundFromPixels,
   buildInkMap,
+  detectHorizontalColumns,
   rotatePixels,
   LocalReflowOptions,
 } from '@/functions/local-reflow-engine'
@@ -684,6 +685,37 @@ describe('local-reflow-engine', () => {
       // Check center pixel is preserved as ink
       const centerIdx = (10 * width + 10) * 4
       expect(rotated[centerIdx]).toBe(0)
+    })
+  })
+
+  describe('detectHorizontalColumns', () => {
+    test('returns single full ROI column when columnCountSetting is 1', () => {
+      const width = 100
+      const height = 100
+      const ink = new Uint8Array(width * height)
+      // Draw text in left and right half with gutter in middle
+      for (let y = 10; y < 90; y++) {
+        for (let x = 10; x < 40; x++) ink[y * width + x] = 1
+        for (let x = 60; x < 90; x++) ink[y * width + x] = 1
+      }
+      const roi = {x: 10, y: 10, w: 80, h: 80}
+      const cols = detectHorizontalColumns(ink, width, height, roi, 1)
+      expect(cols).toEqual([{start: 10, end: 90}])
+    })
+
+    test('detects multiple columns when columnCountSetting is 2 and gutter exists', () => {
+      const width = 200
+      const height = 200
+      const ink = new Uint8Array(width * height)
+      for (let y = 10; y < 190; y++) {
+        for (let x = 10; x < 80; x++) ink[y * width + x] = 1
+        for (let x = 120; x < 190; x++) ink[y * width + x] = 1
+      }
+      const roi = {x: 10, y: 10, w: 180, h: 180}
+      const cols = detectHorizontalColumns(ink, width, height, roi, 2)
+      expect(cols.length).toBe(2)
+      expect(cols[0].start).toBe(10)
+      expect(cols[1].end).toBe(190)
     })
   })
 })

@@ -976,6 +976,18 @@ export default Vue.extend({
       type: String,
       default: '',
     },
+    cachedPageTextureUrl: {
+      type: String,
+      default: '',
+    },
+    cachedWorkWidth: {
+      type: Number,
+      default: undefined,
+    },
+    cachedWorkHeight: {
+      type: Number,
+      default: undefined,
+    },
     cachedTransferStats: {
       type: Object as () => ReflowTransferStats | undefined,
       default: undefined,
@@ -1937,6 +1949,9 @@ export default Vue.extend({
         this.reflowItems = this.cachedItems
         this.pageBackground = this.cachedPageBackground || '#fff'
         this.transferStats = this.cachedTransferStats
+        this.localPageTextureUrl = this.cachedPageTextureUrl || ''
+        this.localTextureWidth = this.cachedWorkWidth || 0
+        this.localTextureHeight = this.cachedWorkHeight || 0
         this.repaginate()
         this.lastDetectionKey = detectionKey
         this.loading = false
@@ -2888,7 +2903,7 @@ export default Vue.extend({
         imageExclusionVersion: 4,
         detectionScaleVersion: 4,
         darkWordRenderVersion: 6,
-        wordSegmentationVersion: 3,
+        wordSegmentationVersion: 4,
       })
     },
     emitReflowed(networkTransferBytes?: number) {
@@ -2898,6 +2913,9 @@ export default Vue.extend({
         items: this.reflowItems,
         pageBackground: this.pageBackground,
         transferStats: this.transferStats,
+        pageTextureUrl: this.localPageTextureUrl,
+        workWidth: this.localTextureWidth,
+        workHeight: this.localTextureHeight,
       } as ReflowCachePayload
       if (networkTransferBytes !== undefined) payload.networkTransferBytes = Math.max(0, Math.round(networkTransferBytes))
       this.$emit('reflowed', payload)
@@ -2910,6 +2928,9 @@ export default Vue.extend({
         items: this.reflowItems,
         pageBackground: this.pageBackground,
         transferStats: this.transferStats,
+        pageTextureUrl: this.localPageTextureUrl,
+        workWidth: this.localTextureWidth,
+        workHeight: this.localTextureHeight,
       }
     },
     rescaleReflowItems() {
@@ -8277,7 +8298,7 @@ export default Vue.extend({
 
 .word-block {
   display: inline-block;
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   min-width: 0;
   height: auto;
   max-width: 100%;
