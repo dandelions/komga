@@ -1174,7 +1174,7 @@ export default Vue.extend({
       return this.effectiveDisplayColumns === 2
     },
     displayColumnLeftItems(): ReflowItem[] {
-      return this.pages[this.virtualPageIndex] || []
+      return this.pages[this.virtualPageIndex] || (this.virtualPageIndex === 0 ? this.paginationItems : [])
     },
     displayColumnRightItems(): ReflowItem[] {
       return this.pages[this.virtualPageIndex + 1] || []
@@ -2027,7 +2027,7 @@ export default Vue.extend({
             rotation: 0,
             formulaProtection: this.options?.formulaProtection !== false,
             deskewAnalysisRoi: this.currentDeskewAnalysisRoi(),
-            renderMode: 'sprite',
+            renderMode: 'slices',
           }
           const manualRegions = this.currentManualImageRois()
           const workerResult = await this.runLocalWorkerReflow(
@@ -2764,6 +2764,7 @@ export default Vue.extend({
     },
     isSpriteWordItem(item: ReflowItem): boolean {
       if (item.type !== 'word') return false
+      if ((item as any).src) return false
       return !!((item as any).pageTextureUrl || this.localPageTextureUrl) && (item as any).w !== undefined && (item as any).h !== undefined
     },
     wordBlockStyle(item: RenderedWordBlock): object {
@@ -2903,7 +2904,7 @@ export default Vue.extend({
         imageExclusionVersion: 4,
         detectionScaleVersion: 4,
         darkWordRenderVersion: 6,
-        wordSegmentationVersion: 4,
+        wordSegmentationVersion: 5,
       })
     },
     emitReflowed(networkTransferBytes?: number) {
