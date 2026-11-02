@@ -639,10 +639,6 @@ export function detectHorizontalColumns(
   columnCountSetting: number,
   imageRegions?: Roi[],
 ): Array<{start: number, end: number}> {
-  if (columnCountSetting === 1) {
-    return [{start: roi.x, end: roi.x + roi.w}]
-  }
-
   const colInk = new Int32Array(roi.w)
   for (let x = 0; x < roi.w; x++) {
     const gx = roi.x + x
@@ -827,8 +823,11 @@ export function detectLines(
     const curH = cur.end - cur.start
     const nextH = next.end - next.start
     const isThinBar = curH <= 8 || nextH <= 8
+    const bothSubstantial = curH >= 16 && nextH >= 16
+    const mergedHeight = next.end - cur.start
+    const heightWithinFormulaLimit = mergedHeight <= avgHeight * 2.2
 
-    if (formulaProtection && gap <= maxFormulaGap && (isThinBar || gap <= 8)) {
+    if (formulaProtection && !bothSubstantial && isThinBar && gap <= maxFormulaGap && heightWithinFormulaLimit) {
       // Merge into a single line to preserve fraction / formula integrity
       cur = {start: cur.start, end: next.end}
     } else {

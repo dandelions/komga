@@ -6,6 +6,7 @@ import {
   detectPageBackgroundFromPixels,
   buildInkMap,
   detectHorizontalColumns,
+  detectLines,
   rotatePixels,
   LocalReflowOptions,
 } from '@/functions/local-reflow-engine'
@@ -716,6 +717,50 @@ describe('local-reflow-engine', () => {
       expect(cols.length).toBe(2)
       expect(cols[0].start).toBe(10)
       expect(cols[1].end).toBe(190)
+    })
+
+    test('splits narrow marginal column even when columnCountSetting is 1', () => {
+      const width = 1000
+      const height = 1000
+      const ink = new Uint8Array(width * height)
+      // Main text column: x: 100..750, y: 100..900
+      for (let y = 100; y < 900; y++) {
+        for (let x = 100; x < 750; x++) ink[y * width + x] = 1
+      }
+      // Gutter: x: 750..820 (width = 70 >= 50)
+      // Marginal notes column: x: 820..880 (width = 60 <= 12% of 1000)
+      for (let y = 100; y < 900; y++) {
+        for (let x = 820; x < 880; x++) ink[y * width + x] = 1
+      }
+      const roi = {x: 100, y: 100, w: 800, h: 800}
+      const cols = detectHorizontalColumns(ink, width, height, roi, 1)
+      expect(cols.length).toBe(2)
+      expect(cols[0].start).toBe(100)
+      expect(cols[1].end).toBe(900)
+    })
+  })
+
+  describe('detectLines', () => {
+    test('does not merge two substantial text lines with small gap', () => {
+      const width = 200
+      const height = 100
+      const ink = new Uint8Array(width * height)
+      // Line 1: y: 10..30 (height 20)
+      for (let y = 10; y < 30; y++) {
+        for (let x = 20; x < 180; x++) ink[y * width + x] = 1
+      }
+      // Gap: y: 30..36 (gap 6 <= 8)
+      // Line 2: y: 36..56 (height 20)
+      for (let y = 36; y < 56; y++) {
+        for (let x = 20; x < 180; x++) ink[y * width + x] = 1
+      }
+      const roi = {x: 0, y: 0, w: width, h: height}
+      const lines = detectLines(ink, width, {start: 0, end: width}, roi, {formulaProtection: true} as any)
+      expect(lines.length).toBe(2)
+      expect(lines[0].start).toBe(10)
+      expect(lines[0].end).toBe(30)
+      expect(lines[1].start).toBe(36)
+      expect(lines[1].end).toBe(56)
     })
   })
 })

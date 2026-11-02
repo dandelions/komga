@@ -2539,7 +2539,7 @@ export default Vue.extend({
         this.virtualPageIndex,
       )
       if (pageIndex < 0) return false
-      this.virtualPageIndex = pageIndex
+      this.virtualPageIndex = this.isTwoColumns ? Math.floor(pageIndex / 2) * 2 : pageIndex
       return true
     },
     syncDisplayedSourcePage(allowRegression: boolean = true) {
