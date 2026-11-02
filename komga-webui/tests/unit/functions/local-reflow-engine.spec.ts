@@ -815,5 +815,34 @@ describe('local-reflow-engine', () => {
       const rightWords = wordItems.filter(w => (w as any).x >= 450 && (w as any).x < 750)
       expect(rightWords.length).toBeGreaterThan(0)
     })
+
+    test('uses whole page as reflow region when cropRois is empty', () => {
+      const width = 600
+      const height = 400
+      const pixels = new Uint8ClampedArray(width * height * 4)
+      pixels.fill(255) // white background
+
+      // Add a line of text spanning across the page
+      for (let y = 50; y < 80; y++) {
+        for (let x = 60; x < 260; x++) {
+          const idx = (y * width + x) * 4
+          pixels[idx] = 0
+          pixels[idx + 1] = 0
+          pixels[idx + 2] = 0
+        }
+      }
+
+      const emptyCropRois: any[] = []
+      const result = reflowPageFromPixels(
+        pixels,
+        width,
+        height,
+        {targetWidth: 600, renderMode: 'slices'} as any,
+        emptyCropRois,
+      )
+
+      const wordItems = result.items.filter(it => it.type === 'word')
+      expect(wordItems.length).toBeGreaterThan(0)
+    })
   })
 })

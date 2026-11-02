@@ -586,6 +586,16 @@ describe('ReflowedPage display columns layout', () => {
       targetWidth: 1400,
     }
     expect(computed.effectiveDisplayColumns.call(verticalWide)).toBe(1)
+
+    const fallbackWide = {
+      verticalText: false,
+      controlDisplayColumns: 'auto',
+      displayColumns: 'auto',
+      hasOnlySingleFallbackImage: true,
+      pageContentWidth: () => 1400,
+      targetWidth: 1400,
+    }
+    expect(computed.effectiveDisplayColumns.call(fallbackWide)).toBe(1)
   })
 
   test('two-column mode splits available width and pages advance by 2', () => {

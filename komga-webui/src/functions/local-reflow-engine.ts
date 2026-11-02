@@ -841,7 +841,7 @@ export function detectLines(
     lines.push(cur)
   }
 
-  return lines
+  return lines.length > 0 ? lines : rawLines
 }
 
 export function shouldMergeHorizontalGlyphFragments(
@@ -962,7 +962,7 @@ export function detectWords(
         inWord = false
         const bx = column.start + wordStart
         const bw = x - wordStart
-        if (bw >= 2) {
+        if (bw >= 1) {
           let top = line.end
           let bottom = line.start
           for (let y = line.start; y < line.end; y++) {
@@ -983,7 +983,7 @@ export function detectWords(
   if (inWord) {
     const bx = column.start + wordStart
     const bw = colW - wordStart
-    if (bw >= 2) {
+    if (bw >= 1) {
       let top = line.end
       let bottom = line.start
       for (let y = line.start; y < line.end; y++) {
@@ -1264,9 +1264,14 @@ export function reflowPageFromPixels(
     }))
     .filter(r => r.w >= 8 && r.h >= 8)
 
+  const hasManualMargin = (options.marginTop || 0) > 0 || (options.marginBottom || 0) > 0 || (options.marginLeft || 0) > 0 || (options.marginRight || 0) > 0
+  const defaultPageRoi: Roi = hasManualMargin
+    ? detectRoi(ink, workW, workH, {...options, autoCropBorder: false})
+    : {x: 0, y: 0, w: workW, h: workH}
+
   const effectiveRois = scaledCropRois.length > 0
     ? scaledCropRois
-    : [detectRoi(ink, workW, workH, options)]
+    : [defaultPageRoi]
 
   const items: LocalReflowItem[] = []
   const textScale = clamp((options.textScale || 100) / 100, 0.2, 2.5)
@@ -1524,9 +1529,8 @@ export function reflowPageFromPixels(
       words.forEach(w => {
         const expanded = expandShortHorizontalGlyphBlock(w, avgColLineH, workH)
         const adjusted = adjustBlockEdges(workPixels, workW, workH, expanded, pageBgLuma)
-        if (adjusted.w >= 2 && adjusted.h >= 2) {
-          adjustedWordsMap.set(w, adjusted)
-        }
+        const valid = (adjusted.w >= 1 && adjusted.h >= 1) ? adjusted : expanded
+        adjustedWordsMap.set(w, valid)
       })
 
       const lineAdjustedWords = Array.from(adjustedWordsMap.values())
@@ -1719,7 +1723,9 @@ export function reflowPageFromPixels(
     const fallbackRoi: Roi = effectiveRois[0] && effectiveRois[0].w >= 2 && effectiveRois[0].h >= 2
       ? effectiveRois[0]
       : {x: 0, y: 0, w: workW, h: workH}
-    items.push(renderImageSlice(fallbackRoi, false))
+    const fallbackItem = renderImageSlice(fallbackRoi, false)
+    ;(fallbackItem as any).isFallback = true
+    items.push(fallbackItem)
   }
 
   return {

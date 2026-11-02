@@ -1162,8 +1162,16 @@ export default Vue.extend({
       if (val === '2' || val === 2) return '2'
       return 'auto'
     },
+    hasOnlySingleFallbackImage(): boolean {
+      const items = (this as any).reflowItems
+      if (Array.isArray(items) && items.length === 1 && items[0]?.type === 'image') return true
+      const pages = (this as any).pages
+      if (Array.isArray(pages) && pages.length === 1 && pages[0]?.length === 1 && pages[0][0]?.type === 'image') return true
+      return false
+    },
     effectiveDisplayColumns(): number {
       if (this.verticalText) return 1
+      if ((this as any).hasOnlySingleFallbackImage) return 1
       const setting = this.controlDisplayColumns || this.displayColumns
       if (setting === '1') return 1
       if (setting === '2') return 2
@@ -3447,7 +3455,7 @@ export default Vue.extend({
       })
     },
     reflowRegionSource(sourceCanvas: HTMLCanvasElement, cropRoi?: Roi): ReflowRegionSource {
-      if (!cropRoi) return {canvas: sourceCanvas, sourceOffset: {x: 0, y: 0, w: sourceCanvas.width, h: sourceCanvas.height}}
+      if (!cropRoi) return {canvas: sourceCanvas, detectionRoi: {x: 0, y: 0, w: sourceCanvas.width, h: sourceCanvas.height}, sourceOffset: {x: 0, y: 0, w: sourceCanvas.width, h: sourceCanvas.height}}
 
       const roi = this.clampRoi(cropRoi, sourceCanvas.width, sourceCanvas.height)
       const canvas = document.createElement('canvas')
@@ -7125,7 +7133,8 @@ export default Vue.extend({
         w: source.w,
         h: source.h,
         width: Math.min(this.targetWidth, source.w * this.textScale()),
-      }
+        isFallback: true,
+      } as any
     },
     verticalImageSlots(imageRegions: ImageRegion[], lines: WordLine[]): ImageRegion[][] {
       const slots = Array.from({length: lines.length + 1}, () => [] as ImageRegion[])
