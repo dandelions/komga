@@ -8,6 +8,11 @@ import {
   detectHorizontalColumns,
   detectLines,
   rotatePixels,
+  detectBands,
+  mergeCloseBands,
+  tightHorizontalLineBounds,
+  horizontalWordBlock,
+  separateOverlappingHorizontalBlocks,
   LocalReflowOptions,
 } from '@/functions/local-reflow-engine'
 
@@ -843,6 +848,95 @@ describe('local-reflow-engine', () => {
 
       const wordItems = result.items.filter(it => it.type === 'word')
       expect(wordItems.length).toBeGreaterThan(0)
+    })
+  })
+
+  describe('bands and line/word geometry alignment', () => {
+    test('detectBands and mergeCloseBands detect and merge line bands', () => {
+      // 10..20 and 22..30: gap is 2
+      const bands = detectBands(0, 50, idx => (idx >= 10 && idx < 20) || (idx >= 22 && idx < 30))
+      expect(bands.length).toBe(2)
+      expect(bands[0]).toEqual({start: 10, end: 20})
+      expect(bands[1]).toEqual({start: 22, end: 30})
+
+      const merged = mergeCloseBands(bands, 2)
+      expect(merged.length).toBe(1)
+      expect(merged[0]).toEqual({start: 10, end: 30})
+    })
+
+    test('tightHorizontalLineBounds calculates tight vertical ink bounds with padding', () => {
+      const width = 100
+      const height = 100
+      const ink = new Uint8Array(width * height)
+      // Line from y: 15..25, x: 20..80
+      for (let y = 15; y < 25; y++) {
+        for (let x = 20; x < 80; x++) ink[y * width + x] = 1
+      }
+      const bounds = tightHorizontalLineBounds(width, height, ink, {start: 10, end: 90}, {start: 10, end: 30})
+      expect(bounds).not.toBeNull()
+      // minY is 15 (minY - 1 = 14), maxY is 24 (maxY + 2 = 26)
+      expect(bounds!.start).toBe(14)
+      expect(bounds!.end).toBe(26)
+    })
+
+    test('horizontalWordBlock and separateOverlappingHorizontalBlocks apply padding without overlapping', () => {
+      const width = 200
+      const height = 100
+      const ink = new Uint8Array(width * height)
+      // Word 1: x: 20..40, y: 15..35
+      for (let y = 15; y < 35; y++) {
+        for (let x = 20; x < 40; x++) ink[y * width + x] = 1
+      }
+      // Word 2: x: 44..64, y: 15..35 (gap = 4)
+      for (let y = 15; y < 35; y++) {
+        for (let x = 44; x < 64; x++) ink[y * width + x] = 1
+      }
+
+      const lineBounds = {start: 14, end: 36} // height = 22, padding = 2
+      const block1 = horizontalWordBlock(width, ink, {start: 15, end: 41}, {start: 14, end: 36}, lineBounds)
+      const block2 = horizontalWordBlock(width, ink, {start: 43, end: 65}, {start: 14, end: 36}, lineBounds)
+      expect(block1).not.toBeNull()
+      expect(block2).not.toBeNull()
+
+      // Before separation, block1 padded right is 40 + 2 = 42, block2 padded left is 44 - 2 = 42
+      const separated = separateOverlappingHorizontalBlocks([block1!, block2!])
+      expect(separated.length).toBe(2)
+      expect(separated[0].x + separated[0].w).toBeLessThanOrEqual(separated[1].x)
+    })
+
+    test('words in slices mode have y === outputTop matching sprite mode and server output', () => {
+      const width = 300
+      const height = 100
+      const pixels = new Uint8ClampedArray(width * height * 4)
+      pixels.fill(255)
+
+      // Word 1: height 15 (y: 25..40)
+      for (let y = 25; y < 40; y++) {
+        for (let x = 20; x < 40; x++) {
+          const idx = (y * width + x) * 4
+          pixels[idx] = 0; pixels[idx + 1] = 0; pixels[idx + 2] = 0
+        }
+      }
+      // Word 2: height 25 (y: 20..45)
+      for (let y = 20; y < 45; y++) {
+        for (let x = 50; x < 70; x++) {
+          const idx = (y * width + x) * 4
+          pixels[idx] = 0; pixels[idx + 1] = 0; pixels[idx + 2] = 0
+        }
+      }
+
+      const options = {
+        targetWidth: 400,
+        renderMode: 'slices' as const,
+        textScale: 100,
+      } as LocalReflowOptions
+
+      const result = reflowPageFromPixels(pixels, width, height, options)
+      const words = result.items.filter(it => it.type === 'word')
+      expect(words.length).toBe(2)
+      // Both words in the same line must share identical y and h in slices mode too
+      expect(words[0].y).toBe(words[1].y)
+      expect(words[0].h).toBe(words[1].h)
     })
   })
 })

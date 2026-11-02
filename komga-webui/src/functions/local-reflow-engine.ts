@@ -631,6 +631,43 @@ export function maskInkRegions(
   return masked
 }
 
+export function trimHorizontalColumn(
+  ink: Uint8Array,
+  width: number,
+  column: {start: number, end: number},
+  roi: Roi,
+): {start: number, end: number} {
+  let start = column.start
+  let end = column.end
+
+  const columnHasInk = (x: number): boolean => {
+    for (let y = roi.y; y < roi.y + roi.h; y++) {
+      if (ink[y * width + x] !== 0) return true
+    }
+    return false
+  }
+
+  for (let x = column.start; x < column.end; x++) {
+    if (columnHasInk(x)) {
+      start = x
+      break
+    }
+  }
+
+  for (let x = column.end - 1; x >= column.start; x--) {
+    if (columnHasInk(x)) {
+      end = x + 1
+      break
+    }
+  }
+
+  const padding = Math.max(2, Math.min(8, Math.round((end - start) * 0.015)))
+  return {
+    start: Math.max(column.start, start - padding),
+    end: Math.min(column.end, end + padding),
+  }
+}
+
 export function detectHorizontalColumns(
   ink: Uint8Array,
   width: number,
@@ -927,89 +964,223 @@ export function expandShortHorizontalGlyphBlock(
   }
 }
 
+export function detectBands(
+  start: number,
+  end: number,
+  hasInk: (index: number) => boolean,
+): Array<{start: number, end: number}> {
+  const bands: Array<{start: number, end: number}> = []
+  let bandStart = -1
+  let lastInk = -1
+
+  for (let index = start; index < end; index++) {
+    if (hasInk(index)) {
+      if (bandStart < 0) bandStart = index
+      lastInk = index
+    } else if (bandStart >= 0 && index - lastInk > 1) {
+      bands.push({start: bandStart, end: lastInk + 1})
+      bandStart = -1
+    }
+  }
+
+  if (bandStart >= 0) bands.push({start: bandStart, end: lastInk + 1})
+  return bands
+}
+
+export function mergeCloseBands(
+  bands: Array<{start: number, end: number}>,
+  gap: number,
+): Array<{start: number, end: number}> {
+  if (bands.length === 0) return bands
+  const merged: Array<{start: number, end: number}> = []
+  let current = {...bands[0]}
+
+  for (let i = 1; i < bands.length; i++) {
+    const band = bands[i]
+    if (band.start - current.end <= gap) {
+      current.end = band.end
+    } else {
+      merged.push(current)
+      current = {...band}
+    }
+  }
+
+  merged.push(current)
+  return merged
+}
+
+export function tightHorizontalLineBounds(
+  width: number,
+  height: number,
+  ink: Uint8Array,
+  column: {start: number, end: number},
+  line: {start: number, end: number},
+): {start: number, end: number} | null {
+  let minY = height
+  let maxY = -1
+
+  for (let y = line.start; y < line.end; y++) {
+    const rowOffset = y * width
+    for (let x = column.start; x < column.end; x++) {
+      if (ink[rowOffset + x] === 0) continue
+      if (y < minY) minY = y
+      if (y > maxY) maxY = y
+    }
+  }
+
+  if (maxY < minY) return null
+  return {
+    start: Math.max(line.start, minY - 1),
+    end: Math.min(line.end, maxY + 2),
+  }
+}
+
+export function horizontalWordBlock(
+  width: number,
+  ink: Uint8Array,
+  wordBand: {start: number, end: number},
+  line: {start: number, end: number},
+  lineBounds: {start: number, end: number},
+): WordBlock | null {
+  let minX = width
+  let maxX = -1
+
+  for (let x = wordBand.start; x < wordBand.end; x++) {
+    for (let y = line.start; y < line.end; y++) {
+      if (ink[y * width + x] === 0) continue
+      if (x < minX) minX = x
+      if (x > maxX) maxX = x
+    }
+  }
+
+  if (maxX < minX) return null
+  const glyphHeight = lineBounds.end - lineBounds.start
+  const padding = Math.max(2, Math.min(6, Math.round(glyphHeight * 0.1)))
+  const x = Math.max(0, minX - padding)
+  const right = Math.min(width, maxX + 1 + padding)
+  return {
+    x,
+    y: lineBounds.start,
+    w: Math.max(1, right - x),
+    h: Math.max(1, lineBounds.end - lineBounds.start),
+  }
+}
+
+export function separateOverlappingHorizontalBlocks(blocks: WordBlock[]): WordBlock[] {
+  if (blocks.length <= 1) return blocks
+  const sorted = [...blocks].sort((a, b) => a.x - b.x)
+  const boundaries: Array<number | null> = []
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const left = sorted[i]
+    const right = sorted[i + 1]
+    const overlapStart = right.x
+    const overlapEnd = left.x + left.w
+    boundaries.push(overlapEnd > overlapStart ? Math.floor((overlapStart + overlapEnd) / 2) : null)
+  }
+
+  return sorted.map((block, index) => {
+    const prevBound = boundaries[index - 1]
+    const nextBound = boundaries[index]
+    const left = prevBound != null ? Math.max(block.x, prevBound) : block.x
+    const right = nextBound != null ? Math.min(block.x + block.w, nextBound) : block.x + block.w
+    return {
+      ...block,
+      x: left,
+      w: Math.max(1, right - left),
+    }
+  })
+}
+
+export function medianNumber(arr: number[]): number {
+  if (arr.length === 0) return 0
+  const sorted = [...arr].sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
+}
+
+export function horizontalCharacterSourceWidth(blocks: WordBlock[]): number {
+  const widths = blocks
+    .filter(b => b.w >= 2 && b.h >= 2)
+    .map(b => Math.min(b.w, Math.max(b.h * 1.8, b.h + 4.0)))
+  return Math.max(8.0, medianNumber(widths))
+}
+
+export function contrastEnhancedTextColor(
+  r: number,
+  g: number,
+  b: number,
+  backgroundLuma: number,
+  darkDisplay: boolean,
+): {r: number, g: number, b: number} {
+  const sourceDark = backgroundLuma < 128
+  const sourceLuma = Math.min(255, Math.max(0, pixelLuma(r, g, b)))
+  const delta = sourceDark ? sourceLuma - backgroundLuma : backgroundLuma - sourceLuma
+  const baseMinDelta = 8.0
+  if (delta <= baseMinDelta) {
+    const bg = darkDisplay ? 0 : 255
+    return {r: bg, g: bg, b: bg}
+  }
+  const maxDelta = sourceDark ? 255 - backgroundLuma : backgroundLuma
+  const contrastRange = Math.max(24.0, maxDelta * 0.55)
+  const norm = Math.min(1.0, Math.max(0.0, (delta - baseMinDelta) / contrastRange))
+  const smooth = norm * norm * (3.0 - 2.0 * norm)
+  const fg = Math.pow(smooth, 0.8)
+  const outputLuma = darkDisplay ? 255.0 * fg : 255.0 * (1.0 - fg)
+  const value = Math.min(255, Math.max(0, Math.round(outputLuma)))
+  return {r: value, g: value, b: value}
+}
+
+export function grayscaleTextColor(
+  r: number,
+  g: number,
+  b: number,
+  backgroundLuma: number,
+  darkDisplay: boolean,
+): {r: number, g: number, b: number} {
+  const sourceDark = backgroundLuma < 128
+  const sourceLuma = Math.min(255, Math.max(0, Math.round(pixelLuma(r, g, b))))
+  const outputLuma = (darkDisplay !== sourceDark) ? 255 - sourceLuma : sourceLuma
+  return {r: outputLuma, g: outputLuma, b: outputLuma}
+}
+
 export function detectWords(
   ink: Uint8Array,
   width: number,
   column: {start: number, end: number},
   line: {start: number, end: number},
   wordGapOption: number = 3,
+  height: number = 0,
 ): WordBlock[] {
   const lineH = line.end - line.start
-  const colW = column.end - column.start
-  const colInk = new Int32Array(colW)
+  const effectiveHeight = height > 0 ? height : Math.max(line.end + 10, 10000)
 
-  for (let x = 0; x < colW; x++) {
-    const gx = column.start + x
-    let count = 0
+  const lineBounds = tightHorizontalLineBounds(width, effectiveHeight, ink, column, line)
+  if (!lineBounds) return []
+
+  const wordBands = detectBands(column.start, column.end, (x: number) => {
     for (let y = line.start; y < line.end; y++) {
-      if (ink[y * width + gx] === 1) count++
+      if (ink[y * width + x] !== 0) return true
     }
-    colInk[x] = count
+    return false
+  })
+
+  const mergedBands = mergeCloseBands(wordBands, Math.max(1, wordGapOption))
+  const blocks: WordBlock[] = []
+  for (const band of mergedBands) {
+    const block = horizontalWordBlock(width, ink, band, line, lineBounds)
+    if (block && block.w >= 2 && block.h >= 2) {
+      blocks.push(block)
+    }
   }
 
-  const rawBlocks: WordBlock[] = []
-  let inWord = false
-  let wordStart = 0
-
-  for (let x = 0; x < colW; x++) {
-    if (colInk[x] > 0) {
-      if (!inWord) {
-        inWord = true
-        wordStart = x
-      }
-    } else {
-      if (inWord) {
-        inWord = false
-        const bx = column.start + wordStart
-        const bw = x - wordStart
-        if (bw >= 1) {
-          let top = line.end
-          let bottom = line.start
-          for (let y = line.start; y < line.end; y++) {
-            for (let px = bx; px < bx + bw; px++) {
-              if (ink[y * width + px] === 1) {
-                if (y < top) top = y
-                if (y > bottom) bottom = y
-              }
-            }
-          }
-          if (bottom >= top) {
-            rawBlocks.push({x: bx, y: top, w: bw, h: bottom - top + 1})
-          }
-        }
-      }
-    }
-  }
-  if (inWord) {
-    const bx = column.start + wordStart
-    const bw = colW - wordStart
-    if (bw >= 1) {
-      let top = line.end
-      let bottom = line.start
-      for (let y = line.start; y < line.end; y++) {
-        for (let px = bx; px < bx + bw; px++) {
-          if (ink[y * width + px] === 1) {
-            if (y < top) top = y
-            if (y > bottom) bottom = y
-          }
-        }
-      }
-      if (bottom >= top) {
-        rawBlocks.push({x: bx, y: top, w: bw, h: bottom - top + 1})
-      } else {
-        rawBlocks.push({x: bx, y: line.start, w: bw, h: lineH})
-      }
-    }
-  }
+  if (blocks.length <= 1) return blocks
 
   // Merge nearby character fragments into words
-  if (rawBlocks.length <= 1) return rawBlocks
-
   const merged: WordBlock[] = []
-  let cur = rawBlocks[0]
+  let cur = blocks[0]
 
-  for (let i = 1; i < rawBlocks.length; i++) {
-    const next = rawBlocks[i]
+  for (let i = 1; i < blocks.length; i++) {
+    const next = blocks[i]
     if (shouldMergeHorizontalGlyphFragments(cur, next, lineH, wordGapOption)) {
       const minX = Math.min(cur.x, next.x)
       const maxX = Math.max(cur.x + cur.w, next.x + next.w)
@@ -1022,7 +1193,8 @@ export function detectWords(
     }
   }
   merged.push(cur)
-  return merged
+
+  return separateOverlappingHorizontalBlocks(merged)
 }
 
 export function adjustBlockEdges(
@@ -1410,7 +1582,7 @@ export function reflowPageFromPixels(
     let colTextRight = 0
     const linesWords: WordBlock[][] = []
     lines.forEach(line => {
-      const words = detectWords(textInk, workW, col, line, options.wordGap || 3)
+      const words = detectWords(textInk, workW, col, line, options.wordGap || 3, workH)
       linesWords.push(words)
       words.forEach(w => {
         if (w.w >= 2 && w.h >= 2) {
@@ -1420,14 +1592,7 @@ export function reflowPageFromPixels(
       })
     })
     const effectiveColStart = Number.isFinite(colTextLeft) ? colTextLeft : col.start
-    const substantialLineEnds = linesWords
-      .filter(ws => ws.length >= 5)
-      .map(ws => ws[ws.length - 1].x + ws[ws.length - 1].w)
-      .sort((a, b) => a - b)
-    const robustColEnd = substantialLineEnds.length > 0
-      ? substantialLineEnds[Math.floor(substantialLineEnds.length * 0.9)]
-      : colTextRight
-    const effectiveColEnd = Math.min(col.end, Math.max(robustColEnd, effectiveColStart))
+    const effectiveColEnd = colTextRight > effectiveColStart ? colTextRight : col.end
 
     let prevLine: {start: number, end: number} | null = null
     let prevWords: WordBlock[] | null = null
@@ -1469,21 +1634,35 @@ export function reflowPageFromPixels(
 
       if (words.length > 0) {
         const firstWord = words[0]
-        const currentIndent = Math.max(0, firstWord.x - effectiveColStart)
+        const rawIndent = Math.max(0, firstWord.x - effectiveColStart)
         const currentHeight = firstWord.h || (line.end - line.start)
-        const glyphWidth = Math.max(8, currentHeight)
-        const indentThreshold = Math.max(12, currentHeight * 1.4)
+        const glyphWidth = Math.max(8, horizontalCharacterSourceWidth(words) || currentHeight)
+        const indentThreshold = Math.max(8, firstWord.h * 0.3)
+        const maxParagraphIndent = Math.max(firstWord.h * 5.0, (effectiveColEnd - effectiveColStart) * 0.18)
+        const lineIndent = (rawIndent >= indentThreshold && rawIndent <= maxParagraphIndent) ? rawIndent : 0
 
-        const isIndent = prevWords && prevWords.length > 0
-          ? currentIndent > Math.max(0, prevWords[0].x - effectiveColStart) + indentThreshold
-          : (lineIdx === 0 && currentIndent >= indentThreshold)
+        const isIndentParagraph = prevWords && prevWords.length > 0
+          ? rawIndent > Math.max(0, prevWords[0].x - effectiveColStart) + Math.max(12, currentHeight * 1.4)
+          : (lineIdx === 0 && lineIndent > 0)
 
-        let previousEndedEarly = false
+        let previousBlankCue = false
         if (prevWords && prevWords.length > 0) {
-          const prevLastWord = prevWords[prevWords.length - 1]
-          const trailingBlank = effectiveColEnd - (prevLastWord.x + prevLastWord.w)
-          const blankThreshold = Math.max(12, glyphWidth * 2.0)
-          previousEndedEarly = trailingBlank >= blankThreshold
+          const prevBlocks = prevWords.filter(w => w.w >= 2 && w.h >= 2)
+          if (prevBlocks.length > 0) {
+            const blankThreshold = Math.max(12, glyphWidth * 2.0)
+            const prevLast = prevBlocks[prevBlocks.length - 1]
+            const trailingBlank = effectiveColEnd - (prevLast.x + prevLast.w)
+            if (trailingBlank >= blankThreshold) {
+              previousBlankCue = true
+            } else {
+              for (let i = 0; i < prevBlocks.length - 1; i++) {
+                if (prevBlocks[i + 1].x - (prevBlocks[i].x + prevBlocks[i].w) >= blankThreshold) {
+                  previousBlankCue = true
+                  break
+                }
+              }
+            }
+          }
         }
 
         let hasParagraphGap = false
@@ -1492,13 +1671,12 @@ export function reflowPageFromPixels(
           hasParagraphGap = gap >= currentHeight * 1.8
         }
 
-        isNewParagraph = isIndent || previousEndedEarly || hasParagraphGap
+        isNewParagraph = (prevWords === null) || isIndentParagraph || previousBlankCue || hasParagraphGap
 
         if (isNewParagraph) {
-          const maxParagraphIndent = Math.max(currentHeight * 5, (effectiveColEnd - effectiveColStart) * 0.18)
-          if (currentIndent >= Math.max(8, currentHeight * 0.3) && currentIndent <= maxParagraphIndent) {
-            indentWidth = currentIndent
-          } else if (previousEndedEarly || hasParagraphGap) {
+          if (lineIndent > 0) {
+            indentWidth = lineIndent
+          } else if (previousBlankCue || hasParagraphGap) {
             indentWidth = Math.round(glyphWidth * 2)
           } else {
             indentWidth = 0
@@ -1579,12 +1757,23 @@ export function reflowPageFromPixels(
           return
         }
 
+        const bgVal = options.darkDisplay ? 0 : 255
         const sliceData = new Uint8ClampedArray(sliceW * sliceH * 4)
+        for (let i = 0; i < sliceW * sliceH; i++) {
+          const pIdx = i * 4
+          sliceData[pIdx] = bgVal
+          sliceData[pIdx + 1] = bgVal
+          sliceData[pIdx + 2] = bgVal
+          sliceData[pIdx + 3] = 255
+        }
 
         for (let y = 0; y < adjusted.h; y++) {
+          const targetY = offsetY + y
+          if (targetY < 0 || targetY >= sliceH) continue
           const sy = adjusted.y + y
+          if (sy < 0 || sy >= workH) continue
           const srcIdx = (sy * workW + adjusted.x) * 4
-          const dstIdx = (offsetY + y) * sliceW * 4
+          const dstIdx = targetY * sliceW * 4
           for (let b = 0; b < sliceW * 4; b++) {
             sliceData[dstIdx + b] = workPixels[srcIdx + b]
           }
@@ -1599,61 +1788,49 @@ export function reflowPageFromPixels(
           (options.optimizeBackground && options.optimizeBackground !== 'none')
 
         if (normalizeColors) {
-          const bgVal = options.darkDisplay ? 0 : 255
-          const fgVal = options.darkDisplay ? 255 : 0
           const inkThresh = adaptiveInkThreshold(threshold, pageBgLuma)
-          const baseMinDelta = 8
-          const maxDelta = sourceDark ? 255 - pageBgLuma : pageBgLuma
+          const fgVal = options.darkDisplay ? 255 : 0
 
-          for (let i = 0; i < sliceW * sliceH; i++) {
-            const pIdx = i * 4
-            const luma = pixelLuma(sliceData[pIdx], sliceData[pIdx + 1], sliceData[pIdx + 2])
-            if (options.matchBackgroundMode === 'monochrome') {
-              const isWordInk = sourceDark ? luma > inkThresh : luma < inkThresh
-              const val = isWordInk ? fgVal : bgVal
-              sliceData[pIdx] = val
-              sliceData[pIdx + 1] = val
-              sliceData[pIdx + 2] = val
-            } else if (options.contrastEnhancement) {
-              const delta = sourceDark ? luma - pageBgLuma : pageBgLuma - luma
-              if (delta <= baseMinDelta) {
-                sliceData[pIdx] = bgVal
-                sliceData[pIdx + 1] = bgVal
-                sliceData[pIdx + 2] = bgVal
-              } else {
-                const foreground = calculateEnhancedForeground(delta, maxDelta, baseMinDelta)
-                const output = options.darkDisplay
-                  ? Math.round(255 * foreground)
-                  : Math.round(255 * (1 - foreground))
-                sliceData[pIdx] = output
-                sliceData[pIdx + 1] = output
-                sliceData[pIdx + 2] = output
-              }
-            } else if (options.darkDisplay) {
-              const isWordInk = sourceDark ? luma > inkThresh : luma < inkThresh
-              if (isWordInk) {
-                const val = sourceDark ? luma : 255 - luma
+          for (let y = 0; y < adjusted.h; y++) {
+            const targetY = offsetY + y
+            if (targetY < 0 || targetY >= sliceH) continue
+            for (let x = 0; x < adjusted.w; x++) {
+              const pIdx = (targetY * sliceW + x) * 4
+              const r = sliceData[pIdx]
+              const g = sliceData[pIdx + 1]
+              const b = sliceData[pIdx + 2]
+              const luma = pixelLuma(r, g, b)
+
+              if (options.matchBackgroundMode === 'monochrome') {
+                const isWordInk = sourceDark ? luma > inkThresh : luma < inkThresh
+                const val = isWordInk ? fgVal : bgVal
                 sliceData[pIdx] = val
                 sliceData[pIdx + 1] = val
                 sliceData[pIdx + 2] = val
+              } else if (options.contrastEnhancement) {
+                const c = contrastEnhancedTextColor(r, g, b, pageBgLuma, options.darkDisplay)
+                sliceData[pIdx] = c.r
+                sliceData[pIdx + 1] = c.g
+                sliceData[pIdx + 2] = c.b
+              } else if (options.darkDisplay) {
+                const c = grayscaleTextColor(r, g, b, pageBgLuma, options.darkDisplay)
+                sliceData[pIdx] = c.r
+                sliceData[pIdx + 1] = c.g
+                sliceData[pIdx + 2] = c.b
               } else {
-                sliceData[pIdx] = bgVal
-                sliceData[pIdx + 1] = bgVal
-                sliceData[pIdx + 2] = bgVal
-              }
-            } else {
-              const isWordInk = sourceDark ? luma > inkThresh : luma < inkThresh
-              if (isWordInk) {
-                if (sourceDark) {
-                  const val = 255 - luma
-                  sliceData[pIdx] = val
-                  sliceData[pIdx + 1] = val
-                  sliceData[pIdx + 2] = val
+                const isWordInk = sourceDark ? luma > inkThresh : luma < inkThresh
+                if (isWordInk) {
+                  if (sourceDark) {
+                    const val = 255 - luma
+                    sliceData[pIdx] = val
+                    sliceData[pIdx + 1] = val
+                    sliceData[pIdx + 2] = val
+                  }
+                } else {
+                  sliceData[pIdx] = bgVal
+                  sliceData[pIdx + 1] = bgVal
+                  sliceData[pIdx + 2] = bgVal
                 }
-              } else {
-                sliceData[pIdx] = bgVal
-                sliceData[pIdx + 1] = bgVal
-                sliceData[pIdx + 2] = bgVal
               }
             }
           }
@@ -1671,7 +1848,7 @@ export function reflowPageFromPixels(
           threshold,
           options.darkDisplay,
           0,
-          0,
+          offsetY,
         )
 
         const dataUrl = rgbaToBmpDataUrl(sliceData, sliceW, sliceH, sliceW, 0, 0)
@@ -1679,7 +1856,7 @@ export function reflowPageFromPixels(
           type: 'word',
           src: dataUrl,
           x: adjusted.x,
-          y: adjusted.y,
+          y: outputTop,
           w: sliceW,
           h: sliceH,
           height: sliceH * textScale,
