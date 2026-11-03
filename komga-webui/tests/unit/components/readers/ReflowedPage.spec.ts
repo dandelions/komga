@@ -903,102 +903,93 @@ describe('ReflowedPage display columns layout', () => {
   })
 })
 
-describe('ReflowedPage crop region ratio presets', () => {
-  test('calculateCropRoiForRatio calculates centered and column-aligned boxes', () => {
-    const pageInstance = {
-      cropDisplayImageSize: {w: 1000, h: 2000},
-      cropRegionCount: 1,
-      activeCropRegion: 0,
-      calculateCropRoiForRatio: methods.calculateCropRoiForRatio,
-    }
+describe('ReflowedPage crop zoom levels', () => {
+  test('cropZoomLevels and cropZoomPercentOptions include levels below 100%', () => {
+    const levels = computed.cropZoomLevels.call({})
+    const percentOptions = computed.cropZoomPercentOptions.call({})
 
-    // 100% full page
-    const full = pageInstance.calculateCropRoiForRatio('100')
-    expect(full).toEqual({x: 0, y: 0, w: 1000, h: 2000})
+    expect(levels).toContain(0.5)
+    expect(levels).toContain(0.8)
+    expect(levels).toContain(1.0)
+    expect(levels).toContain(2.0)
 
-    // 80% centered
-    const ratio80 = pageInstance.calculateCropRoiForRatio('80')
-    expect(ratio80).toEqual({x: 100, y: 200, w: 800, h: 1600})
-
-    // 50% centered
-    const ratio50 = pageInstance.calculateCropRoiForRatio('50')
-    expect(ratio50).toEqual({x: 250, y: 500, w: 500, h: 1000})
-
-    // 50% left half
-    const leftHalf = pageInstance.calculateCropRoiForRatio('50-left')
-    expect(leftHalf).toEqual({x: 0, y: 0, w: 500, h: 2000})
-
-    // 50% right half
-    const rightHalf = pageInstance.calculateCropRoiForRatio('50-right')
-    expect(rightHalf).toEqual({x: 500, y: 0, w: 500, h: 2000})
-
-    // Two-region mode: region 0 and region 1
-    pageInstance.cropRegionCount = 2
-    const col0 = pageInstance.calculateCropRoiForRatio('80', 0)
-    expect(col0).toEqual({x: 50, y: 200, w: 400, h: 1600})
-
-    const col1 = pageInstance.calculateCropRoiForRatio('80', 1)
-    expect(col1).toEqual({x: 550, y: 200, w: 400, h: 1600})
+    expect(percentOptions).toContain(50)
+    expect(percentOptions).toContain(80)
+    expect(percentOptions).toContain(100)
+    expect(percentOptions).toContain(200)
   })
 
-  test('matchingCropRegionRatio identifies matched ratio and returns custom otherwise', () => {
+  test('adjustCropZoom steps up and down through predefined zoom levels', () => {
     const pageInstance: any = {
-      cropDisplayImageSize: {w: 1000, h: 2000},
-      cropRegionCount: 1,
-      activeCropRegion: 0,
-      cropRegionRatioOptions: computed.cropRegionRatioOptions.call({cropRegionCount: 1}),
-      calculateCropRoiForRatio: methods.calculateCropRoiForRatio,
+      cropZoom: 1.0,
+      cropZoomLevels: computed.cropZoomLevels.call({}),
+      clampNumber: methods.clampNumber,
+      $refs: {},
+      $nextTick: (fn: Function) => fn(),
+      setCropZoom: methods.setCropZoom,
+      adjustCropZoom: methods.adjustCropZoom,
     }
-    Object.defineProperty(pageInstance, 'matchingCropRegionRatio', {
-      get: () => computed.matchingCropRegionRatio.call(pageInstance),
-      configurable: true,
-    })
 
-    // 80% match
-    pageInstance.activeRoi = {x: 100, y: 200, w: 800, h: 1600}
-    expect(computed.matchingCropRegionRatio.call(pageInstance)).toBe('80')
-    expect(computed.currentCropRegionRatioValue.call(pageInstance)).toBe('80')
-    expect(computed.isCustomCropRegionRatio.call(pageInstance)).toBe(false)
+    // From 100% (1.0), step down: 90% -> 80% -> 70% -> 60% -> 50%
+    pageInstance.adjustCropZoom(-1)
+    expect(pageInstance.cropZoom).toBe(0.9)
 
-    // Custom ROI
-    pageInstance.activeRoi = {x: 120, y: 240, w: 750, h: 1500}
-    expect(computed.matchingCropRegionRatio.call(pageInstance)).toBeUndefined()
-    expect(computed.currentCropRegionRatioValue.call(pageInstance)).toBe('custom')
-    expect(computed.isCustomCropRegionRatio.call(pageInstance)).toBe(true)
+    pageInstance.adjustCropZoom(-1)
+    expect(pageInstance.cropZoom).toBe(0.8)
 
-    // Undefined ROI
-    pageInstance.activeRoi = undefined
-    expect(computed.matchingCropRegionRatio.call(pageInstance)).toBeUndefined()
-    expect(computed.currentCropRegionRatioValue.call(pageInstance)).toBe('custom')
-    expect(computed.isCustomCropRegionRatio.call(pageInstance)).toBe(true)
+    pageInstance.adjustCropZoom(-1)
+    expect(pageInstance.cropZoom).toBe(0.7)
+
+    pageInstance.adjustCropZoom(-1)
+    expect(pageInstance.cropZoom).toBe(0.6)
+
+    pageInstance.adjustCropZoom(-1)
+    expect(pageInstance.cropZoom).toBe(0.5)
+
+    // Cannot step below 50% (0.5)
+    pageInstance.adjustCropZoom(-1)
+    expect(pageInstance.cropZoom).toBe(0.5)
+
+    // Step up: 60% -> 70% -> 80% -> 90% -> 100% -> 150% -> 200%
+    pageInstance.adjustCropZoom(1)
+    expect(pageInstance.cropZoom).toBe(0.6)
+
+    pageInstance.adjustCropZoom(1)
+    expect(pageInstance.cropZoom).toBe(0.7)
+
+    pageInstance.adjustCropZoom(1)
+    expect(pageInstance.cropZoom).toBe(0.8)
+
+    pageInstance.adjustCropZoom(1)
+    expect(pageInstance.cropZoom).toBe(0.9)
+
+    pageInstance.adjustCropZoom(1)
+    expect(pageInstance.cropZoom).toBe(1.0)
+
+    pageInstance.adjustCropZoom(1)
+    expect(pageInstance.cropZoom).toBe(1.5)
+
+    pageInstance.adjustCropZoom(1)
+    expect(pageInstance.cropZoom).toBe(2.0)
   })
 
-  test('setCropRegionRatio applies ratio and persists draft', () => {
-    let persisted = false
+  test('setCropZoom clamps value between 0.5 and 4.0', () => {
     const pageInstance: any = {
-      selectionPageParity: 'odd',
-      explicitCropRoisByParity: {odd: [false], even: [false]},
-      cropDisplayImageSize: {w: 1000, h: 2000},
-      cropRegionCount: 1,
-      activeCropRegion: 0,
-      cropTarget: 'image',
-      draftRoi: undefined,
-      cropWarning: '',
-      cropRegionRatioOptions: computed.cropRegionRatioOptions.call({cropRegionCount: 1}),
-      clearCropAdjustment: jest.fn(),
-      calculateCropRoiForRatio: methods.calculateCropRoiForRatio,
-      persistCurrentCropDraft: () => {
-        persisted = true
-      },
-      setCropRegionRatio: methods.setCropRegionRatio,
+      cropZoom: 1.0,
+      clampNumber: methods.clampNumber,
+      $refs: {},
+      $nextTick: (fn: Function) => fn(),
+      setCropZoom: methods.setCropZoom,
     }
 
-    pageInstance.setCropRegionRatio('80')
-    expect(pageInstance.cropTarget).toBe('text')
-    expect(pageInstance.draftRoi).toEqual({x: 100, y: 200, w: 800, h: 1600})
-    expect(pageInstance.clearCropAdjustment).toHaveBeenCalledTimes(1)
-    expect(persisted).toBe(true)
-    expect(pageInstance.cropWarning).toContain('80%')
+    pageInstance.setCropZoom(0.3)
+    expect(pageInstance.cropZoom).toBe(0.5)
+
+    pageInstance.setCropZoom(5.0)
+    expect(pageInstance.cropZoom).toBe(4.0)
+
+    pageInstance.setCropZoom(0.8)
+    expect(pageInstance.cropZoom).toBe(0.8)
   })
 })
 

@@ -343,13 +343,6 @@
                 <option v-for="region in cropRegionIndexes" :key="`crop-text-${region}`" :value="region">区域 {{ region + 1 }}</option>
               </select>
             </label>
-            <label class="crop-region-ratio-control">
-              <span>区域比例</span>
-              <select :value="currentCropRegionRatioValue" aria-label="区域比例" @change="setCropRegionRatioFromEvent">
-                <option v-if="isCustomCropRegionRatio" value="custom">自定义</option>
-                <option v-for="option in cropRegionRatioOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-              </select>
-            </label>
           </div>
           <div class="crop-region-group crop-image-region-group">
             <label class="crop-region-count-control">
@@ -398,19 +391,26 @@
           <button
             type="button"
             class="reflow-control crop-zoom-button"
-            :disabled="cropZoom <= 1"
+            :disabled="cropZoom <= 0.5"
             aria-label="缩小截取页面"
-            @click="adjustCropZoom(-0.5)"
+            @click="adjustCropZoom(-1)"
           >
             <v-icon small>mdi-minus</v-icon>
           </button>
-          <span class="crop-zoom-label">{{ cropZoomPercent }}%</span>
+          <select
+            class="crop-zoom-select"
+            :value="cropZoomPercent"
+            aria-label="截取缩放比例"
+            @change="setCropZoomFromEvent"
+          >
+            <option v-for="level in cropZoomPercentOptions" :key="level" :value="level">{{ level }}%</option>
+          </select>
           <button
             type="button"
             class="reflow-control crop-zoom-button"
             :disabled="cropZoom >= 4"
             aria-label="放大截取页面"
-            @click="adjustCropZoom(0.5)"
+            @click="adjustCropZoom(1)"
           >
             <v-icon small>mdi-plus</v-icon>
           </button>
@@ -1451,48 +1451,11 @@ export default Vue.extend({
     manualImageRegionIndexes(): CropRegionIndex[] {
       return Array.from({length: this.manualImageRegionCount}, (_, index) => index)
     },
-    cropRegionRatioOptions(): Array<{value: string, label: string}> {
-      const options = [
-        {value: '100', label: '100% (全页)'},
-        {value: '95', label: '95%'},
-        {value: '90', label: '90%'},
-        {value: '85', label: '85%'},
-        {value: '80', label: '80%'},
-        {value: '75', label: '75%'},
-        {value: '70', label: '70%'},
-        {value: '60', label: '60%'},
-        {value: '50', label: '50%'},
-      ]
-      if (this.cropRegionCount === 1) {
-        options.push(
-          {value: '50-left', label: '50% (左半)'},
-          {value: '50-right', label: '50% (右半)'},
-        )
-      }
-      return options
+    cropZoomLevels(): number[] {
+      return [0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0]
     },
-    matchingCropRegionRatio(): string | undefined {
-      const roi = this.activeRoi
-      if (!roi || !this.cropDisplayImageSize.w || !this.cropDisplayImageSize.h) return undefined
-      for (const option of this.cropRegionRatioOptions) {
-        const expected = this.calculateCropRoiForRatio(option.value, this.activeCropRegion)
-        if (
-          expected &&
-          Math.abs(roi.x - expected.x) <= 2 &&
-          Math.abs(roi.y - expected.y) <= 2 &&
-          Math.abs(roi.w - expected.w) <= 2 &&
-          Math.abs(roi.h - expected.h) <= 2
-        ) {
-          return option.value
-        }
-      }
-      return undefined
-    },
-    currentCropRegionRatioValue(): string {
-      return this.matchingCropRegionRatio || 'custom'
-    },
-    isCustomCropRegionRatio(): boolean {
-      return !this.matchingCropRegionRatio
+    cropZoomPercentOptions(): number[] {
+      return [50, 60, 70, 80, 90, 100, 150, 200, 250, 300, 350, 400]
     },
     selectAreaLabel(): string {
       return this.cropMode ? '完成' : '截取区域'
@@ -7835,72 +7798,6 @@ export default Vue.extend({
       this.clearCropAdjustment()
       this.cropWarning = ''
     },
-    setCropRegionRatioFromEvent(event: Event) {
-      const target = event.target as HTMLSelectElement
-      this.setCropRegionRatio(target.value)
-    },
-    setCropRegionRatio(value: string) {
-      if (value === 'custom') return
-      this.cropTarget = 'text'
-      const imageSize = this.cropDisplayImageSize
-      if (!imageSize.w || !imageSize.h) return
-      const roi = this.calculateCropRoiForRatio(value, this.activeCropRegion)
-      if (!roi) return
-      this.clearCropAdjustment()
-      this.draftRoi = roi
-      this.persistCurrentCropDraft()
-      const option = this.cropRegionRatioOptions.find(opt => opt.value === value)
-      const label = option ? option.label : `${value}%`
-      const otherParity: PageParity = (this.selectionPageParity || 'odd') === 'odd' ? 'even' : 'odd'
-      const isFirst = !this.explicitCropRoisByParity?.[otherParity]?.[this.activeCropRegion]
-      this.cropWarning = isFirst
-        ? `区域 ${this.activeCropRegion + 1} 选区已设为 ${label}，默认应用至奇偶页（翻到下一页可单独截取）`
-        : `区域 ${this.activeCropRegion + 1} 选区已设为 ${label}（${this.pageParityShortLabel}页独立区域）`
-    },
-    calculateCropRoiForRatio(value: string, regionIndex: CropRegionIndex = this.activeCropRegion): Roi | undefined {
-      const imageSize = this.cropDisplayImageSize
-      const width = imageSize.w || 0
-      const height = imageSize.h || 0
-      if (width <= 0 || height <= 0) return undefined
-
-      if (value === '50-left') {
-        const targetW = Math.round(width * 0.5)
-        return {
-          x: 0,
-          y: 0,
-          w: targetW,
-          h: height,
-        }
-      }
-      if (value === '50-right') {
-        const targetW = Math.round(width * 0.5)
-        return {
-          x: width - targetW,
-          y: 0,
-          w: targetW,
-          h: height,
-        }
-      }
-
-      const ratio = Number(value) / 100
-      if (!Number.isFinite(ratio) || ratio <= 0 || ratio > 1) return undefined
-
-      const count = Math.max(1, this.cropRegionCount)
-      const columnWidth = width / count
-      const columnLeft = regionIndex * columnWidth
-
-      const targetW = Math.max(MIN_CROP_SIZE, Math.round(columnWidth * ratio))
-      const targetH = Math.max(MIN_CROP_SIZE, Math.round(height * ratio))
-      const x = Math.round(columnLeft + (columnWidth - targetW) / 2)
-      const y = Math.round((height - targetH) / 2)
-
-      return {
-        x: Math.max(0, Math.min(width - targetW, x)),
-        y: Math.max(0, Math.min(height - targetH, y)),
-        w: targetW,
-        h: targetH,
-      }
-    },
     setManualImageRegionCount(event: Event) {
       const target = event.target as HTMLSelectElement
       const count = this.normalizedCropRegionCount(target.value)
@@ -8235,8 +8132,28 @@ export default Vue.extend({
     initialCropZoom(): number {
       return 1
     },
-    adjustCropZoom(delta: number) {
-      this.setCropZoom(this.cropZoom + delta)
+    adjustCropZoom(direction: number) {
+      const levels = this.cropZoomLevels
+      let closestIndex = 0
+      let minDiff = Infinity
+      for (let i = 0; i < levels.length; i++) {
+        const diff = Math.abs(levels[i] - this.cropZoom)
+        if (diff < minDiff) {
+          minDiff = diff
+          closestIndex = i
+        }
+      }
+      const targetIndex = direction > 0
+        ? Math.min(levels.length - 1, closestIndex + 1)
+        : Math.max(0, closestIndex - 1)
+      this.setCropZoom(levels[targetIndex])
+    },
+    setCropZoomFromEvent(event: Event) {
+      const target = event.target as HTMLSelectElement
+      const percent = Number(target.value)
+      if (Number.isFinite(percent) && percent >= 50 && percent <= 400) {
+        this.setCropZoom(percent / 100)
+      }
     },
     setCropZoom(value: number) {
       const viewport = this.$refs.cropViewport as HTMLElement | undefined
@@ -8246,7 +8163,7 @@ export default Vue.extend({
       const centerY = viewport && viewport.scrollHeight > 0
         ? (viewport.scrollTop + viewport.clientHeight / 2) / viewport.scrollHeight
         : 0.5
-      this.cropZoom = this.clampNumber(value, 1, 4, 1)
+      this.cropZoom = this.clampNumber(value, 0.5, 4, 1)
       this.$nextTick(() => {
         const nextViewport = this.$refs.cropViewport as HTMLElement | undefined
         if (!nextViewport) return
@@ -9125,14 +9042,38 @@ export default Vue.extend({
   font-variant-numeric: tabular-nums;
 }
 
+.crop-zoom-select {
+  height: 30px;
+  padding: 0 4px;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  min-width: 60px;
+}
+
+.reflowed-page-dark .crop-zoom-select {
+  border-color: rgba(255, 255, 255, 0.28);
+  background: #1e1e1e;
+  color: #eeeeee;
+}
+
+.reflowed-page-dark .crop-zoom-select option {
+  background: #212121;
+  color: #eeeeee;
+}
+
 .crop-toolbar-label {
   font-size: 13px;
   font-weight: 700;
 }
 
 .crop-region-count-control,
-.crop-region-target-control,
-.crop-region-ratio-control {
+.crop-region-target-control {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -9142,8 +9083,7 @@ export default Vue.extend({
 }
 
 .crop-region-count-control select,
-.crop-region-target-control select,
-.crop-region-ratio-control select {
+.crop-region-target-control select {
   flex: 0 0 auto;
   min-width: 48px;
   height: 28px;
@@ -9162,27 +9102,21 @@ export default Vue.extend({
 
 .crop-region-group {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, max-content));
-  flex: 1 1 360px;
+  grid-template-columns: repeat(2, minmax(0, max-content));
+  flex: 1 1 320px;
   align-items: center;
   justify-content: center;
-  gap: 5px 8px;
+  gap: 5px 10px;
   min-width: min(280px, 100%);
 
   .crop-region-count-control,
-  .crop-region-target-control,
-  .crop-region-ratio-control {
+  .crop-region-target-control {
     justify-self: center;
   }
 }
 
 .crop-region-target-control select {
-  min-width: 90px;
-  height: 32px;
-}
-
-.crop-region-ratio-control select {
-  min-width: 84px;
+  min-width: 120px;
   height: 32px;
 }
 
@@ -9253,7 +9187,7 @@ export default Vue.extend({
 .crop-stage {
   position: relative;
   display: block;
-  min-width: 100%;
+  margin: 0 auto;
   max-width: none;
   cursor: crosshair;
   touch-action: none;

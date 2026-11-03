@@ -495,11 +495,11 @@
         <v-btn small color="primary" :disabled="!readerCropCanComplete" @click="completeReaderCropMode">完成</v-btn>
         <span>拖拽选择{{ readerCropPageParityLabel }}区域 {{ readerActiveCropRegion + 1 }}</span>
         <div class="reader-crop-zoom-controls">
-          <v-btn icon small dark :disabled="readerCropZoom <= 1" @click="adjustReaderCropZoom(-0.5)">
+          <v-btn icon small dark :disabled="readerCropZoom <= 0.5" @click="adjustReaderCropZoom(-1)">
             <v-icon small>mdi-minus</v-icon>
           </v-btn>
           <span>{{ readerCropZoomPercent }}%</span>
-          <v-btn icon small dark :disabled="readerCropZoom >= 4" @click="adjustReaderCropZoom(0.5)">
+          <v-btn icon small dark :disabled="readerCropZoom >= 4" @click="adjustReaderCropZoom(1)">
             <v-icon small>mdi-plus</v-icon>
           </v-btn>
           <v-btn small :color="!readerCropPanMode ? 'primary' : undefined" @click="setReaderCropPanMode(false)">框选</v-btn>
@@ -2393,14 +2393,30 @@ export default Vue.extend({
       this.readerCropDraft = this.readerCropPreviousDraft ? {...this.readerCropPreviousDraft} : undefined
       this.readerCropPreviousDraft = undefined
     },
-    adjustReaderCropZoom(delta: number) {
-      this.setReaderCropZoom(this.readerCropZoom + delta)
+    readerCropZoomLevels(): number[] {
+      return [0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0]
+    },
+    adjustReaderCropZoom(direction: number) {
+      const levels = this.readerCropZoomLevels()
+      let closestIndex = 0
+      let minDiff = Infinity
+      for (let i = 0; i < levels.length; i++) {
+        const diff = Math.abs(levels[i] - this.readerCropZoom)
+        if (diff < minDiff) {
+          minDiff = diff
+          closestIndex = i
+        }
+      }
+      const targetIndex = direction > 0
+        ? Math.min(levels.length - 1, closestIndex + 1)
+        : Math.max(0, closestIndex - 1)
+      this.setReaderCropZoom(levels[targetIndex])
     },
     setReaderCropZoom(value: number) {
       const viewport = this.$refs.readerCropViewport as HTMLElement | undefined
       const centerX = viewport && viewport.scrollWidth > 0 ? (viewport.scrollLeft + viewport.clientWidth / 2) / viewport.scrollWidth : 0.5
       const centerY = viewport && viewport.scrollHeight > 0 ? (viewport.scrollTop + viewport.clientHeight / 2) / viewport.scrollHeight : 0.5
-      this.readerCropZoom = Math.max(1, Math.min(4, value))
+      this.readerCropZoom = Math.max(0.5, Math.min(4, value))
       this.$nextTick(() => {
         const nextViewport = this.$refs.readerCropViewport as HTMLElement | undefined
         if (!nextViewport) return
@@ -4235,7 +4251,7 @@ export default Vue.extend({
 .reader-crop-stage {
   position: relative;
   display: block;
-  min-width: 100%;
+  margin: 0 auto;
   max-width: none;
   cursor: crosshair;
   touch-action: none;
