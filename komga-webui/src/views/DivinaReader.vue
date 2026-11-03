@@ -11,7 +11,7 @@
         <!-- Top Toolbar-->
         <v-toolbar
           dense elevation="1"
-          v-if="showToolbars"
+          v-if="showToolbars && !reflowCropMode && !readerCropMode"
           class="settings full-width"
           style="position: fixed; top: 0; z-index: 10"
         >
@@ -198,7 +198,7 @@
           class="settings full-width"
           style="position: fixed; bottom: 0; z-index: 10"
           horizontal
-          v-if="showToolbars"
+          v-if="showToolbars && !reflowCropMode && !readerCropMode"
         >
           <v-row justify="center">
             <!--  Menu: page slider  -->
@@ -1776,13 +1776,13 @@ export default Vue.extend({
       return this.reflowSettings
     },
     reflowControlsTopOffset(): number {
-      return this.showToolbars ? 48 : 0
+      return this.showToolbars && !this.reflowCropMode && !this.readerCropMode ? 48 : 0
     },
     reflowClickLayerStyle(): object {
       if (this.landscapeDisplay) {
         return {}
       }
-      const toolbarOffset = this.showToolbars ? '48px' : '0'
+      const toolbarOffset = this.showToolbars && !this.reflowCropMode && !this.readerCropMode ? '48px' : '0'
       return {
         top: toolbarOffset,
         bottom: toolbarOffset,
@@ -2305,6 +2305,7 @@ export default Vue.extend({
     async startReaderCropMode() {
       if (!this.currentPage?.url) return
       this.showSettings = false
+      this.showToolbars = false
       await this.prepareReaderCropImage()
       this.readerCropMode = true
       this.readerCropDrawing = false
@@ -2968,6 +2969,7 @@ export default Vue.extend({
       this.sendNotification(`${this.$t('bookreader.cycling_page_layout')}: ${text}`)
     },
     toggleToolbars() {
+      if (this.reflowCropMode || this.readerCropMode) return
       this.showToolbars = !this.showToolbars
     },
     toggleExplorer() {
@@ -3526,7 +3528,10 @@ export default Vue.extend({
     },
     setReflowCropMode(cropMode: boolean) {
       this.reflowCropMode = cropMode
-      if (cropMode) this.clearReflowPrefetch()
+      if (cropMode) {
+        this.showToolbars = false
+        this.clearReflowPrefetch()
+      }
     },
     setReflowCropRois(cropRoisByParity: Record<string, any>) {
       const normalized = this.normalizedReflowCropRois(cropRoisByParity)

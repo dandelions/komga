@@ -903,3 +903,100 @@ describe('ReflowedPage display columns layout', () => {
   })
 })
 
+describe('ReflowedPage crop region ratio presets', () => {
+  test('calculateCropRoiForRatio calculates centered and column-aligned boxes', () => {
+    const pageInstance = {
+      cropDisplayImageSize: {w: 1000, h: 2000},
+      cropRegionCount: 1,
+      activeCropRegion: 0,
+      calculateCropRoiForRatio: methods.calculateCropRoiForRatio,
+    }
+
+    // 100% full page
+    const full = pageInstance.calculateCropRoiForRatio('100')
+    expect(full).toEqual({x: 0, y: 0, w: 1000, h: 2000})
+
+    // 80% centered
+    const ratio80 = pageInstance.calculateCropRoiForRatio('80')
+    expect(ratio80).toEqual({x: 100, y: 200, w: 800, h: 1600})
+
+    // 50% centered
+    const ratio50 = pageInstance.calculateCropRoiForRatio('50')
+    expect(ratio50).toEqual({x: 250, y: 500, w: 500, h: 1000})
+
+    // 50% left half
+    const leftHalf = pageInstance.calculateCropRoiForRatio('50-left')
+    expect(leftHalf).toEqual({x: 0, y: 0, w: 500, h: 2000})
+
+    // 50% right half
+    const rightHalf = pageInstance.calculateCropRoiForRatio('50-right')
+    expect(rightHalf).toEqual({x: 500, y: 0, w: 500, h: 2000})
+
+    // Two-region mode: region 0 and region 1
+    pageInstance.cropRegionCount = 2
+    const col0 = pageInstance.calculateCropRoiForRatio('80', 0)
+    expect(col0).toEqual({x: 50, y: 200, w: 400, h: 1600})
+
+    const col1 = pageInstance.calculateCropRoiForRatio('80', 1)
+    expect(col1).toEqual({x: 550, y: 200, w: 400, h: 1600})
+  })
+
+  test('matchingCropRegionRatio identifies matched ratio and returns custom otherwise', () => {
+    const pageInstance: any = {
+      cropDisplayImageSize: {w: 1000, h: 2000},
+      cropRegionCount: 1,
+      activeCropRegion: 0,
+      cropRegionRatioOptions: computed.cropRegionRatioOptions.call({cropRegionCount: 1}),
+      calculateCropRoiForRatio: methods.calculateCropRoiForRatio,
+    }
+    Object.defineProperty(pageInstance, 'matchingCropRegionRatio', {
+      get: () => computed.matchingCropRegionRatio.call(pageInstance),
+      configurable: true,
+    })
+
+    // 80% match
+    pageInstance.activeRoi = {x: 100, y: 200, w: 800, h: 1600}
+    expect(computed.matchingCropRegionRatio.call(pageInstance)).toBe('80')
+    expect(computed.currentCropRegionRatioValue.call(pageInstance)).toBe('80')
+    expect(computed.isCustomCropRegionRatio.call(pageInstance)).toBe(false)
+
+    // Custom ROI
+    pageInstance.activeRoi = {x: 120, y: 240, w: 750, h: 1500}
+    expect(computed.matchingCropRegionRatio.call(pageInstance)).toBeUndefined()
+    expect(computed.currentCropRegionRatioValue.call(pageInstance)).toBe('custom')
+    expect(computed.isCustomCropRegionRatio.call(pageInstance)).toBe(true)
+
+    // Undefined ROI
+    pageInstance.activeRoi = undefined
+    expect(computed.matchingCropRegionRatio.call(pageInstance)).toBeUndefined()
+    expect(computed.currentCropRegionRatioValue.call(pageInstance)).toBe('custom')
+    expect(computed.isCustomCropRegionRatio.call(pageInstance)).toBe(true)
+  })
+
+  test('setCropRegionRatio applies ratio and persists draft', () => {
+    let persisted = false
+    const pageInstance: any = {
+      cropDisplayImageSize: {w: 1000, h: 2000},
+      cropRegionCount: 1,
+      activeCropRegion: 0,
+      cropTarget: 'image',
+      draftRoi: undefined,
+      cropWarning: '',
+      cropRegionRatioOptions: computed.cropRegionRatioOptions.call({cropRegionCount: 1}),
+      clearCropAdjustment: jest.fn(),
+      calculateCropRoiForRatio: methods.calculateCropRoiForRatio,
+      persistCurrentCropDraft: () => {
+        persisted = true
+      },
+      setCropRegionRatio: methods.setCropRegionRatio,
+    }
+
+    pageInstance.setCropRegionRatio('80')
+    expect(pageInstance.cropTarget).toBe('text')
+    expect(pageInstance.draftRoi).toEqual({x: 100, y: 200, w: 800, h: 1600})
+    expect(pageInstance.clearCropAdjustment).toHaveBeenCalledTimes(1)
+    expect(persisted).toBe(true)
+    expect(pageInstance.cropWarning).toContain('80%')
+  })
+})
+

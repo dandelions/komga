@@ -25,6 +25,28 @@ describe('DivinaReader reflow cache changes', () => {
     expect(reader.reflowRootPage).toBe(3)
     expect(reader.scheduleNextReflowPrefetch).not.toHaveBeenCalled()
   })
+
+  test('hides toolbars and avoids top offset when entering reflow crop mode', () => {
+    const reader = {
+      reflowCropMode: false,
+      showToolbars: true,
+      readerCropMode: false,
+      clearReflowPrefetch: jest.fn(),
+    }
+
+    methods.setReflowCropMode.call(reader, true)
+    expect(reader.reflowCropMode).toBe(true)
+    expect(reader.showToolbars).toBe(false)
+    expect(reader.clearReflowPrefetch).toHaveBeenCalledTimes(1)
+
+    // Cannot toggle toolbars while in reflow crop mode
+    methods.toggleToolbars.call(reader)
+    expect(reader.showToolbars).toBe(false)
+
+    // Controls top offset is 0 when in crop mode
+    const offset = computed.reflowControlsTopOffset.call(reader)
+    expect(offset).toBe(0)
+  })
 })
 
 describe('DivinaReader crop adjustment', () => {

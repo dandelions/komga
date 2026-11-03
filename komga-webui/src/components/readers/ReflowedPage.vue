@@ -343,6 +343,13 @@
                 <option v-for="region in cropRegionIndexes" :key="`crop-text-${region}`" :value="region">区域 {{ region + 1 }}</option>
               </select>
             </label>
+            <label class="crop-region-ratio-control">
+              <span>区域比例</span>
+              <select :value="currentCropRegionRatioValue" aria-label="区域比例" @change="setCropRegionRatioFromEvent">
+                <option v-if="isCustomCropRegionRatio" value="custom">自定义</option>
+                <option v-for="option in cropRegionRatioOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+              </select>
+            </label>
           </div>
           <div class="crop-region-group crop-image-region-group">
             <label class="crop-region-count-control">
@@ -1443,6 +1450,49 @@ export default Vue.extend({
     },
     manualImageRegionIndexes(): CropRegionIndex[] {
       return Array.from({length: this.manualImageRegionCount}, (_, index) => index)
+    },
+    cropRegionRatioOptions(): Array<{value: string, label: string}> {
+      const options = [
+        {value: '100', label: '100% (全页)'},
+        {value: '95', label: '95%'},
+        {value: '90', label: '90%'},
+        {value: '85', label: '85%'},
+        {value: '80', label: '80%'},
+        {value: '75', label: '75%'},
+        {value: '70', label: '70%'},
+        {value: '60', label: '60%'},
+        {value: '50', label: '50%'},
+      ]
+      if (this.cropRegionCount === 1) {
+        options.push(
+          {value: '50-left', label: '50% (左半)'},
+          {value: '50-right', label: '50% (右半)'},
+        )
+      }
+      return options
+    },
+    matchingCropRegionRatio(): string | undefined {
+      const roi = this.activeRoi
+      if (!roi || !this.cropDisplayImageSize.w || !this.cropDisplayImageSize.h) return undefined
+      for (const option of this.cropRegionRatioOptions) {
+        const expected = this.calculateCropRoiForRatio(option.value, this.activeCropRegion)
+        if (
+          expected &&
+          Math.abs(roi.x - expected.x) <= 2 &&
+          Math.abs(roi.y - expected.y) <= 2 &&
+          Math.abs(roi.w - expected.w) <= 2 &&
+          Math.abs(roi.h - expected.h) <= 2
+        ) {
+          return option.value
+        }
+      }
+      return undefined
+    },
+    currentCropRegionRatioValue(): string {
+      return this.matchingCropRegionRatio || 'custom'
+    },
+    isCustomCropRegionRatio(): boolean {
+      return !this.matchingCropRegionRatio
     },
     selectAreaLabel(): string {
       return this.cropMode ? '完成' : '截取区域'
@@ -7777,6 +7827,68 @@ export default Vue.extend({
       this.clearCropAdjustment()
       this.cropWarning = ''
     },
+    setCropRegionRatioFromEvent(event: Event) {
+      const target = event.target as HTMLSelectElement
+      this.setCropRegionRatio(target.value)
+    },
+    setCropRegionRatio(value: string) {
+      if (value === 'custom') return
+      this.cropTarget = 'text'
+      const imageSize = this.cropDisplayImageSize
+      if (!imageSize.w || !imageSize.h) return
+      const roi = this.calculateCropRoiForRatio(value, this.activeCropRegion)
+      if (!roi) return
+      this.clearCropAdjustment()
+      this.draftRoi = roi
+      this.persistCurrentCropDraft()
+      const option = this.cropRegionRatioOptions.find(opt => opt.value === value)
+      const label = option ? option.label : `${value}%`
+      this.cropWarning = `区域 ${this.activeCropRegion + 1} 选区已设为 ${label}`
+    },
+    calculateCropRoiForRatio(value: string, regionIndex: CropRegionIndex = this.activeCropRegion): Roi | undefined {
+      const imageSize = this.cropDisplayImageSize
+      const width = imageSize.w || 0
+      const height = imageSize.h || 0
+      if (width <= 0 || height <= 0) return undefined
+
+      if (value === '50-left') {
+        const targetW = Math.round(width * 0.5)
+        return {
+          x: 0,
+          y: 0,
+          w: targetW,
+          h: height,
+        }
+      }
+      if (value === '50-right') {
+        const targetW = Math.round(width * 0.5)
+        return {
+          x: width - targetW,
+          y: 0,
+          w: targetW,
+          h: height,
+        }
+      }
+
+      const ratio = Number(value) / 100
+      if (!Number.isFinite(ratio) || ratio <= 0 || ratio > 1) return undefined
+
+      const count = Math.max(1, this.cropRegionCount)
+      const columnWidth = width / count
+      const columnLeft = regionIndex * columnWidth
+
+      const targetW = Math.max(MIN_CROP_SIZE, Math.round(columnWidth * ratio))
+      const targetH = Math.max(MIN_CROP_SIZE, Math.round(height * ratio))
+      const x = Math.round(columnLeft + (columnWidth - targetW) / 2)
+      const y = Math.round((height - targetH) / 2)
+
+      return {
+        x: Math.max(0, Math.min(width - targetW, x)),
+        y: Math.max(0, Math.min(height - targetH, y)),
+        w: targetW,
+        h: targetH,
+      }
+    },
     setManualImageRegionCount(event: Event) {
       const target = event.target as HTMLSelectElement
       const count = this.normalizedCropRegionCount(target.value)
@@ -8923,6 +9035,7 @@ export default Vue.extend({
   height: 100vh;
   height: 100dvh;
   padding: 8px;
+  padding-top: max(8px, env(safe-area-inset-top));
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -8984,7 +9097,8 @@ export default Vue.extend({
 }
 
 .crop-region-count-control,
-.crop-region-target-control {
+.crop-region-target-control,
+.crop-region-ratio-control {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -8994,7 +9108,8 @@ export default Vue.extend({
 }
 
 .crop-region-count-control select,
-.crop-region-target-control select {
+.crop-region-target-control select,
+.crop-region-ratio-control select {
   flex: 0 0 auto;
   min-width: 48px;
   height: 28px;
@@ -9013,21 +9128,27 @@ export default Vue.extend({
 
 .crop-region-group {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, max-content));
-  flex: 1 1 320px;
+  grid-template-columns: repeat(3, minmax(0, max-content));
+  flex: 1 1 360px;
   align-items: center;
   justify-content: center;
-  gap: 5px 10px;
+  gap: 5px 8px;
   min-width: min(280px, 100%);
 
   .crop-region-count-control,
-  .crop-region-target-control {
+  .crop-region-target-control,
+  .crop-region-ratio-control {
     justify-self: center;
   }
 }
 
 .crop-region-target-control select {
-  min-width: 120px;
+  min-width: 90px;
+  height: 32px;
+}
+
+.crop-region-ratio-control select {
+  min-width: 84px;
   height: 32px;
 }
 
