@@ -976,6 +976,8 @@ describe('ReflowedPage crop region ratio presets', () => {
   test('setCropRegionRatio applies ratio and persists draft', () => {
     let persisted = false
     const pageInstance: any = {
+      selectionPageParity: 'odd',
+      explicitCropRoisByParity: {odd: [false], even: [false]},
       cropDisplayImageSize: {w: 1000, h: 2000},
       cropRegionCount: 1,
       activeCropRegion: 0,
@@ -997,6 +999,118 @@ describe('ReflowedPage crop region ratio presets', () => {
     expect(pageInstance.clearCropAdjustment).toHaveBeenCalledTimes(1)
     expect(persisted).toBe(true)
     expect(pageInstance.cropWarning).toContain('80%')
+  })
+})
+
+describe('ReflowedPage odd/even crop parity inheritance and override', () => {
+  test('first crop on odd page defaults to both odd and even pages', () => {
+    const pageInstance: any = {
+      selectionPageParity: 'odd',
+      activeCropRegion: 0,
+      cropRoisByParity: {
+        odd: [undefined],
+        even: [undefined],
+      },
+      explicitCropRoisByParity: {
+        odd: [false],
+        even: [false],
+      },
+      $set: (target: any, key: string, value: any) => {
+        target[key] = value
+      },
+      setCurrentCropRoi: methods.setCurrentCropRoi,
+      effectiveCropRoi: methods.effectiveCropRoi,
+    }
+
+    const firstCrop = {x: 100, y: 200, w: 800, h: 1600}
+    pageInstance.setCurrentCropRoi(firstCrop)
+
+    // Odd is explicit
+    expect(pageInstance.cropRoisByParity.odd[0]).toEqual(firstCrop)
+    expect(pageInstance.explicitCropRoisByParity.odd[0]).toBe(true)
+
+    // Even gets the crop as default, but is not yet individually explicit
+    expect(pageInstance.cropRoisByParity.even[0]).toEqual(firstCrop)
+    expect(pageInstance.explicitCropRoisByParity.even[0]).toBe(false)
+
+    // Both parities effectively return the first crop
+    expect(pageInstance.effectiveCropRoi('odd', 0)).toEqual(firstCrop)
+    expect(pageInstance.effectiveCropRoi('even', 0)).toEqual(firstCrop)
+  })
+
+  test('subsequent separate crop on even page overrides only even page', () => {
+    const firstCrop = {x: 100, y: 200, w: 800, h: 1600}
+    const pageInstance: any = {
+      selectionPageParity: 'even',
+      activeCropRegion: 0,
+      cropRoisByParity: {
+        odd: [firstCrop],
+        even: [{...firstCrop}],
+      },
+      explicitCropRoisByParity: {
+        odd: [true],
+        even: [false],
+      },
+      $set: (target: any, key: string, value: any) => {
+        target[key] = value
+      },
+      setCurrentCropRoi: methods.setCurrentCropRoi,
+      effectiveCropRoi: methods.effectiveCropRoi,
+    }
+
+    // Now user separately crops even page with new coordinates
+    const evenSeparateCrop = {x: 120, y: 220, w: 760, h: 1560}
+    pageInstance.setCurrentCropRoi(evenSeparateCrop)
+
+    // Even is now explicit with new coordinates
+    expect(pageInstance.cropRoisByParity.even[0]).toEqual(evenSeparateCrop)
+    expect(pageInstance.explicitCropRoisByParity.even[0]).toBe(true)
+    expect(pageInstance.effectiveCropRoi('even', 0)).toEqual(evenSeparateCrop)
+
+    // Odd retains its original coordinates and remains explicit
+    expect(pageInstance.cropRoisByParity.odd[0]).toEqual(firstCrop)
+    expect(pageInstance.explicitCropRoisByParity.odd[0]).toBe(true)
+    expect(pageInstance.effectiveCropRoi('odd', 0)).toEqual(firstCrop)
+  })
+
+  test('K2ReflowedPage also defaults first crop to both parities and allows separate override', () => {
+    const pageInstance: any = {
+      pageParity: 'odd',
+      localCropRoisByParity: {odd: undefined, even: undefined},
+      explicitCropRoisByParity: {odd: false, even: false},
+      $set: (target: any, key: string, value: any) => {
+        target[key] = value
+      },
+      $emit: jest.fn(),
+      cropRoisPayload: k2Methods.cropRoisPayload,
+      setCurrentCropRoi: k2Methods.setCurrentCropRoi,
+      effectiveCropRoi: k2Methods.effectiveCropRoi,
+    }
+
+    const firstCrop = {x: 50, y: 50, w: 400, h: 800}
+    pageInstance.setCurrentCropRoi(firstCrop)
+
+    // Odd explicit, even populated as default
+    expect(pageInstance.localCropRoisByParity.odd).toEqual(firstCrop)
+    expect(pageInstance.explicitCropRoisByParity.odd).toBe(true)
+    expect(pageInstance.localCropRoisByParity.even).toEqual(firstCrop)
+    expect(pageInstance.explicitCropRoisByParity.even).toBe(false)
+    expect(pageInstance.effectiveCropRoi('odd')).toEqual(firstCrop)
+    expect(pageInstance.effectiveCropRoi('even')).toEqual(firstCrop)
+
+    // Separate crop on even
+    pageInstance.pageParity = 'even'
+    const evenCrop = {x: 60, y: 60, w: 380, h: 780}
+    pageInstance.setCurrentCropRoi(evenCrop)
+
+    expect(pageInstance.localCropRoisByParity.even).toEqual(evenCrop)
+    expect(pageInstance.explicitCropRoisByParity.even).toBe(true)
+    expect(pageInstance.effectiveCropRoi('even')).toEqual(evenCrop)
+
+    // Odd still intact
+    expect(pageInstance.localCropRoisByParity.odd).toEqual(firstCrop)
+    expect(pageInstance.explicitCropRoisByParity.odd).toBe(true)
+    expect(pageInstance.effectiveCropRoi('odd')).toEqual(firstCrop)
   })
 })
 

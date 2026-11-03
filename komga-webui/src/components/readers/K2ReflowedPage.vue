@@ -1738,7 +1738,13 @@ export default Vue.extend({
       this.$set(this.explicitCropRoisByParity, 'even', even ? explicit.even !== false : false)
     },
     effectiveCropRoi(parity: PageParity): Roi | undefined {
-      if (!this.explicitCropRoisByParity[parity]) return undefined
+      if (this.explicitCropRoisByParity[parity]) {
+        return this.localCropRoisByParity[parity]
+      }
+      const otherParity: PageParity = parity === 'odd' ? 'even' : 'odd'
+      if (this.explicitCropRoisByParity[otherParity]) {
+        return this.localCropRoisByParity[otherParity]
+      }
       return this.localCropRoisByParity[parity]
     },
     normalizedStoredRoi(value: Roi | null | undefined): Roi | undefined {
@@ -1751,9 +1757,12 @@ export default Vue.extend({
       return {x, y, w, h}
     },
     cropRoisPayload(): Record<PageParity, Roi | null> {
+      const odd = this.localCropRoisByParity.odd || this.effectiveCropRoi('odd')
+      const even = this.localCropRoisByParity.even || this.effectiveCropRoi('even')
+      const hasAny = this.explicitCropRoisByParity.odd || this.explicitCropRoisByParity.even
       return {
-        odd: this.explicitCropRoisByParity.odd && this.localCropRoisByParity.odd ? {...this.localCropRoisByParity.odd} : null,
-        even: this.explicitCropRoisByParity.even && this.localCropRoisByParity.even ? {...this.localCropRoisByParity.even} : null,
+        odd: hasAny && odd ? {...odd} : null,
+        even: hasAny && even ? {...even} : null,
         explicit: {
           odd: this.explicitCropRoisByParity.odd,
           even: this.explicitCropRoisByParity.even,
@@ -2910,8 +2919,15 @@ export default Vue.extend({
       }
     },
     setCurrentCropRoi(roi: Roi | undefined) {
+      const otherParity: PageParity = this.pageParity === 'odd' ? 'even' : 'odd'
       this.$set(this.localCropRoisByParity, this.pageParity, roi)
       this.$set(this.explicitCropRoisByParity, this.pageParity, !!roi)
+
+      if (roi && !this.explicitCropRoisByParity[otherParity]) {
+        this.$set(this.localCropRoisByParity, otherParity, {...roi})
+      } else if (!roi && !this.explicitCropRoisByParity[otherParity]) {
+        this.$set(this.localCropRoisByParity, otherParity, undefined)
+      }
       this.$emit('crop-rois-change', this.cropRoisPayload())
     },
     countInkInRect(ink: Uint8Array, width: number, height: number, xStart: number, xEnd: number, yStart: number, yEnd: number): number {

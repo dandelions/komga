@@ -5252,7 +5252,13 @@ export default Vue.extend({
       return Math.max(1, Math.min(MAX_CROP_REGIONS, Math.round(numberValue)))
     },
     effectiveCropRoi(parity: PageParity, region: CropRegionIndex): Roi | undefined {
-      if (!this.explicitCropRoisByParity[parity]?.[region]) return undefined
+      if (this.explicitCropRoisByParity[parity]?.[region]) {
+        return this.cropRoisByParity[parity]?.[region]
+      }
+      const otherParity: PageParity = parity === 'odd' ? 'even' : 'odd'
+      if (this.explicitCropRoisByParity[otherParity]?.[region]) {
+        return this.cropRoisByParity[otherParity]?.[region]
+      }
       return this.cropRoisByParity[parity]?.[region]
     },
     effectiveCropRois(parity: PageParity): Array<Roi | undefined> {
@@ -5315,8 +5321,10 @@ export default Vue.extend({
     },
     payloadRegions(parity: PageParity): Array<Roi | null> {
       return this.cropRegionIndexes.map(region => {
-        const roi = this.cropRoisByParity[parity][region]
-        return this.explicitCropRoisByParity[parity][region] && roi ? {...roi} : null
+        const roi = this.cropRoisByParity[parity][region] || this.effectiveCropRoi(parity, region)
+        const hasExplicit = this.explicitCropRoisByParity[parity]?.[region] ||
+          this.explicitCropRoisByParity[parity === 'odd' ? 'even' : 'odd']?.[region]
+        return hasExplicit && roi ? {...roi} : null
       })
     },
     manualImageRoisPayload(): Record<string, any> {
@@ -7843,7 +7851,11 @@ export default Vue.extend({
       this.persistCurrentCropDraft()
       const option = this.cropRegionRatioOptions.find(opt => opt.value === value)
       const label = option ? option.label : `${value}%`
-      this.cropWarning = `区域 ${this.activeCropRegion + 1} 选区已设为 ${label}`
+      const otherParity: PageParity = (this.selectionPageParity || 'odd') === 'odd' ? 'even' : 'odd'
+      const isFirst = !this.explicitCropRoisByParity?.[otherParity]?.[this.activeCropRegion]
+      this.cropWarning = isFirst
+        ? `区域 ${this.activeCropRegion + 1} 选区已设为 ${label}，默认应用至奇偶页（翻到下一页可单独截取）`
+        : `区域 ${this.activeCropRegion + 1} 选区已设为 ${label}（${this.pageParityShortLabel}页独立区域）`
     },
     calculateCropRoiForRatio(value: string, regionIndex: CropRegionIndex = this.activeCropRegion): Roi | undefined {
       const imageSize = this.cropDisplayImageSize
@@ -8003,6 +8015,9 @@ export default Vue.extend({
     draftCropMatchesCurrentSelection(): boolean {
       const draft = this.draftRoi
       if (!draft) return true
+      if (this.cropTarget === 'text' && !this.explicitCropRoisByParity[this.selectionPageParity]?.[this.activeCropRegion]) {
+        return false
+      }
       let current: Roi | undefined
       if (this.cropTarget === 'image') current = this.manualImageRoi
       else if (this.cropTarget === 'deskew') current = this.deskewAnalysisRoi
@@ -8134,7 +8149,11 @@ export default Vue.extend({
         if (this.cropAdjustMoved) {
           this.clearCropAdjustment()
           this.persistCurrentCropDraft()
-          this.cropWarning = '选区已保存，可继续调整或点击完成'
+          const otherParity: PageParity = (this.selectionPageParity || 'odd') === 'odd' ? 'even' : 'odd'
+          const isFirst = !this.explicitCropRoisByParity?.[otherParity]?.[this.activeCropRegion]
+          this.cropWarning = isFirst
+            ? '选区已调整，默认应用至奇偶页（翻到下一页可单独截取）'
+            : `选区已调整为${this.pageParityShortLabel}页独立区域`
         } else {
           this.cropWarning = `${this.cropResizeEdgeLabel(this.cropAdjustMode)}已选中，请点击目标位置`
         }
@@ -8147,7 +8166,11 @@ export default Vue.extend({
       if (roi.w > MIN_CROP_SIZE && roi.h > MIN_CROP_SIZE) {
         this.draftRoi = roi
         this.persistCurrentCropDraft()
-        this.cropWarning = '框选已保存，可放大检查或重新框选'
+        const otherParity: PageParity = (this.selectionPageParity || 'odd') === 'odd' ? 'even' : 'odd'
+        const isFirst = !this.explicitCropRoisByParity?.[otherParity]?.[this.activeCropRegion]
+        this.cropWarning = isFirst
+          ? '框选已保存，默认应用至奇偶页（翻到下一页可单独截取）'
+          : `框选已保存为${this.pageParityShortLabel}页独立区域`
       } else {
         this.draftRoi = this.cropPreviousRoi ? {...this.cropPreviousRoi} : undefined
         this.cropWarning = this.cropPreviousRoi ? '点击未改变现有选区，可继续调整或重新框选' : '框选范围太小，请重新框选'
@@ -8285,12 +8308,23 @@ export default Vue.extend({
     },
     setCurrentCropRoi(roi: Roi | undefined) {
       const parity = this.selectionPageParity
+      const otherParity: PageParity = parity === 'odd' ? 'even' : 'odd'
       const rois = this.cropRoisByParity[parity].slice()
       const explicit = this.explicitCropRoisByParity[parity].slice()
       rois[this.activeCropRegion] = roi
       explicit[this.activeCropRegion] = !!roi
       this.$set(this.cropRoisByParity, parity, rois)
       this.$set(this.explicitCropRoisByParity, parity, explicit)
+
+      if (roi && !this.explicitCropRoisByParity[otherParity]?.[this.activeCropRegion]) {
+        const otherRois = this.cropRoisByParity[otherParity].slice()
+        otherRois[this.activeCropRegion] = {...roi}
+        this.$set(this.cropRoisByParity, otherParity, otherRois)
+      } else if (!roi && !this.explicitCropRoisByParity[otherParity]?.[this.activeCropRegion]) {
+        const otherRois = this.cropRoisByParity[otherParity].slice()
+        otherRois[this.activeCropRegion] = undefined
+        this.$set(this.cropRoisByParity, otherParity, otherRois)
+      }
     },
     setCurrentManualImageRoi(roi: Roi | undefined) {
       const pageKey = this.selectionManualImagePageKey
