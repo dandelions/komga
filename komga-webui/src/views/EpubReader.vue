@@ -673,6 +673,10 @@ import SettingsSwitch from '@/components/SettingsSwitch.vue'
 import {TocEntry} from '@/types/epub'
 import TocList from '@/components/TocList.vue'
 import EpubTtsPlayer from '@/components/readers/EpubTtsPlayer.vue'
+import {
+  consumeMultittsHttpsTipOnce,
+  hasMultittsHttpsTipBeenShown,
+} from '@/functions/tts-tips'
 import {Locations} from '@d-i-t-a/reader/dist/types/model/Locator'
 import {
   epubShortcutsMenus,
@@ -1019,6 +1023,8 @@ export default Vue.extend({
       ttsMultittsVoice: '',
       ttsMultittsParagraphPause: 150,
       ttsSentencePause: 0,
+      ttsMultittsHttpsTipShown: hasMultittsHttpsTipBeenShown(),
+      ttsMultittsConsecutiveErrors: 0,
       ttsPlayToken: 0,
       ttsAudioElement: null as HTMLAudioElement | null,
       ttsPrefetchAudio: null as HTMLAudioElement | null,
@@ -3097,6 +3103,7 @@ export default Vue.extend({
     },
     ttsStop() {
       this.ttsPlaying = false
+      this.ttsMultittsConsecutiveErrors = 0
       this.ttsClearWatchdog()
       this.ttsClearCrossPageTimer()
       this.ttsClearSleepTimer()
@@ -3153,6 +3160,7 @@ export default Vue.extend({
     },
     ttsPause() {
       this.ttsPlaying = false
+      this.ttsMultittsConsecutiveErrors = 0
       this.ttsClearWatchdog()
       this.ttsClearCrossPageTimer()
       if (this.ttsAudioElement) {
@@ -3223,6 +3231,7 @@ export default Vue.extend({
     },
     ttsUpdateEngine(engine: string) {
       this.ttsEngine = engine
+      this.ttsMultittsConsecutiveErrors = 0
       this.ttsSaveSettings()
       if (this.ttsPrefetchUrl) {
         URL.revokeObjectURL(this.ttsPrefetchUrl)
@@ -3264,6 +3273,7 @@ export default Vue.extend({
     },
     ttsUpdateMultittsUrl(url: string) {
       this.ttsMultittsUrl = url
+      this.ttsMultittsConsecutiveErrors = 0
       this.ttsSaveSettings()
       if (this.ttsPrefetchAudio) {
         this.ttsPrefetchAudio.src = ''
@@ -3891,7 +3901,11 @@ export default Vue.extend({
       audio.volume = this.ttsVolume
 
       audio.onplay = () => {
-        if (this.ttsPlayToken !== currentToken) return
+        if (this.ttsPlayToken !== currentToken || !this.ttsActive || !this.ttsPlaying) {
+          audio.pause()
+          return
+        }
+        this.ttsMultittsConsecutiveErrors = 0
         this.ttsPlaying = true
         this.ttsStartWatchdog(item.text)
         this.ttsPrefetchMultiTts(index + 1)
@@ -3921,48 +3935,49 @@ export default Vue.extend({
         this.ttsScheduleNextItem(pauseMs, currentToken)
       }
 
-      audio.onerror = () => {
-        if (this.ttsPlayToken !== currentToken) return
+      let errorHandled = false
+      const handleMultiTtsError = (err?: any) => {
+        if (errorHandled || this.ttsPlayToken !== currentToken) return
+        errorHandled = true
         this.ttsClearWatchdog()
-        if (this.ttsActive && this.ttsPlaying) {
-          const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:'
-          const isHttpUrl = (this.ttsMultittsUrl || '').trim().toLowerCase().startsWith('http:')
-          const isMixedContent = isHttps && isHttpUrl
-          const errMsg = isMixedContent
+        if (!this.ttsActive || !this.ttsPlaying) return
+
+        this.ttsMultittsConsecutiveErrors += 1
+
+        if (this.ttsMultittsConsecutiveErrors === 1) {
+          const showHttpsTip = !this.ttsMultittsHttpsTipShown && consumeMultittsHttpsTipOnce(this.ttsMultittsUrl)
+          if (showHttpsTip) {
+            this.ttsMultittsHttpsTipShown = true
+          }
+          const errMsg = showHttpsTip
             ? this.$t('epubreader.tts.multitts_https_tip').toString()
-            : this.$t('epubreader.tts.multitts_play_error').toString()
+            : ((err && err.message) || this.$t('epubreader.tts.multitts_play_error').toString())
           this.sendNotification(errMsg)
-          setTimeout(() => {
-            if (this.ttsPlayToken === currentToken && this.ttsActive && this.ttsPlaying) {
-              this.ttsPlayItem(this.ttsCurrentIndex + 1)
-            }
-          }, 500)
         }
+
+        if (this.ttsMultittsConsecutiveErrors >= 3) {
+          this.ttsPause()
+          return
+        }
+
+        setTimeout(() => {
+          if (this.ttsPlayToken === currentToken && this.ttsActive && this.ttsPlaying) {
+            this.ttsPlayItem(this.ttsCurrentIndex + 1)
+          }
+        }, 500)
       }
 
+      audio.onerror = () => handleMultiTtsError()
+
       // 切换音频源并开始播放
+      this.ttsPlaying = true
       audio.src = requestUrl
       audio.play().catch(err => {
         // Chrome 官方规范：当被新的 load() 或切句打断时，浏览器抛出 AbortError，属于正常控制流，静默忽略
         if (err && (err.name === 'AbortError' || (err.message && err.message.includes('interrupted')))) {
           return
         }
-        if (this.ttsPlayToken !== currentToken) return
-        if (this.ttsActive && this.ttsPlaying) {
-          const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:'
-          const isHttpUrl = (this.ttsMultittsUrl || '').trim().toLowerCase().startsWith('http:')
-          const isMixedContent = isHttps && isHttpUrl
-          const errMsg = isMixedContent
-            ? this.$t('epubreader.tts.multitts_https_tip').toString()
-            : (err.message || this.$t('epubreader.tts.multitts_play_error').toString())
-          this.sendNotification(errMsg)
-          // 尝试自动跳到下一句继续
-          setTimeout(() => {
-            if (this.ttsPlayToken === currentToken && this.ttsActive && this.ttsPlaying) {
-              this.ttsPlayItem(this.ttsCurrentIndex + 1)
-            }
-          }, 800)
-        }
+        handleMultiTtsError(err)
       })
     },
     ttsPrefetchMultiTts(nextIndex: number) {

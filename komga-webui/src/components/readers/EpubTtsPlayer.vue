@@ -319,11 +319,13 @@
           <div v-else-if="engine === 'multitts'" class="mb-4">
             <!-- HTTPS 混合内容警告提示 -->
             <v-alert
-              v-if="isHttps"
+              v-if="showHttpsMixedContentTip"
               dense
               text
+              dismissible
               type="warning"
               class="mb-3 caption"
+              @input="dismissHttpsTip"
             >
               <div class="font-weight-bold mb-1">
                 {{ $t('epubreader.tts.multitts_https_alert_title') }}
@@ -354,7 +356,7 @@
                 <v-icon x-small left color="primary">mdi-shield-check-outline</v-icon>
                 {{ $t('epubreader.tts.multitts_cors_tip') }}
               </div>
-              <div v-if="isHttps" class="caption warning--text mt-1 d-flex align-center">
+              <div v-if="showHttpsMixedContentTip" class="caption warning--text mt-1 d-flex align-center">
                 <v-icon x-small left color="warning">mdi-alert</v-icon>
                 {{ $t('epubreader.tts.multitts_https_tip') }}
               </div>
@@ -694,6 +696,12 @@
 
 <script lang="ts">
 import Vue from 'vue'
+import {
+  hasMultittsHttpsTipBeenShown,
+  isHttpUrl,
+  isHttpsPage,
+  markMultittsHttpsTipShown,
+} from '@/functions/tts-tips'
 
 export default Vue.extend({
   name: 'EpubTtsPlayer',
@@ -827,6 +835,8 @@ export default Vue.extend({
       multittsTestResultText: '',
       multittsTestSuccess: false,
       multittsTestSourceError: false,
+      httpsTipAlreadyShown: hasMultittsHttpsTipBeenShown(),
+      showingHttpsTipCurrentOpen: false,
       serverVoicePresets: [
         { text: 'zh-CN-XiaoxiaoNeural (微软晓晓 - 女声温柔)', value: 'zh-CN-XiaoxiaoNeural' },
         { text: 'zh-CN-YunxiNeural (微软云希 - 男声小说)', value: 'zh-CN-YunxiNeural' },
@@ -891,7 +901,13 @@ export default Vue.extend({
       return [defaultItem, ...list]
     },
     isHttps(): boolean {
-      return typeof window !== 'undefined' && window.location.protocol === 'https:'
+      return isHttpsPage()
+    },
+    isHttpMultittsUrl(): boolean {
+      return isHttpUrl(this.multittsUrl)
+    },
+    showHttpsMixedContentTip(): boolean {
+      return this.isHttps && this.isHttpMultittsUrl && (this.showingHttpsTipCurrentOpen || !this.httpsTipAlreadyShown)
     },
     multittsPauseOptions(): { text: string, value: number }[] {
       return [
@@ -922,7 +938,43 @@ export default Vue.extend({
       return presets
     },
   },
+  watch: {
+    showSettingsDialog(val: boolean) {
+      if (val) {
+        this.syncHttpsTipVisibility()
+      } else {
+        this.showingHttpsTipCurrentOpen = false
+      }
+    },
+    engine() {
+      this.syncHttpsTipVisibility()
+    },
+    multittsUrl() {
+      this.syncHttpsTipVisibility()
+    },
+  },
   methods: {
+    syncHttpsTipVisibility() {
+      if (hasMultittsHttpsTipBeenShown()) {
+        this.httpsTipAlreadyShown = true
+      }
+      if (
+        this.showSettingsDialog &&
+        this.engine === 'multitts' &&
+        this.isHttps &&
+        this.isHttpMultittsUrl &&
+        !this.httpsTipAlreadyShown
+      ) {
+        this.showingHttpsTipCurrentOpen = true
+        this.httpsTipAlreadyShown = true
+        markMultittsHttpsTipShown()
+      }
+    },
+    dismissHttpsTip() {
+      this.showingHttpsTipCurrentOpen = false
+      this.httpsTipAlreadyShown = true
+      markMultittsHttpsTipShown()
+    },
     parseVoicesResponse(json: any): { label: string, id: string }[] {
       const voices: { label: string, id: string }[] = []
       const seenIds = new Set<string>()
