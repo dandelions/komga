@@ -34,6 +34,7 @@ class FontsControllerTest(
         status { isOk() }
         header {
           string(HttpHeaders.CONTENT_TYPE, "font/woff")
+          exists(HttpHeaders.CACHE_CONTROL)
         }
       }
   }
@@ -47,6 +48,7 @@ class FontsControllerTest(
         status { isOk() }
         header {
           string(HttpHeaders.CONTENT_TYPE, "text/css")
+          exists(HttpHeaders.CACHE_CONTROL)
         }
         content {
           string(

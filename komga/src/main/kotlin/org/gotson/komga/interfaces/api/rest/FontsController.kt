@@ -12,6 +12,7 @@ import org.springframework.core.io.ByteArrayResource
 import org.springframework.core.io.FileSystemResource
 import org.springframework.core.io.Resource
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver
+import org.springframework.http.CacheControl
 import org.springframework.http.ContentDisposition
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
@@ -21,6 +22,7 @@ import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.server.ResponseStatusException
+import java.util.concurrent.TimeUnit
 import kotlin.io.path.Path
 import kotlin.io.path.extension
 import kotlin.io.path.isDirectory
@@ -102,6 +104,7 @@ class FontsController(
       val mediaType = "font/${FilenameUtils.getExtension(resource.uri.toString()).lowercase()}"
       return ResponseEntity
         .ok()
+        .cacheControl(CacheControl.maxAge(1, TimeUnit.DAYS).cachePublic())
         .headers {
           it.contentDisposition =
             ContentDisposition
@@ -129,6 +132,7 @@ class FontsController(
 
       return ResponseEntity
         .ok()
+        .cacheControl(CacheControl.maxAge(1, TimeUnit.DAYS).cachePublic())
         .headers {
           it.contentDisposition =
             ContentDisposition

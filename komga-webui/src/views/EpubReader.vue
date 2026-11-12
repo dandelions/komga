@@ -249,35 +249,56 @@
             <v-subheader class="font-weight-black text-h6">{{ $t('bookreader.settings.display') }}</v-subheader>
 
             <v-list-item v-if="fontFamilyOptions.length > 1" class="py-2">
-              <div class="d-flex align-center" style="width: 100%;">
-                <span class="mr-3 text-no-wrap">{{ $t('epubreader.settings.font_family') }}</span>
-                <v-select
-                  v-model="fontFamily"
-                  :items="fontFamilyOptions"
-                  item-text="text"
-                  item-value="value"
-                  class="flex-grow-1"
-                  filled
-                  dense
-                  solo
-                  hide-details
-                >
-                  <template #selection="{ item }">
-                    <span class="text-truncate" :style="fontFamilyPreviewStyle(item.value)">{{ item.text }}</span>
-                  </template>
-                  <template #item="{ item }">
-                    <div class="py-1 font-family-option">
-                      <div class="text-truncate" :style="fontFamilyPreviewStyle(item.value)">{{ item.text }}</div>
-                      <div
-                        v-if="fontFamilySampleText && item.value !== 'Original'"
-                        class="text--secondary text-truncate"
-                        :style="fontFamilySampleStyle(item.value)"
-                      >
-                        {{ fontFamilySampleText }}
+              <div style="width: 100%;">
+                <div class="d-flex align-center">
+                  <span class="mr-3 text-no-wrap">{{ $t('epubreader.settings.font_family') }}</span>
+                  <v-select
+                    v-model="fontFamily"
+                    :items="fontFamilyOptions"
+                    item-text="text"
+                    item-value="value"
+                    class="flex-grow-1"
+                    filled
+                    dense
+                    solo
+                    hide-details
+                  >
+                    <template #selection="{ item }">
+                      <span class="d-flex align-center">
+                        <span class="text-truncate">{{ item.text }}</span>
+                        <span
+                          v-if="item.value !== 'Original'"
+                          class="text--secondary text-truncate ml-2"
+                          :style="fontFamilySampleStyle(item.value)"
+                        >
+                          {{ fontFamilySampleText }}
+                        </span>
+                      </span>
+                    </template>
+                    <template #item="{ item }">
+                      <div class="py-1 font-family-option">
+                        <div class="text-truncate" :style="fontPreview ? fontFamilyPreviewStyle(item.value) : {}">{{ item.text }}</div>
+                        <div
+                          v-if="fontPreview && item.value !== 'Original'"
+                          class="text--secondary text-truncate"
+                          :style="fontFamilySampleStyle(item.value)"
+                        >
+                          {{ fontFamilySampleText }}
+                        </div>
                       </div>
-                    </div>
-                  </template>
-                </v-select>
+                    </template>
+                  </v-select>
+                </div>
+                <div class="d-flex justify-end">
+                  <v-switch
+                    :input-value="fontPreview"
+                    :label="$t('epubreader.settings.font_preview')"
+                    class="mt-1 pt-0"
+                    dense
+                    hide-details
+                    @change="fontPreview = $event"
+                  />
+                </div>
               </div>
             </v-list-item>
 
@@ -956,6 +977,7 @@ export default Vue.extend({
         fixedLayoutShadow: false,
         direction: 'auto',
         fontFamily: 'Original',
+        fontPreview: true,
         // Epub Reader
         alwaysFullscreen: false,
         navigationClick: true,
@@ -1367,6 +1389,15 @@ export default Vue.extend({
       set: function (value: string): void {
         this.settings.fontFamily = value
         this.d2Reader.applyUserSettings({fontFamily: value})
+        this.$store.commit('setEpubreaderSettings', this.settings)
+      },
+    },
+    fontPreview: {
+      get: function (): boolean {
+        return this.settings.fontPreview !== false
+      },
+      set: function (value: boolean): void {
+        this.settings.fontPreview = value
         this.$store.commit('setEpubreaderSettings', this.settings)
       },
     },
