@@ -248,12 +248,37 @@
 
             <v-subheader class="font-weight-black text-h6">{{ $t('bookreader.settings.display') }}</v-subheader>
 
-            <v-list-item v-if="fontFamilies.length > 1">
-              <settings-select
-                :items="fontFamilies"
-                v-model="fontFamily"
-                :label="$t('epubreader.settings.font_family')"
-              />
+            <v-list-item v-if="fontFamilyOptions.length > 1" class="py-2">
+              <div class="d-flex align-center" style="width: 100%;">
+                <span class="mr-3 text-no-wrap">{{ $t('epubreader.settings.font_family') }}</span>
+                <v-select
+                  v-model="fontFamily"
+                  :items="fontFamilyOptions"
+                  item-text="text"
+                  item-value="value"
+                  class="flex-grow-1"
+                  filled
+                  dense
+                  solo
+                  hide-details
+                >
+                  <template #selection="{ item }">
+                    <span class="text-truncate" :style="fontFamilyPreviewStyle(item.value)">{{ item.text }}</span>
+                  </template>
+                  <template #item="{ item }">
+                    <div class="py-1 font-family-option">
+                      <div class="text-truncate" :style="fontFamilyPreviewStyle(item.value)">{{ item.text }}</div>
+                      <div
+                        v-if="fontFamilySampleText && item.value !== 'Original'"
+                        class="text--secondary text-truncate"
+                        :style="fontFamilySampleStyle(item.value)"
+                      >
+                        {{ fontFamilySampleText }}
+                      </div>
+                    </div>
+                  </template>
+                </v-select>
+              </div>
             </v-list-item>
 
             <v-list-item>
@@ -918,7 +943,7 @@ export default Vue.extend({
         value: 'Original',
       }],
       fontFamiliesAdditional: [] as string[],
-      fontFamilies: [] as any[],
+      fontFamilySampleText: 'AaBbCc 天地玄黄 0123',
       settings: {
         // R2D2BC
         appearance: 'readium-default-on',
@@ -1056,7 +1081,7 @@ export default Vue.extend({
     this.settings.alwaysFullscreen = this.$store.state.persistedState.webreader.alwaysFullscreen
 
     this.fontFamiliesAdditional = await this.$komgaFonts.getFamilies()
-    this.fontFamilies = [...this.fontFamilyDefault, ...this.fontFamiliesAdditional]
+    this.loadFontFamilyPreviewStyles()
 
     this.ttsInitVoices()
     this.ttsLoadSettings()
@@ -1083,6 +1108,12 @@ export default Vue.extend({
   computed: {
     isRtl(): boolean {
       return this.effectiveDirection === 'rtl'
+    },
+    fontFamilyOptions(): Array<{text: string, value: string}> {
+      return [
+        ...this.fontFamilyDefault,
+        ...this.fontFamiliesAdditional.map(family => ({text: family, value: family})),
+      ]
     },
     ttsIsFirstChapter(): boolean {
       const reader = this.d2Reader as D2Reader & { readingOrder?: EpubReadingOrderItem[] }
@@ -1351,6 +1382,24 @@ export default Vue.extend({
     },
   },
   methods: {
+    loadFontFamilyPreviewStyles() {
+      this.fontFamiliesAdditional.forEach(family => {
+        const id = `komga-font-family-preview-${family}`
+        if (document.getElementById(id)) return
+        const link = document.createElement('link')
+        link.id = id
+        link.rel = 'stylesheet'
+        link.href = new URL(`${urls.origin}api/v1/fonts/resource/${encodeURIComponent(family)}/css`).toString()
+        document.head.appendChild(link)
+      })
+    },
+    fontFamilyPreviewStyle(family?: string): Record<string, string> {
+      if (!family || family === 'Original') return {}
+      return {fontFamily: `'${family}', serif`}
+    },
+    fontFamilySampleStyle(family?: string): Record<string, string> {
+      return {...this.fontFamilyPreviewStyle(family), fontSize: '.75rem', lineHeight: '1.2'}
+    },
     previousBook() {
       if (!this.$_.isEmpty(this.siblingPrevious)) {
         this.jumpToPreviousBook = false
