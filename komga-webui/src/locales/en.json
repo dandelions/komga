@@ -925,6 +925,21 @@
       "settings": "Settings",
       "show_hide_toc": "Show/hide table of contents",
       "tts": "Toggle Text-to-Speech (TTS)"
+    },
+    "font_manager": {
+      "title": "Font manager",
+      "summary": "Installed {count}, using {size}",
+      "empty": "No font available",
+      "install": "Install",
+      "remove": "Remove",
+      "installed": "Installed",
+      "installed_size": "Installed ({size})",
+      "not_installed": "Not installed",
+      "downloading": "Downloading {size}…",
+      "install_success": "Font {name} installed",
+      "install_failed": "Font {name} install failed: {err}",
+      "remove_success": "Font {name} removed",
+      "hint": "Installed fonts are stored on this device, so you can read with them without downloading again."
     }
   },
   "error_codes": {

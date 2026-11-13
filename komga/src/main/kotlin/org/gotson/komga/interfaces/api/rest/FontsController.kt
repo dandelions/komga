@@ -151,6 +151,31 @@ class FontsController(
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
   }
 
+  @GetMapping("resource/{fontFamily}/faces")
+  @Operation(summary = "List font faces", description = "List the font files and their characteristics for a font family. This is used by the Epub Reader to download and cache fonts locally.")
+  @SecurityRequirements
+  fun getFontFaces(
+    @PathVariable fontFamily: String,
+  ): List<FontFace> {
+    val resources = fonts[fontFamily] ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+
+    return resources.map { resource ->
+      val filename = FilenameUtils.getName(resource.uri.toString())
+      val characteristics = getFontCharacteristics(filename)
+      FontFace(
+        file = filename,
+        format =
+          when (val extension = FilenameUtils.getExtension(filename).lowercase()) {
+            "ttf" -> "truetype"
+            "otf" -> "opentype"
+            else -> extension
+          },
+        weight = characteristics.weight,
+        style = characteristics.style,
+      )
+    }
+  }
+
   @GetMapping("resource/{fontFamily}/preview", produces = [MediaType.IMAGE_PNG_VALUE])
   @Operation(summary = "Download font preview image", description = "Download a small PNG image rendering a sample text with the font family. This is used by the Epub Reader to preview fonts without downloading them.")
   @SecurityRequirements
@@ -279,6 +304,13 @@ class FontsController(
   private data class FontCharacteristics(
     val style: String,
     val weight: String,
+  )
+
+  data class FontFace(
+    val file: String,
+    val format: String,
+    val weight: String,
+    val style: String,
   )
 
   private companion object {

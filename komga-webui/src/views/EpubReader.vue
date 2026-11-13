@@ -265,6 +265,14 @@
                   <template #item="{ item }">
                     <div class="d-flex align-center py-1 font-family-option" style="width: 100%;">
                       <span class="text-truncate flex-grow-1">{{ item.text }}</span>
+                      <v-icon
+                        v-if="installedFonts[item.value]"
+                        x-small
+                        class="ml-2 success--text"
+                        :title="$t('epubreader.font_manager.installed')"
+                      >
+                        mdi-content-save-check
+                      </v-icon>
                       <img
                         v-if="fontPreviewUrl(item.value)"
                         :src="fontPreviewUrl(item.value)"
@@ -275,6 +283,15 @@
                     </div>
                   </template>
                 </v-select>
+                <v-btn
+                  icon
+                  small
+                  class="ml-1"
+                  :title="$t('epubreader.font_manager.title')"
+                  @click="showFontManager = true"
+                >
+                  <v-icon small>mdi-download</v-icon>
+                </v-btn>
               </div>
             </v-list-item>
 
@@ -629,6 +646,14 @@
       :shortcuts="shortcutsHelp"
     />
 
+    <epub-font-manager-dialog
+      v-model="showFontManager"
+      :families="fontFamiliesAdditional"
+      :preview-url-builder="fontPreviewUrl"
+      @changed="onInstalledFontsChanged"
+      @notify="sendNotification($event)"
+    />
+
     <epub-tts-player
       :active="ttsActive"
       :playing="ttsPlaying"
@@ -710,6 +735,14 @@ import {
 } from '@/functions/shortcuts/epubreader'
 import {flattenToc} from '@/functions/toc'
 import ShortcutHelpDialog from '@/components/dialogs/ShortcutHelpDialog.vue'
+import EpubFontManagerDialog from '@/components/dialogs/EpubFontManagerDialog.vue'
+import {
+  buildInstalledFontCss,
+  fontFamilyPreviewUrl,
+  getInstalledFontFamily,
+  listInstalledFontSummaries,
+  InstalledFontSummary,
+} from '@/functions/font-store'
 import screenfull from 'screenfull'
 import {getBookReadRouteFromMedia} from '@/functions/book-format'
 import SettingsSelect from '@/components/SettingsSelect.vue'
@@ -872,7 +905,7 @@ type EpubNavigator = {
 
 export default Vue.extend({
   name: 'EpubReader',
-  components: {SettingsSelect, ShortcutHelpDialog, TocList, SettingsSwitch, EpubTtsPlayer},
+  components: {SettingsSelect, ShortcutHelpDialog, EpubFontManagerDialog, TocList, SettingsSwitch, EpubTtsPlayer},
   data: function () {
     return {
       screenfull,
@@ -890,6 +923,10 @@ export default Vue.extend({
       showToolbars: false,
       showToc: false,
       showHelp: false,
+      showFontManager: false,
+      installedFonts: {} as Record<string, InstalledFontSummary>,
+      installedFontCss: '',
+      installedFontObjectUrls: [] as string[],
       readingDirs: [
         {
           text: this.$t('enums.epubreader.reading_direction.auto').toString(),
@@ -1060,6 +1097,7 @@ export default Vue.extend({
     if (screenfull.isEnabled) screenfull.on('change', this.fullscreenChanged)
   },
   beforeDestroy() {
+    this.revokeInstalledFontObjectUrls()
     this.ttsStop()
     this.clearEpubTouchSelectionState()
     this.stopEpubIframeEnhancements()
@@ -1078,6 +1116,7 @@ export default Vue.extend({
     this.settings.alwaysFullscreen = this.$store.state.persistedState.webreader.alwaysFullscreen
 
     this.fontFamiliesAdditional = await this.$komgaFonts.getFamilies()
+    await this.refreshInstalledFonts()
 
     this.ttsInitVoices()
     this.ttsLoadSettings()
@@ -1380,10 +1419,81 @@ export default Vue.extend({
   methods: {
     fontPreviewUrl(family?: string): string {
       if (!family || family === 'Original' || this.fontPreviewErrors.includes(family)) return ''
-      return new URL(`${urls.origin}api/v1/fonts/resource/${encodeURIComponent(family)}/preview`).toString()
+      return fontFamilyPreviewUrl(family)
     },
     onFontPreviewError(family: string) {
       if (!this.fontPreviewErrors.includes(family)) this.fontPreviewErrors.push(family)
+    },
+    async refreshInstalledFonts() {
+      try {
+        this.installedFonts = await listInstalledFontSummaries()
+      } catch (e) {
+        this.installedFonts = {}
+      }
+      await this.rebuildInstalledFontCss()
+    },
+    async rebuildInstalledFontCss() {
+      this.revokeInstalledFontObjectUrls()
+      const cssParts: string[] = []
+      for (const family of Object.keys(this.installedFonts)) {
+        try {
+          const installed = await getInstalledFontFamily(family)
+          if (installed) cssParts.push(buildInstalledFontCss(family, installed.files, this.installedFontObjectUrls))
+        } catch (e) {
+        }
+      }
+      this.installedFontCss = cssParts.join('\n')
+    },
+    revokeInstalledFontObjectUrls() {
+      this.installedFontObjectUrls.forEach(url => {
+        try {
+          URL.revokeObjectURL(url)
+        } catch (e) {
+        }
+      })
+      this.installedFontObjectUrls = []
+    },
+    onInstalledFontsChanged() {
+      this.refreshInstalledFonts().then(() => this.scheduleEpubIframeEnhancements(false))
+    },
+    applyInstalledFontsToDocument(doc: Document) {
+      const styleId = 'komga-installed-fonts'
+      const existing = doc.getElementById(styleId) as HTMLStyleElement | null
+
+      // remove the network font sheets of installed families, so that the locally stored blobs are used
+      if (doc.head) {
+        doc.head.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]').forEach(link => {
+          const family = this.installedFontFamilyFromCssUrl(link.href)
+          if (family) link.remove()
+        })
+      }
+
+      if (!this.installedFontCss) {
+        if (existing) existing.remove()
+        return
+      }
+
+      const head = doc.head || doc.documentElement
+      if (!head) return
+      const style = existing || doc.createElement('style')
+      if (!existing) {
+        style.id = styleId
+        head.appendChild(style)
+      }
+      if (style.textContent !== this.installedFontCss) style.textContent = this.installedFontCss
+    },
+    installedFontFamilyFromCssUrl(href: string): string | undefined {
+      const marker = '/api/v1/fonts/resource/'
+      const index = href.indexOf(marker)
+      if (index === -1 || !href.endsWith('/css')) return undefined
+      const encoded = href.substring(index + marker.length, href.length - '/css'.length)
+      let family: string
+      try {
+        family = decodeURIComponent(encoded)
+      } catch (e) {
+        return undefined
+      }
+      return this.installedFonts[family] ? family : undefined
     },
     previousBook() {
       if (!this.$_.isEmpty(this.siblingPrevious)) {
@@ -2194,6 +2304,7 @@ export default Vue.extend({
         this.applyEpubChineseConversion(doc)
         this.applyEpubThemeToDocument(doc)
         this.applyEpubCustomStyleToDocument(doc)
+        this.applyInstalledFontsToDocument(doc)
         this.applyEpubTextSelection(doc)
         this.ttsInjectHighlightStyle(doc)
         if ((doc.documentElement.getAttribute('data-komga-writing-mode') || '').indexOf('vertical') === 0) {

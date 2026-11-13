@@ -62,6 +62,32 @@ class FontsControllerTest(
 
   @Test
   @WithMockCustomUser
+  fun `when getting font faces then all files are listed with their characteristics`() {
+    mockMvc
+      .get("/api/v1/fonts/resource/OpenDyslexic/faces")
+      .andExpect {
+        status { isOk() }
+        jsonPath("$.length()") { value(8) }
+        jsonPath("$[?(@.file == 'OpenDyslexic-Regular.woff2')].weight") { value("normal") }
+        jsonPath("$[?(@.file == 'OpenDyslexic-Regular.woff2')].style") { value("normal") }
+        jsonPath("$[?(@.file == 'OpenDyslexic-Regular.woff2')].format") { value("woff2") }
+        jsonPath("$[?(@.file == 'OpenDyslexic-Bold-Italic.woff')].weight") { value("bold") }
+        jsonPath("$[?(@.file == 'OpenDyslexic-Bold-Italic.woff')].style") { value("italic") }
+      }
+  }
+
+  @Test
+  @WithMockCustomUser
+  fun `when getting font faces for unknown font family then 404`() {
+    mockMvc
+      .get("/api/v1/fonts/resource/UnknownFamily/faces")
+      .andExpect {
+        status { isNotFound() }
+      }
+  }
+
+  @Test
+  @WithMockCustomUser
   fun `when getting font css file then the content is correct`() {
     mockMvc
       .get("/api/v1/fonts/resource/OpenDyslexic/css")

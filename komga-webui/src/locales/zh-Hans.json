@@ -925,6 +925,21 @@
       "settings": "设置",
       "show_hide_toc": "显示/隐藏目录",
       "tts": "语音阅读 (TTS) 切换"
+    },
+    "font_manager": {
+      "title": "字体管理",
+      "summary": "已安装 {count} 款，占用 {size}",
+      "empty": "没有可用字体",
+      "install": "安装",
+      "remove": "删除",
+      "installed": "已安装",
+      "installed_size": "已安装（{size}）",
+      "not_installed": "未安装",
+      "downloading": "正在下载 {size}…",
+      "install_success": "字体 {name} 安装完成",
+      "install_failed": "字体 {name} 安装失败：{err}",
+      "remove_success": "字体 {name} 已删除",
+      "hint": "安装后的字体保存在本机，离线也能使用，不会重复下载。"
     }
   },
   "error_codes": {
