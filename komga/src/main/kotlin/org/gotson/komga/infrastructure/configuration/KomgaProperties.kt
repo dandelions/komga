@@ -84,6 +84,9 @@ class KomgaProperties {
   class Fonts {
     @get:NotBlank
     var dataDirectory: String = ""
+
+    // where generated font preview images are stored, so that they survive restarts
+    var previewCacheDirectory: String = ""
   }
 
   class Lucene {

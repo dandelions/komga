@@ -22,6 +22,7 @@ komga:
     data-directory: \${komga.config-dir}/lucene
   fonts:
     data-directory: \${komga.config-dir}/fonts
+    preview-cache-directory: \${komga.config-dir}/font-previews
   config-dir: \${user.home}/.komga
   tasks-db:
     file: \${komga.config-dir}/tasks.sqlite

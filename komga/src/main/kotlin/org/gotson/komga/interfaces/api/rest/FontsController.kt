@@ -27,16 +27,21 @@ import java.awt.Font
 import java.awt.RenderingHints
 import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
-import java.util.concurrent.ConcurrentHashMap
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 import javax.imageio.ImageIO
 import kotlin.io.path.Path
+import kotlin.io.path.createDirectories
 import kotlin.io.path.extension
 import kotlin.io.path.isDirectory
 import kotlin.io.path.isReadable
 import kotlin.io.path.isRegularFile
 import kotlin.io.path.listDirectoryEntries
 import kotlin.io.path.name
+import kotlin.io.path.readBytes
 
 private val logger = KotlinLogging.logger {}
 
@@ -48,7 +53,7 @@ class FontsController(
 ) {
   private val supportedExtensions = listOf("woff", "woff2", "ttf", "otf")
   private final val fonts: Map<String, List<Resource>>
-  private val fontPreviews = ConcurrentHashMap<String, ByteArray>()
+  private val fontPreviewCacheDirectory: Path?
 
   init {
     val resolver = PathMatchingResourcePatternResolver()
@@ -91,6 +96,18 @@ class FontsController(
       }
 
     fonts = fontsEmbedded + fontsAdditional
+
+    fontPreviewCacheDirectory =
+      komgaProperties.fonts.previewCacheDirectory
+        .takeIf { it.isNotBlank() }
+        ?.let { directory ->
+          try {
+            Path(directory).createDirectories()
+          } catch (e: Exception) {
+            logger.warn(e) { "Could not create font preview cache directory: $directory" }
+            null
+          }
+        }
 
     logger.info { "Fonts embedded: $fontsEmbedded" }
     logger.info { "Fonts discovered: $fontsAdditional" }
@@ -182,9 +199,14 @@ class FontsController(
   fun getFontFamilyPreview(
     @PathVariable fontFamily: String,
   ): ResponseEntity<ByteArray> {
+    val fontFile = findPreviewFontFile(fontFamily) ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+    val cacheFile = fontPreviewCacheFile(fontFamily, fontFile)
+
     val preview =
-      fontPreviews[fontFamily]
-        ?: generateFontPreview(fontFamily)?.also { fontPreviews[fontFamily] = it }
+      cacheFile?.let { readFontPreviewFromCache(it) }
+        ?: generateFontPreview(fontFamily, fontFile)?.also { preview ->
+          cacheFile?.let { writeFontPreviewToCache(it, preview) }
+        }
         ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
 
     return ResponseEntity
@@ -194,7 +216,7 @@ class FontsController(
       .body(preview)
   }
 
-  private fun generateFontPreview(fontFamily: String): ByteArray? {
+  private fun findPreviewFontFile(fontFamily: String): Resource? {
     val resources = fonts[fontFamily] ?: return null
     // AWT can only read TrueType/OpenType files, woff/woff2 are not supported
     val candidates =
@@ -202,13 +224,66 @@ class FontsController(
         val name = resource.filename ?: return@filter false
         name.endsWith(".ttf", true) || name.endsWith(".otf", true)
       }
-    val fontFile =
-      candidates.firstOrNull { it.filename?.contains("regular", true) == true }
-        ?: candidates.firstOrNull { it.filename?.let { name -> !name.contains("bold", true) && !name.contains("italic", true) } == true }
-        ?: candidates.firstOrNull()
-        ?: return null
+    return candidates.firstOrNull { it.filename?.contains("regular", true) == true }
+      ?: candidates.firstOrNull { it.filename?.let { name -> !name.contains("bold", true) && !name.contains("italic", true) } == true }
+      ?: candidates.firstOrNull()
+  }
 
-    return try {
+  private fun fontPreviewCacheFile(
+    fontFamily: String,
+    fontFile: Resource,
+  ): Path? {
+    val directory = fontPreviewCacheDirectory ?: return null
+    val fingerprint = fontPreviewFingerprint(fontFile)
+    val safeFamily = fontFamily.replace(Regex("[^A-Za-z0-9._-]"), "_")
+    return directory.resolve("$safeFamily-$fingerprint.png")
+  }
+
+  private fun fontPreviewFingerprint(fontFile: Resource): String {
+    val raw =
+      try {
+        "${fontFile.filename}:${fontFile.contentLength()}:${fontFile.lastModified()}:$PREVIEW_VERSION"
+      } catch (e: Exception) {
+        "${fontFile.filename}:$PREVIEW_VERSION"
+      }
+    return MessageDigest
+      .getInstance("SHA-1")
+      .digest(raw.toByteArray())
+      .joinToString("") { "%02x".format(it) }
+      .take(16)
+  }
+
+  private fun readFontPreviewFromCache(cacheFile: Path): ByteArray? =
+    try {
+      if (cacheFile.isRegularFile()) cacheFile.readBytes() else null
+    } catch (e: Exception) {
+      null
+    }
+
+  private fun writeFontPreviewToCache(
+    cacheFile: Path,
+    preview: ByteArray,
+  ) {
+    try {
+      val directory = cacheFile.parent
+      val tempFile = Files.createTempFile(directory, "preview", ".tmp")
+      try {
+        Files.write(tempFile, preview)
+        Files.move(tempFile, cacheFile, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+      } catch (e: Exception) {
+        Files.deleteIfExists(tempFile)
+        Files.write(cacheFile, preview)
+      }
+    } catch (e: Exception) {
+      logger.warn(e) { "Could not cache font preview: $cacheFile" }
+    }
+  }
+
+  private fun generateFontPreview(
+    fontFamily: String,
+    fontFile: Resource,
+  ): ByteArray? =
+    try {
       fontFile.inputStream.use { stream ->
         val baseFont = Font.createFonts(stream).first()
         // only include the characters the font can actually render, so that no missing glyph boxes are drawn
@@ -220,14 +295,12 @@ class FontsController(
               append(PREVIEW_SAMPLE_LATIN)
             }
           }
-        if (sample.isEmpty()) return null
-        renderFontPreview(baseFont, sample)
+        if (sample.isEmpty()) null else renderFontPreview(baseFont, sample)
       }
     } catch (e: Exception) {
       logger.warn(e) { "Could not generate preview for font family $fontFamily" }
       null
     }
-  }
 
   private fun renderFontPreview(
     baseFont: Font,
@@ -314,6 +387,7 @@ class FontsController(
   )
 
   private companion object {
+    const val PREVIEW_VERSION = 1
     const val PREVIEW_FONT_SIZE = 26f
     const val PREVIEW_PADDING = 6
     const val PREVIEW_SAMPLE_CJK = "天地玄黄"
