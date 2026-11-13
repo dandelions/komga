@@ -277,9 +277,9 @@
                     </template>
                     <template #item="{ item }">
                       <div class="py-1 font-family-option">
-                        <div class="text-truncate" :style="fontPreview ? fontFamilyPreviewStyle(item.value) : {}">{{ item.text }}</div>
+                        <div class="text-truncate" :style="fontSampleInList ? fontFamilyPreviewStyle(item.value) : {}">{{ item.text }}</div>
                         <div
-                          v-if="fontPreview && item.value !== 'Original'"
+                          v-if="fontSampleInList && item.value !== 'Original'"
                           class="text--secondary text-truncate"
                           :style="fontFamilySampleStyle(item.value)"
                         >
@@ -291,12 +291,12 @@
                 </div>
                 <div class="d-flex justify-end">
                   <v-switch
-                    :input-value="fontPreview"
+                    :input-value="fontSampleInList"
                     :label="$t('epubreader.settings.font_preview')"
                     class="mt-1 pt-0"
                     dense
                     hide-details
-                    @change="fontPreview = $event"
+                    @change="fontSampleInList = $event"
                   />
                 </div>
               </div>
@@ -977,7 +977,7 @@ export default Vue.extend({
         fixedLayoutShadow: false,
         direction: 'auto',
         fontFamily: 'Original',
-        fontPreview: true,
+        fontSampleInList: false,
         // Epub Reader
         alwaysFullscreen: false,
         navigationClick: true,
@@ -1103,7 +1103,9 @@ export default Vue.extend({
     this.settings.alwaysFullscreen = this.$store.state.persistedState.webreader.alwaysFullscreen
 
     this.fontFamiliesAdditional = await this.$komgaFonts.getFamilies()
-    this.loadFontFamilyPreviewStyles()
+    // only the selected font is loaded up front, other samples are loaded on demand
+    if (this.settings.fontSampleInList) this.loadFontFamilyPreviewStyles()
+    else this.loadFontFamilyPreviewStyles([this.fontFamily])
 
     this.ttsInitVoices()
     this.ttsLoadSettings()
@@ -1389,15 +1391,19 @@ export default Vue.extend({
       set: function (value: string): void {
         this.settings.fontFamily = value
         this.d2Reader.applyUserSettings({fontFamily: value})
+        // load the stylesheet of the newly selected font only, so that its sample can be rendered
+        this.loadFontFamilyPreviewStyles([value])
         this.$store.commit('setEpubreaderSettings', this.settings)
       },
     },
-    fontPreview: {
+    fontSampleInList: {
       get: function (): boolean {
-        return this.settings.fontPreview !== false
+        return this.settings.fontSampleInList === true
       },
       set: function (value: boolean): void {
-        this.settings.fontPreview = value
+        this.settings.fontSampleInList = value
+        // only load every font stylesheet when the user opts in, to avoid downloading all font files
+        if (value) this.loadFontFamilyPreviewStyles()
         this.$store.commit('setEpubreaderSettings', this.settings)
       },
     },
@@ -1413,8 +1419,9 @@ export default Vue.extend({
     },
   },
   methods: {
-    loadFontFamilyPreviewStyles() {
-      this.fontFamiliesAdditional.forEach(family => {
+    loadFontFamilyPreviewStyles(families: string[] = this.fontFamiliesAdditional) {
+      families.forEach(family => {
+        if (!family || family === 'Original') return
         const id = `komga-font-family-preview-${family}`
         if (document.getElementById(id)) return
         const link = document.createElement('link')
