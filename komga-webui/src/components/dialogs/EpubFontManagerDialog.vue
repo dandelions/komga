@@ -42,12 +42,20 @@
             size="20"
             width="2"
             color="primary"
+            class="flex-shrink-0"
           />
           <template v-else-if="installedSummaries[family]">
-            <v-icon small class="mr-2 success--text" :title="$t('epubreader.font_manager.installed')">
+            <v-icon small class="mr-2 flex-shrink-0 success--text" :title="$t('epubreader.font_manager.installed')">
               mdi-content-save-check
             </v-icon>
-            <v-btn small text color="error" :disabled="installingFamily !== ''" @click="removeFamily(family)">
+            <v-btn
+              small
+              text
+              color="error"
+              class="flex-shrink-0"
+              :disabled="installingFamily !== ''"
+              @click="removeFamily(family)"
+            >
               {{ $t('epubreader.font_manager.remove') }}
             </v-btn>
           </template>
@@ -56,6 +64,7 @@
             small
             text
             color="primary"
+            class="flex-shrink-0"
             :disabled="installingFamily !== ''"
             @click="installFamily(family)"
           >
@@ -182,8 +191,10 @@ export default Vue.extend({
 
 <style scoped>
 .font-manager-preview {
+  display: block;
   height: 24px;
   max-width: 100%;
   object-fit: contain;
+  object-position: left center;
 }
 </style>

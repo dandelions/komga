@@ -257,6 +257,7 @@
                   item-text="text"
                   item-value="value"
                   class="flex-grow-1"
+                  :menu-props="{maxWidth: '90vw'}"
                   filled
                   dense
                   solo
@@ -264,11 +265,11 @@
                 >
                   <template #item="{ item }">
                     <div class="d-flex align-center py-1 font-family-option" style="width: 100%;">
-                      <span class="text-truncate flex-grow-1">{{ item.text }}</span>
+                      <span class="text-truncate flex-grow-1 font-family-name">{{ item.text }}</span>
                       <v-icon
                         v-if="installedFonts[item.value]"
                         x-small
-                        class="ml-2 success--text"
+                        class="ml-2 flex-shrink-0 success--text"
                         :title="$t('epubreader.font_manager.installed')"
                       >
                         mdi-content-save-check
@@ -4297,9 +4298,18 @@ export default Vue.extend({
   z-index: 2;
 }
 
+.font-family-option {
+  overflow: hidden;
+}
+
+.font-family-name {
+  min-width: 0;
+}
+
 .font-family-preview {
+  width: 120px;
   height: 26px;
-  max-width: 50%;
+  flex: 0 0 auto;
   object-fit: contain;
   object-position: right center;
 }
