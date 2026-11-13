@@ -249,56 +249,32 @@
             <v-subheader class="font-weight-black text-h6">{{ $t('bookreader.settings.display') }}</v-subheader>
 
             <v-list-item v-if="fontFamilyOptions.length > 1" class="py-2">
-              <div style="width: 100%;">
-                <div class="d-flex align-center">
-                  <span class="mr-3 text-no-wrap">{{ $t('epubreader.settings.font_family') }}</span>
-                  <v-select
-                    v-model="fontFamily"
-                    :items="fontFamilyOptions"
-                    item-text="text"
-                    item-value="value"
-                    class="flex-grow-1"
-                    filled
-                    dense
-                    solo
-                    hide-details
-                  >
-                    <template #selection="{ item }">
-                      <span class="d-flex align-center">
-                        <span class="text-truncate">{{ item.text }}</span>
-                        <span
-                          v-if="item.value !== 'Original'"
-                          class="text--secondary text-truncate ml-2"
-                          :style="fontFamilySampleStyle(item.value)"
-                        >
-                          {{ fontFamilySampleText }}
-                        </span>
-                      </span>
-                    </template>
-                    <template #item="{ item }">
-                      <div class="py-1 font-family-option">
-                        <div class="text-truncate" :style="fontSampleInList ? fontFamilyPreviewStyle(item.value) : {}">{{ item.text }}</div>
-                        <div
-                          v-if="fontSampleInList && item.value !== 'Original'"
-                          class="text--secondary text-truncate"
-                          :style="fontFamilySampleStyle(item.value)"
-                        >
-                          {{ fontFamilySampleText }}
-                        </div>
-                      </div>
-                    </template>
-                  </v-select>
-                </div>
-                <div class="d-flex justify-end">
-                  <v-switch
-                    :input-value="fontSampleInList"
-                    :label="$t('epubreader.settings.font_preview')"
-                    class="mt-1 pt-0"
-                    dense
-                    hide-details
-                    @change="fontSampleInList = $event"
-                  />
-                </div>
+              <div class="d-flex align-center" style="width: 100%;">
+                <span class="mr-3 text-no-wrap">{{ $t('epubreader.settings.font_family') }}</span>
+                <v-select
+                  v-model="fontFamily"
+                  :items="fontFamilyOptions"
+                  item-text="text"
+                  item-value="value"
+                  class="flex-grow-1"
+                  filled
+                  dense
+                  solo
+                  hide-details
+                >
+                  <template #item="{ item }">
+                    <div class="d-flex align-center py-1 font-family-option" style="width: 100%;">
+                      <span class="text-truncate flex-grow-1">{{ item.text }}</span>
+                      <img
+                        v-if="fontPreviewUrl(item.value)"
+                        :src="fontPreviewUrl(item.value)"
+                        :alt="item.text"
+                        class="font-family-preview ml-2"
+                        @error="onFontPreviewError(item.value)"
+                      >
+                    </div>
+                  </template>
+                </v-select>
               </div>
             </v-list-item>
 
@@ -964,7 +940,7 @@ export default Vue.extend({
         value: 'Original',
       }],
       fontFamiliesAdditional: [] as string[],
-      fontFamilySampleText: 'AaBbCc 天地玄黄 0123',
+      fontPreviewErrors: [] as string[],
       settings: {
         // R2D2BC
         appearance: 'readium-default-on',
@@ -977,7 +953,6 @@ export default Vue.extend({
         fixedLayoutShadow: false,
         direction: 'auto',
         fontFamily: 'Original',
-        fontSampleInList: false,
         // Epub Reader
         alwaysFullscreen: false,
         navigationClick: true,
@@ -1103,9 +1078,6 @@ export default Vue.extend({
     this.settings.alwaysFullscreen = this.$store.state.persistedState.webreader.alwaysFullscreen
 
     this.fontFamiliesAdditional = await this.$komgaFonts.getFamilies()
-    // only the selected font is loaded up front, other samples are loaded on demand
-    if (this.settings.fontSampleInList) this.loadFontFamilyPreviewStyles()
-    else this.loadFontFamilyPreviewStyles([this.fontFamily])
 
     this.ttsInitVoices()
     this.ttsLoadSettings()
@@ -1391,19 +1363,6 @@ export default Vue.extend({
       set: function (value: string): void {
         this.settings.fontFamily = value
         this.d2Reader.applyUserSettings({fontFamily: value})
-        // load the stylesheet of the newly selected font only, so that its sample can be rendered
-        this.loadFontFamilyPreviewStyles([value])
-        this.$store.commit('setEpubreaderSettings', this.settings)
-      },
-    },
-    fontSampleInList: {
-      get: function (): boolean {
-        return this.settings.fontSampleInList === true
-      },
-      set: function (value: boolean): void {
-        this.settings.fontSampleInList = value
-        // only load every font stylesheet when the user opts in, to avoid downloading all font files
-        if (value) this.loadFontFamilyPreviewStyles()
         this.$store.commit('setEpubreaderSettings', this.settings)
       },
     },
@@ -1419,24 +1378,12 @@ export default Vue.extend({
     },
   },
   methods: {
-    loadFontFamilyPreviewStyles(families: string[] = this.fontFamiliesAdditional) {
-      families.forEach(family => {
-        if (!family || family === 'Original') return
-        const id = `komga-font-family-preview-${family}`
-        if (document.getElementById(id)) return
-        const link = document.createElement('link')
-        link.id = id
-        link.rel = 'stylesheet'
-        link.href = new URL(`${urls.origin}api/v1/fonts/resource/${encodeURIComponent(family)}/css`).toString()
-        document.head.appendChild(link)
-      })
+    fontPreviewUrl(family?: string): string {
+      if (!family || family === 'Original' || this.fontPreviewErrors.includes(family)) return ''
+      return new URL(`${urls.origin}api/v1/fonts/resource/${encodeURIComponent(family)}/preview`).toString()
     },
-    fontFamilyPreviewStyle(family?: string): Record<string, string> {
-      if (!family || family === 'Original') return {}
-      return {fontFamily: `'${family}', serif`}
-    },
-    fontFamilySampleStyle(family?: string): Record<string, string> {
-      return {...this.fontFamilyPreviewStyle(family), fontSize: '.75rem', lineHeight: '1.2'}
+    onFontPreviewError(family: string) {
+      if (!this.fontPreviewErrors.includes(family)) this.fontPreviewErrors.push(family)
     },
     previousBook() {
       if (!this.$_.isEmpty(this.siblingPrevious)) {
@@ -4237,6 +4184,13 @@ export default Vue.extend({
 <style scoped>
 .settings {
   z-index: 2;
+}
+
+.font-family-preview {
+  height: 26px;
+  max-width: 50%;
+  object-fit: contain;
+  object-position: right center;
 }
 
 .full-height {

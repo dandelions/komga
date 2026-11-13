@@ -869,7 +869,6 @@
     "settings": {
       "column_count": "Column count",
       "font_family": "Font",
-      "font_preview": "Show font samples in list",
       "layout": "Layout",
       "layout_paginated": "Paginated",
       "layout_scroll": "Scroll",

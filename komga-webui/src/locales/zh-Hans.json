@@ -869,7 +869,6 @@
     "settings": {
       "column_count": "列数",
       "font_family": "字体",
-      "font_preview": "字体列表显示样例",
       "layout": "布局",
       "layout_paginated": "分页",
       "layout_scroll": "滚屏",

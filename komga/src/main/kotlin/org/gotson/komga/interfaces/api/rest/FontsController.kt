@@ -22,7 +22,14 @@ import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.server.ResponseStatusException
+import java.awt.Color
+import java.awt.Font
+import java.awt.RenderingHints
+import java.awt.image.BufferedImage
+import java.io.ByteArrayOutputStream
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import javax.imageio.ImageIO
 import kotlin.io.path.Path
 import kotlin.io.path.extension
 import kotlin.io.path.isDirectory
@@ -41,6 +48,7 @@ class FontsController(
 ) {
   private val supportedExtensions = listOf("woff", "woff2", "ttf", "otf")
   private final val fonts: Map<String, List<Resource>>
+  private val fontPreviews = ConcurrentHashMap<String, ByteArray>()
 
   init {
     val resolver = PathMatchingResourcePatternResolver()
@@ -143,6 +151,97 @@ class FontsController(
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
   }
 
+  @GetMapping("resource/{fontFamily}/preview", produces = [MediaType.IMAGE_PNG_VALUE])
+  @Operation(summary = "Download font preview image", description = "Download a small PNG image rendering a sample text with the font family. This is used by the Epub Reader to preview fonts without downloading them.")
+  @SecurityRequirements
+  fun getFontFamilyPreview(
+    @PathVariable fontFamily: String,
+  ): ResponseEntity<ByteArray> {
+    val preview =
+      fontPreviews[fontFamily]
+        ?: generateFontPreview(fontFamily)?.also { fontPreviews[fontFamily] = it }
+        ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+
+    return ResponseEntity
+      .ok()
+      .cacheControl(CacheControl.maxAge(30, TimeUnit.DAYS).cachePublic())
+      .contentType(MediaType.IMAGE_PNG)
+      .body(preview)
+  }
+
+  private fun generateFontPreview(fontFamily: String): ByteArray? {
+    val resources = fonts[fontFamily] ?: return null
+    // AWT can only read TrueType/OpenType files, woff/woff2 are not supported
+    val candidates =
+      resources.filter { resource ->
+        val name = resource.filename ?: return@filter false
+        name.endsWith(".ttf", true) || name.endsWith(".otf", true)
+      }
+    val fontFile =
+      candidates.firstOrNull { it.filename?.contains("regular", true) == true }
+        ?: candidates.firstOrNull { it.filename?.let { name -> !name.contains("bold", true) && !name.contains("italic", true) } == true }
+        ?: candidates.firstOrNull()
+        ?: return null
+
+    return try {
+      fontFile.inputStream.use { stream ->
+        val baseFont = Font.createFonts(stream).first()
+        // only include the characters the font can actually render, so that no missing glyph boxes are drawn
+        val sample =
+          buildString {
+            if (baseFont.canDisplayUpTo(PREVIEW_SAMPLE_CJK) == -1) append(PREVIEW_SAMPLE_CJK)
+            if (baseFont.canDisplayUpTo(PREVIEW_SAMPLE_LATIN) == -1) {
+              if (isNotEmpty()) append(' ')
+              append(PREVIEW_SAMPLE_LATIN)
+            }
+          }
+        if (sample.isEmpty()) return null
+        renderFontPreview(baseFont, sample)
+      }
+    } catch (e: Exception) {
+      logger.warn(e) { "Could not generate preview for font family $fontFamily" }
+      null
+    }
+  }
+
+  private fun renderFontPreview(
+    baseFont: Font,
+    text: String,
+  ): ByteArray {
+    val font = baseFont.deriveFont(PREVIEW_FONT_SIZE)
+
+    val probeGraphics = BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB).createGraphics()
+    val metrics =
+      try {
+        probeGraphics.font = font
+        probeGraphics.fontMetrics
+      } finally {
+        probeGraphics.dispose()
+      }
+
+    val image =
+      BufferedImage(
+        metrics.stringWidth(text) + PREVIEW_PADDING * 2,
+        metrics.height + PREVIEW_PADDING * 2,
+        BufferedImage.TYPE_INT_ARGB,
+      )
+    val graphics = image.createGraphics()
+    try {
+      graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+      graphics.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
+      graphics.font = font
+      graphics.color = PREVIEW_COLOR
+      graphics.drawString(text, PREVIEW_PADDING, PREVIEW_PADDING + metrics.ascent)
+    } finally {
+      graphics.dispose()
+    }
+
+    return ByteArrayOutputStream().use { output ->
+      ImageIO.write(image, "png", output)
+      output.toByteArray()
+    }
+  }
+
   private fun buildFontFaceBlock(
     fontFamily: String,
     styleAndWeight: FontCharacteristics,
@@ -181,4 +280,12 @@ class FontsController(
     val style: String,
     val weight: String,
   )
+
+  private companion object {
+    const val PREVIEW_FONT_SIZE = 26f
+    const val PREVIEW_PADDING = 6
+    const val PREVIEW_SAMPLE_CJK = "天地玄黄"
+    const val PREVIEW_SAMPLE_LATIN = "AaBb 0123"
+    val PREVIEW_COLOR: Color = Color(128, 128, 128)
+  }
 }
