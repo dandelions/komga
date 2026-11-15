@@ -1062,6 +1062,15 @@ export default Vue.extend({
       ttsVoiceURI: '',
       ttsAutoScroll: true,
       ttsHighlight: true,
+      ttsHighlightedElement: undefined as HTMLElement | undefined,
+      ttsHighlightedStyle: undefined as undefined | {
+        backgroundColor: string
+        backgroundColorPriority: string
+        borderRadius: string
+        borderRadiusPriority: string
+        boxShadow: string
+        boxShadowPriority: string
+      },
       ttsSleepMode: 'off',
       ttsSleepRemaining: 0,
       ttsSleepTimerId: undefined as number | undefined,
@@ -3557,14 +3566,19 @@ export default Vue.extend({
         .komga-tts-sentence {
           display: inline !important;
         }
-        .komga-tts-active {
+        /* ReadiumCSS sets :root[style*="--USER__backgroundColor"] * { background-color: transparent !important },
+           so the selector below has to outrank it. Inline styles are also applied by the reader. */
+        :root .komga-tts-active,
+        :root .komga-tts-sentence.komga-tts-active {
           background-color: rgba(255, 235, 59, 0.45) !important;
           border-radius: 4px !important;
           box-shadow: 0 0 0 2px rgba(255, 215, 0, 0.5) !important;
           transition: background-color 0.2s ease, box-shadow 0.2s ease !important;
         }
-        .night .komga-tts-active, [data-theme="night"] .komga-tts-active {
-          background-color: rgba(255, 215, 0, 0.25) !important;
+        :root.night .komga-tts-active,
+        :root .night .komga-tts-active,
+        :root[data-theme="night"] .komga-tts-active {
+          background-color: rgba(255, 215, 0, 0.28) !important;
           box-shadow: 0 0 0 2px rgba(255, 215, 0, 0.35) !important;
         }
       `
@@ -4160,13 +4174,44 @@ export default Vue.extend({
     },
     ttsApplyHighlight(element: HTMLElement) {
       this.ttsClearHighlight()
+      if (!element) return
+      this.ttsHighlightedElement = element
+      this.ttsHighlightedStyle = {
+        backgroundColor: element.style.getPropertyValue('background-color'),
+        backgroundColorPriority: element.style.getPropertyPriority('background-color'),
+        borderRadius: element.style.getPropertyValue('border-radius'),
+        borderRadiusPriority: element.style.getPropertyPriority('border-radius'),
+        boxShadow: element.style.getPropertyValue('box-shadow'),
+        boxShadowPriority: element.style.getPropertyPriority('box-shadow'),
+      }
       element.classList.add('komga-tts-active')
+      // inline styles are required: ReadiumCSS forces `background-color: transparent !important` on every
+      // element when a custom background is set, and only inline `!important` declarations outrank it
+      const night = this.getEpubAppearanceName() === 'night'
+      element.style.setProperty('background-color', night ? 'rgba(255, 215, 0, 0.28)' : 'rgba(255, 235, 59, 0.45)', 'important')
+      element.style.setProperty('border-radius', '4px', 'important')
+      element.style.setProperty('box-shadow', night ? '0 0 0 2px rgba(255, 215, 0, 0.35)' : '0 0 0 2px rgba(255, 215, 0, 0.5)', 'important')
     },
     ttsClearHighlight() {
+      const reset = (el: HTMLElement, restore?: typeof this.ttsHighlightedStyle) => {
+        el.classList.remove('komga-tts-active')
+        const put = (property: string, value: string, priority: string) => {
+          if (value) el.style.setProperty(property, value, priority || '')
+          else el.style.removeProperty(property)
+        }
+        put('background-color', restore?.backgroundColor || '', restore?.backgroundColorPriority || '')
+        put('border-radius', restore?.borderRadius || '', restore?.borderRadiusPriority || '')
+        put('box-shadow', restore?.boxShadow || '', restore?.boxShadowPriority || '')
+      }
+      if (this.ttsHighlightedElement) {
+        reset(this.ttsHighlightedElement, this.ttsHighlightedStyle)
+        this.ttsHighlightedElement = undefined
+        this.ttsHighlightedStyle = undefined
+      }
       const iframe = document.querySelector<HTMLIFrameElement>('#iframe-wrapper iframe')
       const doc = iframe?.contentDocument
       if (!doc) return
-      doc.querySelectorAll('.komga-tts-active').forEach(el => el.classList.remove('komga-tts-active'))
+      doc.querySelectorAll<HTMLElement>('.komga-tts-active').forEach(el => reset(el))
     },
     ttsScrollIntoViewIfNeeded(element: HTMLElement, durationSeconds?: number) {
       this.ttsClearCrossPageTimer()
