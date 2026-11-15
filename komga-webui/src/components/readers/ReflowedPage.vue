@@ -2940,6 +2940,7 @@ export default Vue.extend({
         workHeight: this.localTextureHeight,
       } as ReflowCachePayload
       if (networkTransferBytes !== undefined) payload.networkTransferBytes = Math.max(0, Math.round(networkTransferBytes))
+      this.$debug?.('[reflow]', `page:${this.page.number}`, `items:${this.reflowItems.length}`, `mode:${this.controlProcessingMode}`)
       this.$emit('reflowed', payload)
     },
     currentCachePayload(): ReflowCachePayload | undefined {
@@ -3150,7 +3151,7 @@ export default Vue.extend({
       if (this.cropPageUrl === this.page.url) this.imageSize = {...this.cropImageSize}
       this.$nextTick(() => this.focusCropViewport(this.activeRoi))
     },
-    canvasContext(canvas: HTMLCanvasElement, willReadFrequently: boolean = false): CanvasRenderingContext2D | null {
+    canvasContext(canvas: HTMLCanvasElement, willReadFrequently: boolean = true): CanvasRenderingContext2D | null {
       if (willReadFrequently) return canvas.getContext('2d', {willReadFrequently: true})
       return canvas.getContext('2d')
     },
@@ -3426,7 +3427,7 @@ export default Vue.extend({
       const canvas = document.createElement('canvas')
       canvas.width = image.naturalWidth
       canvas.height = image.naturalHeight
-      const context = this.canvasContext(canvas)
+      const context = this.canvasContext(canvas, true)
       if (!context) return
       context.drawImage(image, 0, 0)
       this.pageBackground = this.detectPageBackground(context, canvas.width, canvas.height)
@@ -6470,7 +6471,7 @@ export default Vue.extend({
       requestId?: number,
       effectiveRoi?: Roi,
     ): Promise<ReflowItem[]> {
-      const sourceContext = this.canvasContext(sourceCanvas)
+      const sourceContext = this.canvasContext(sourceCanvas, true)
       if (!sourceContext) return []
       const sourceImageData = sourceContext.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height)
       const edgeBackgroundLuma = this.estimateSliceBackgroundLuma(sourceImageData.data, sourceCanvas.width, sourceCanvas.height)

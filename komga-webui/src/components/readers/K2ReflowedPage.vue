@@ -996,7 +996,7 @@ export default Vue.extend({
       if (normalized === 270) return -90
       return 0
     },
-    canvasContext(canvas: HTMLCanvasElement, willReadFrequently: boolean = false): CanvasRenderingContext2D | null {
+    canvasContext(canvas: HTMLCanvasElement, willReadFrequently: boolean = true): CanvasRenderingContext2D | null {
       if (willReadFrequently) return canvas.getContext('2d', {willReadFrequently: true})
       return canvas.getContext('2d')
     },

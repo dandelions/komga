@@ -1489,7 +1489,8 @@ export default Vue.extend({
     this.reflowSettingsBookId = this.bookId
     await this.loadReflowSettings(this.bookId)
 
-    this.setup(this.bookId, Number(this.$route.query.page))
+    const queryPage = this.$route.query.page ? Number(this.$route.query.page) : undefined
+    this.setup(this.bookId, Number.isFinite(queryPage) ? queryPage : undefined)
   },
   destroyed() {
     document.documentElement.classList.remove('html-reader')
@@ -2784,7 +2785,8 @@ export default Vue.extend({
       }
     },
     async setup(bookId: string, page?: number) {
-      this.$debug('[setup]', `bookId:${bookId}`, `page:${page}`)
+      const requestedPage = Number.isFinite(page) ? page : undefined
+      this.$debug('[setup]', `bookId:${bookId}`, requestedPage !== undefined ? `page:${requestedPage}` : 'page:auto')
       this.reflowCache = {}
       this.clearReflowPrefetch()
       this.revokeReaderDeskewedPageUrls()
