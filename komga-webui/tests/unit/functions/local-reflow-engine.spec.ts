@@ -1196,5 +1196,43 @@ describe('local-reflow-engine', () => {
       // There must NOT be a break between line 1 and line 2
       expect(breaks.length).toBe(0)
     })
+
+    test('extracts words and sets black pageBackground when darkDisplay and optimizeBackground are enabled', () => {
+      const width = 400
+      const height = 200
+      const pixels = new Uint8ClampedArray(width * height * 4)
+      pixels.fill(255)
+
+      // Draw 2 lines of text
+      for (let y = 30; y < 54; y++) {
+        for (let x = 40; x < 360; x += 24) {
+          for (let px = x; px < x + 16; px++) {
+            const idx = (y * width + px) * 4
+            pixels[idx] = 20; pixels[idx + 1] = 20; pixels[idx + 2] = 20
+          }
+        }
+      }
+      for (let y = 70; y < 94; y++) {
+        for (let x = 40; x < 360; x += 24) {
+          for (let px = x; px < x + 16; px++) {
+            const idx = (y * width + px) * 4
+            pixels[idx] = 20; pixels[idx + 1] = 20; pixels[idx + 2] = 20
+          }
+        }
+      }
+
+      const options = {
+        targetWidth: 400,
+        renderMode: 'slices' as const,
+        textScale: 100,
+        darkDisplay: true,
+        optimizeBackground: 'normalize',
+      } as LocalReflowOptions
+
+      const result = reflowPageFromPixels(pixels, width, height, options)
+      expect(result.pageBackground).toBe('#000000')
+      const words = result.items.filter(it => it.type === 'word')
+      expect(words.length).toBeGreaterThanOrEqual(10)
+    })
   })
 })

@@ -364,28 +364,41 @@ export function removeDocumentBackground(
     }
   }
 
+  const gx0Arr = new Int32Array(width)
+  const gx1Arr = new Int32Array(width)
+  const xFracArr = new Float32Array(width)
+  for (let x = 0; x < width; x++) {
+    const gxExact = (x / blockSize) - 0.5
+    const gx0 = Math.max(0, Math.min(gridW - 1, Math.floor(gxExact)))
+    gx0Arr[x] = gx0
+    gx1Arr[x] = Math.max(0, Math.min(gridW - 1, gx0 + 1))
+    xFracArr[x] = Math.max(0, Math.min(1, gxExact - gx0))
+  }
+
   for (let y = 0; y < height; y++) {
     const gyExact = (y / blockSize) - 0.5
     const gy0 = Math.max(0, Math.min(gridH - 1, Math.floor(gyExact)))
     const gy1 = Math.max(0, Math.min(gridH - 1, gy0 + 1))
     const yFrac = Math.max(0, Math.min(1, gyExact - gy0))
+    const row0 = gy0 * gridW
+    const row1 = gy1 * gridW
+    const rowOffset = y * width * 4
 
     for (let x = 0; x < width; x++) {
-      const gxExact = (x / blockSize) - 0.5
-      const gx0 = Math.max(0, Math.min(gridW - 1, Math.floor(gxExact)))
-      const gx1 = Math.max(0, Math.min(gridW - 1, gx0 + 1))
-      const xFrac = Math.max(0, Math.min(1, gxExact - gx0))
+      const gx0 = gx0Arr[x]
+      const gx1 = gx1Arr[x]
+      const xFrac = xFracArr[x]
 
-      const bg00 = bgGrid[gy0 * gridW + gx0]
-      const bg10 = bgGrid[gy0 * gridW + gx1]
-      const bg01 = bgGrid[gy1 * gridW + gx0]
-      const bg11 = bgGrid[gy1 * gridW + gx1]
+      const bg00 = bgGrid[row0 + gx0]
+      const bg10 = bgGrid[row0 + gx1]
+      const bg01 = bgGrid[row1 + gx0]
+      const bg11 = bgGrid[row1 + gx1]
 
       const top = bg00 + (bg10 - bg00) * xFrac
       const bottom = bg01 + (bg11 - bg01) * xFrac
       const localBg = top + (bottom - top) * yFrac
 
-      const offset = (y * width + x) * 4
+      const offset = rowOffset + x * 4
       if (data[offset + 3] === 0) {
         setGrayPixel(data, offset, targetBg)
         continue

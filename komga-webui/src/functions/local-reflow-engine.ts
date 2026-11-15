@@ -75,8 +75,8 @@ export type LocalReflowResult = {
 const EDGE_INK_THRESHOLD = 245
 const MAX_EDGE_TRIM = 6
 const MAX_EDGE_EXPANSION = 10
-const LOCAL_REFLOW_MAX_SIDE = 3600
-const LOCAL_REFLOW_MAX_PIXELS = 8_000_000
+const LOCAL_REFLOW_MAX_SIDE = 2600
+const LOCAL_REFLOW_MAX_PIXELS = 4_500_000
 const LOCAL_REFLOW_STRIP_ASPECT_RATIO = 2.0
 const LOCAL_REFLOW_STRIP_MAX_SHORT_SIDE = 1800
 const LOCAL_REFLOW_STRIP_MAX_LONG_SIDE = 65000
@@ -1365,8 +1365,10 @@ export function reflowPageFromPixels(
     options.optimizeBackground === 'normalize' ||
     options.matchBackgroundMode === 'monochrome'
 
-  if (isHighContrast) {
-    pageBackground = options.darkDisplay ? '#000000' : '#ffffff'
+  if (options.darkDisplay) {
+    pageBackground = '#000000'
+  } else if (isHighContrast) {
+    pageBackground = '#ffffff'
   }
 
   // 2. Downscale if excessively large (aligned with downscaleServerImage)
@@ -1411,7 +1413,7 @@ export function reflowPageFromPixels(
   }
 
   if (options.optimizeBackground && options.optimizeBackground !== 'none') {
-    removeDocumentBackground(workPixels, workW, workH, options.optimizeBackground, options.darkDisplay)
+    removeDocumentBackground(workPixels, workW, workH, options.optimizeBackground, sourceDark)
   }
 
   // 3. Auto deskew if requested

@@ -44,7 +44,7 @@ private const val VERTICAL_PARAGRAPH_BLANK_BLOCKS = 1.3
 private const val EDGE_INK_THRESHOLD = 245
 private const val MAX_EDGE_TRIM = 6
 private const val MAX_EDGE_EXPANSION = 10
-private const val REFLOW_ALGORITHM_VERSION = 17
+private const val REFLOW_ALGORITHM_VERSION = 18
 
 data class PdfPageReflowOptions(
   val targetWidth: Int,

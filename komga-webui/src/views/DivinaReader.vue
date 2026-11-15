@@ -1811,7 +1811,7 @@ export default Vue.extend({
     },
     reflowCacheKey(): string {
       return JSON.stringify({
-        renderVersion: 22,
+        renderVersion: 23,
         bookId: this.bookId,
         processingMode: this.reflowSettings.processingMode,
         rotation: this.readerRotation,

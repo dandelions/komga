@@ -954,7 +954,7 @@ const DETECTION_FULL_RES_MAX_PIXELS = 6000000
 const DETECTION_MAX_SIDE = 2800
 const DETECTION_MAX_PIXELS = 5000000
 const DETECTION_MIN_SCALE = 0.4
-const REFLOW_RESPONSE_VERSION = 17
+const REFLOW_RESPONSE_VERSION = 18
 
 export default Vue.extend({
   name: 'ReflowedPage',
@@ -2925,7 +2925,7 @@ export default Vue.extend({
         imageExclusionVersion: 4,
         detectionScaleVersion: 4,
         darkWordRenderVersion: 6,
-        wordSegmentationVersion: 9,
+        wordSegmentationVersion: 10,
       })
     },
     emitReflowed(networkTransferBytes?: number) {
