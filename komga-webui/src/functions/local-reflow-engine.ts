@@ -1614,6 +1614,8 @@ export function reflowPageFromPixels(
     let prevWords: WordBlock[] | null = null
     let prevLineWasCentered = false
     let prevLineWasRightAligned = false
+    let inListItem = false
+    let listContentIndent = 0
 
     lines.forEach((line, lineIdx) => {
       // 1. Insert block images appearing above this line
@@ -1636,6 +1638,8 @@ export function reflowPageFromPixels(
         prevWords = null
         prevLineWasCentered = false
         prevLineWasRightAligned = false
+        inListItem = false
+        listContentIndent = 0
       }
 
       // 2. Identify inline images inside this line
@@ -1664,57 +1668,20 @@ export function reflowPageFromPixels(
         const maxParagraphIndent = Math.max(firstWord.h * 5.0, colSpan * 0.18)
         const lineIndent = (rawIndent >= indentThreshold && rawIndent <= maxParagraphIndent) ? rawIndent : 0
 
-        const isIndentParagraph = prevWords && prevWords.length > 0
-          ? rawIndent > Math.max(0, prevWords[0].x - effectiveColStart) + Math.max(12, currentHeight * 1.4)
-          : (lineIdx === 0 && lineIndent > 0)
-
-        // 1. 居中行判定（前后均断行，如标题、居中诗歌）
-        const centerDiff = Math.abs(rawIndent - trailingBlankCurrent)
-        const isCentered = colSpan > glyphWidth * 5 &&
-          rawIndent >= glyphWidth * 1.5 &&
-          trailingBlankCurrent >= glyphWidth * 1.5 &&
-          centerDiff <= Math.max(18, glyphWidth * 1.5)
-
-        // 2. 右对齐行判定（前后均断行，如落款、作者署名、日期）
-        const isRightAligned = colSpan > glyphWidth * 5 &&
-          rawIndent >= Math.max(colSpan * 0.35, glyphWidth * 4.0) &&
-          trailingBlankCurrent <= Math.max(16, glyphWidth * 1.2)
-
-        // 3. 字号/行高突变判定（大字标题或小字题注进出）
-        let isFontSizeChange = false
-        if (prevWords && prevWords.length > 0) {
-          const prevHeight = prevWords[0].h || (prevLine ? prevLine.end - prevLine.start : currentHeight)
-          if (prevHeight > 0 && currentHeight > 0) {
-            const heightRatio = currentHeight / prevHeight
-            if (heightRatio >= 1.25 || heightRatio <= 0.78) {
-              isFontSizeChange = true
-            }
-          }
-        }
-
-        // 4. 悬挂缩进恢复顶格（词典条目、文献条目从内缩恢复顶格）
-        let isOutdentReset = false
-        if (prevWords && prevWords.length > 0) {
-          const prevRawIndent = Math.max(0, prevWords[0].x - effectiveColStart)
-          if (prevRawIndent >= glyphWidth * 1.4 && rawIndent <= glyphWidth * 0.6) {
-            isOutdentReset = true
-          }
-        }
-
-        // 5. 列表序号 / 引导符号起始行（•, -, *, 1. 等）
+        // 1. 列表序号 / 引导符号起始行（•, -, *, 1. 等）
         let isListItemPrefix = false
         if (words.length >= 2) {
           const w0 = words[0]
           const w1 = words[1]
           const gap01 = w1.x - (w0.x + w0.w)
-          const isBullet = (w0.w <= glyphWidth * 0.55 && w0.h <= currentHeight * 0.55)
-          const hasListGap = gap01 >= Math.max(4, glyphWidth * 0.3)
+          const isBullet = (w0.w <= glyphWidth * 0.85)
+          const hasListGap = gap01 >= Math.max(3, glyphWidth * 0.25)
           if (isBullet && hasListGap && rawIndent <= glyphWidth * 2.0) {
             isListItemPrefix = true
           }
         }
 
-        // 6. 尾部留白敏感度放宽 + 上一行句末标点符号辅助
+        // 2. 尾部留白敏感度放宽 + 上一行句末标点符号辅助
         let previousBlankCue = false
         if (prevWords && prevWords.length > 0) {
           const prevBlocks = prevWords.filter(w => w.w >= 2 && w.h >= 2)
@@ -1724,18 +1691,93 @@ export function reflowPageFromPixels(
             const isTrailingPunctuation = (prevLast.w <= glyphWidth * 0.65 || prevLast.h <= currentHeight * 0.65)
             const adaptiveBlankThreshold = isTrailingPunctuation
               ? Math.max(8, glyphWidth * 0.8)
-              : Math.max(10, glyphWidth * 1.3)
+              : Math.max(12, glyphWidth * 1.5)
 
             if (trailingBlank >= adaptiveBlankThreshold) {
               previousBlankCue = true
             } else {
               for (let i = 0; i < prevBlocks.length - 1; i++) {
-                if (prevBlocks[i + 1].x - (prevBlocks[i].x + prevBlocks[i].w) >= Math.max(12, glyphWidth * 1.8)) {
+                if (prevBlocks[i + 1].x - (prevBlocks[i].x + prevBlocks[i].w) >= Math.max(12, glyphWidth * 2.0)) {
                   previousBlankCue = true
                   break
                 }
               }
             }
+          }
+        }
+
+        // 3. 检查当前行是否为列表项/悬挂缩进续行（多行列表项内部正文，绝不断行）
+        let isHangingContinuation = false
+        if (prevWords && prevWords.length >= 2) {
+          const p0 = prevWords[0]
+          const p1 = prevWords[1]
+          const p0ToP1Offset = p1.x - p0.x
+          const p0ToP1Gap = p1.x - (p0.x + p0.w)
+          const hasPrefixOffset = p0ToP1Offset >= glyphWidth * 0.6 || p0ToP1Gap >= Math.max(4, glyphWidth * 0.25)
+          const alignsWithP1 = Math.abs(firstWord.x - p1.x) <= Math.max(24, glyphWidth * 0.6)
+          const indentedFromP0 = firstWord.x - p0.x >= glyphWidth * 0.6
+
+          if (hasPrefixOffset && alignsWithP1 && indentedFromP0 && !previousBlankCue) {
+            isHangingContinuation = true
+          }
+        }
+
+        let isListItemContinuation = isHangingContinuation
+        if (isListItemPrefix) {
+          inListItem = true
+          listContentIndent = words.length >= 2 ? (words[1].x - effectiveColStart) : (rawIndent + glyphWidth * 1.5)
+        } else if (inListItem && prevWords && prevWords.length > 0) {
+          const alignsListContent = Math.abs(rawIndent - listContentIndent) <= Math.max(20, glyphWidth * 0.8)
+          if (alignsListContent) {
+            if (previousBlankCue) {
+              inListItem = false
+            } else {
+              isListItemContinuation = true
+            }
+          } else if (rawIndent <= glyphWidth * 0.5 && rawIndent < listContentIndent - glyphWidth * 0.8) {
+            inListItem = false
+          }
+        }
+
+        const isIndentParagraph = !isListItemContinuation && (prevWords && prevWords.length > 0
+          ? rawIndent > Math.max(0, prevWords[0].x - effectiveColStart) + Math.max(12, currentHeight * 1.4)
+          : (lineIdx === 0 && lineIndent > 0))
+
+        // 4. 居中行判定（前后均断行，如标题、居中诗歌）
+        const centerDiff = Math.abs(rawIndent - trailingBlankCurrent)
+        const isCentered = !isListItemContinuation && colSpan > glyphWidth * 6 &&
+          rawIndent >= glyphWidth * 2.0 &&
+          trailingBlankCurrent >= glyphWidth * 2.0 &&
+          centerDiff <= Math.max(16, glyphWidth * 1.5)
+
+        // 5. 右对齐行判定（前后均断行，如落款、作者署名、日期）
+        const isRightAligned = !isListItemContinuation && colSpan > glyphWidth * 6 &&
+          rawIndent >= Math.max(colSpan * 0.4, glyphWidth * 4.5) &&
+          trailingBlankCurrent <= Math.max(12, glyphWidth * 1.0)
+
+        // 6. 字号/行高突变判定（大字标题或小字题注进出）
+        let isFontSizeChange = false
+        if (!isListItemContinuation && prevWords && prevWords.length > 0) {
+          const prevHeights = prevWords.filter(w => w.w >= 2 && w.h >= 2).map(w => w.h)
+          const currHeights = words.filter(w => w.w >= 2 && w.h >= 2).map(w => w.h)
+          if (prevHeights.length > 0 && currHeights.length > 0) {
+            const prevHeight = medianNumber(prevHeights)
+            const currHeight = medianNumber(currHeights)
+            if (prevHeight > 0 && currHeight > 0) {
+              const heightRatio = currHeight / prevHeight
+              if (heightRatio >= 1.35 || heightRatio <= 0.72) {
+                isFontSizeChange = true
+              }
+            }
+          }
+        }
+
+        // 7. 悬挂缩进恢复顶格（词典条目、文献条目从内缩恢复顶格）
+        let isOutdentReset = false
+        if (!isListItemContinuation && prevWords && prevWords.length > 0) {
+          const prevRawIndent = Math.max(0, prevWords[0].x - effectiveColStart)
+          if (prevRawIndent >= glyphWidth * 1.5 && rawIndent <= glyphWidth * 0.5) {
+            isOutdentReset = true
           }
         }
 
@@ -1745,27 +1787,32 @@ export function reflowPageFromPixels(
           hasParagraphGap = gap >= currentHeight * 1.8
         }
 
-        isNewParagraph = (prevWords === null) ||
-          isIndentParagraph ||
-          previousBlankCue ||
-          hasParagraphGap ||
-          isCentered ||
-          prevLineWasCentered ||
-          isRightAligned ||
-          prevLineWasRightAligned ||
-          isFontSizeChange ||
-          isOutdentReset ||
-          isListItemPrefix
+        if (isListItemContinuation) {
+          isNewParagraph = false
+          indentWidth = 0
+        } else {
+          isNewParagraph = (prevWords === null) ||
+            isIndentParagraph ||
+            previousBlankCue ||
+            hasParagraphGap ||
+            isCentered ||
+            prevLineWasCentered ||
+            isRightAligned ||
+            prevLineWasRightAligned ||
+            isFontSizeChange ||
+            isOutdentReset ||
+            isListItemPrefix
 
-        if (isNewParagraph) {
-          if (isCentered || isRightAligned) {
-            indentWidth = 0
-          } else if (lineIndent > 0) {
-            indentWidth = lineIndent
-          } else if (previousBlankCue || hasParagraphGap) {
-            indentWidth = Math.round(glyphWidth * 2)
-          } else {
-            indentWidth = 0
+          if (isNewParagraph) {
+            if (isCentered || isRightAligned || isListItemPrefix) {
+              indentWidth = 0
+            } else if (lineIndent > 0) {
+              indentWidth = lineIndent
+            } else if (previousBlankCue || hasParagraphGap) {
+              indentWidth = Math.round(glyphWidth * 2)
+            } else {
+              indentWidth = 0
+            }
           }
         }
 

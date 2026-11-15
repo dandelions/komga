@@ -44,7 +44,7 @@ private const val VERTICAL_PARAGRAPH_BLANK_BLOCKS = 1.3
 private const val EDGE_INK_THRESHOLD = 245
 private const val MAX_EDGE_TRIM = 6
 private const val MAX_EDGE_EXPANSION = 10
-private const val REFLOW_ALGORITHM_VERSION = 15
+private const val REFLOW_ALGORITHM_VERSION = 16
 
 data class PdfPageReflowOptions(
   val targetWidth: Int,
@@ -2249,6 +2249,8 @@ class PdfPageReflowService(
     val imageSlots = horizontalImageSlots(imageRegions, lines)
     var prevLineWasCentered = false
     var prevLineWasRightAligned = false
+    var inListItem = false
+    var listContentIndent = 0.0
 
     lines.forEachIndexed { index, line ->
       appendImageItems(items, imageSlots[index], imageItemsByRegion)
@@ -2264,30 +2266,65 @@ class PdfPageReflowService(
           manualImageExplainsHorizontalColumnTransition(it, line, manualImageRegions, glyphHeight)
         } ?: false
 
+      val glyphWidth = max(8.0, horizontalCharacterSourceWidth(line.blocks).takeIf { it > 0 } ?: glyphHeight)
+      val rawIndent = rawHorizontalLineIndent(line).toDouble()
+      val isListItemPrefix = isHorizontalListItemPrefix(line, glyphWidth)
+
+      val isHangingContinuation =
+        previousLine != null &&
+          previousLine.column == line.column &&
+          isHorizontalHangingContinuation(line, previousLine, glyphWidth, previousBlankCue)
+
+      var isListItemContinuation = isHangingContinuation
+      if (isListItemPrefix) {
+        inListItem = true
+        val validBlocks = line.blocks.filter { it.w >= 2 && it.h >= 2 && !isRuleLikeBlock(it) }.sortedBy { it.x }
+        listContentIndent =
+          if (validBlocks.size >= 2) {
+            max(0.0, validBlocks[1].x - line.column.start.toDouble())
+          } else {
+            rawIndent + glyphWidth * 1.5
+          }
+      } else if (inListItem && previousLine != null && previousLine.column == line.column) {
+        val alignsListContent = abs(rawIndent - listContentIndent) <= max(20.0, glyphWidth * 0.8)
+        if (alignsListContent) {
+          if (previousBlankCue) {
+            inListItem = false
+          } else {
+            isListItemContinuation = true
+          }
+        } else if (rawIndent <= glyphWidth * 0.5 && rawIndent < listContentIndent - glyphWidth * 0.8) {
+          inListItem = false
+        }
+      }
+
       val inManualImageFlow = manualImageTrailingBlank || manualImageColumnTransition
-      val isCentered = !inManualImageFlow && isHorizontalCenteredLine(line, glyphHeight)
-      val isRightAligned = !inManualImageFlow && isHorizontalRightAlignedLine(line, glyphHeight)
-      val isFontSizeChange = !inManualImageFlow && (previousLine?.let { isHorizontalFontSizeChange(it, line) } ?: false)
-      val isOutdentReset = !inManualImageFlow && (previousLine?.let { isHorizontalOutdentReset(it, line, glyphHeight) } ?: false)
-      val isListItemPrefix = isHorizontalListItemPrefix(line, glyphHeight)
+      val isCentered = !inManualImageFlow && !isListItemContinuation && isHorizontalCenteredLine(line, glyphHeight)
+      val isRightAligned = !inManualImageFlow && !isListItemContinuation && isHorizontalRightAlignedLine(line, glyphHeight)
+      val isFontSizeChange = !inManualImageFlow && !isListItemContinuation && (previousLine?.let { isHorizontalFontSizeChange(it, line) } ?: false)
+      val isOutdentReset = !inManualImageFlow && !isListItemContinuation && (previousLine?.let { isHorizontalOutdentReset(it, line, glyphHeight) } ?: false)
 
       val startParagraph =
-        isHorizontalParagraphStart(line, previousLine, manualImageColumnTransition) ||
-          previousBlankCue ||
-          isCentered ||
-          prevLineWasCentered ||
-          isRightAligned ||
-          prevLineWasRightAligned ||
-          isFontSizeChange ||
-          isOutdentReset ||
-          isListItemPrefix
+        if (isListItemContinuation) {
+          false
+        } else {
+          isHorizontalParagraphStart(line, previousLine, manualImageColumnTransition) ||
+            previousBlankCue ||
+            isCentered ||
+            prevLineWasCentered ||
+            isRightAligned ||
+            prevLineWasRightAligned ||
+            isFontSizeChange ||
+            isOutdentReset ||
+            isListItemPrefix
+        }
 
       prevLineWasCentered = isCentered
       prevLineWasRightAligned = isRightAligned
 
       val indent =
         if (startParagraph) {
-          if (isCentered || isRightAligned) {
+          if (isCentered || isRightAligned || isListItemPrefix) {
             0
           } else {
             val lineIndent = horizontalLineIndentSourceWidth(line)
@@ -2636,6 +2673,29 @@ class PdfPageReflowService(
     return prevIndent >= glyphWidth * 1.5 && currIndent <= glyphWidth * 0.5
   }
 
+  private fun isHorizontalHangingContinuation(
+    line: HorizontalTextLine,
+    previousLine: HorizontalTextLine,
+    glyphWidth: Double,
+    previousBlankCue: Boolean,
+  ): Boolean {
+    val prevBlocks = previousLine.blocks.filter { it.w >= 2 && it.h >= 2 && !isRuleLikeBlock(it) }.sortedBy { it.x }
+    if (prevBlocks.size < 2 || line.blocks.isEmpty()) return false
+    val p0 = prevBlocks[0]
+    val p1 = prevBlocks[1]
+    val currBlocks = line.blocks.filter { it.w >= 2 && it.h >= 2 && !isRuleLikeBlock(it) }.sortedBy { it.x }
+    if (currBlocks.isEmpty()) return false
+    val c0 = currBlocks[0]
+
+    val p0ToP1Offset = (p1.x - p0.x).toDouble()
+    val p0ToP1Gap = (p1.x - (p0.x + p0.w)).toDouble()
+    val hasPrefixOffset = p0ToP1Offset >= glyphWidth * 0.6 || p0ToP1Gap >= max(4.0, glyphWidth * 0.25)
+    val alignsWithP1 = abs(c0.x - p1.x) <= max(24.0, glyphWidth * 0.6)
+    val indentedFromP0 = (c0.x - p0.x) >= glyphWidth * 0.6
+
+    return hasPrefixOffset && alignsWithP1 && indentedFromP0 && !previousBlankCue
+  }
+
   private fun isHorizontalListItemPrefix(
     line: HorizontalTextLine,
     glyphWidth: Double,
@@ -2645,9 +2705,8 @@ class PdfPageReflowService(
     val b0 = blocks[0]
     val b1 = blocks[1]
     val gap01 = b1.x - (b0.x + b0.w)
-    val height = b0.h.toDouble()
-    val isBullet = b0.w <= glyphWidth * 0.55 && b0.h <= height * 0.55
-    val hasListGap = gap01 >= max(4.0, glyphWidth * 0.3)
+    val isBullet = b0.w <= glyphWidth * 0.85
+    val hasListGap = gap01 >= max(3.0, glyphWidth * 0.25)
     val rawIndent = max(0, b0.x - line.column.start)
     return isBullet && hasListGap && rawIndent <= glyphWidth * 2.0
   }

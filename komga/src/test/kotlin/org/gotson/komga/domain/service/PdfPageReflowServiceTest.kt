@@ -1892,4 +1892,38 @@ class PdfPageReflowServiceTest {
     val breaks = response.items.filter { it.type == "break" }
     assertThat(breaks).isNotEmpty
   }
+
+  @Test
+  fun `given bullet list item continuation line then no break is inserted`() {
+    val width = 600
+    val height = 150
+    val image = BufferedImage(width, height, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, width, height)
+    graphics.color = Color.BLACK
+    // Line 1: Bullet at x: 40 (w: 16), text from x: 80 to 580 (height 24, y: 20..44)
+    graphics.fillRect(40, 24, 16, 16)
+    repeat(20) { glyph -> graphics.fillRect(80 + glyph * 24, 20, 16, 24) }
+    // Line 2: Continuation text directly under Line 1 body (x: 80..580, height 24, y: 55..79)
+    repeat(20) { glyph -> graphics.fillRect(80 + glyph * 24, 55, 16, 24) }
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    val pageBytes = output.toByteArray()
+
+    val book = makeBook("bullet-continuation-book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+      )
+
+    val breaks = response.items.filter { it.type == "break" }
+    assertThat(breaks).isEmpty()
+  }
 }

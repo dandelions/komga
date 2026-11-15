@@ -1039,5 +1039,54 @@ describe('local-reflow-engine', () => {
       const breaks = result.items.filter(it => it.type === 'break')
       expect(breaks.length).toBeGreaterThanOrEqual(1)
     })
+
+    test('bullet list item continuation lines do not break or insert fake indent', () => {
+      const width = 600
+      const height = 150
+      const pixels = new Uint8ClampedArray(width * height * 4)
+      pixels.fill(255)
+
+      // Line 1: Bullet at x: 40 (width 16), text: 15 glyphs from x: 80 to 560 (height 24, y: 20..44)
+      for (let y = 24; y < 40; y++) {
+        for (let x = 40; x < 56; x++) {
+          const idx = (y * width + x) * 4
+          pixels[idx] = 0; pixels[idx + 1] = 0; pixels[idx + 2] = 0
+        }
+      }
+      for (let g = 0; g < 15; g++) {
+        const gx = 80 + g * 32
+        for (let y = 20; y < 44; y++) {
+          for (let x = gx; x < gx + 20; x++) {
+            const idx = (y * width + x) * 4
+            pixels[idx] = 0; pixels[idx + 1] = 0; pixels[idx + 2] = 0
+          }
+        }
+      }
+
+      // Line 2: Continuation text: 15 glyphs directly under Line 1 body (x: 80..560, height 24, y: 55..79)
+      for (let g = 0; g < 15; g++) {
+        const gx = 80 + g * 32
+        for (let y = 55; y < 79; y++) {
+          for (let x = gx; x < gx + 20; x++) {
+            const idx = (y * width + x) * 4
+            pixels[idx] = 0; pixels[idx + 1] = 0; pixels[idx + 2] = 0
+          }
+        }
+      }
+
+      const options = {
+        targetWidth: 600,
+        renderMode: 'slices' as const,
+        textScale: 100,
+      } as LocalReflowOptions
+
+      const result = reflowPageFromPixels(pixels, width, height, options)
+      const breaks = result.items.filter(it => it.type === 'break')
+      const indents = result.items.filter(it => it.type === 'indent')
+
+      // Continuation line must NOT be treated as a new paragraph (no break between line 1 and line 2)
+      expect(breaks.length).toBe(0)
+      expect(indents.length).toBe(0)
+    })
   })
 })
