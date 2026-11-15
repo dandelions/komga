@@ -40,11 +40,11 @@ private const val REFLOW_INLINE_TARGET_MAX_BYTES = 220 * 1024
 private const val REFLOW_INLINE_MAX_PIXELS = 1_400_000
 private const val REFLOW_INLINE_MAX_SIDE = 1800
 private const val REFLOW_INLINE_MIN_SCALE = 0.35
-private const val VERTICAL_PARAGRAPH_BLANK_BLOCKS = 2.0
+private const val VERTICAL_PARAGRAPH_BLANK_BLOCKS = 1.3
 private const val EDGE_INK_THRESHOLD = 245
 private const val MAX_EDGE_TRIM = 6
 private const val MAX_EDGE_EXPANSION = 10
-private const val REFLOW_ALGORITHM_VERSION = 14
+private const val REFLOW_ALGORITHM_VERSION = 15
 
 data class PdfPageReflowOptions(
   val targetWidth: Int,
@@ -2247,6 +2247,9 @@ class PdfPageReflowService(
         .let { mergeManualImageHorizontalLineFragments(it, manualImageRegions, glyphHeight) }
 
     val imageSlots = horizontalImageSlots(imageRegions, lines)
+    var prevLineWasCentered = false
+    var prevLineWasRightAligned = false
+
     lines.forEachIndexed { index, line ->
       appendImageItems(items, imageSlots[index], imageItemsByRegion)
       val previousLine = lines.getOrNull(index - 1)
@@ -2260,14 +2263,39 @@ class PdfPageReflowService(
         previousLine?.let {
           manualImageExplainsHorizontalColumnTransition(it, line, manualImageRegions, glyphHeight)
         } ?: false
-      val startParagraph = isHorizontalParagraphStart(line, previousLine, manualImageColumnTransition) || previousBlankCue
+
+      val inManualImageFlow = manualImageTrailingBlank || manualImageColumnTransition
+      val isCentered = !inManualImageFlow && isHorizontalCenteredLine(line, glyphHeight)
+      val isRightAligned = !inManualImageFlow && isHorizontalRightAlignedLine(line, glyphHeight)
+      val isFontSizeChange = !inManualImageFlow && (previousLine?.let { isHorizontalFontSizeChange(it, line) } ?: false)
+      val isOutdentReset = !inManualImageFlow && (previousLine?.let { isHorizontalOutdentReset(it, line, glyphHeight) } ?: false)
+      val isListItemPrefix = isHorizontalListItemPrefix(line, glyphHeight)
+
+      val startParagraph =
+        isHorizontalParagraphStart(line, previousLine, manualImageColumnTransition) ||
+          previousBlankCue ||
+          isCentered ||
+          prevLineWasCentered ||
+          isRightAligned ||
+          prevLineWasRightAligned ||
+          isFontSizeChange ||
+          isOutdentReset ||
+          isListItemPrefix
+
+      prevLineWasCentered = isCentered
+      prevLineWasRightAligned = isRightAligned
+
       val indent =
         if (startParagraph) {
-          val lineIndent = horizontalLineIndentSourceWidth(line)
-          when {
-            lineIndent > 0 -> lineIndent
-            previousBlankCue -> horizontalParagraphIndentSourceWidth(line, glyphHeight)
-            else -> 0
+          if (isCentered || isRightAligned) {
+            0
+          } else {
+            val lineIndent = horizontalLineIndentSourceWidth(line)
+            when {
+              lineIndent > 0 -> lineIndent
+              previousBlankCue -> horizontalParagraphIndentSourceWidth(line, glyphHeight)
+              else -> 0
+            }
           }
         } else {
           0
@@ -2537,14 +2565,91 @@ class PdfPageReflowService(
         abs(first.x - nextFirst.x) <= glyphWidth * 1.25
     if (sameNarrowColumn) return false
 
-    val blankThreshold = max(12.0, glyphWidth * 2.0)
     val last = blocks.last()
     val trailingBlank = line.column.end - (last.x + last.w)
-    if (!ignoreTrailingBlank && trailingBlank >= blankThreshold) return true
+    val isTrailingPunctuation = last.w <= glyphWidth * 0.65 || last.h <= glyphHeight * 0.65
+    val adaptiveBlankThreshold = if (isTrailingPunctuation) max(8.0, glyphWidth * 0.8) else max(12.0, glyphWidth * 1.5)
+    if (!ignoreTrailingBlank && trailingBlank >= adaptiveBlankThreshold) return true
 
+    val gapThreshold = max(12.0, glyphWidth * 2.0)
     return blocks.zipWithNext().any { (left, right) ->
-      right.x - (left.x + left.w) >= blankThreshold
+      right.x - (left.x + left.w) >= gapThreshold
     }
+  }
+
+  private fun isHorizontalCenteredLine(
+    line: HorizontalTextLine,
+    glyphWidth: Double,
+  ): Boolean {
+    val blocks = line.blocks.filter { it.w >= 2 && it.h >= 2 && !isRuleLikeBlock(it) }.sortedBy { it.x }
+    if (blocks.isEmpty()) return false
+    val first = blocks.first()
+    val last = blocks.last()
+    val colSpan = line.column.end - line.column.start
+    val leftBlank = max(0, first.x - line.column.start)
+    val rightBlank = max(0, line.column.end - (last.x + last.w))
+    val centerDiff = abs(leftBlank - rightBlank)
+    return colSpan > glyphWidth * 6.0 &&
+      leftBlank >= glyphWidth * 2.0 &&
+      rightBlank >= glyphWidth * 2.0 &&
+      centerDiff <= max(16.0, glyphWidth * 1.5)
+  }
+
+  private fun isHorizontalRightAlignedLine(
+    line: HorizontalTextLine,
+    glyphWidth: Double,
+  ): Boolean {
+    val blocks = line.blocks.filter { it.w >= 2 && it.h >= 2 && !isRuleLikeBlock(it) }.sortedBy { it.x }
+    if (blocks.isEmpty()) return false
+    val first = blocks.first()
+    val last = blocks.last()
+    val colSpan = line.column.end - line.column.start
+    val leftBlank = max(0, first.x - line.column.start)
+    val rightBlank = max(0, line.column.end - (last.x + last.w))
+    return colSpan > glyphWidth * 6.0 &&
+      leftBlank >= max(colSpan * 0.4, glyphWidth * 4.5) &&
+      rightBlank <= max(12.0, glyphWidth * 1.0)
+  }
+
+  private fun isHorizontalFontSizeChange(
+    previousLine: HorizontalTextLine,
+    currentLine: HorizontalTextLine,
+  ): Boolean {
+    val prevHeights = previousLine.blocks.filter { it.w >= 2 && it.h >= 2 && !isRuleLikeBlock(it) }.map { it.h.toDouble() }
+    val currHeights = currentLine.blocks.filter { it.w >= 2 && it.h >= 2 && !isRuleLikeBlock(it) }.map { it.h.toDouble() }
+    if (prevHeights.isEmpty() || currHeights.isEmpty()) return false
+    val prevHeight = medianNumber(prevHeights)
+    val currHeight = medianNumber(currHeights)
+    if (prevHeight <= 0.0 || currHeight <= 0.0) return false
+    val ratio = currHeight / prevHeight
+    return ratio >= 1.35 || ratio <= 0.72
+  }
+
+  private fun isHorizontalOutdentReset(
+    previousLine: HorizontalTextLine,
+    currentLine: HorizontalTextLine,
+    glyphWidth: Double,
+  ): Boolean {
+    if (previousLine.column != currentLine.column) return false
+    val prevIndent = rawHorizontalLineIndent(previousLine)
+    val currIndent = rawHorizontalLineIndent(currentLine)
+    return prevIndent >= glyphWidth * 1.5 && currIndent <= glyphWidth * 0.5
+  }
+
+  private fun isHorizontalListItemPrefix(
+    line: HorizontalTextLine,
+    glyphWidth: Double,
+  ): Boolean {
+    val blocks = line.blocks.filter { it.w >= 2 && it.h >= 2 && !isRuleLikeBlock(it) }.sortedBy { it.x }
+    if (blocks.size < 2) return false
+    val b0 = blocks[0]
+    val b1 = blocks[1]
+    val gap01 = b1.x - (b0.x + b0.w)
+    val height = b0.h.toDouble()
+    val isBullet = b0.w <= glyphWidth * 0.55 && b0.h <= height * 0.55
+    val hasListGap = gap01 >= max(4.0, glyphWidth * 0.3)
+    val rawIndent = max(0, b0.x - line.column.start)
+    return isBullet && hasListGap && rawIndent <= glyphWidth * 2.0
   }
 
   private fun manualImageOccupiesHorizontalTrailingBlank(
@@ -3069,7 +3174,10 @@ class PdfPageReflowService(
         verticalCharacterSourceHeight(line.blocks),
         verticalCharacterSourceHeight(previousLine.blocks),
       )
-    return blankTail >= max(6.0, characterHeight * VERTICAL_PARAGRAPH_BLANK_BLOCKS)
+    val lastBlock = previousLine.blocks.filter { !isRuleLikeBlock(it) }.maxByOrNull { it.y + it.h }
+    val isPunctuation = lastBlock != null && (lastBlock.w <= characterHeight * 0.65 || lastBlock.h <= characterHeight * 0.65)
+    val factor = if (isPunctuation) 0.8 else VERTICAL_PARAGRAPH_BLANK_BLOCKS
+    return blankTail >= max(6.0, characterHeight * factor)
   }
 
   private fun verticalLineBottom(line: VerticalTextLine): Int? =

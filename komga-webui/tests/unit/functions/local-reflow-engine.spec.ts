@@ -939,4 +939,105 @@ describe('local-reflow-engine', () => {
       expect(words[0].h).toBe(words[1].h)
     })
   })
+
+  describe('new paragraph and line break rules', () => {
+    test('triggers paragraph break on centered title line', () => {
+      const width = 600
+      const height = 200
+      const pixels = new Uint8ClampedArray(width * height * 4)
+      pixels.fill(255)
+
+      // Line 1: Centered title (x: 230..370, y: 30..60, width: 140, centered in 600)
+      for (let y = 30; y < 60; y++) {
+        for (let x = 230; x < 370; x++) {
+          const idx = (y * width + x) * 4
+          pixels[idx] = 0; pixels[idx + 1] = 0; pixels[idx + 2] = 0
+        }
+      }
+
+      // Line 2: Regular body line starting at x: 20..580, y: 80..110
+      for (let y = 80; y < 110; y++) {
+        for (let x = 20; x < 580; x++) {
+          const idx = (y * width + x) * 4
+          pixels[idx] = 0; pixels[idx + 1] = 0; pixels[idx + 2] = 0
+        }
+      }
+
+      const options = {
+        targetWidth: 600,
+        renderMode: 'slices' as const,
+        textScale: 100,
+      } as LocalReflowOptions
+
+      const result = reflowPageFromPixels(pixels, width, height, options)
+      const breaks = result.items.filter(it => it.type === 'break')
+      expect(breaks.length).toBeGreaterThanOrEqual(1)
+    })
+
+    test('triggers paragraph break on font size change between heading and body', () => {
+      const width = 600
+      const height = 200
+      const pixels = new Uint8ClampedArray(width * height * 4)
+      pixels.fill(255)
+
+      // Line 1: Large heading (height = 40, y: 20..60, x: 20..500)
+      for (let y = 20; y < 60; y++) {
+        for (let x = 20; x < 500; x++) {
+          const idx = (y * width + x) * 4
+          pixels[idx] = 0; pixels[idx + 1] = 0; pixels[idx + 2] = 0
+        }
+      }
+
+      // Line 2: Small body line (height = 20, y: 75..95, x: 20..500)
+      for (let y = 75; y < 95; y++) {
+        for (let x = 20; x < 500; x++) {
+          const idx = (y * width + x) * 4
+          pixels[idx] = 0; pixels[idx + 1] = 0; pixels[idx + 2] = 0
+        }
+      }
+
+      const options = {
+        targetWidth: 600,
+        renderMode: 'slices' as const,
+        textScale: 100,
+      } as LocalReflowOptions
+
+      const result = reflowPageFromPixels(pixels, width, height, options)
+      const breaks = result.items.filter(it => it.type === 'break')
+      expect(breaks.length).toBeGreaterThanOrEqual(1)
+    })
+
+    test('triggers paragraph break on outdent reset for bibliography entries', () => {
+      const width = 600
+      const height = 200
+      const pixels = new Uint8ClampedArray(width * height * 4)
+      pixels.fill(255)
+
+      // Line 1: Indented continuation of previous entry (x: 80..580, y: 20..45)
+      for (let y = 20; y < 45; y++) {
+        for (let x = 80; x < 580; x++) {
+          const idx = (y * width + x) * 4
+          pixels[idx] = 0; pixels[idx + 1] = 0; pixels[idx + 2] = 0
+        }
+      }
+
+      // Line 2: New entry outdents back to left margin (x: 20..580, y: 55..80)
+      for (let y = 55; y < 80; y++) {
+        for (let x = 20; x < 580; x++) {
+          const idx = (y * width + x) * 4
+          pixels[idx] = 0; pixels[idx + 1] = 0; pixels[idx + 2] = 0
+        }
+      }
+
+      const options = {
+        targetWidth: 600,
+        renderMode: 'slices' as const,
+        textScale: 100,
+      } as LocalReflowOptions
+
+      const result = reflowPageFromPixels(pixels, width, height, options)
+      const breaks = result.items.filter(it => it.type === 'break')
+      expect(breaks.length).toBeGreaterThanOrEqual(1)
+    })
+  })
 })

@@ -77,6 +77,9 @@ const MAX_EDGE_TRIM = 6
 const MAX_EDGE_EXPANSION = 10
 const LOCAL_REFLOW_MAX_SIDE = 3600
 const LOCAL_REFLOW_MAX_PIXELS = 8_000_000
+const LOCAL_REFLOW_STRIP_ASPECT_RATIO = 2.0
+const LOCAL_REFLOW_STRIP_MAX_SHORT_SIDE = 1800
+const LOCAL_REFLOW_STRIP_MAX_LONG_SIDE = 65000
 
 export function clamp(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, v))
@@ -1105,6 +1108,14 @@ export function horizontalCharacterSourceWidth(blocks: WordBlock[]): number {
   return Math.max(8.0, medianNumber(widths))
 }
 
+export function horizontalCharacterSourceHeight(blocks: WordBlock[]): number {
+  const heights = blocks
+    .filter(b => b.w >= 2 && b.h >= 2)
+    .map(b => b.h)
+  if (heights.length === 0) return 8.0
+  return Math.max(8.0, medianNumber(heights))
+}
+
 export function contrastEnhancedTextColor(
   r: number,
   g: number,
@@ -1359,23 +1370,26 @@ export function reflowPageFromPixels(
   }
 
   // 2. Downscale if excessively large (aligned with downscaleServerImage)
-  const maxPixels = LOCAL_REFLOW_MAX_PIXELS
-  const maxSide = LOCAL_REFLOW_MAX_SIDE
-  const currentPixels = sourceW * sourceH
-  const currentMaxSide = Math.max(sourceW, sourceH)
+  const shortSide = Math.min(sourceW, sourceH)
+  const longSide = Math.max(sourceW, sourceH)
+  const aspectRatio = longSide / Math.max(1, shortSide)
 
   let scale = 1.0
-  if (currentPixels > maxPixels || currentMaxSide > maxSide) {
-    const scalePixels = Math.sqrt(maxPixels / currentPixels)
-    const scaleSide = maxSide / currentMaxSide
-    scale = Math.min(scalePixels, scaleSide)
+  if (aspectRatio > LOCAL_REFLOW_STRIP_ASPECT_RATIO) {
+    const shortSideScale = LOCAL_REFLOW_STRIP_MAX_SHORT_SIDE / shortSide
+    const longSideScale = LOCAL_REFLOW_STRIP_MAX_LONG_SIDE / longSide
+    scale = Math.min(1.0, Math.min(shortSideScale, longSideScale))
+  } else {
+    const maxSideScale = LOCAL_REFLOW_MAX_SIDE / longSide
+    const pixelScale = Math.sqrt(LOCAL_REFLOW_MAX_PIXELS / Math.max(1, sourceW * sourceH))
+    scale = Math.min(1.0, Math.min(maxSideScale, pixelScale))
   }
 
   let workPixels = sourcePixels
   let workW = sourceW
   let workH = sourceH
 
-  if (scale < 0.95) {
+  if (scale < 0.99) {
     workW = Math.max(1, Math.round(sourceW * scale))
     workH = Math.max(1, Math.round(sourceH * scale))
     workPixels = new Uint8ClampedArray(workW * workH * 4)
@@ -1593,9 +1607,13 @@ export function reflowPageFromPixels(
     })
     const effectiveColStart = Number.isFinite(colTextLeft) ? colTextLeft : col.start
     const effectiveColEnd = colTextRight > effectiveColStart ? colTextRight : col.end
+    const allColWords = linesWords.flat()
+    const colGlyphHeight = horizontalCharacterSourceHeight(allColWords)
 
     let prevLine: {start: number, end: number} | null = null
     let prevWords: WordBlock[] | null = null
+    let prevLineWasCentered = false
+    let prevLineWasRightAligned = false
 
     lines.forEach((line, lineIdx) => {
       // 1. Insert block images appearing above this line
@@ -1616,6 +1634,8 @@ export function reflowPageFromPixels(
         })
         prevLine = null
         prevWords = null
+        prevLineWasCentered = false
+        prevLineWasRightAligned = false
       }
 
       // 2. Identify inline images inside this line
@@ -1634,29 +1654,83 @@ export function reflowPageFromPixels(
 
       if (words.length > 0) {
         const firstWord = words[0]
+        const lastWord = words[words.length - 1]
+        const colSpan = effectiveColEnd - effectiveColStart
         const rawIndent = Math.max(0, firstWord.x - effectiveColStart)
+        const trailingBlankCurrent = Math.max(0, effectiveColEnd - (lastWord.x + lastWord.w))
         const currentHeight = firstWord.h || (line.end - line.start)
         const glyphWidth = Math.max(8, horizontalCharacterSourceWidth(words) || currentHeight)
         const indentThreshold = Math.max(8, firstWord.h * 0.3)
-        const maxParagraphIndent = Math.max(firstWord.h * 5.0, (effectiveColEnd - effectiveColStart) * 0.18)
+        const maxParagraphIndent = Math.max(firstWord.h * 5.0, colSpan * 0.18)
         const lineIndent = (rawIndent >= indentThreshold && rawIndent <= maxParagraphIndent) ? rawIndent : 0
 
         const isIndentParagraph = prevWords && prevWords.length > 0
           ? rawIndent > Math.max(0, prevWords[0].x - effectiveColStart) + Math.max(12, currentHeight * 1.4)
           : (lineIdx === 0 && lineIndent > 0)
 
+        // 1. 居中行判定（前后均断行，如标题、居中诗歌）
+        const centerDiff = Math.abs(rawIndent - trailingBlankCurrent)
+        const isCentered = colSpan > glyphWidth * 5 &&
+          rawIndent >= glyphWidth * 1.5 &&
+          trailingBlankCurrent >= glyphWidth * 1.5 &&
+          centerDiff <= Math.max(18, glyphWidth * 1.5)
+
+        // 2. 右对齐行判定（前后均断行，如落款、作者署名、日期）
+        const isRightAligned = colSpan > glyphWidth * 5 &&
+          rawIndent >= Math.max(colSpan * 0.35, glyphWidth * 4.0) &&
+          trailingBlankCurrent <= Math.max(16, glyphWidth * 1.2)
+
+        // 3. 字号/行高突变判定（大字标题或小字题注进出）
+        let isFontSizeChange = false
+        if (prevWords && prevWords.length > 0) {
+          const prevHeight = prevWords[0].h || (prevLine ? prevLine.end - prevLine.start : currentHeight)
+          if (prevHeight > 0 && currentHeight > 0) {
+            const heightRatio = currentHeight / prevHeight
+            if (heightRatio >= 1.25 || heightRatio <= 0.78) {
+              isFontSizeChange = true
+            }
+          }
+        }
+
+        // 4. 悬挂缩进恢复顶格（词典条目、文献条目从内缩恢复顶格）
+        let isOutdentReset = false
+        if (prevWords && prevWords.length > 0) {
+          const prevRawIndent = Math.max(0, prevWords[0].x - effectiveColStart)
+          if (prevRawIndent >= glyphWidth * 1.4 && rawIndent <= glyphWidth * 0.6) {
+            isOutdentReset = true
+          }
+        }
+
+        // 5. 列表序号 / 引导符号起始行（•, -, *, 1. 等）
+        let isListItemPrefix = false
+        if (words.length >= 2) {
+          const w0 = words[0]
+          const w1 = words[1]
+          const gap01 = w1.x - (w0.x + w0.w)
+          const isBullet = (w0.w <= glyphWidth * 0.55 && w0.h <= currentHeight * 0.55)
+          const hasListGap = gap01 >= Math.max(4, glyphWidth * 0.3)
+          if (isBullet && hasListGap && rawIndent <= glyphWidth * 2.0) {
+            isListItemPrefix = true
+          }
+        }
+
+        // 6. 尾部留白敏感度放宽 + 上一行句末标点符号辅助
         let previousBlankCue = false
         if (prevWords && prevWords.length > 0) {
           const prevBlocks = prevWords.filter(w => w.w >= 2 && w.h >= 2)
           if (prevBlocks.length > 0) {
-            const blankThreshold = Math.max(12, glyphWidth * 2.0)
             const prevLast = prevBlocks[prevBlocks.length - 1]
             const trailingBlank = effectiveColEnd - (prevLast.x + prevLast.w)
-            if (trailingBlank >= blankThreshold) {
+            const isTrailingPunctuation = (prevLast.w <= glyphWidth * 0.65 || prevLast.h <= currentHeight * 0.65)
+            const adaptiveBlankThreshold = isTrailingPunctuation
+              ? Math.max(8, glyphWidth * 0.8)
+              : Math.max(10, glyphWidth * 1.3)
+
+            if (trailingBlank >= adaptiveBlankThreshold) {
               previousBlankCue = true
             } else {
               for (let i = 0; i < prevBlocks.length - 1; i++) {
-                if (prevBlocks[i + 1].x - (prevBlocks[i].x + prevBlocks[i].w) >= blankThreshold) {
+                if (prevBlocks[i + 1].x - (prevBlocks[i].x + prevBlocks[i].w) >= Math.max(12, glyphWidth * 1.8)) {
                   previousBlankCue = true
                   break
                 }
@@ -1671,10 +1745,22 @@ export function reflowPageFromPixels(
           hasParagraphGap = gap >= currentHeight * 1.8
         }
 
-        isNewParagraph = (prevWords === null) || isIndentParagraph || previousBlankCue || hasParagraphGap
+        isNewParagraph = (prevWords === null) ||
+          isIndentParagraph ||
+          previousBlankCue ||
+          hasParagraphGap ||
+          isCentered ||
+          prevLineWasCentered ||
+          isRightAligned ||
+          prevLineWasRightAligned ||
+          isFontSizeChange ||
+          isOutdentReset ||
+          isListItemPrefix
 
         if (isNewParagraph) {
-          if (lineIndent > 0) {
+          if (isCentered || isRightAligned) {
+            indentWidth = 0
+          } else if (lineIndent > 0) {
             indentWidth = lineIndent
           } else if (previousBlankCue || hasParagraphGap) {
             indentWidth = Math.round(glyphWidth * 2)
@@ -1682,6 +1768,9 @@ export function reflowPageFromPixels(
             indentWidth = 0
           }
         }
+
+        prevLineWasCentered = isCentered
+        prevLineWasRightAligned = isRightAligned
       }
 
       if (isNewParagraph && items.length > 0) {
@@ -1703,9 +1792,10 @@ export function reflowPageFromPixels(
       }
 
       // 1. Expand short horizontal glyphs and adjust edges for all words in line
+      const effectiveGlyphHeight = colGlyphHeight > 0 ? colGlyphHeight : avgColLineH
       const adjustedWordsMap = new Map<WordBlock, WordBlock>()
       words.forEach(w => {
-        const expanded = expandShortHorizontalGlyphBlock(w, avgColLineH, workH)
+        const expanded = expandShortHorizontalGlyphBlock(w, effectiveGlyphHeight, workH)
         const adjusted = adjustBlockEdges(workPixels, workW, workH, expanded, pageBgLuma)
         const valid = (adjusted.w >= 1 && adjusted.h >= 1) ? adjusted : expanded
         adjustedWordsMap.set(w, valid)

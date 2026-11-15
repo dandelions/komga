@@ -2925,7 +2925,7 @@ export default Vue.extend({
         imageExclusionVersion: 4,
         detectionScaleVersion: 4,
         darkWordRenderVersion: 6,
-        wordSegmentationVersion: 6,
+        wordSegmentationVersion: 7,
       })
     },
     emitReflowed(networkTransferBytes?: number) {

@@ -1793,4 +1793,103 @@ class PdfPageReflowServiceTest {
     val wordBlocks = response.items.filter { it.type == "word" }
     assertThat(wordBlocks).isNotEmpty
   }
+
+  @Test
+  fun `given centered heading line when reflowing page then break is inserted`() {
+    val width = 600
+    val height = 200
+    val image = BufferedImage(width, height, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, width, height)
+    graphics.color = Color.BLACK
+    // Line 1: Centered title: 5 glyphs centered around x: 240..360, y: 30
+    repeat(5) { glyph -> graphics.fillRect(240 + glyph * 24, 30, 16, 24) }
+    // Line 2: Regular body line: 20 glyphs from x: 40..520, y: 80
+    repeat(20) { glyph -> graphics.fillRect(40 + glyph * 24, 80, 16, 24) }
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    val pageBytes = output.toByteArray()
+
+    val book = makeBook("centered-heading-book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+      )
+
+    val breaks = response.items.filter { it.type == "break" }
+    assertThat(breaks).isNotEmpty
+  }
+
+  @Test
+  fun `given font size change between heading and body then break is inserted`() {
+    val width = 600
+    val height = 200
+    val image = BufferedImage(width, height, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, width, height)
+    graphics.color = Color.BLACK
+    // Line 1: Heading with height = 40 (y: 20..60, 8 glyphs)
+    repeat(8) { glyph -> graphics.fillRect(40 + glyph * 40, 20, 28, 40) }
+    // Line 2: Body with height = 20 (y: 80..100, 16 glyphs)
+    repeat(16) { glyph -> graphics.fillRect(40 + glyph * 24, 80, 16, 20) }
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    val pageBytes = output.toByteArray()
+
+    val book = makeBook("font-size-change-book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+      )
+
+    val breaks = response.items.filter { it.type == "break" }
+    assertThat(breaks).isNotEmpty
+  }
+
+  @Test
+  fun `given outdent reset for bibliography entries then break is inserted`() {
+    val width = 600
+    val height = 200
+    val image = BufferedImage(width, height, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, width, height)
+    graphics.color = Color.BLACK
+    // Line 1: Indented continuation (x: 100.., 16 glyphs, y: 20..44)
+    repeat(16) { glyph -> graphics.fillRect(100 + glyph * 24, 20, 16, 24) }
+    // Line 2: Outdented new entry (x: 40.., 18 glyphs, y: 60..84)
+    repeat(18) { glyph -> graphics.fillRect(40 + glyph * 24, 60, 16, 24) }
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    val pageBytes = output.toByteArray()
+
+    val book = makeBook("outdent-reset-book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+      )
+
+    val breaks = response.items.filter { it.type == "break" }
+    assertThat(breaks).isNotEmpty
+  }
 }
