@@ -1013,19 +1013,36 @@ describe('local-reflow-engine', () => {
       const pixels = new Uint8ClampedArray(width * height * 4)
       pixels.fill(255)
 
-      // Line 1: Indented continuation of previous entry (x: 80..580, y: 20..45)
-      for (let y = 20; y < 45; y++) {
-        for (let x = 80; x < 580; x++) {
-          const idx = (y * width + x) * 4
-          pixels[idx] = 0; pixels[idx + 1] = 0; pixels[idx + 2] = 0
+      // Line 1: Entry 1 head (flush left at x: 20..580, y: 20..44)
+      for (let g = 0; g < 17; g++) {
+        const gx = 20 + g * 32
+        for (let y = 20; y < 44; y++) {
+          for (let x = gx; x < gx + 20; x++) {
+            const idx = (y * width + x) * 4
+            pixels[idx] = 0; pixels[idx + 1] = 0; pixels[idx + 2] = 0
+          }
         }
       }
 
-      // Line 2: New entry outdents back to left margin (x: 20..580, y: 55..80)
-      for (let y = 55; y < 80; y++) {
-        for (let x = 20; x < 580; x++) {
-          const idx = (y * width + x) * 4
-          pixels[idx] = 0; pixels[idx + 1] = 0; pixels[idx + 2] = 0
+      // Line 2: Entry 1 hanging continuation (indented at x: 80..580, y: 55..79)
+      for (let g = 0; g < 15; g++) {
+        const gx = 80 + g * 32
+        for (let y = 55; y < 79; y++) {
+          for (let x = gx; x < gx + 20; x++) {
+            const idx = (y * width + x) * 4
+            pixels[idx] = 0; pixels[idx + 1] = 0; pixels[idx + 2] = 0
+          }
+        }
+      }
+
+      // Line 3: Entry 2 head (outdented back to left margin at x: 20..580, y: 90..114)
+      for (let g = 0; g < 17; g++) {
+        const gx = 20 + g * 32
+        for (let y = 90; y < 114; y++) {
+          for (let x = gx; x < gx + 20; x++) {
+            const idx = (y * width + x) * 4
+            pixels[idx] = 0; pixels[idx + 1] = 0; pixels[idx + 2] = 0
+          }
         }
       }
 
@@ -1087,6 +1104,97 @@ describe('local-reflow-engine', () => {
       // Continuation line must NOT be treated as a new paragraph (no break between line 1 and line 2)
       expect(breaks.length).toBe(0)
       expect(indents.length).toBe(0)
+    })
+
+    test('indented bullet list items with 2-character indent start on new lines', () => {
+      const width = 600
+      const height = 150
+      const pixels = new Uint8ClampedArray(width * height * 4)
+      pixels.fill(255)
+
+      // Line 1: Indented Bullet at x: 80 (w: 16), text from x: 120 to 580 (height 24, y: 20..44)
+      for (let y = 24; y < 40; y++) {
+        for (let x = 80; x < 96; x++) {
+          const idx = (y * width + x) * 4
+          pixels[idx] = 0; pixels[idx + 1] = 0; pixels[idx + 2] = 0
+        }
+      }
+      for (let g = 0; g < 14; g++) {
+        const gx = 120 + g * 32
+        for (let y = 20; y < 44; y++) {
+          for (let x = gx; x < gx + 20; x++) {
+            const idx = (y * width + x) * 4
+            pixels[idx] = 0; pixels[idx + 1] = 0; pixels[idx + 2] = 0
+          }
+        }
+      }
+
+      // Line 2: Indented Bullet at x: 80 (w: 16), text from x: 120 to 580 (height 24, y: 55..79)
+      for (let y = 59; y < 75; y++) {
+        for (let x = 80; x < 96; x++) {
+          const idx = (y * width + x) * 4
+          pixels[idx] = 0; pixels[idx + 1] = 0; pixels[idx + 2] = 0
+        }
+      }
+      for (let g = 0; g < 14; g++) {
+        const gx = 120 + g * 32
+        for (let y = 55; y < 79; y++) {
+          for (let x = gx; x < gx + 20; x++) {
+            const idx = (y * width + x) * 4
+            pixels[idx] = 0; pixels[idx + 1] = 0; pixels[idx + 2] = 0
+          }
+        }
+      }
+
+      const options = {
+        targetWidth: 600,
+        renderMode: 'slices' as const,
+        textScale: 100,
+      } as LocalReflowOptions
+
+      const result = reflowPageFromPixels(pixels, width, height, options)
+      const breaks = result.items.filter(it => it.type === 'break')
+      expect(breaks.length).toBeGreaterThanOrEqual(1)
+    })
+
+    test('second line of first-line-indented paragraph does not trigger outdent reset break', () => {
+      const width = 600
+      const height = 150
+      const pixels = new Uint8ClampedArray(width * height * 4)
+      pixels.fill(255)
+
+      // Line 1: First line with 2-char indent at x: 80, fills all the way to x: 580 (y: 20..44)
+      for (let g = 0; g < 15; g++) {
+        const gx = 80 + g * 33
+        for (let y = 20; y < 44; y++) {
+          for (let x = gx; x < gx + 22; x++) {
+            const idx = (y * width + x) * 4
+            pixels[idx] = 0; pixels[idx + 1] = 0; pixels[idx + 2] = 0
+          }
+        }
+      }
+
+      // Line 2: Second line is flush left at x: 30..580 (y: 55..79)
+      for (let g = 0; g < 17; g++) {
+        const gx = 30 + g * 32
+        for (let y = 55; y < 79; y++) {
+          for (let x = gx; x < gx + 20; x++) {
+            const idx = (y * width + x) * 4
+            pixels[idx] = 0; pixels[idx + 1] = 0; pixels[idx + 2] = 0
+          }
+        }
+      }
+
+      const options = {
+        targetWidth: 600,
+        renderMode: 'slices' as const,
+        textScale: 100,
+      } as LocalReflowOptions
+
+      const result = reflowPageFromPixels(pixels, width, height, options)
+      const breaks = result.items.filter(it => it.type === 'break')
+      // There must NOT be a break between line 1 and line 2
+      expect(breaks.length).toBe(0)
     })
   })
 })

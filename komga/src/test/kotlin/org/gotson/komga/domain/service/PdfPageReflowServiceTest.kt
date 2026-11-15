@@ -1869,10 +1869,12 @@ class PdfPageReflowServiceTest {
     graphics.color = Color.WHITE
     graphics.fillRect(0, 0, width, height)
     graphics.color = Color.BLACK
-    // Line 1: Indented continuation (x: 100.., 16 glyphs, y: 20..44)
-    repeat(16) { glyph -> graphics.fillRect(100 + glyph * 24, 20, 16, 24) }
-    // Line 2: Outdented new entry (x: 40.., 18 glyphs, y: 60..84)
-    repeat(18) { glyph -> graphics.fillRect(40 + glyph * 24, 60, 16, 24) }
+    // Line 1: Entry 1 head (flush left at x: 40.., 18 glyphs, y: 20..44)
+    repeat(18) { glyph -> graphics.fillRect(40 + glyph * 24, 20, 16, 24) }
+    // Line 2: Entry 1 hanging continuation (indented at x: 100.., 16 glyphs, y: 55..79)
+    repeat(16) { glyph -> graphics.fillRect(100 + glyph * 24, 55, 16, 24) }
+    // Line 3: Entry 2 head (outdented back to left margin at x: 40.., 18 glyphs, y: 90..114)
+    repeat(18) { glyph -> graphics.fillRect(40 + glyph * 24, 90, 16, 24) }
     graphics.dispose()
 
     val output = ByteArrayOutputStream()
@@ -1914,6 +1916,74 @@ class PdfPageReflowServiceTest {
     val pageBytes = output.toByteArray()
 
     val book = makeBook("bullet-continuation-book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+      )
+
+    val breaks = response.items.filter { it.type == "break" }
+    assertThat(breaks).isEmpty()
+  }
+
+  @Test
+  fun `given indented bullet list items with 2-character indent then break is inserted`() {
+    val width = 600
+    val height = 150
+    val image = BufferedImage(width, height, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, width, height)
+    graphics.color = Color.BLACK
+    // Line 1: Indented Bullet at x: 80 (w: 16), text from x: 120 to 580 (height 24, y: 20..44)
+    graphics.fillRect(80, 24, 16, 16)
+    repeat(14) { glyph -> graphics.fillRect(120 + glyph * 32, 20, 20, 24) }
+    // Line 2: Indented Bullet at x: 80 (w: 16), text from x: 120 to 580 (height 24, y: 55..79)
+    graphics.fillRect(80, 59, 16, 16)
+    repeat(14) { glyph -> graphics.fillRect(120 + glyph * 32, 55, 20, 24) }
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    val pageBytes = output.toByteArray()
+
+    val book = makeBook("indented-bullet-book")
+    every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
+
+    val response =
+      pdfPageReflowService.reflowPage(
+        book = book,
+        pageNumber = 1,
+        options = defaultOptions(),
+      )
+
+    val breaks = response.items.filter { it.type == "break" }
+    assertThat(breaks).isNotEmpty()
+  }
+
+  @Test
+  fun `given second line of first-line-indented paragraph then no outdent reset break is inserted`() {
+    val width = 600
+    val height = 150
+    val image = BufferedImage(width, height, BufferedImage.TYPE_INT_RGB)
+    val graphics = image.createGraphics()
+    graphics.color = Color.WHITE
+    graphics.fillRect(0, 0, width, height)
+    graphics.color = Color.BLACK
+    // Line 1: First line with 2-char indent at x: 80, fills all the way to x: 580 (y: 20..44)
+    repeat(15) { glyph -> graphics.fillRect(80 + glyph * 33, 20, 22, 24) }
+    // Line 2: Second line is flush left at x: 30..580 (y: 55..79)
+    repeat(17) { glyph -> graphics.fillRect(30 + glyph * 32, 55, 20, 24) }
+    graphics.dispose()
+
+    val output = ByteArrayOutputStream()
+    ImageIO.write(image, "png", output)
+    val pageBytes = output.toByteArray()
+
+    val book = makeBook("indented-para-continuation-book")
     every { bookLifecycle.getBookPage(book, 1) } returns TypedBytes(pageBytes, "image/png")
 
     val response =

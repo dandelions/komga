@@ -44,7 +44,7 @@ private const val VERTICAL_PARAGRAPH_BLANK_BLOCKS = 1.3
 private const val EDGE_INK_THRESHOLD = 245
 private const val MAX_EDGE_TRIM = 6
 private const val MAX_EDGE_EXPANSION = 10
-private const val REFLOW_ALGORITHM_VERSION = 16
+private const val REFLOW_ALGORITHM_VERSION = 17
 
 data class PdfPageReflowOptions(
   val targetWidth: Int,
@@ -2249,6 +2249,7 @@ class PdfPageReflowService(
     val imageSlots = horizontalImageSlots(imageRegions, lines)
     var prevLineWasCentered = false
     var prevLineWasRightAligned = false
+    var prevLineWasFirstLineIndent = false
     var inListItem = false
     var listContentIndent = 0.0
 
@@ -2271,13 +2272,15 @@ class PdfPageReflowService(
       val isListItemPrefix = isHorizontalListItemPrefix(line, glyphWidth)
 
       val isHangingContinuation =
-        previousLine != null &&
+        !isListItemPrefix &&
+          previousLine != null &&
           previousLine.column == line.column &&
           isHorizontalHangingContinuation(line, previousLine, glyphWidth, previousBlankCue)
 
       var isListItemContinuation = isHangingContinuation
       if (isListItemPrefix) {
         inListItem = true
+        isListItemContinuation = false
         val validBlocks = line.blocks.filter { it.w >= 2 && it.h >= 2 && !isRuleLikeBlock(it) }.sortedBy { it.x }
         listContentIndent =
           if (validBlocks.size >= 2) {
@@ -2302,7 +2305,7 @@ class PdfPageReflowService(
       val isCentered = !inManualImageFlow && !isListItemContinuation && isHorizontalCenteredLine(line, glyphHeight)
       val isRightAligned = !inManualImageFlow && !isListItemContinuation && isHorizontalRightAlignedLine(line, glyphHeight)
       val isFontSizeChange = !inManualImageFlow && !isListItemContinuation && (previousLine?.let { isHorizontalFontSizeChange(it, line) } ?: false)
-      val isOutdentReset = !inManualImageFlow && !isListItemContinuation && (previousLine?.let { isHorizontalOutdentReset(it, line, glyphHeight) } ?: false)
+      val isOutdentReset = !inManualImageFlow && !isListItemContinuation && !prevLineWasFirstLineIndent && (previousLine?.let { isHorizontalOutdentReset(it, line, glyphWidth) } ?: false)
 
       val startParagraph =
         if (isListItemContinuation) {
@@ -2322,12 +2325,12 @@ class PdfPageReflowService(
       prevLineWasCentered = isCentered
       prevLineWasRightAligned = isRightAligned
 
+      val lineIndent = horizontalLineIndentSourceWidth(line)
       val indent =
         if (startParagraph) {
           if (isCentered || isRightAligned || isListItemPrefix) {
             0
           } else {
-            val lineIndent = horizontalLineIndentSourceWidth(line)
             when {
               lineIndent > 0 -> lineIndent
               previousBlankCue -> horizontalParagraphIndentSourceWidth(line, glyphHeight)
@@ -2337,6 +2340,8 @@ class PdfPageReflowService(
         } else {
           0
         }
+
+      prevLineWasFirstLineIndent = startParagraph && (lineIndent > 0 && !isListItemPrefix)
 
       if (startParagraph && items.isNotEmpty()) appendBreakIfNeeded(items)
       if (indent > 0) items += horizontalIndentItem(indent, options, textScale)
@@ -2705,10 +2710,18 @@ class PdfPageReflowService(
     val b0 = blocks[0]
     val b1 = blocks[1]
     val gap01 = b1.x - (b0.x + b0.w)
+    val gap12 = if (blocks.size >= 3) max(0, blocks[2].x - (blocks[1].x + blocks[1].w)) else 0
     val isBullet = b0.w <= glyphWidth * 0.85
-    val hasListGap = gap01 >= max(3.0, glyphWidth * 0.25)
+    val isDistinctListGap =
+      if (blocks.size >= 3) {
+        gap01 >= max(5.0, glyphWidth * 0.25) && gap01 >= gap12 * 1.5
+      } else {
+        gap01 >= max(8.0, glyphWidth * 0.35)
+      }
     val rawIndent = max(0, b0.x - line.column.start)
-    return isBullet && hasListGap && rawIndent <= glyphWidth * 2.0
+    val colSpan = (line.column.end - line.column.start).toDouble()
+    val maxListIndent = max(glyphWidth * 5.0, colSpan * 0.35)
+    return isBullet && isDistinctListGap && rawIndent <= maxListIndent
   }
 
   private fun manualImageOccupiesHorizontalTrailingBlank(

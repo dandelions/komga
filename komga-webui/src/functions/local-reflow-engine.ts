@@ -1614,6 +1614,7 @@ export function reflowPageFromPixels(
     let prevWords: WordBlock[] | null = null
     let prevLineWasCentered = false
     let prevLineWasRightAligned = false
+    let prevLineWasFirstLineIndent = false
     let inListItem = false
     let listContentIndent = 0
 
@@ -1638,6 +1639,7 @@ export function reflowPageFromPixels(
         prevWords = null
         prevLineWasCentered = false
         prevLineWasRightAligned = false
+        prevLineWasFirstLineIndent = false
         inListItem = false
         listContentIndent = 0
       }
@@ -1674,9 +1676,14 @@ export function reflowPageFromPixels(
           const w0 = words[0]
           const w1 = words[1]
           const gap01 = w1.x - (w0.x + w0.w)
-          const isBullet = (w0.w <= glyphWidth * 0.85)
-          const hasListGap = gap01 >= Math.max(3, glyphWidth * 0.25)
-          if (isBullet && hasListGap && rawIndent <= glyphWidth * 2.0) {
+          const gap12 = words.length >= 3 ? Math.max(0, words[2].x - (words[1].x + words[1].w)) : 0
+          const isSmallBullet = (w0.w <= glyphWidth * 0.85)
+          const isDistinctListGap = words.length >= 3
+            ? (gap01 >= Math.max(5, glyphWidth * 0.25) && gap01 >= gap12 * 1.5)
+            : (gap01 >= Math.max(8, glyphWidth * 0.35))
+          const maxListIndent = Math.max(glyphWidth * 5.0, colSpan * 0.35)
+
+          if (isSmallBullet && isDistinctListGap && rawIndent <= maxListIndent) {
             isListItemPrefix = true
           }
         }
@@ -1708,7 +1715,7 @@ export function reflowPageFromPixels(
 
         // 3. 检查当前行是否为列表项/悬挂缩进续行（多行列表项内部正文，绝不断行）
         let isHangingContinuation = false
-        if (prevWords && prevWords.length >= 2) {
+        if (!isListItemPrefix && prevWords && prevWords.length >= 2) {
           const p0 = prevWords[0]
           const p1 = prevWords[1]
           const p0ToP1Offset = p1.x - p0.x
@@ -1725,6 +1732,7 @@ export function reflowPageFromPixels(
         let isListItemContinuation = isHangingContinuation
         if (isListItemPrefix) {
           inListItem = true
+          isListItemContinuation = false
           listContentIndent = words.length >= 2 ? (words[1].x - effectiveColStart) : (rawIndent + glyphWidth * 1.5)
         } else if (inListItem && prevWords && prevWords.length > 0) {
           const alignsListContent = Math.abs(rawIndent - listContentIndent) <= Math.max(20, glyphWidth * 0.8)
@@ -1772,9 +1780,9 @@ export function reflowPageFromPixels(
           }
         }
 
-        // 7. 悬挂缩进恢复顶格（词典条目、文献条目从内缩恢复顶格）
+        // 7. 悬挂缩进恢复顶格（词典条目、文献条目从内缩恢复顶格，不能误判普通首行缩进段落第2行）
         let isOutdentReset = false
-        if (!isListItemContinuation && prevWords && prevWords.length > 0) {
+        if (!isListItemContinuation && !prevLineWasFirstLineIndent && prevWords && prevWords.length > 0) {
           const prevRawIndent = Math.max(0, prevWords[0].x - effectiveColStart)
           if (prevRawIndent >= glyphWidth * 1.5 && rawIndent <= glyphWidth * 0.5) {
             isOutdentReset = true
@@ -1818,6 +1826,7 @@ export function reflowPageFromPixels(
 
         prevLineWasCentered = isCentered
         prevLineWasRightAligned = isRightAligned
+        prevLineWasFirstLineIndent = isNewParagraph && (lineIndent > 0 && !isListItemPrefix)
       }
 
       if (isNewParagraph && items.length > 0) {
