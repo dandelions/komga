@@ -762,6 +762,18 @@ import {
   ClientSettingsEpubCustomStyles,
 } from '@/types/komga-clientsettings'
 
+interface TtsTextRun {
+  text: string
+  chain: Element[]
+  isBreak?: boolean
+}
+
+interface TtsSentenceRange {
+  text: string
+  start: number
+  end: number
+}
+
 const EPUB_CUSTOM_STYLE_WINDOW_KEY = '__KOMGA_EPUB_CUSTOM_STYLE__'
 const EPUB_CUSTOM_STYLE_ID = 'komga-epub-custom-style'
 const EPUB_AUTHOR_STYLE_DISABLED_ATTR = 'komgaAuthorStyleDisabled'
@@ -774,6 +786,8 @@ const EPUB_AUTHOR_ORIGINAL_HEIGHT_ATTR = 'komgaOriginalHeight'
 const EPUB_VERTICAL_PAGE_MASK_ID = 'komga-epub-vertical-page-mask'
 const EPUB_TEXT_SELECTION_STYLE_ID = 'komga-epub-text-selection'
 const EPUB_CHINESE_TEXT_ORIGINALS = new WeakMap<Text, string>()
+const EPUB_TTS_ORIGINAL_HTML = new WeakMap<HTMLElement, string>()
+const EPUB_TTS_RUN_SKIP_TAGS = /^(SCRIPT|STYLE|SVG|NOSCRIPT|AUDIO|VIDEO|MATH|TEMPLATE)$/
 const EPUB_CHINESE_CONVERTERS = {} as Partial<Record<Exclude<ClientSettingsEpubChineseConversion, 'none'>, ConverterFunction>>
 const EPUB_CHINESE_TEXT_PATTERN = /[\u3400-\u9fff\uf900-\ufaff]/
 const EPUB_HORIZONTAL_SWIPE_MIN_DISTANCE = 48
@@ -3613,15 +3627,15 @@ export default Vue.extend({
       }
 
       const items: { element: HTMLElement, text: string, isParagraphEnd?: boolean, isHeading?: boolean }[] = []
-      // 按句号、感叹号、问号、分号、换行分句（保持整句发音自然，不被逗号切碎）
-      const sentenceRegex = /[^。！？!?；;\n\r]+([。！？!?；;\n\r]+["'”’）)]*|$)/g
 
       blockElements.forEach(el => {
         const rawText = (el.innerText || el.textContent || '').trim()
         if (!rawText) return
         const isHeading = /^H[1-6]$/i.test(el.tagName)
-        const sentences = rawText.match(sentenceRegex)
-        if (!sentences || sentences.length === 0) {
+
+        // 段落内还有块级子元素时不切分，直接整块朗读，避免破坏嵌套结构
+        const hasBlockChildren = !!el.querySelector('p, div, ul, ol, li, h1, h2, h3, h4, h5, h6, table, blockquote')
+        if (hasBlockChildren) {
           items.push({
             element: el,
             text: rawText,
@@ -3631,77 +3645,198 @@ export default Vue.extend({
           return
         }
 
-        const validSentences = sentences.map(s => s.trim()).filter(s => s.length > 0)
-        if (validSentences.length <= 1) {
-          const singleText = validSentences[0] || rawText
-          let singleSpan: HTMLElement | null = null
-          try {
-            const hasBlockChildren = el.querySelector('p, div, ul, ol, li, h1, h2, h3, h4, h5, h6, table, blockquote')
-            if (!hasBlockChildren) {
-              const existing = el.querySelector<HTMLElement>('.komga-tts-sentence')
-              if (existing && existing.textContent === singleText) {
-                singleSpan = existing
-              } else {
-                const span = doc.createElement('span')
-                span.className = 'komga-tts-sentence'
-                span.textContent = singleText
-                el.innerHTML = ''
-                el.appendChild(span)
-                singleSpan = span
-              }
-            }
-          } catch (e) {
-            singleSpan = null
-          }
+        // 为每个完整句子包裹独立的 span，使每句拥有精准的 DOM 物理坐标（跨页翻页依赖它），
+        // 同时保留段落内的内联标签（em/strong/a/br 等），不再用 innerHTML 清空重建
+        const {spans, sentences} = this.ttsWrapSentences(el, doc)
+        if (spans.length === 0 || sentences.length !== spans.length) {
           items.push({
-            element: singleSpan || el,
-            text: singleText,
+            element: el,
+            text: rawText,
             isParagraphEnd: true,
             isHeading,
           })
           return
         }
 
-        // 为多句段落包裹独立 span，使每个完整句子拥有精准的 DOM 物理坐标，跨页时能够准确翻页
-        let sentenceSpans: HTMLElement[] = []
-        try {
-          const hasBlockChildren = el.querySelector('p, div, ul, ol, li, h1, h2, h3, h4, h5, h6, table, blockquote')
-          if (!hasBlockChildren) {
-            const existingSpans = Array.from(el.querySelectorAll<HTMLElement>('.komga-tts-sentence'))
-            if (existingSpans.length === validSentences.length) {
-              sentenceSpans = existingSpans
-            } else {
-              const fragment = doc.createDocumentFragment()
-              validSentences.forEach((s, idx) => {
-                const span = doc.createElement('span')
-                span.className = 'komga-tts-sentence'
-                span.textContent = s
-                fragment.appendChild(span)
-                if (idx < validSentences.length - 1) {
-                  fragment.appendChild(doc.createTextNode(' '))
-                }
-                sentenceSpans.push(span)
-              })
-              el.innerHTML = ''
-              el.appendChild(fragment)
-            }
-          }
-        } catch (e) {
-          sentenceSpans = []
+        if (sentences.length === 1) {
+          items.push({
+            element: el,
+            text: sentences[0],
+            isParagraphEnd: true,
+            isHeading,
+          })
+          return
         }
 
-        const hasSpans = sentenceSpans.length === validSentences.length
-        validSentences.forEach((s, idx) => {
+        sentences.forEach((sentence, idx) => {
           items.push({
-            element: hasSpans ? sentenceSpans[idx] : el,
-            text: s,
-            isParagraphEnd: idx === validSentences.length - 1,
+            element: spans[idx],
+            text: sentence,
+            isParagraphEnd: idx === sentences.length - 1,
             isHeading,
           })
         })
       })
 
       return items
+    },
+    ttsWrapSentences(
+      el: HTMLElement,
+      doc: Document,
+    ): { spans: HTMLElement[], sentences: string[] } {
+      // 始终基于首次提取时保存的原始 HTML 重建，保证重复提取不会层层嵌套自己的 span
+      const sourceHtml = EPUB_TTS_ORIGINAL_HTML.get(el) ?? el.innerHTML
+      if (!EPUB_TTS_ORIGINAL_HTML.has(el)) EPUB_TTS_ORIGINAL_HTML.set(el, sourceHtml)
+
+      const container = doc.createElement(el.tagName)
+      container.innerHTML = sourceHtml
+
+      const collected: TtsTextRun[] = []
+      this.ttsCollectTextRuns(container, [], collected)
+      // 源码里的换行/缩进在 HTML 中会被折叠为空格，这里做同样的归一化，避免句子被错误切分
+      const preserveWhitespace = el.tagName.toUpperCase() === 'PRE'
+      collected.forEach(run => {
+        if (run.isBreak || preserveWhitespace) return
+        run.text = run.text.replace(/\s+/g, ' ')
+      })
+      // 去掉空 run，否则偏移量会落在没有内容的 run 上
+      const runs = collected.filter(run => run.isBreak || run.text.length > 0)
+
+      const fullText = runs.map(run => run.text).join('')
+      const sentences = this.ttsSplitSentences(fullText)
+      if (sentences.length === 0) return {spans: [], sentences: []}
+
+      const runStarts: number[] = []
+      runs.reduce((offset, run) => {
+        runStarts.push(offset)
+        return offset + run.text.length
+      }, 0)
+
+      const runIndexAt = (offset: number): number => {
+        for (let i = runs.length - 1; i >= 0; i--) {
+          if (offset >= runStarts[i]) return i
+        }
+        return 0
+      }
+
+      // 按 [from, to) 区间把原始 run 还原到 parent 中：文本按行内标签链克隆，
+      // <br> 还原为 br 元素，这样句子之间的换行也不会丢失
+      const appendRange = (parent: Node, from: number, to: number) => {
+        let offset = from
+        while (offset < to && runs.length > 0) {
+          const runIndex = runIndexAt(offset)
+          const run = runs[runIndex]
+          const runStart = runStarts[runIndex]
+          const pieceStart = offset - runStart
+          const pieceEnd = Math.min(run.text.length, to - runStart)
+          if (pieceEnd <= pieceStart) break
+
+          if (run.isBreak) {
+            parent.appendChild(doc.createElement('br'))
+          } else {
+            const piece = run.text.slice(pieceStart, pieceEnd)
+            if (piece) {
+              let target: Node = parent
+              run.chain.forEach(ancestor => {
+                const clone = ancestor.cloneNode(false)
+                target.appendChild(clone)
+                target = clone
+              })
+              target.appendChild(doc.createTextNode(piece))
+            }
+          }
+          offset = runStart + pieceEnd
+        }
+      }
+
+      const fragment = doc.createDocumentFragment()
+      const spans: HTMLElement[] = []
+      let cursor = 0
+
+      sentences.forEach(sentence => {
+        // 句子之间的空白（空格、换行）保留在 span 之外，保证渲染结果与原段落一致
+        if (sentence.start > cursor) appendRange(fragment, cursor, sentence.start)
+
+        const span = doc.createElement('span')
+        span.className = 'komga-tts-sentence'
+        appendRange(span, sentence.start, sentence.end)
+
+        fragment.appendChild(span)
+        spans.push(span)
+        cursor = sentence.end
+      })
+
+      if (cursor < fullText.length) appendRange(fragment, cursor, fullText.length)
+
+      el.innerHTML = ''
+      el.appendChild(fragment)
+
+      return {spans, sentences: sentences.map(sentence => sentence.text)}
+    },
+    ttsCollectTextRuns(
+      node: Node,
+      chain: Element[],
+      runs: TtsTextRun[],
+    ) {
+      Array.from(node.childNodes).forEach(child => {
+        if (child.nodeType === Node.TEXT_NODE) {
+          runs.push({text: child.nodeValue || '', chain})
+          return
+        }
+        if (child.nodeType !== Node.ELEMENT_NODE) return
+
+        const childElement = child as Element
+        const tag = childElement.tagName.toUpperCase()
+        if (EPUB_TTS_RUN_SKIP_TAGS.test(tag)) return
+        if (tag === 'BR') {
+          runs.push({text: '\n', chain, isBreak: true})
+          return
+        }
+        // 自己生成的包裹层不参与克隆，直接展开其内容
+        if (childElement.classList.contains('komga-tts-sentence')) {
+          this.ttsCollectTextRuns(childElement, chain, runs)
+          return
+        }
+        this.ttsCollectTextRuns(childElement, [...chain, childElement], runs)
+      })
+    },
+    ttsSplitSentences(text: string): TtsSentenceRange[] {
+      // 逐字符扫描而不是用正则，既能处理中英文混排，也不会把 3.14 这类小数点切开
+      const terminators = '。！？!?；;\n\r'
+      const closers = '"\'”’）)]】》」』'
+      const sentences: TtsSentenceRange[] = []
+
+      const pushRange = (from: number, to: number) => {
+        let start = from
+        let end = to
+        while (start < end && /\s/.test(text[start])) start++
+        while (end > start && /\s/.test(text[end - 1])) end--
+        if (end > start) sentences.push({text: text.slice(start, end), start, end})
+      }
+
+      let start = 0
+      let i = 0
+      while (i < text.length) {
+        const char = text[i]
+        let boundary = terminators.includes(char)
+        if (!boundary && char === '.') {
+          // 英文句点只有在其后是空白或结尾时才算句末
+          boundary = i + 1 >= text.length || /\s/.test(text[i + 1])
+        }
+        if (!boundary) {
+          i++
+          continue
+        }
+
+        let end = i + 1
+        while (end < text.length && closers.includes(text[end])) end++
+        pushRange(start, end)
+        start = end
+        i = end
+      }
+
+      if (start < text.length) pushRange(start, text.length)
+      return sentences
     },
     ttsFindStartIndex(items: { element: HTMLElement, text: string, isParagraphEnd?: boolean, isHeading?: boolean }[]): number {
       if (!items || items.length === 0) return 0
