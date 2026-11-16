@@ -27,6 +27,7 @@ import java.awt.Font
 import java.awt.RenderingHints
 import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
+import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
@@ -134,7 +135,7 @@ class FontsController(
           it.contentDisposition =
             ContentDisposition
               .attachment()
-              .filename(fontFile)
+              .filename(fontFile, StandardCharsets.UTF_8)
               .build()
         }.contentType(MediaType.parseMediaType(mediaType))
         .body(resource)
@@ -162,7 +163,7 @@ class FontsController(
           it.contentDisposition =
             ContentDisposition
               .attachment()
-              .filename("$fontFamily.css")
+              .filename("$fontFamily.css", StandardCharsets.UTF_8)
               .build()
         }.body(ByteArrayResource(css.toByteArray()))
     } ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
