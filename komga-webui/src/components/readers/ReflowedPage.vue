@@ -1365,7 +1365,7 @@ export default Vue.extend({
         columnGap: `${this.blockSpacing}px`,
         rowGap: `${Math.round(this.blockSpacing * 1.5)}px`,
         height: `${this.pageContentHeight()}px`,
-        minHeight: `${this.pageContentHeight()}px`,
+        minHeight: '100vh',
         backgroundColor: this.wordOutputBackground(),
       }
       if (this.isTwoColumns) {
@@ -2437,6 +2437,7 @@ export default Vue.extend({
         this.rescaleReflowItems()
       }
       this.repaginate(false)
+      this.scrollToTop()
     },
     updateViewportMetrics() {
       const vv = typeof window !== 'undefined' ? window.visualViewport : undefined
@@ -8289,7 +8290,6 @@ export default Vue.extend({
 .reflow-wrapper {
   width: 100%;
   min-height: 100vh;
-  min-height: 100dvh;
   padding: 16px;
   box-sizing: border-box;
   display: flex;
@@ -8325,7 +8325,6 @@ export default Vue.extend({
 
 .reflow-status {
   min-height: 100vh;
-  min-height: 100dvh;
   display: flex;
   flex-direction: column;
   gap: 8px;

@@ -1464,6 +1464,7 @@ export default Vue.extend({
   },
   async mounted() {
     document.documentElement.classList.add('html-reader')
+    document.body.classList.add('html-reader')
     this.updateViewportMetrics()
     window.addEventListener('resize', this.updateViewportMetrics)
     window.visualViewport?.addEventListener('resize', this.updateViewportMetrics)
@@ -1494,6 +1495,7 @@ export default Vue.extend({
   },
   destroyed() {
     document.documentElement.classList.remove('html-reader')
+    document.body.classList.remove('html-reader')
     window.removeEventListener('resize', this.updateViewportMetrics)
     window.visualViewport?.removeEventListener('resize', this.updateViewportMetrics)
     window.visualViewport?.removeEventListener('scroll', this.updateViewportMetrics)
@@ -4122,6 +4124,7 @@ export default Vue.extend({
 }
 
 .reflow-reader {
+  position: relative;
   width: 100%;
   min-height: 100%;
 }
@@ -4131,36 +4134,39 @@ export default Vue.extend({
   width: 1px;
   height: 1px;
   left: -10000px;
-  top: -10000px;
+  top: 0;
   overflow: hidden;
   pointer-events: none;
 }
 
 .reflow-click-left {
-  position: fixed;
+  position: absolute;
   top: 0;
   left: 0;
-  height: 100vh;
-  width: 30vw;
+  height: 100%;
+  width: 30%;
   z-index: 3;
+  touch-action: pan-y;
 }
 
 .reflow-click-right {
-  position: fixed;
+  position: absolute;
   top: 0;
   right: 0;
-  height: 100vh;
-  width: 30vw;
+  height: 100%;
+  width: 30%;
   z-index: 3;
+  touch-action: pan-y;
 }
 
 .reflow-click-center {
-  position: fixed;
+  position: absolute;
   top: 0;
-  left: 30vw;
-  height: 100vh;
-  width: 40vw;
+  left: 30%;
+  height: 100%;
+  width: 40%;
   z-index: 3;
+  touch-action: pan-y;
 }
 
 .reader-frame-landscape .reflow-click-left {
@@ -4390,13 +4396,17 @@ export default Vue.extend({
 
 </style>
 <style>
-.html-reader::-webkit-scrollbar {
-  display: none;
+html.html-reader,
+body.html-reader {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
 }
 
-.html-reader {
-  scrollbar-width: none;
-  overscroll-behavior: none;
+html.html-reader::-webkit-scrollbar,
+body.html-reader::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
 }
 
 .reader-shell {

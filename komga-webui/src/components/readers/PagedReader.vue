@@ -57,6 +57,7 @@
     <!--  Unified gesture and navigation surface with 30% / 40% / 30% image hitboxes  -->
     <div
       class="paged-click-surface"
+      :class="{'paged-click-surface-zoomed': zoomLevel > 1.05}"
       @click="handleReaderClick($event)"
       @touchstart="handleTouchStart($event)"
       @touchmove="handleTouchMove($event)"
@@ -1119,7 +1120,7 @@ export default Vue.extend({
             }
             return
           }
-          if (Math.abs(localDeltaY) > 40 && Math.abs(localDeltaY) > Math.abs(localDeltaX) * 1.5) {
+          if (this.vertical && Math.abs(localDeltaY) > 40 && Math.abs(localDeltaY) > Math.abs(localDeltaX) * 1.5) {
             this.hasDragged = true
             if (e.stopPropagation) e.stopPropagation()
             if (localDeltaY > 0) {
@@ -1497,6 +1498,8 @@ export default Vue.extend({
 .paged-reader {
   position: relative;
   width: 100%;
+  height: 100%;
+  overflow: hidden;
 }
 
 .left-quarter {
@@ -1605,30 +1608,26 @@ export default Vue.extend({
 }
 
 .img-fit-width {
-  width: 100vw;
-  width: 100dvw;
-  min-height: 100vh;
-  min-height: 100dvh;
+  width: 100%;
+  max-width: 100%;
+  min-height: 100%;
   align-self: flex-start;
 }
 
 .img-double-fit-width {
-  width: 50vw;
-  width: 50dvw;
-  min-height: 100vh;
-  min-height: 100dvh;
+  width: 50%;
+  max-width: 50%;
+  min-height: 100%;
   align-self: flex-start;
 }
 
 .img-fit-width-shrink-only {
-  max-width: 100vw;
-  max-width: 100dvw;
+  max-width: 100%;
   align-self: flex-start;
 }
 
 .img-double-fit-width-shrink-only {
-  max-width: 50vw;
-  max-width: 50dvw;
+  max-width: 50%;
   align-self: flex-start;
 }
 
@@ -1638,24 +1637,21 @@ export default Vue.extend({
 }
 
 .img-fit-height {
-  min-height: 100vh;
-  min-height: 100dvh;
-  height: 100vh;
-  height: 100dvh;
+  min-height: 100%;
+  height: 100%;
 }
 
 .img-fit-screen {
-  width: 100vw;
-  width: 100dvw;
-  height: 100vh;
-  height: 100dvh;
+  width: 100%;
+  max-width: 100%;
+  height: 100%;
+  max-height: 100%;
 }
 
 .img-double-fit-screen {
-  max-width: 50vw;
-  max-width: 50dvw;
-  height: 100vh;
-  height: 100dvh;
+  max-width: 50%;
+  height: 100%;
+  max-height: 100%;
 }
 
 .paged-click-surface {
@@ -1667,6 +1663,10 @@ export default Vue.extend({
   width: 100%;
   height: 100%;
   z-index: 2;
+  touch-action: pan-y;
+}
+
+.paged-click-surface.paged-click-surface-zoomed {
   touch-action: none;
 }
 

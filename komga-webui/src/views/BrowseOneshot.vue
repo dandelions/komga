@@ -1,5 +1,5 @@
 <template>
-  <div v-if="!$_.isEmpty(book) && !$_.isEmpty(series)">
+  <div v-if="!$_.isEmpty(book) && !$_.isEmpty(series)" class="browse-book-view">
     <toolbar-sticky>
       <v-tooltip bottom :disabled="!isAdmin">
         <template v-slot:activator="{ on }">
@@ -901,4 +901,10 @@ export default Vue.extend({
 </script>
 
 <style scoped>
+@media (max-width: 959px) {
+  .browse-book-view {
+    min-height: calc(100vh + 80px);
+    padding-bottom: 96px;
+  }
+}
 </style>

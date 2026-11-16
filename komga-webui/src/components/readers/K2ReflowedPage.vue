@@ -859,6 +859,7 @@ export default Vue.extend({
       this.updateViewportMetrics()
       this.$nextTick(this.constrainControlsPosition)
       this.repaginate(false)
+      this.scrollToTop()
     },
     updateViewportMetrics() {
       const vv = typeof window !== 'undefined' ? window.visualViewport : undefined
@@ -3340,7 +3341,6 @@ export default Vue.extend({
 
 .k2-status {
   min-height: 100vh;
-  min-height: 100dvh;
   display: flex;
   flex-direction: column;
   gap: 8px;
