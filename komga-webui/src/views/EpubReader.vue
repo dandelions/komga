@@ -899,6 +899,10 @@ type EpubTouchStart = {
   y: number,
 }
 
+type EpubRootScrollTouchStart = {
+  y: number,
+}
+
 type EpubPageAction = 'next' | 'previous'
 type EpubBackgroundImageMode = 'light' | 'dark'
 
@@ -1068,6 +1072,7 @@ export default Vue.extend({
       epubIframeEnhancementObserver: undefined as MutationObserver | undefined,
       epubIframeEnhancementTimers: [] as number[],
       epubTouchStart: undefined as EpubTouchStart | undefined,
+      epubRootScrollTouchStart: undefined as EpubRootScrollTouchStart | undefined,
       epubTouchSelectionTimer: undefined as number | undefined,
       epubTouchSelectionActive: false,
       epubImageZoomVisible: false,
@@ -1130,6 +1135,7 @@ export default Vue.extend({
     this.revokeInstalledFontObjectUrls()
     this.ttsStop()
     this.clearEpubTouchSelectionState()
+    this.epubRootScrollTouchStart = undefined
     this.stopEpubIframeEnhancements()
     this.d2Reader?.stop?.()
   },
@@ -1151,9 +1157,12 @@ export default Vue.extend({
 
     this.ttsInitVoices()
     this.ttsLoadSettings()
-    const fontInitialization = this.initializeFontSupport()
+    await this.initializeFontSupport()
     await this.setup(this.bookId)
-    await fontInitialization
+    this.refreshInstalledFonts().catch(() => {
+      this.installedFonts = {}
+      this.installedFontCss = ''
+    })
     this.scheduleEpubIframeEnhancements(false)
   },
   props: {
@@ -1458,12 +1467,6 @@ export default Vue.extend({
         this.fontFamiliesAdditional = []
       }
 
-      try {
-        await this.refreshInstalledFonts()
-      } catch (e) {
-        this.installedFonts = {}
-        this.installedFontCss = ''
-      }
     },
     fontPreviewUrl(family?: string): string {
       if (!family || family === 'Original' || this.fontPreviewErrors.includes(family)) return ''
@@ -1720,6 +1723,12 @@ export default Vue.extend({
       // parse query params to get incognito mode
       this.incognito = !!(this.$route.query.incognito && this.$route.query.incognito.toString().toLowerCase() === 'true')
 
+      const fontFamilyInjectables = this.fontFamiliesAdditional.map(family => ({
+        type: 'style',
+        fontFamily: family,
+        systemFont: true,
+      }))
+
       this.d2Reader = await D2Reader.load({
         url: new URL(bookManifestUrl(bookId)),
         userSettings: this.settings,
@@ -1746,6 +1755,7 @@ export default Vue.extend({
           {type: 'style', url: R2D2BC_POPUP_CSS_URL},
           {type: 'style', url: R2D2BC_POPOVER_CSS_URL},
           {type: 'style', url: R2D2BC_STYLE_CSS_URL},
+          ...fontFamilyInjectables,
         ],
         requestConfig: {
           credentials: 'include',
@@ -2368,6 +2378,7 @@ export default Vue.extend({
         if (!doc?.documentElement || !view) return
 
         this.bindEpubIframeTouchNavigation(doc)
+        this.bindEpubRootScrollBridge(doc)
         this.applyEpubVerticalWritingMode(doc, view)
         this.applyEpubAuthorStylePreference(doc)
         this.applyEpubChineseConversion(doc)
@@ -2798,6 +2809,32 @@ export default Vue.extend({
       const normalizedA = normalize(a)
       const normalizedB = normalize(b)
       return normalizedA === normalizedB || normalizedA.endsWith(`/${normalizedB}`) || normalizedB.endsWith(`/${normalizedA}`)
+    },
+    bindEpubRootScrollBridge(doc: Document) {
+      const html = doc.documentElement
+      if (html.dataset.komgaEpubRootScrollBridgeBound === 'true') return
+
+      html.dataset.komgaEpubRootScrollBridgeBound = 'true'
+      doc.addEventListener('touchstart', (event: TouchEvent) => {
+        if (event.touches.length !== 1) return
+        this.epubRootScrollTouchStart = {y: event.touches[0].clientY}
+      }, {capture: true, passive: true})
+      doc.addEventListener('touchmove', (event: TouchEvent) => {
+        const start = this.epubRootScrollTouchStart
+        if (!start || event.touches.length !== 1 || this.verticalScroll) return
+
+        const currentY = event.touches[0].clientY
+        const deltaY = start.y - currentY
+        if (Math.abs(deltaY) < 1) return
+        window.scrollBy(0, deltaY)
+        this.epubRootScrollTouchStart = {y: currentY}
+      }, {capture: true, passive: true})
+      doc.addEventListener('touchend', () => {
+        this.epubRootScrollTouchStart = undefined
+      }, {capture: true, passive: true})
+      doc.addEventListener('touchcancel', () => {
+        this.epubRootScrollTouchStart = undefined
+      }, {capture: true, passive: true})
     },
     bindEpubIframeTouchNavigation(doc: Document) {
       const html = doc.documentElement
