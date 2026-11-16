@@ -717,7 +717,7 @@
 <script lang="ts">
 import Vue from 'vue'
 import D2Reader, {Locator} from '@d-i-t-a/reader'
-import urls, {bookManifestUrl, bookPositionsUrl} from '@/functions/urls'
+import {bookManifestUrl, bookPositionsUrl} from '@/functions/urls'
 import {BookDto} from '@/types/komga-books'
 import {getBookTitleCompact} from '@/functions/book-title'
 import {SeriesDto} from '@/types/komga-series'
@@ -744,6 +744,7 @@ import ShortcutHelpDialog from '@/components/dialogs/ShortcutHelpDialog.vue'
 import EpubFontManagerDialog from '@/components/dialogs/EpubFontManagerDialog.vue'
 import {
   buildInstalledFontCss,
+  fontFamilyCssUrl,
   fontFamilyPreviewUrl,
   getInstalledFontFamily,
   listInstalledFontSummaries,
@@ -1679,7 +1680,7 @@ export default Vue.extend({
 
       const fontFamiliesInjectables = this.fontFamiliesAdditional.map(x => ({
         type: 'style',
-        url: new URL(`${urls.origin}api/v1/fonts/resource/${x}/css`).toString(),
+        url: fontFamilyCssUrl(x),
         fontFamily: x,
       }))
 
