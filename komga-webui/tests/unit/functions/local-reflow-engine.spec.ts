@@ -5,6 +5,7 @@ import {
   reflowPageFromPixels,
   detectPageBackgroundFromPixels,
   buildInkMap,
+  localReflowScale,
   detectHorizontalColumns,
   detectLines,
   rotatePixels,
@@ -17,6 +18,14 @@ import {
 } from '@/functions/local-reflow-engine'
 
 describe('local-reflow-engine', () => {
+  describe('localReflowScale', () => {
+    test('uses the same 3600px and 8MP limits as the server', () => {
+      expect(localReflowScale(7200, 4800)).toBeCloseTo(Math.sqrt(8000000 / (7200 * 4800)))
+      expect(localReflowScale(12000, 1000)).toBe(1)
+      expect(localReflowScale(2400, 1600)).toBe(1)
+    })
+  })
+
   describe('adaptiveInkThreshold', () => {
     test('adjusts threshold according to light background', () => {
       const normal = adaptiveInkThreshold(185, 255)
@@ -259,6 +268,7 @@ describe('local-reflow-engine', () => {
       expect(result.sourceWidth).toBe(width)
       expect(result.sourceHeight).toBe(height)
       expect(result.items.length).toBeGreaterThan(0)
+      expect((result.items.find(it => it.type === 'word') as any).height).toBe(30)
 
       const wordItems = result.items.filter(it => it.type === 'word')
       expect(wordItems.length).toBeGreaterThanOrEqual(1)

@@ -318,13 +318,14 @@ class BookController(
   fun getBookSiblingPrevious(
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @PathVariable bookId: String,
-  ): BookDto {
+  ): ResponseEntity<BookDto> {
     contentRestrictionChecker.checkContentRestrictionBook(principal.user, bookId)
 
     return bookDtoRepository
       .findPreviousInSeriesOrNull(bookId, principal.user.id)
       ?.restrictUrl(!principal.user.isAdmin)
-      ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+      ?.let { ResponseEntity.ok(it) }
+      ?: ResponseEntity.status(HttpStatus.NO_CONTENT).build()
   }
 
   @Operation(summary = "Get next book in series", tags = [OpenApiConfiguration.TagNames.BOOKS])
@@ -332,13 +333,14 @@ class BookController(
   fun getBookSiblingNext(
     @AuthenticationPrincipal principal: KomgaPrincipal,
     @PathVariable bookId: String,
-  ): BookDto {
+  ): ResponseEntity<BookDto> {
     contentRestrictionChecker.checkContentRestrictionBook(principal.user, bookId)
 
     return bookDtoRepository
       .findNextInSeriesOrNull(bookId, principal.user.id)
       ?.restrictUrl(!principal.user.isAdmin)
-      ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+      ?.let { ResponseEntity.ok(it) }
+      ?: ResponseEntity.status(HttpStatus.NO_CONTENT).build()
   }
 
   @Operation(summary = "List book's readlists", tags = [OpenApiConfiguration.TagNames.BOOKS])

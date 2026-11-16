@@ -200,7 +200,7 @@ class FontsController(
   fun getFontFamilyPreview(
     @PathVariable fontFamily: String,
   ): ResponseEntity<ByteArray> {
-    val fontFile = findPreviewFontFile(fontFamily) ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+    val fontFile = findPreviewFontFile(fontFamily) ?: return ResponseEntity.noContent().build()
     val cacheFile = fontPreviewCacheFile(fontFamily, fontFile)
 
     val preview =
@@ -208,7 +208,7 @@ class FontsController(
         ?: generateFontPreview(fontFamily, fontFile)?.also { preview ->
           cacheFile?.let { writeFontPreviewToCache(it, preview) }
         }
-        ?: throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        ?: return ResponseEntity.noContent().build()
 
     return ResponseEntity
       .ok()

@@ -41,22 +41,22 @@ class FontsControllerTest(
 
   @Test
   @WithMockCustomUser
-  fun `when getting preview for unknown font family then 404`() {
+  fun `when getting preview for unknown font family then no content`() {
     mockMvc
       .get("/api/v1/fonts/resource/UnknownFamily/preview")
       .andExpect {
-        status { isNotFound() }
+        status { isNoContent() }
       }
   }
 
   @Test
   @WithMockCustomUser
-  fun `when getting preview for a woff only font family then 404`() {
+  fun `when getting preview for a woff only font family then no content`() {
     // AWT cannot parse woff/woff2, so no preview can be generated for the embedded OpenDyslexic font
     mockMvc
       .get("/api/v1/fonts/resource/OpenDyslexic/preview")
       .andExpect {
-        status { isNotFound() }
+        status { isNoContent() }
       }
   }
 

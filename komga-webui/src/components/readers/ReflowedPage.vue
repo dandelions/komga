@@ -718,8 +718,8 @@ import {
 import {mergeVerticalColumnBands} from '@/functions/vertical-reflow'
 import type {ReflowAnalysisWorkerResponse, ReflowWorkerRoi} from '@/functions/reflow-analysis-worker'
 import {createReflowAnalysisWorker} from '@/functions/reflow-analysis-worker-factory'
+import {localReflowScale, repairInvertedGlyphComponents} from '@/functions/local-reflow-engine'
 import type {LocalReflowOptions, LocalReflowResult} from '@/functions/local-reflow-engine'
-import {repairInvertedGlyphComponents} from '@/functions/local-reflow-engine'
 import {
   contiguousReflowPageCount,
   fitReflowImageDimensions,
@@ -958,7 +958,7 @@ const DETECTION_FULL_RES_MAX_PIXELS = 6000000
 const DETECTION_MAX_SIDE = 2800
 const DETECTION_MAX_PIXELS = 5000000
 const DETECTION_MIN_SCALE = 0.4
-const REFLOW_RESPONSE_VERSION = 18
+const REFLOW_RESPONSE_VERSION = 19
 
 export default Vue.extend({
   name: 'ReflowedPage',
@@ -2018,9 +2018,15 @@ export default Vue.extend({
         const cropRois = this.reflowCropRois()
 
         if (this.supportsLocalAnalysisWorker()) {
-          const context = this.canvasContext(canvas, true)
+          const analysisSource = this.localReflowAnalysisCanvas(canvas)
+          const context = this.canvasContext(analysisSource.canvas, true)
           if (!context) throw new Error('Canvas is unavailable')
-          const imageData = context.getImageData(0, 0, canvas.width, canvas.height)
+          const imageData = context.getImageData(0, 0, analysisSource.canvas.width, analysisSource.canvas.height)
+          const analysisCropRois = cropRois
+            .filter((r): r is Roi => !!r)
+            .map(roi => this.scaleRoi(roi, analysisSource.scale, imageData.width, imageData.height))
+          const analysisManualRegions = this.currentManualImageRois()
+            .map(region => this.scaleRoi(region, analysisSource.scale, imageData.width, imageData.height))
           const workerOptions: LocalReflowOptions = {
             targetWidth: this.targetWidth,
             autoCropBorder: this.controlAutoCropBorder,
@@ -2049,15 +2055,16 @@ export default Vue.extend({
             darkDisplay: this.darkDisplay,
             rotation: 0,
             formulaProtection: this.options?.formulaProtection !== false,
-            deskewAnalysisRoi: this.currentDeskewAnalysisRoi(),
+            deskewAnalysisRoi: this.currentDeskewAnalysisRoi()
+              ? this.scaleRoi(this.currentDeskewAnalysisRoi() as Roi, analysisSource.scale, imageData.width, imageData.height)
+              : undefined,
             renderMode: 'slices',
           }
-          const manualRegions = this.currentManualImageRois()
           const workerResult = await this.runLocalWorkerReflow(
             imageData,
             workerOptions,
-            cropRois.filter((r): r is Roi => !!r),
-            manualRegions,
+            analysisCropRois,
+            analysisManualRegions,
             requestId,
           )
           if (requestId !== this.requestId) return
@@ -2178,6 +2185,20 @@ export default Vue.extend({
     },
     supportsLocalAnalysisWorker(): boolean {
       return typeof Worker !== 'undefined' && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function'
+    },
+    localReflowAnalysisCanvas(sourceCanvas: HTMLCanvasElement): {canvas: HTMLCanvasElement, scale: number} {
+      const scale = localReflowScale(sourceCanvas.width, sourceCanvas.height)
+      if (scale >= 0.995) return {canvas: sourceCanvas, scale: 1}
+
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.max(1, Math.round(sourceCanvas.width * scale))
+      canvas.height = Math.max(1, Math.round(sourceCanvas.height * scale))
+      const context = this.canvasContext(canvas, true)
+      if (!context) return {canvas: sourceCanvas, scale: 1}
+      context.imageSmoothingEnabled = true
+      context.imageSmoothingQuality = 'high'
+      context.drawImage(sourceCanvas, 0, 0, sourceCanvas.width, sourceCanvas.height, 0, 0, canvas.width, canvas.height)
+      return {canvas, scale}
     },
     async runLocalWorkerReflow(
       imageData: ImageData,
@@ -2925,9 +2946,9 @@ export default Vue.extend({
         darkDisplay: this.darkDisplay,
         deskewDetectionVersion: 10,
         imageExclusionVersion: 4,
-        detectionScaleVersion: 4,
+        detectionScaleVersion: 5,
         darkWordRenderVersion: 6,
-        wordSegmentationVersion: 10,
+        wordSegmentationVersion: 11,
       })
     },
     emitReflowed(networkTransferBytes?: number) {

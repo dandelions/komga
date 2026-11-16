@@ -696,7 +696,7 @@ class BookControllerTest(
 
       mockMvc
         .get("/api/v1/books/${book1.id}/previous")
-        .andExpect { status { isNotFound() } }
+        .andExpect { status { isNoContent() } }
       mockMvc
         .get("/api/v1/books/${book1.id}/next")
         .andExpect {
@@ -725,7 +725,7 @@ class BookControllerTest(
         }
       mockMvc
         .get("/api/v1/books/${book3.id}/next")
-        .andExpect { status { isNotFound() } }
+        .andExpect { status { isNoContent() } }
     }
   }
 

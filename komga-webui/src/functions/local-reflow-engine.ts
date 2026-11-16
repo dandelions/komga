@@ -81,6 +81,22 @@ const LOCAL_REFLOW_STRIP_ASPECT_RATIO = 2.0
 const LOCAL_REFLOW_STRIP_MAX_SHORT_SIDE = 1800
 const LOCAL_REFLOW_STRIP_MAX_LONG_SIDE = 65000
 
+export function localReflowScale(sourceW: number, sourceH: number): number {
+  const shortSide = Math.min(sourceW, sourceH)
+  const longSide = Math.max(sourceW, sourceH)
+  const aspectRatio = longSide / Math.max(1, shortSide)
+
+  if (aspectRatio > LOCAL_REFLOW_STRIP_ASPECT_RATIO) {
+    const shortSideScale = LOCAL_REFLOW_STRIP_MAX_SHORT_SIDE / Math.max(1, shortSide)
+    const longSideScale = LOCAL_REFLOW_STRIP_MAX_LONG_SIDE / Math.max(1, longSide)
+    return Math.min(1, Math.min(shortSideScale, longSideScale))
+  }
+
+  const maxSideScale = LOCAL_REFLOW_MAX_SIDE / Math.max(1, longSide)
+  const pixelScale = Math.sqrt(LOCAL_REFLOW_MAX_PIXELS / Math.max(1, sourceW * sourceH))
+  return Math.min(1, Math.min(maxSideScale, pixelScale))
+}
+
 export function clamp(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, v))
 }
@@ -801,10 +817,8 @@ export function detectLines(
   const rawLines: Array<{start: number, end: number}> = []
   let inLine = false
   let lineStart = 0
-  const noiseThreshold = Math.max(1, Math.round(colWidth * 0.01))
-
   for (let y = 0; y < roi.h; y++) {
-    if (rowInk[y] > noiseThreshold) {
+    if (rowInk[y] >= 1) {
       if (!inLine) {
         inLine = true
         lineStart = y
@@ -1372,20 +1386,7 @@ export function reflowPageFromPixels(
   }
 
   // 2. Downscale if excessively large (aligned with downscaleServerImage)
-  const shortSide = Math.min(sourceW, sourceH)
-  const longSide = Math.max(sourceW, sourceH)
-  const aspectRatio = longSide / Math.max(1, shortSide)
-
-  let scale = 1.0
-  if (aspectRatio > LOCAL_REFLOW_STRIP_ASPECT_RATIO) {
-    const shortSideScale = LOCAL_REFLOW_STRIP_MAX_SHORT_SIDE / shortSide
-    const longSideScale = LOCAL_REFLOW_STRIP_MAX_LONG_SIDE / longSide
-    scale = Math.min(1.0, Math.min(shortSideScale, longSideScale))
-  } else {
-    const maxSideScale = LOCAL_REFLOW_MAX_SIDE / longSide
-    const pixelScale = Math.sqrt(LOCAL_REFLOW_MAX_PIXELS / Math.max(1, sourceW * sourceH))
-    scale = Math.min(1.0, Math.min(maxSideScale, pixelScale))
-  }
+  const scale = localReflowScale(sourceW, sourceH)
 
   let workPixels = sourcePixels
   let workW = sourceW
@@ -1462,7 +1463,7 @@ export function reflowPageFromPixels(
     : [defaultPageRoi]
 
   const items: LocalReflowItem[] = []
-  const textScale = clamp((options.textScale || 100) / 100, 0.2, 2.5)
+  const textScale = clamp((options.textScale || 100) / 100, 0.1, 1.4)
 
   const isSpriteMode = options.renderMode === 'sprite'
   let pageTextureUrl = ''
@@ -1790,13 +1791,11 @@ export function reflowPageFromPixels(
             isOutdentReset = true
           }
         }
-
         let hasParagraphGap = false
         if (prevLine) {
           const gap = line.start - prevLine.end
           hasParagraphGap = gap >= currentHeight * 1.8
         }
-
         if (isListItemContinuation) {
           isNewParagraph = false
           indentWidth = 0

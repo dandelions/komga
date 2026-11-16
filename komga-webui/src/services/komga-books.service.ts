@@ -99,7 +99,8 @@ export default class KomgaBooksService {
 
   async getBookSiblingNext(bookId: string): Promise<BookDto> {
     try {
-      return (await this.http.get(`${API_BOOKS}/${bookId}/next`)).data
+      const response = await this.http.get(`${API_BOOKS}/${bookId}/next`)
+      return response.status === 204 ? {} as BookDto : response.data
     } catch (e) {
       let msg = 'An error occurred while trying to retrieve book'
       if (e.response.data.message) {
@@ -111,7 +112,8 @@ export default class KomgaBooksService {
 
   async getBookSiblingPrevious(bookId: string): Promise<BookDto> {
     try {
-      return (await this.http.get(`${API_BOOKS}/${bookId}/previous`)).data
+      const response = await this.http.get(`${API_BOOKS}/${bookId}/previous`)
+      return response.status === 204 ? {} as BookDto : response.data
     } catch (e) {
       let msg = 'An error occurred while trying to retrieve book'
       if (e.response.data.message) {
