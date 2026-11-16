@@ -162,7 +162,7 @@ class FontsController(
         .headers {
           it.contentDisposition =
             ContentDisposition
-              .attachment()
+              .inline()
               .filename("$fontFamily.css", StandardCharsets.UTF_8)
               .build()
         }.body(ByteArrayResource(css.toByteArray()))

@@ -96,6 +96,7 @@ class FontsControllerTest(
         header {
           string(HttpHeaders.CONTENT_TYPE, "text/css")
           exists(HttpHeaders.CACHE_CONTROL)
+          string(HttpHeaders.CONTENT_DISPOSITION, org.hamcrest.Matchers.containsString("inline;"))
           string(HttpHeaders.CONTENT_DISPOSITION, org.hamcrest.Matchers.containsString("filename*=UTF-8''OpenDyslexic.css"))
         }
         content {
