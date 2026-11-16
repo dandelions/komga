@@ -1,5 +1,10 @@
 <template>
-  <div id="root" :key="bookId">
+  <div
+    id="root"
+    :key="bookId"
+    class="epub-reader-page"
+    :class="{'epub-reader-continuous-page': verticalScroll}"
+  >
     <v-slide-y-transition>
       <v-toolbar
         v-if="showToolbars"
@@ -133,7 +138,7 @@
     <header id="headerMenu"/>
 
     <div id="D2Reader-Container" :style="epubReaderBackgroundStyle" :class="appearanceClass('bg')">
-      <main tabindex=-1 id="iframe-wrapper" style="height: 100vh" @click="clickThrough">
+      <main tabindex=-1 id="iframe-wrapper" @click="clickThrough">
         <div id="reader-loading"></div>
         <div id="reader-error"></div>
       </main>
@@ -1128,6 +1133,8 @@ export default Vue.extend({
     this.d2Reader?.stop?.()
   },
   destroyed() {
+    document.documentElement.classList.remove('html-epub-reader')
+    document.body.classList.remove('html-epub-reader')
     delete (window as any)[EPUB_CUSTOM_STYLE_WINDOW_KEY]
     this.$vuetify.rtl = (this.$t('common.locale_rtl') === 'true')
     if (screenfull.isEnabled) {
@@ -1136,6 +1143,8 @@ export default Vue.extend({
     }
   },
   async mounted() {
+    document.documentElement.classList.add('html-epub-reader')
+    document.body.classList.add('html-epub-reader')
     Object.assign(this.settings, this.$store.state.persistedState.epubreader)
     this.settings.alwaysFullscreen = this.$store.state.persistedState.webreader.alwaysFullscreen
 
@@ -4621,13 +4630,36 @@ export default Vue.extend({
 .hidden {
   display: none !important;
 }
-/*修复移动端视口不正常的BUG */
 #iframe-wrapper {
-  /* 使用 dvh (Dynamic Viewport Height) 自动适配移动端浏览器工具栏 */
-  height: 100vh !important;
-  height: 100dvh !important; 
   width: 100%;
-  overflow: hidden;
+  min-height: 100vh;
+  min-height: 100dvh;
   position: relative;
+}
+
+@media (max-width: 959px), (hover: none) and (pointer: coarse) {
+  html.html-epub-reader,
+  body.html-epub-reader {
+    min-height: calc(100vh + 150px);
+    min-height: calc(100dvh + 150px);
+  }
+
+  html.html-epub-reader .v-application,
+  html.html-epub-reader .v-application--wrap {
+    min-height: inherit;
+  }
+
+  html.html-epub-reader .epub-reader-page:not(.epub-reader-continuous-page) #D2Reader-Container {
+    position: sticky;
+    top: 0;
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+
+  html.html-epub-reader .epub-reader-page:not(.epub-reader-continuous-page) #iframe-wrapper {
+    min-height: 100vh;
+    min-height: 100dvh;
+    overflow: visible;
+  }
 }
 </style>
