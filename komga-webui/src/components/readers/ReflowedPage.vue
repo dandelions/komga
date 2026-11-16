@@ -442,6 +442,10 @@
           <span class="reflow-font-value">{{ controlSkewCorrectionLabel }}</span>
           <span v-if="controlAutoSkewCorrection" class="crop-auto-skew-label">自动 {{ detectedAutoSkewCorrectionLabel }}</span>
         </label>
+        <label class="reflow-column-control reflow-checkbox-control crop-auto-skew-control">
+          <span>自动纠斜</span>
+          <input type="checkbox" :checked="controlAutoSkewCorrection" @change="setAutoSkewCorrection"/>
+        </label>
       </div>
       <div v-if="cropWarning" class="crop-warning">{{ cropWarning }}</div>
       <div
@@ -7618,12 +7622,13 @@ export default Vue.extend({
     adjustSkewCorrection(delta: number) {
       this.pendingSkewCorrection = this.normalizedSkewCorrection(this.controlSkewCorrection + delta)
     },
-    setAutoSkewCorrection(event: Event) {
+    async setAutoSkewCorrection(event: Event) {
       const target = event.target as HTMLInputElement
       this.pendingAutoSkewCorrection = target.checked
       this.$emit('auto-skew-correction-change', target.checked)
       if (this.cropMode || this.deferReflow) {
-        this.ensureCropImage(this.controlSkewCorrection)
+        this.revokePreparedCropObjectUrl()
+        await this.ensureCropImage(this.controlSkewCorrection)
       } else {
         this.reflow()
       }
@@ -9156,6 +9161,11 @@ export default Vue.extend({
 .crop-skew-control {
   flex: 0 1 320px;
   min-width: min(320px, 100%);
+}
+
+.crop-auto-skew-control {
+  flex: 0 0 auto;
+  min-width: 0;
 }
 
 .reflowed-page-dark .crop-toolbar {

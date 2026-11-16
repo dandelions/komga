@@ -903,6 +903,32 @@ describe('ReflowedPage display columns layout', () => {
   })
 })
 
+describe('ReflowedPage crop auto deskew', () => {
+  test('refreshes the crop image before allowing selection to continue', async () => {
+    const ensureCropImage = jest.fn().mockResolvedValue(undefined)
+    const revokePreparedCropObjectUrl = jest.fn()
+    const emit = jest.fn()
+    const pageInstance: any = {
+      pendingAutoSkewCorrection: false,
+      cropMode: true,
+      deferReflow: false,
+      controlSkewCorrection: 0,
+      ensureCropImage,
+      revokePreparedCropObjectUrl,
+      $emit: emit,
+    }
+
+    await methods.setAutoSkewCorrection.call(pageInstance, {
+      target: {checked: true},
+    } as any)
+
+    expect(pageInstance.pendingAutoSkewCorrection).toBe(true)
+    expect(revokePreparedCropObjectUrl).toHaveBeenCalledTimes(1)
+    expect(ensureCropImage).toHaveBeenCalledWith(0)
+    expect(emit).toHaveBeenCalledWith('auto-skew-correction-change', true)
+  })
+})
+
 describe('ReflowedPage crop zoom levels', () => {
   test('cropZoomLevels and cropZoomPercentOptions include levels below 100%', () => {
     const levels = computed.cropZoomLevels.call({})
