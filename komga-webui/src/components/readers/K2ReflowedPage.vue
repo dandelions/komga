@@ -565,7 +565,6 @@ export default Vue.extend({
     this.updateViewportMetrics()
     window.addEventListener('resize', this.handleResize)
     window.visualViewport?.addEventListener('resize', this.handleResize)
-    window.visualViewport?.addEventListener('scroll', this.handleResize)
     this.$nextTick(() => {
       this.initializeControlsPosition()
       this.updateViewportMetrics()
@@ -575,7 +574,6 @@ export default Vue.extend({
   destroyed() {
     window.removeEventListener('resize', this.handleResize)
     window.visualViewport?.removeEventListener('resize', this.handleResize)
-    window.visualViewport?.removeEventListener('scroll', this.handleResize)
     this.removeControlsDragListeners()
     this.revokeObjectUrl()
   },
@@ -859,7 +857,6 @@ export default Vue.extend({
       this.updateViewportMetrics()
       this.$nextTick(this.constrainControlsPosition)
       this.repaginate(false)
-      this.scrollToTop()
     },
     updateViewportMetrics() {
       const vv = typeof window !== 'undefined' ? window.visualViewport : undefined

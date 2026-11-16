@@ -1,7 +1,11 @@
 <template>
   <v-container
     class="ma-0 pa-0 full-height reader-shell"
-    :class="{'reader-night-mode': nightDisplay, 'reader-landscape-shell': landscapeDisplay && !continuousReader}"
+    :class="{
+      'reader-night-mode': nightDisplay,
+      'reader-landscape-shell': landscapeDisplay && !continuousReader,
+      'reader-continuous-shell': continuousReader,
+    }"
     fluid
     v-if="pages.length > 0"
     :style="`width: 100%; background-color: ${backgroundColor}`"
@@ -1468,7 +1472,6 @@ export default Vue.extend({
     this.updateViewportMetrics()
     window.addEventListener('resize', this.updateViewportMetrics)
     window.visualViewport?.addEventListener('resize', this.updateViewportMetrics)
-    window.visualViewport?.addEventListener('scroll', this.updateViewportMetrics)
     this.loadMagnifierSettings()
 
     this.$debug('[mounted]', 'route.query:', this.$route.query)
@@ -1498,7 +1501,6 @@ export default Vue.extend({
     document.body.classList.remove('html-reader')
     window.removeEventListener('resize', this.updateViewportMetrics)
     window.visualViewport?.removeEventListener('resize', this.updateViewportMetrics)
-    window.visualViewport?.removeEventListener('scroll', this.updateViewportMetrics)
     this.clearReflowPrefetch()
     this.clearReaderCropImagePreparationTimer()
     this.revokeReaderCropImageUrl()
@@ -4407,6 +4409,28 @@ body.html-reader::-webkit-scrollbar {
   display: none !important;
   width: 0 !important;
   height: 0 !important;
+}
+
+@media (max-width: 959px), (hover: none) and (pointer: coarse) {
+  body.html-reader {
+    min-height: calc(100vh + 150px) !important;
+    min-height: calc(100dvh + 150px) !important;
+  }
+
+  .html-reader .v-application,
+  .html-reader .v-application--wrap {
+    min-height: inherit !important;
+  }
+
+  .html-reader .reader-shell:not(.reader-continuous-shell) {
+    position: -webkit-sticky !important;
+    position: sticky !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+  }
 }
 
 .reader-shell {
