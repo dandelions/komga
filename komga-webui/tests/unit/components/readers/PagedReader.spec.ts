@@ -103,6 +103,23 @@ describe('PagedReader previous-page scroll restoration', () => {
     ])
   })
 
+  test('renders the actual crop segment overlap without a fixed size cap', () => {
+    const reader = {}
+
+    expect(methods.cropSegmentOverlapStyle.call(reader, 'bottom', 20)).toEqual({
+      left: '0',
+      right: '0',
+      bottom: '0',
+      height: '20.00%',
+    })
+    expect(methods.cropSegmentOverlapStyle.call(reader, 'right', 70)).toEqual({
+      top: '0',
+      right: '0',
+      bottom: '0',
+      width: '70.00%',
+    })
+  })
+
   test('rebuilds spreads and refreshes deskewed urls on rotation change', () => {
     const reader = createReader()
     reader.page = 2

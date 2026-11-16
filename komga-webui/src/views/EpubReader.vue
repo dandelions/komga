@@ -1149,12 +1149,12 @@ export default Vue.extend({
     Object.assign(this.settings, this.$store.state.persistedState.epubreader)
     this.settings.alwaysFullscreen = this.$store.state.persistedState.webreader.alwaysFullscreen
 
-    this.fontFamiliesAdditional = await this.$komgaFonts.getFamilies()
-    await this.refreshInstalledFonts()
-
     this.ttsInitVoices()
     this.ttsLoadSettings()
-    this.setup(this.bookId)
+    const fontInitialization = this.initializeFontSupport()
+    await this.setup(this.bookId)
+    await fontInitialization
+    this.scheduleEpubIframeEnhancements(false)
   },
   props: {
     bookId: {
@@ -1451,6 +1451,20 @@ export default Vue.extend({
     },
   },
   methods: {
+    async initializeFontSupport() {
+      try {
+        this.fontFamiliesAdditional = await this.$komgaFonts.getFamilies()
+      } catch (e) {
+        this.fontFamiliesAdditional = []
+      }
+
+      try {
+        await this.refreshInstalledFonts()
+      } catch (e) {
+        this.installedFonts = {}
+        this.installedFontCss = ''
+      }
+    },
     fontPreviewUrl(family?: string): string {
       if (!family || family === 'Original' || this.fontPreviewErrors.includes(family)) return ''
       return fontFamilyPreviewUrl(family)
@@ -1489,6 +1503,34 @@ export default Vue.extend({
     },
     onInstalledFontsChanged() {
       this.refreshInstalledFonts().then(() => this.scheduleEpubIframeEnhancements(false))
+    },
+    applyServerFontStylesToDocument(doc: Document) {
+      const head = doc.head || doc.documentElement
+      if (!head) return
+
+      const currentFamilies = new Set(this.fontFamiliesAdditional)
+      head.querySelectorAll<HTMLLinkElement>('link[data-komga-server-font="true"]').forEach(link => {
+        const family = link.dataset.komgaFontFamily || ''
+        if (!currentFamilies.has(family) || this.installedFonts[family]) link.remove()
+      })
+
+      this.fontFamiliesAdditional.forEach(family => {
+        if (this.installedFonts[family]) return
+        const existing = Array.from(head.querySelectorAll<HTMLLinkElement>('link[data-komga-server-font="true"]'))
+          .some(link => link.dataset.komgaFontFamily === family)
+        if (existing) return
+
+        const link = doc.createElement('link')
+        link.rel = 'stylesheet'
+        link.href = fontFamilyCssUrl(family)
+        link.dataset.komgaServerFont = 'true'
+        link.dataset.komgaFontFamily = family
+        link.onerror = () => {
+          link.dataset.komgaServerFontFailed = 'true'
+          link.removeAttribute('href')
+        }
+        head.appendChild(link)
+      })
     },
     applyInstalledFontsToDocument(doc: Document) {
       const styleId = 'komga-installed-fonts'
@@ -1678,12 +1720,6 @@ export default Vue.extend({
       // parse query params to get incognito mode
       this.incognito = !!(this.$route.query.incognito && this.$route.query.incognito.toString().toLowerCase() === 'true')
 
-      const fontFamiliesInjectables = this.fontFamiliesAdditional.map(x => ({
-        type: 'style',
-        url: fontFamilyCssUrl(x),
-        fontFamily: x,
-      }))
-
       this.d2Reader = await D2Reader.load({
         url: new URL(bookManifestUrl(bookId)),
         userSettings: this.settings,
@@ -1710,7 +1746,6 @@ export default Vue.extend({
           {type: 'style', url: R2D2BC_POPUP_CSS_URL},
           {type: 'style', url: R2D2BC_POPOVER_CSS_URL},
           {type: 'style', url: R2D2BC_STYLE_CSS_URL},
-          ...fontFamiliesInjectables,
         ],
         requestConfig: {
           credentials: 'include',
@@ -2338,6 +2373,7 @@ export default Vue.extend({
         this.applyEpubChineseConversion(doc)
         this.applyEpubThemeToDocument(doc)
         this.applyEpubCustomStyleToDocument(doc)
+        this.applyServerFontStylesToDocument(doc)
         this.applyInstalledFontsToDocument(doc)
         this.applyEpubTextSelection(doc)
         this.ttsInjectHighlightStyle(doc)

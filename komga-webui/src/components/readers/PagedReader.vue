@@ -726,7 +726,7 @@ export default Vue.extend({
       return Math.max(0, this.cropSegmentCount(pageNumber, regionIndex) - 1)
     },
     cropSegmentOverlapStyle(edge: CropSegmentEdge, percent: number): Record<string, string> {
-      const size = `${Math.max(3, Math.min(18, percent)).toFixed(2)}%`
+      const size = `${Math.max(0, Math.min(100, percent)).toFixed(2)}%`
       switch (edge) {
         case 'top':
           return {top: '0', left: '0', right: '0', height: size}
