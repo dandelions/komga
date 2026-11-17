@@ -15,25 +15,27 @@ describe('EpubReader mobile address bar collapse and root scrolling structure', 
     expect(content).toMatch(/\.html-epub-reader\s+\.v-application,\s*\n\s*\.html-epub-reader\s+\.v-application--wrap\s*\{[\s\S]*?min-height:\s*inherit\s*!important/i)
   })
 
-  test('paginated epub reader page is sticky pinned and allows vertical panning on mobile viewports', () => {
+  test('paginated epub reader page is sticky pinned and routes mobile touches through the top-level wrapper', () => {
     expect(content).toMatch(/\.html-epub-reader\s+\.epub-reader-page:not\(\.epub-reader-continuous-page\)\s*\{[\s\S]*?position:\s*-webkit-sticky\s*!important/i)
     expect(content).toMatch(/\.html-epub-reader\s+\.epub-reader-page:not\(\.epub-reader-continuous-page\)\s*\{[\s\S]*?position:\s*sticky\s*!important/i)
     expect(content).toMatch(/\.html-epub-reader\s+\.epub-reader-page:not\(\.epub-reader-continuous-page\)\s*\{[\s\S]*?height:\s*100dvh\s*!important/i)
-    expect(content).toMatch(/\.html-epub-reader\s+\.epub-reader-page:not\(\.epub-reader-continuous-page\)\s+#iframe-wrapper\s*\{[\s\S]*?touch-action:\s*pan-y\s+pinch-zoom\s*!important/i)
-    expect(content).toMatch(/\.html-epub-reader\s+\.epub-reader-page:not\(\.epub-reader-continuous-page\)\s+#iframe-wrapper\s+iframe\s*\{[\s\S]*?touch-action:\s*pan-y\s+pinch-zoom\s*!important/i)
+    expect(content).toMatch(/\.html-epub-reader\s+\.epub-reader-page\s+#iframe-wrapper\s*\{[\s\S]*?touch-action:\s*pan-y\s+pinch-zoom\s*!important/i)
+    expect(content).toMatch(/\.html-epub-reader\s+\.epub-reader-page:not\(\.epub-reader-selection-mode\)\s+#iframe-wrapper\s+iframe\s*\{[\s\S]*?pointer-events:\s*none\s*!important/i)
   })
 
-  test('does not fight native compositor address bar collapse with programmatic touchmove scrollBy', () => {
+  test('does not fight native compositor address bar collapse with programmatic touchmove scrollBy or post-swipe backward scrollTo', () => {
     expect(content).not.toContain('bindEpubRootScrollBridge')
     expect(content).not.toContain('window.scrollBy(')
     expect(content).not.toContain('scroller.scrollTop += deltaY')
+    expect(content).not.toContain('recenterEpubRootScroll')
   })
 
-  test('only binds non-passive touchmove listeners for vertical writing mode and recenters root scroll when idle', () => {
-    expect(content).toContain('applyEpubMobileScrollSupport(iframe: HTMLIFrameElement, doc: Document)')
-    expect(content).toContain('iframe.style.setProperty(\'touch-action\', \'pan-y pinch-zoom\')')
-    expect(content).toContain('if (isVerticalWriting && !verticalBound)')
-    expect(content).toContain('recenterEpubRootScroll()')
-    expect(content).toContain('window.scrollTo({top: 120, left: 0, behavior: \'auto\'})')
+  test('handles mobile swipes, taps, links, and long-press selection mode via passive top-level wrapper listeners', () => {
+    expect(content).toContain('@touchstart.passive="handleEpubWrapperTouchStart"')
+    expect(content).toContain('@touchmove.passive="handleEpubWrapperTouchMove"')
+    expect(content).toContain('@touchend.passive="handleEpubWrapperTouchEnd"')
+    expect(content).toContain('resolveEpubIframeTargetAtPoint(clientX: number, clientY: number)')
+    expect(content).toContain('enableEpubMobileSelectionMode()')
+    expect(content).toContain('handleEpubMobileViewportResize()')
   })
 })

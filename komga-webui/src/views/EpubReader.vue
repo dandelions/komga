@@ -3,7 +3,10 @@
     id="root"
     :key="bookId"
     class="epub-reader-page"
-    :class="{'epub-reader-continuous-page': verticalScroll}"
+    :class="{
+      'epub-reader-continuous-page': verticalScroll,
+      'epub-reader-selection-mode': epubMobileSelectionMode,
+    }"
   >
     <v-slide-y-transition>
       <v-toolbar
@@ -138,7 +141,16 @@
     <header id="headerMenu"/>
 
     <div id="D2Reader-Container" :style="epubReaderBackgroundStyle" :class="appearanceClass('bg')">
-      <main tabindex=-1 id="iframe-wrapper" @click="clickThrough">
+      <main
+        tabindex=-1
+        id="iframe-wrapper"
+        @click="clickThrough"
+        @touchstart.passive="handleEpubWrapperTouchStart"
+        @touchmove.passive="handleEpubWrapperTouchMove"
+        @touchend.passive="handleEpubWrapperTouchEnd"
+        @touchcancel.passive="handleEpubWrapperTouchCancel"
+        @contextmenu="handleEpubWrapperContextMenu"
+      >
         <div id="reader-loading"></div>
         <div id="reader-error"></div>
       </main>
@@ -1068,8 +1080,13 @@ export default Vue.extend({
       epubIframeEnhancementObserver: undefined as MutationObserver | undefined,
       epubIframeEnhancementTimers: [] as number[],
       epubTouchStart: undefined as EpubTouchStart | undefined,
-      epubRootTouchActive: false,
-      epubRootScrollRecenterTimer: undefined as number | undefined,
+      epubMobileSelectionMode: false,
+      epubMobileSelectionIdleTimer: undefined as number | undefined,
+      epubMobileTouchStart: undefined as (EpubTouchStart & { time: number }) | undefined,
+      epubMobileLastSwipeAt: 0,
+      epubMobileLastImageTap: undefined as { src: string, time: number } | undefined,
+      epubMobileLongPressTimer: undefined as number | undefined,
+      epubMobileLastViewportHeight: 0,
       epubTouchSelectionTimer: undefined as number | undefined,
       epubTouchSelectionActive: false,
       epubImageZoomVisible: false,
@@ -1132,12 +1149,10 @@ export default Vue.extend({
     this.revokeInstalledFontObjectUrls()
     this.ttsStop()
     this.clearEpubTouchSelectionState()
-    this.epubRootTouchActive = false
-    this.clearEpubRootScrollRecenterTimer()
-    window.removeEventListener('scroll', this.handleEpubRootScroll)
-    window.removeEventListener('touchstart', this.handleEpubRootTouchStart)
-    window.removeEventListener('touchend', this.handleEpubRootTouchEnd)
-    window.removeEventListener('touchcancel', this.handleEpubRootTouchEnd)
+    this.clearEpubMobileTouchState()
+    this.disableEpubMobileSelectionMode()
+    window.removeEventListener('resize', this.handleEpubMobileViewportResize)
+    window.visualViewport?.removeEventListener('resize', this.handleEpubMobileViewportResize)
     this.stopEpubIframeEnhancements()
     this.d2Reader?.stop?.()
   },
@@ -1154,10 +1169,9 @@ export default Vue.extend({
   async mounted() {
     document.documentElement.classList.add('html-epub-reader')
     document.body.classList.add('html-epub-reader')
-    window.addEventListener('scroll', this.handleEpubRootScroll, {passive: true})
-    window.addEventListener('touchstart', this.handleEpubRootTouchStart, {passive: true})
-    window.addEventListener('touchend', this.handleEpubRootTouchEnd, {passive: true})
-    window.addEventListener('touchcancel', this.handleEpubRootTouchEnd, {passive: true})
+    this.epubMobileLastViewportHeight = window.visualViewport?.height || window.innerHeight
+    window.addEventListener('resize', this.handleEpubMobileViewportResize, {passive: true})
+    window.visualViewport?.addEventListener('resize', this.handleEpubMobileViewportResize, {passive: true})
     Object.assign(this.settings, this.$store.state.persistedState.epubreader)
     this.settings.alwaysFullscreen = this.$store.state.persistedState.webreader.alwaysFullscreen
 
@@ -1628,7 +1642,53 @@ export default Vue.extend({
       this.shortcuts[e.key]?.execute(this)
     },
     clickThrough(e: MouseEvent) {
-      const target = e.target as Element | null
+      if (Date.now() - this.epubMobileLastSwipeAt < 350) {
+        return
+      }
+      const rawTarget = e.target as Element | null
+      if (rawTarget?.ownerDocument === document && rawTarget.closest?.('#d2-popover, #d2-popup, a, button, input, textarea, select, label')) {
+        return
+      }
+      if (this.epubMobileSelectionMode) {
+        if (this.hasEpubIframeSelection()) {
+          clearTimeout(this.clickTimer)
+          return
+        }
+        this.disableEpubMobileSelectionMode()
+      }
+      let target = rawTarget
+      if (rawTarget?.ownerDocument === document && this.isMobileEpubViewport() && !this.epubMobileSelectionMode) {
+        const innerTarget = this.resolveEpubIframeTargetAtPoint(e.clientX, e.clientY)
+        if (innerTarget) {
+          target = innerTarget
+          const anchor = innerTarget.closest?.('a[href]') as HTMLElement | null
+          if (anchor) {
+            clearTimeout(this.clickTimer)
+            anchor.click()
+            return
+          }
+          const interactive = innerTarget.closest?.('button, input, textarea, select, label, audio, video') as HTMLElement | null
+          if (interactive) {
+            clearTimeout(this.clickTimer)
+            interactive.click()
+            return
+          }
+          if (innerTarget.tagName.toLowerCase() === 'img') {
+            const img = innerTarget as HTMLImageElement
+            const src = img.currentSrc || img.src
+            const now = Date.now()
+            if (e.detail === 2 || (src && this.epubMobileLastImageTap?.src === src && now - this.epubMobileLastImageTap.time < 320)) {
+              clearTimeout(this.clickTimer)
+              this.epubMobileLastImageTap = undefined
+              this.openEpubImageZoom(img)
+              return
+            }
+            if (src) {
+              this.epubMobileLastImageTap = {src, time: now}
+            }
+          }
+        }
+      }
       if (this.ttsActive && target) {
         const itemIdx = this.ttsItems.findIndex(it => it.element === target || it.element.contains(target))
         if (itemIdx !== -1) {
@@ -2820,45 +2880,143 @@ export default Vue.extend({
       return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
         && window.matchMedia('(max-width: 959px), (hover: none) and (pointer: coarse)').matches
     },
-    clearEpubRootScrollRecenterTimer() {
-      if (this.epubRootScrollRecenterTimer !== undefined) {
-        window.clearTimeout(this.epubRootScrollRecenterTimer)
-        this.epubRootScrollRecenterTimer = undefined
+    clearEpubMobileLongPressTimer() {
+      if (this.epubMobileLongPressTimer !== undefined) {
+        window.clearTimeout(this.epubMobileLongPressTimer)
+        this.epubMobileLongPressTimer = undefined
       }
     },
-    handleEpubRootTouchStart() {
-      this.epubRootTouchActive = true
-      this.clearEpubRootScrollRecenterTimer()
+    clearEpubMobileTouchState() {
+      this.clearEpubMobileLongPressTimer()
+      this.epubMobileTouchStart = undefined
     },
-    handleEpubRootTouchEnd() {
-      this.epubRootTouchActive = false
-      this.scheduleEpubRootScrollRecenter()
-    },
-    handleEpubRootScroll() {
-      if (this.verticalScroll || this.epubRootTouchActive) return
-      this.scheduleEpubRootScrollRecenter()
-    },
-    scheduleEpubRootScrollRecenter() {
-      this.clearEpubRootScrollRecenterTimer()
-      if (this.verticalScroll || this.epubRootTouchActive || !this.isMobileEpubViewport()) return
-      this.epubRootScrollRecenterTimer = window.setTimeout(() => {
-        this.epubRootScrollRecenterTimer = undefined
-        this.recenterEpubRootScroll()
-      }, 350)
-    },
-    recenterEpubRootScroll() {
-      if (this.verticalScroll || this.epubRootTouchActive || !this.isMobileEpubViewport()) return
-      const scroller = (document.scrollingElement || document.documentElement) as HTMLElement | null
-      if (!scroller) return
-      const maxScroll = scroller.scrollHeight - scroller.clientHeight
-      if (maxScroll >= 240 && scroller.scrollTop > maxScroll - 140) {
-        window.scrollTo({top: 120, left: 0, behavior: 'auto'})
+    clearEpubMobileSelectionIdleTimer() {
+      if (this.epubMobileSelectionIdleTimer !== undefined) {
+        window.clearTimeout(this.epubMobileSelectionIdleTimer)
+        this.epubMobileSelectionIdleTimer = undefined
       }
+    },
+    enableEpubMobileSelectionMode() {
+      if (!this.isMobileEpubViewport()) return
+      this.epubMobileSelectionMode = true
+      this.scheduleEpubMobileSelectionIdleCheck()
+    },
+    disableEpubMobileSelectionMode() {
+      this.clearEpubMobileSelectionIdleTimer()
+      this.epubMobileSelectionMode = false
+    },
+    scheduleEpubMobileSelectionIdleCheck() {
+      this.clearEpubMobileSelectionIdleTimer()
+      this.epubMobileSelectionIdleTimer = window.setTimeout(() => {
+        this.epubMobileSelectionIdleTimer = undefined
+        if (!this.hasEpubIframeSelection()) {
+          this.epubMobileSelectionMode = false
+        }
+      }, 6000)
+    },
+    handleEpubIframeSelectionChange() {
+      if (!this.epubMobileSelectionMode) return
+      if (!this.hasEpubIframeSelection()) {
+        this.disableEpubMobileSelectionMode()
+      } else {
+        this.clearEpubMobileSelectionIdleTimer()
+      }
+    },
+    handleEpubMobileViewportResize() {
+      const currentHeight = window.visualViewport?.height || window.innerHeight
+      const prevHeight = this.epubMobileLastViewportHeight
+      this.epubMobileLastViewportHeight = currentHeight
+      if (this.verticalScroll || !this.isMobileEpubViewport() || prevHeight <= 0) return
+      // Only reset scroll position when the browser UI re-expanded (viewport shrank) while stuck near the bottom.
+      if (currentHeight < prevHeight - 20) {
+        const scroller = (document.scrollingElement || document.documentElement) as HTMLElement | null
+        if (!scroller) return
+        const maxScroll = scroller.scrollHeight - scroller.clientHeight
+        if (maxScroll >= 240 && scroller.scrollTop > maxScroll - 120) {
+          window.scrollTo({top: 0, left: 0, behavior: 'auto'})
+        }
+      }
+    },
+    resolveEpubIframeTargetAtPoint(clientX: number, clientY: number): Element | null {
+      try {
+        const iframe = document.querySelector<HTMLIFrameElement>('#iframe-wrapper iframe')
+        const doc = iframe?.contentDocument
+        if (!iframe || !doc) return null
+        const rect = iframe.getBoundingClientRect()
+        const cs = window.getComputedStyle(iframe)
+        const paddingLeft = parseFloat(cs.paddingLeft || '0') || 0
+        const paddingTop = parseFloat(cs.paddingTop || '0') || 0
+        const iframeX = clientX - rect.left - paddingLeft
+        const iframeY = clientY - rect.top - paddingTop
+        if (iframeX < 0 || iframeY < 0 || iframeX > rect.width || iframeY > rect.height) return null
+        return doc.elementFromPoint(iframeX, iframeY)
+      } catch (e) {
+        return null
+      }
+    },
+    handleEpubWrapperTouchStart(event: TouchEvent) {
+      if (!this.isMobileEpubViewport() || this.epubMobileSelectionMode) return
+      this.clearEpubMobileTouchState()
+      if (event.touches.length !== 1) return
+
+      const touch = event.touches[0]
+      this.epubMobileTouchStart = {
+        x: touch.clientX,
+        y: touch.clientY,
+        time: Date.now(),
+      }
+      this.epubMobileLongPressTimer = window.setTimeout(() => {
+        this.epubMobileLongPressTimer = undefined
+        this.enableEpubMobileSelectionMode()
+      }, EPUB_TEXT_SELECTION_LONG_PRESS_DELAY)
+    },
+    handleEpubWrapperTouchMove(event: TouchEvent) {
+      const start = this.epubMobileTouchStart
+      if (!start || event.touches.length !== 1) {
+        this.clearEpubMobileLongPressTimer()
+        return
+      }
+      const touch = event.touches[0]
+      if (Math.abs(touch.clientX - start.x) > 10 || Math.abs(touch.clientY - start.y) > 10) {
+        this.clearEpubMobileLongPressTimer()
+      }
+    },
+    handleEpubWrapperTouchEnd(event: TouchEvent) {
+      const start = this.epubMobileTouchStart
+      this.clearEpubMobileTouchState()
+      if (!start || this.verticalScroll || this.epubMobileSelectionMode || !this.isMobileEpubViewport()) return
+      if (event.changedTouches.length === 0) return
+
+      const touch = event.changedTouches[0]
+      const dt = Date.now() - start.time
+      if (dt > 650) return
+
+      const swipeDirection = this.getEpubHorizontalSwipeDirection(start, touch.clientX, touch.clientY)
+      if (swipeDirection === 0) return
+
+      this.epubMobileLastSwipeAt = Date.now()
+      if (this.isVerticalEpubPaginationActive()) {
+        this.handleEpubHorizontalSwipe(swipeDirection)
+      } else if (swipeDirection < 0) {
+        if (this.isRtl) this.previousEpubPage()
+        else this.nextEpubPage()
+      } else {
+        if (this.isRtl) this.nextEpubPage()
+        else this.previousEpubPage()
+      }
+    },
+    handleEpubWrapperTouchCancel() {
+      this.clearEpubMobileTouchState()
+    },
+    handleEpubWrapperContextMenu(event: Event) {
+      if (!this.isMobileEpubViewport() || this.epubMobileSelectionMode) return
+      event.preventDefault()
+      this.enableEpubMobileSelectionMode()
     },
     applyEpubMobileScrollSupport(iframe: HTMLIFrameElement, doc: Document) {
       const html = doc.documentElement
       const body = doc.body
-      if (!this.verticalScroll && this.isMobileEpubViewport()) {
+      if (this.isMobileEpubViewport()) {
         iframe.style.setProperty('touch-action', 'pan-y pinch-zoom')
         html.style.setProperty('touch-action', 'pan-y pinch-zoom')
         body?.style.setProperty('touch-action', 'pan-y pinch-zoom')
@@ -2877,9 +3035,7 @@ export default Vue.extend({
           view.addEventListener('contextmenu', this.handleEpubIframeContextMenu, {capture: true})
         }
         doc.addEventListener('contextmenu', this.handleEpubIframeContextMenu, {capture: true})
-        doc.addEventListener('touchstart', this.handleEpubRootTouchStart, {capture: true, passive: true})
-        doc.addEventListener('touchend', this.handleEpubRootTouchEnd, {capture: true, passive: true})
-        doc.addEventListener('touchcancel', this.handleEpubRootTouchEnd, {capture: true, passive: true})
+        doc.addEventListener('selectionchange', this.handleEpubIframeSelectionChange)
       }
 
       const isVerticalWriting = (html.getAttribute('data-komga-writing-mode') || '').indexOf('vertical') === 0
@@ -4801,7 +4957,7 @@ body.html-epub-reader::-webkit-scrollbar {
     min-height: 100dvh !important;
   }
 
-  .html-epub-reader .epub-reader-page:not(.epub-reader-continuous-page) #iframe-wrapper {
+  .html-epub-reader .epub-reader-page #iframe-wrapper {
     width: 100% !important;
     min-height: 100vh !important;
     min-height: 100dvh !important;
@@ -4809,7 +4965,8 @@ body.html-epub-reader::-webkit-scrollbar {
     touch-action: pan-y pinch-zoom !important;
   }
 
-  .html-epub-reader .epub-reader-page:not(.epub-reader-continuous-page) #iframe-wrapper iframe {
+  .html-epub-reader .epub-reader-page:not(.epub-reader-selection-mode) #iframe-wrapper iframe {
+    pointer-events: none !important;
     touch-action: pan-y pinch-zoom !important;
   }
 }
