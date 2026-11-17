@@ -2943,11 +2943,12 @@ export default Vue.extend({
         marginBottom: this.options.marginBottom,
         marginLeft: this.options.marginLeft,
         cropRois: this.currentReflowCropRois(this.pageParity),
+        manualImageRois: this.currentManualImageRois(),
         darkDisplay: this.darkDisplay,
         deskewDetectionVersion: 10,
         imageExclusionVersion: 4,
         detectionScaleVersion: 5,
-        darkWordRenderVersion: 6,
+        darkWordRenderVersion: 7,
         wordSegmentationVersion: 11,
       })
     },
@@ -7169,6 +7170,9 @@ export default Vue.extend({
         outW,
         outH,
       )
+      if (this.darkDisplay) {
+        this.normalizeImageSliceForDarkDisplay(sliceContext, outW, outH)
+      }
       const dataUrl = this.reflowSliceDataUrl(sliceCanvas)
       return {
         type: 'image',

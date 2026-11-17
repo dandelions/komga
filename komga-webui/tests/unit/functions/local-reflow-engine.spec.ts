@@ -21,6 +21,7 @@ import {
   clearDirtyBlockEdges,
   edgeBackgroundColor,
   isColoredPixel,
+  normalizeImageSliceForDarkDisplay,
   LocalReflowOptions,
 } from '@/functions/local-reflow-engine'
 
@@ -1399,6 +1400,130 @@ describe('local-reflow-engine', () => {
       expect(r).toBeGreaterThan(180)
       expect(g).toBeLessThan(60)
       expect(b).toBeLessThan(60)
+    })
+  })
+
+  describe('cropped image dark/light display switching', () => {
+    const readBmpPixel = (dataUrl: string, x: number, y: number) => {
+      const base64 = dataUrl.replace(/^data:image\/bmp;base64,/, '')
+      const buf = Buffer.from(base64, 'base64')
+      const bmpW = buf.readInt32LE(18)
+      const bmpH = buf.readInt32LE(22)
+      const rowBytes = Math.floor((bmpW * 3 + 3) / 4) * 4
+      const offset = 54 + (bmpH - 1 - y) * rowBytes + x * 3
+      return {r: buf[offset + 2], g: buf[offset + 1], b: buf[offset], width: bmpW, height: bmpH}
+    }
+
+    test('normalizeImageSliceForDarkDisplay inverts grayscale slices and preserves color while darkening white edges', () => {
+      // Grayscale slice: white border + black center
+      const gray = new Uint8ClampedArray(10 * 10 * 4)
+      gray.fill(255)
+      for (let y = 3; y < 7; y++) {
+        for (let x = 3; x < 7; x++) {
+          const idx = (y * 10 + x) * 4
+          gray[idx] = 0
+          gray[idx + 1] = 0
+          gray[idx + 2] = 0
+        }
+      }
+      normalizeImageSliceForDarkDisplay(gray, 10, 10, 185)
+      expect([gray[0], gray[1], gray[2]]).toEqual([0, 0, 0])
+      const centerIdx = (5 * 10 + 5) * 4
+      expect([gray[centerIdx], gray[centerIdx + 1], gray[centerIdx + 2]]).toEqual([255, 255, 255])
+
+      // Colored slice: white edge + black caption border + vivid blue fill
+      const color = new Uint8ClampedArray(12 * 12 * 4)
+      color.fill(255)
+      for (let y = 2; y < 10; y++) {
+        for (let x = 2; x < 10; x++) {
+          const idx = (y * 12 + x) * 4
+          if (x === 2 || x === 9 || y === 2 || y === 9) {
+            color[idx] = 10
+            color[idx + 1] = 10
+            color[idx + 2] = 10
+          } else {
+            color[idx] = 20
+            color[idx + 1] = 90
+            color[idx + 2] = 220
+          }
+        }
+      }
+      normalizeImageSliceForDarkDisplay(color, 12, 12, 185)
+      expect([color[0], color[1], color[2]]).toEqual([0, 0, 0])
+      const borderIdx = (2 * 12 + 5) * 4
+      expect([color[borderIdx], color[borderIdx + 1], color[borderIdx + 2]]).toEqual([255, 255, 255])
+      const blueIdx = (6 * 12 + 6) * 4
+      expect([color[blueIdx], color[blueIdx + 1], color[blueIdx + 2]]).toEqual([20, 90, 220])
+    })
+
+    test('switches manually cropped image items between light and dark display in local reflow', () => {
+      const width = 120
+      const height = 120
+      const pixels = new Uint8ClampedArray(width * height * 4)
+      pixels.fill(255)
+
+      // Grayscale diagram inside manual image region (20, 20, 60, 60)
+      for (let y = 35; y < 65; y++) {
+        for (let x = 35; x < 65; x++) {
+          const idx = (y * width + x) * 4
+          pixels[idx] = 15
+          pixels[idx + 1] = 15
+          pixels[idx + 2] = 15
+        }
+      }
+
+      const manualImageRegions = [{x: 20, y: 20, w: 60, h: 60}]
+      const baseOptions = {
+        targetWidth: 400,
+        renderMode: 'slices' as const,
+        textScale: 100,
+        contrastEnhancement: false,
+        matchBackground: false,
+        matchBackgroundMode: 'grayscale',
+        strokeStrength: 0.1,
+      } as LocalReflowOptions
+
+      const lightResult = reflowPageFromPixels(pixels, width, height, {...baseOptions, darkDisplay: false}, [], manualImageRegions)
+      const lightImage = lightResult.items.find(it => it.type === 'image')
+      expect(lightImage?.src).toBeDefined()
+      const lightBg = readBmpPixel(lightImage!.src!, 2, 2)
+      const lightInk = readBmpPixel(lightImage!.src!, 30, 30)
+      expect(lightBg.r).toBeGreaterThan(240)
+      expect(lightInk.r).toBeLessThan(30)
+
+      const darkResult = reflowPageFromPixels(pixels, width, height, {...baseOptions, darkDisplay: true}, [], manualImageRegions)
+      const darkImage = darkResult.items.find(it => it.type === 'image')
+      expect(darkImage?.src).toBeDefined()
+      const darkBg = readBmpPixel(darkImage!.src!, 2, 2)
+      const darkInk = readBmpPixel(darkImage!.src!, 30, 30)
+      expect(darkBg.r).toBeLessThan(15)
+      expect(darkInk.r).toBeGreaterThan(220)
+    })
+
+    test('switches fallback cropped image items between light and dark display in local reflow', () => {
+      const width = 80
+      const height = 80
+      const pixels = new Uint8ClampedArray(width * height * 4)
+      pixels.fill(255)
+
+      const baseOptions = {
+        targetWidth: 400,
+        renderMode: 'slices' as const,
+        textScale: 100,
+        contrastEnhancement: false,
+        matchBackground: false,
+        matchBackgroundMode: 'original',
+      } as LocalReflowOptions
+
+      const lightResult = reflowPageFromPixels(pixels, width, height, {...baseOptions, darkDisplay: false})
+      const lightFallback = lightResult.items.find(it => it.type === 'image')
+      expect(lightFallback?.src).toBeDefined()
+      expect(readBmpPixel(lightFallback!.src!, 10, 10).r).toBeGreaterThan(240)
+
+      const darkResult = reflowPageFromPixels(pixels, width, height, {...baseOptions, darkDisplay: true})
+      const darkFallback = darkResult.items.find(it => it.type === 'image')
+      expect(darkFallback?.src).toBeDefined()
+      expect(readBmpPixel(darkFallback!.src!, 10, 10).r).toBeLessThan(15)
     })
   })
 })

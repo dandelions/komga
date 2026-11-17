@@ -1347,6 +1347,149 @@ export function isColoredPixel(r: number, g: number, b: number): boolean {
   return maxChannel - minChannel >= 20 && maxChannel > 30
 }
 
+export function isGrayscaleImagePixels(data: Uint8ClampedArray, width: number, height: number): boolean {
+  const pixels = Math.max(1, width * height)
+  const step = Math.max(1, Math.round(Math.sqrt(pixels / 12000)))
+  let sampled = 0
+  let colored = 0
+
+  for (let y = 0; y < height; y += step) {
+    for (let x = 0; x < width; x += step) {
+      const offset = (y * width + x) * 4
+      if (data[offset + 3] === 0) continue
+      const max = Math.max(data[offset], data[offset + 1], data[offset + 2])
+      const min = Math.min(data[offset], data[offset + 1], data[offset + 2])
+      sampled++
+      if (max - min >= 28 && max > 36) colored++
+    }
+  }
+
+  return sampled > 0 && colored / sampled <= 0.03
+}
+
+function isLightNeutralImagePixel(data: Uint8ClampedArray, offset: number): boolean {
+  if (data[offset + 3] === 0) return false
+  const r = data[offset]
+  const g = data[offset + 1]
+  const b = data[offset + 2]
+  const max = Math.max(r, g, b)
+  const min = Math.min(r, g, b)
+  return max - min <= 24 && pixelLuma(r, g, b) >= 214
+}
+
+function isDarkNeutralImagePixel(data: Uint8ClampedArray, offset: number, darkThreshold: number): boolean {
+  if (data[offset + 3] === 0) return false
+  const r = data[offset]
+  const g = data[offset + 1]
+  const b = data[offset + 2]
+  const max = Math.max(r, g, b)
+  const min = Math.min(r, g, b)
+  return max - min <= 32 && pixelLuma(r, g, b) <= darkThreshold
+}
+
+function edgeLightBackgroundMask(data: Uint8ClampedArray, width: number, height: number): Uint8Array {
+  const total = width * height
+  const mask = new Uint8Array(total)
+  const queue = new Int32Array(total)
+  let qHead = 0
+  let qTail = 0
+
+  const enqueue = (x: number, y: number) => {
+    if (x < 0 || x >= width || y < 0 || y >= height) return
+    const index = y * width + x
+    if (mask[index] || !isLightNeutralImagePixel(data, index * 4)) return
+    mask[index] = 1
+    queue[qTail++] = index
+  }
+
+  for (let x = 0; x < width; x++) {
+    enqueue(x, 0)
+    enqueue(x, height - 1)
+  }
+  for (let y = 1; y < height - 1; y++) {
+    enqueue(0, y)
+    enqueue(width - 1, y)
+  }
+
+  while (qHead < qTail) {
+    const index = queue[qHead++]
+    const x = index % width
+    const y = Math.floor(index / width)
+    enqueue(x - 1, y)
+    enqueue(x + 1, y)
+    enqueue(x, y - 1)
+    enqueue(x, y + 1)
+  }
+
+  return mask
+}
+
+function hasMaskedNeighbor(mask: Uint8Array, width: number, height: number, x: number, y: number, radius: number): boolean {
+  const yStart = Math.max(0, y - radius)
+  const yEnd = Math.min(height - 1, y + radius)
+  const xStart = Math.max(0, x - radius)
+  const xEnd = Math.min(width - 1, x + radius)
+  for (let yy = yStart; yy <= yEnd; yy++) {
+    const rowOffset = yy * width
+    for (let xx = xStart; xx <= xEnd; xx++) {
+      if (mask[rowOffset + xx]) return true
+    }
+  }
+  return false
+}
+
+export function normalizeImageSliceForDarkDisplay(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+  threshold: number = 185,
+): void {
+  if (width <= 0 || height <= 0) return
+
+  if (isGrayscaleImagePixels(data, width, height)) {
+    const total = width * height
+    for (let index = 0; index < total; index++) {
+      const offset = index * 4
+      if (data[offset + 3] === 0) continue
+      data[offset] = 255 - data[offset]
+      data[offset + 1] = 255 - data[offset + 1]
+      data[offset + 2] = 255 - data[offset + 2]
+    }
+    return
+  }
+
+  const background = edgeLightBackgroundMask(data, width, height)
+  const foreground = new Uint8Array(width * height)
+  const darkThreshold = Math.min(120, Math.floor(clamp(threshold, 50, 230) / 2))
+
+  for (let y = 0; y < height; y++) {
+    const rowOffset = y * width
+    for (let x = 0; x < width; x++) {
+      const index = rowOffset + x
+      if (background[index]) continue
+      if (isDarkNeutralImagePixel(data, index * 4, darkThreshold) && hasMaskedNeighbor(background, width, height, x, y, 2)) {
+        foreground[index] = 1
+      }
+    }
+  }
+
+  const total = width * height
+  for (let i = 0; i < total; i++) {
+    const offset = i * 4
+    if (background[i]) {
+      data[offset] = 0
+      data[offset + 1] = 0
+      data[offset + 2] = 0
+      data[offset + 3] = 255
+    } else if (foreground[i]) {
+      data[offset] = 255
+      data[offset + 1] = 255
+      data[offset + 2] = 255
+      data[offset + 3] = 255
+    }
+  }
+}
+
 export function originalTextColor(
   r: number,
   g: number,
@@ -1962,21 +2105,25 @@ export function reflowPageFromPixels(
   const usedImageIndices = new Set<number>()
 
   const renderImageSlice = (reg: Roi, isInline: boolean): LocalReflowItem => {
-    const sliceW = Math.max(1, reg.w)
-    const sliceH = Math.max(1, reg.h)
+    const startX = clamp(Math.floor(reg.x), 0, Math.max(0, workW - 1))
+    const startY = clamp(Math.floor(reg.y), 0, Math.max(0, workH - 1))
+    const sliceW = clamp(Math.ceil(reg.w), 1, Math.max(1, workW - startX))
+    const sliceH = clamp(Math.ceil(reg.h), 1, Math.max(1, workH - startY))
     const sliceData = new Uint8ClampedArray(sliceW * sliceH * 4)
 
     for (let y = 0; y < sliceH; y++) {
-      const sy = Math.min(workH - 1, reg.y + y)
-      const srcIdx = (sy * workW + reg.x) * 4
+      const sy = Math.min(workH - 1, startY + y)
+      const srcIdx = (sy * workW + startX) * 4
       const dstIdx = y * sliceW * 4
       for (let b = 0; b < sliceW * 4; b++) {
         sliceData[dstIdx + b] = workPixels[srcIdx + b]
       }
     }
 
-    if (isHighContrast && options.matchBackgroundMode !== 'original') {
-      const bgVal = options.darkDisplay ? 0 : 255
+    if (options.darkDisplay) {
+      normalizeImageSliceForDarkDisplay(sliceData, sliceW, sliceH, threshold)
+    } else if (isHighContrast && options.matchBackgroundMode !== 'original') {
+      const bgVal = 255
       const inkThresh = adaptiveInkThreshold(threshold, pageBgLuma)
       const baseMinDelta = 8
       const maxDelta = sourceDark ? 255 - pageBgLuma : pageBgLuma
@@ -1991,7 +2138,7 @@ export function reflowPageFromPixels(
             sliceData[pIdx + 2] = bgVal
           } else {
             const foreground = calculateEnhancedForeground(delta, maxDelta, baseMinDelta)
-            const output = options.darkDisplay ? Math.round(255 * foreground) : Math.round(255 * (1 - foreground))
+            const output = Math.round(255 * (1 - foreground))
             sliceData[pIdx] = output
             sliceData[pIdx + 1] = output
             sliceData[pIdx + 2] = output

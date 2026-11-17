@@ -1850,7 +1850,7 @@ export default Vue.extend({
         deskewDetectionVersion: 10,
         imageExclusionVersion: 3,
         detectionScaleVersion: 1,
-        darkWordRenderVersion: 2,
+        darkWordRenderVersion: 3,
       })
     },
 
