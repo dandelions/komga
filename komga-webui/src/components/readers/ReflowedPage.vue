@@ -3213,14 +3213,14 @@ export default Vue.extend({
       this.pageBackground = '#fff'
     },
     finishWordSlice(context: CanvasRenderingContext2D, width: number, height: number) {
-      const textModeEnabled = this.matchBackgroundMode !== 'original'
-      const originalDarkMode = this.matchBackgroundMode === 'original' && this.darkDisplay
+      const textModeEnabled = this.controlMatchBackgroundMode !== 'original'
+      const originalDarkMode = this.controlMatchBackgroundMode === 'original' && this.darkDisplay
       if (this.contrastEnhancement || this.matchBackground || textModeEnabled || originalDarkMode) {
         enhanceTextContrast(context, width, height, {
           enabled: this.contrastEnhancement,
           nightDisplay: this.darkDisplay,
           matchBackground: this.matchBackground,
-          matchBackgroundMode: this.matchBackgroundMode,
+          matchBackgroundMode: this.controlMatchBackgroundMode,
           backgroundLuma: this.sourceBackgroundLuma(),
         })
         return
@@ -7271,6 +7271,7 @@ export default Vue.extend({
       return Math.min(maxIndent, sourceHeight * this.textScale())
     },
     boldenSourceCanvas(targetContext: CanvasRenderingContext2D, width: number, height: number) {
+      if (this.controlMatchBackgroundMode === 'original') return
       if (this.reflowAlgorithmMode() === 'koreader') {
         this.boldenSourceCanvasKoreader(targetContext, width, height)
         return
@@ -7316,6 +7317,7 @@ export default Vue.extend({
       targetContext.putImageData(imageData, 0, 0)
     },
     boldenSourceCanvasKoreader(targetContext: CanvasRenderingContext2D, width: number, height: number) {
+      if (this.controlMatchBackgroundMode === 'original') return
       const strength = this.strokeStrength
       if (strength <= 0) return
 

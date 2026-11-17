@@ -2213,7 +2213,7 @@ export default Vue.extend({
           sliceCanvas.height = word.h
           this.fillWordSliceBackground(sliceContext, word.w, word.h)
           sliceContext.drawImage(sourceCanvas, word.x, word.y, word.w, word.h, 0, 0, word.w, word.h)
-          if (this.strokeStrength > 0) this.strengthenInk(sliceContext, word.w, word.h)
+          if (this.strokeStrength > 0 && this.matchBackgroundMode !== 'original') this.strengthenInk(sliceContext, word.w, word.h)
           this.finishWordSlice(sliceContext, word.w, word.h)
 
           items.push({
@@ -2679,6 +2679,9 @@ export default Vue.extend({
           const offset = i * 4
           const luma = 0.299 * source[offset] + 0.587 * source[offset + 1] + 0.114 * source[offset + 2]
           if (source[offset + 3] === 0 || luma >= threshold) continue
+          const maxC = Math.max(source[offset], source[offset + 1], source[offset + 2])
+          const minC = Math.min(source[offset], source[offset + 1], source[offset + 2])
+          if (maxC - minC >= 20 && maxC > 30) continue
 
           for (let dy = -passes; dy <= passes; dy++) {
             const ny = y + dy

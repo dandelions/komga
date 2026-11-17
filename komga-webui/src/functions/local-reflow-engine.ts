@@ -436,6 +436,7 @@ export function repairInvertedGlyphComponents(
     if (sourcePixelsCount > 0 && sourceInkPixelsCount / sourcePixelsCount >= 0.72) {
       for (let i = 0; i < compCount; i++) {
         const pIdx = component[i] * 4
+        if (isColoredPixel(slicePixels[pIdx], slicePixels[pIdx + 1], slicePixels[pIdx + 2])) continue
         slicePixels[pIdx] = targetVal
         slicePixels[pIdx + 1] = targetVal
         slicePixels[pIdx + 2] = targetVal
@@ -451,9 +452,13 @@ export function applyStrokeStrengthToPixels(
   threshold: number,
   strokeStrength: number,
   darkDisplay: boolean,
+  matchBackgroundMode: string = 'grayscale',
 ): void {
   const strength = clamp(strokeStrength, 0, 3)
   if (strength <= 0 || width < 1 || height < 1) return
+
+  const isOriginalMode = matchBackgroundMode === 'original'
+  if (isOriginalMode && strength <= 0.3) return
 
   const strokeThreshold = Math.min(245, clamp(threshold, 50, 230) + 18)
   const mask = new Uint8Array(width * height)
@@ -463,7 +468,11 @@ export function applyStrokeStrengthToPixels(
       const index = y * width + x
       const pixelIndex = index * 4
       if (pixels[pixelIndex + 3] === 0) continue
-      const luma = pixelLuma(pixels[pixelIndex], pixels[pixelIndex + 1], pixels[pixelIndex + 2])
+      const r = pixels[pixelIndex]
+      const g = pixels[pixelIndex + 1]
+      const b = pixels[pixelIndex + 2]
+      if (isColoredPixel(r, g, b)) continue
+      const luma = pixelLuma(r, g, b)
       const isInk = darkDisplay ? luma > 255 - strokeThreshold : luma < strokeThreshold
       if (isInk) {
         mask[index] = 1
@@ -471,6 +480,8 @@ export function applyStrokeStrengthToPixels(
       }
     }
   }
+
+  if (indexes.length === 0) return
 
   const exterior = exteriorPaperMask(mask, width, height)
   const fullPasses = Math.floor(strength)
@@ -493,6 +504,8 @@ export function applyStrokeStrengthToPixels(
           if (nextX < 0 || nextX >= width) continue
           const nextIndex = nextRowOffset + nextX
           if (expanded[nextIndex] !== 0 || !exterior[nextIndex]) continue
+          const nIdx = nextIndex * 4
+          if (isColoredPixel(pixels[nIdx], pixels[nIdx + 1], pixels[nIdx + 2])) continue
           expanded[nextIndex] = 1
           nextIndexes.push(nextIndex)
         }
@@ -505,15 +518,16 @@ export function applyStrokeStrengthToPixels(
   const foreground = darkDisplay ? 255 : 0
   const setForeground = (index: number, influence: number) => {
     const pixelIndex = index * 4
+    if (isColoredPixel(pixels[pixelIndex], pixels[pixelIndex + 1], pixels[pixelIndex + 2])) return
     const amount = clamp(influence, 0, 1)
     pixels[pixelIndex] = Math.round(pixels[pixelIndex] + (foreground - pixels[pixelIndex]) * amount)
     pixels[pixelIndex + 1] = Math.round(pixels[pixelIndex + 1] + (foreground - pixels[pixelIndex + 1]) * amount)
     pixels[pixelIndex + 2] = Math.round(pixels[pixelIndex + 2] + (foreground - pixels[pixelIndex + 2]) * amount)
   }
 
-  if (fullPasses > 0) {
-    for (let i = 0; i < activeIndexes.length; i++) {
-      setForeground(activeIndexes[i], 1)
+  if (!isOriginalMode && fullPasses > 0) {
+    for (let i = 0; i < indexes.length; i++) {
+      setForeground(indexes[i], 1)
     }
   }
   const fractional = strength - fullPasses
@@ -521,7 +535,9 @@ export function applyStrokeStrengthToPixels(
 
   for (let i = 0; i < activeIndexes.length; i++) {
     const index = activeIndexes[i]
-    setForeground(index, fractional)
+    if (!isOriginalMode && mask[index]) {
+      setForeground(index, fractional)
+    }
     const y = (index / width) | 0
     const x = index - y * width
     for (let dy = -1; dy <= 1; dy++) {
@@ -534,6 +550,8 @@ export function applyStrokeStrengthToPixels(
         if (nextX < 0 || nextX >= width) continue
         const nextIndex = nextRowOffset + nextX
         if (!exterior[nextIndex]) continue
+        const nIdx = nextIndex * 4
+        if (isColoredPixel(pixels[nIdx], pixels[nIdx + 1], pixels[nIdx + 2])) continue
         setForeground(nextIndex, fractional * (Math.abs(dx) + Math.abs(dy) === 1 ? 0.7 : 0.45))
       }
     }
@@ -1323,6 +1341,12 @@ export function colorWithLuma(
   }
 }
 
+export function isColoredPixel(r: number, g: number, b: number): boolean {
+  const maxChannel = Math.max(r, g, b)
+  const minChannel = Math.min(r, g, b)
+  return maxChannel - minChannel >= 20 && maxChannel > 30
+}
+
 export function originalTextColor(
   r: number,
   g: number,
@@ -1330,7 +1354,10 @@ export function originalTextColor(
   backgroundLuma: number,
   options: LocalReflowOptions,
 ): {r: number, g: number, b: number} {
-  if (options.matchBackground && !options.contrastEnhancement && !options.darkDisplay) {
+  if (!options.contrastEnhancement && !options.darkDisplay) {
+    return {r, g, b}
+  }
+  if (isColoredPixel(r, g, b) && !options.darkDisplay) {
     return {r, g, b}
   }
   const sourceDark = backgroundLuma < 128
@@ -1346,7 +1373,7 @@ export function originalTextColor(
     const smooth = norm * norm * (3.0 - 2.0 * norm)
     const fg = Math.pow(smooth, 0.8)
     outputLuma = options.darkDisplay ? 255.0 * fg : 255.0 * (1.0 - fg)
-  } else if (options.darkDisplay !== sourceDark) {
+  } else if (Boolean(options.darkDisplay) !== sourceDark) {
     outputLuma = 255.0 - sourceLuma
   } else {
     outputLuma = sourceLuma
@@ -1948,7 +1975,7 @@ export function reflowPageFromPixels(
       }
     }
 
-    if (isHighContrast) {
+    if (isHighContrast && options.matchBackgroundMode !== 'original') {
       const bgVal = options.darkDisplay ? 0 : 255
       const inkThresh = adaptiveInkThreshold(threshold, pageBgLuma)
       const baseMinDelta = 8
@@ -2473,6 +2500,7 @@ export function reflowPageFromPixels(
           threshold,
           options.strokeStrength || 0,
           options.darkDisplay,
+          options.matchBackgroundMode,
         )
 
         // Apply server-identical inverted glyph repair AFTER color normalization

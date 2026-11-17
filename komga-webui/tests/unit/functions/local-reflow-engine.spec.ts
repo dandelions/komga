@@ -20,6 +20,7 @@ import {
   adjustWordBlockEdges,
   clearDirtyBlockEdges,
   edgeBackgroundColor,
+  isColoredPixel,
   LocalReflowOptions,
 } from '@/functions/local-reflow-engine'
 
@@ -1338,6 +1339,66 @@ describe('local-reflow-engine', () => {
     test('edgeBackgroundColor returns white for normalized modes and black for darkDisplay', () => {
       expect(edgeBackgroundColor({darkDisplay: true} as LocalReflowOptions, 255)).toEqual({r: 0, g: 0, b: 0})
       expect(edgeBackgroundColor({darkDisplay: false, matchBackground: true} as LocalReflowOptions, 255)).toEqual({r: 255, g: 255, b: 255})
+    })
+
+    test('isColoredPixel identifies chromatic color and ignores monochrome shades', () => {
+      expect(isColoredPixel(220, 30, 30)).toBe(true) // red
+      expect(isColoredPixel(30, 30, 220)).toBe(true) // blue
+      expect(isColoredPixel(30, 180, 30)).toBe(true) // green
+      expect(isColoredPixel(0, 0, 0)).toBe(false) // black
+      expect(isColoredPixel(128, 128, 128)).toBe(false) // gray
+      expect(isColoredPixel(255, 255, 255)).toBe(false) // white
+    })
+
+    test('reflowPageFromPixels preserves colorful text in original text mode', () => {
+      const width = 120
+      const height = 80
+      const pixels = new Uint8ClampedArray(width * height * 4)
+      pixels.fill(255) // white paper
+
+      // Draw red word: x: 30..70, y: 30..50
+      for (let y = 30; y < 50; y++) {
+        for (let x = 30; x < 70; x++) {
+          const idx = (y * width + x) * 4
+          pixels[idx] = 220
+          pixels[idx + 1] = 30
+          pixels[idx + 2] = 30
+        }
+      }
+
+      const options = {
+        targetWidth: 400,
+        renderMode: 'slices' as const,
+        textScale: 100,
+        darkDisplay: false,
+        matchBackground: false,
+        matchBackgroundMode: 'original',
+        strokeStrength: 0.8,
+      } as LocalReflowOptions
+
+      const result = reflowPageFromPixels(pixels, width, height, options)
+      const wordItem = result.items.find(it => it.type === 'word')
+      expect(wordItem).toBeDefined()
+      expect(wordItem?.src).toBeDefined()
+
+      // Decode the generated BMP to verify the text remains vivid red, not black or grayscale
+      const base64 = (wordItem?.src || '').replace(/^data:image\/bmp;base64,/, '')
+      const buf = Buffer.from(base64, 'base64')
+      const bmpW = buf.readInt32LE(18)
+      const bmpH = buf.readInt32LE(22)
+      const rowBytes = Math.floor((bmpW * 3 + 3) / 4) * 4
+
+      // Sample a pixel near the center of the rendered word
+      const midY = Math.floor(bmpH / 2)
+      const midX = Math.floor(bmpW / 2)
+      const offset = 54 + (bmpH - 1 - midY) * rowBytes + midX * 3
+      const b = buf[offset]
+      const g = buf[offset + 1]
+      const r = buf[offset + 2]
+
+      expect(r).toBeGreaterThan(180)
+      expect(g).toBeLessThan(60)
+      expect(b).toBeLessThan(60)
     })
   })
 })
