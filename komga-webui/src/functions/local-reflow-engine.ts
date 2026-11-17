@@ -72,7 +72,7 @@ export type LocalReflowResult = {
   items: LocalReflowItem[],
 }
 
-const EDGE_INK_THRESHOLD = 245
+const EDGE_INK_THRESHOLD = 238
 const MAX_EDGE_TRIM = 6
 const MAX_EDGE_EXPANSION = 10
 const LOCAL_REFLOW_MAX_SIDE = 3600
@@ -351,17 +351,33 @@ export function repairInvertedGlyphComponents(
   const fgThreshold = Math.min(245, clamp(threshold, 50, 230) + 18)
   const total = sliceWidth * sliceHeight
   const foreground = new Uint8Array(total)
+  let foregroundCount = 0
 
   for (let y = 0; y < sliceHeight; y++) {
+    const rowOffset = y * sliceWidth
     for (let x = 0; x < sliceWidth; x++) {
-      const idx = (y * sliceWidth + x) * 4
+      const idx = (rowOffset + x) * 4
       const luma = pixelLuma(slicePixels[idx], slicePixels[idx + 1], slicePixels[idx + 2])
       const isInk = darkDisplay ? luma > 255 - fgThreshold : luma < fgThreshold
-      if (isInk) foreground[y * sliceWidth + x] = 1
+      if (isInk) {
+        foreground[rowOffset + x] = 1
+        foregroundCount++
+      }
     }
   }
 
+  if (foregroundCount === 0 || foregroundCount === total) return
+
   const exterior = exteriorPaperMask(foreground, sliceWidth, sliceHeight)
+  let exteriorCount = 0
+  for (let i = 0; i < total; i++) {
+    if (exterior[i] !== 0) exteriorCount++
+  }
+
+  // Fast check: if every non-foreground pixel is reachable from exterior paper,
+  // there are no enclosed cavities / inverted glyph components.
+  if (foregroundCount + exteriorCount === total) return
+
   const visited = new Uint8Array(total)
   const sourceDark = sourceBgLuma < 128
   const maxSourceDelta = sourceDark ? 255 - sourceBgLuma : sourceBgLuma
@@ -387,8 +403,8 @@ export function repairInvertedGlyphComponents(
     while (qHead < qTail) {
       const idx = queue[qHead++]
       component[compCount++] = idx
-      const x = idx % sliceWidth
-      const y = Math.floor(idx / sliceWidth)
+      const y = (idx / sliceWidth) | 0
+      const x = idx - y * sliceWidth
       const sourceX = x - offsetX
       const sourceY = y - offsetY
 
@@ -400,17 +416,20 @@ export function repairInvertedGlyphComponents(
         if (sDelta > sourceInkDelta) sourceInkPixelsCount++
       }
 
-      const neighbors = [
-        [x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1],
-      ]
-      for (let n = 0; n < 4; n++) {
-        const nx = neighbors[n][0]
-        const ny = neighbors[n][1]
-        if (nx < 0 || nx >= sliceWidth || ny < 0 || ny >= sliceHeight) continue
-        const nIdx = ny * sliceWidth + nx
-        if (foreground[nIdx] !== 0 || exterior[nIdx] !== 0 || visited[nIdx] !== 0) continue
-        visited[nIdx] = 1
-        queue[qTail++] = nIdx
+      for (let dy = -1; dy <= 1; dy++) {
+        const ny = y + dy
+        if (ny < 0 || ny >= sliceHeight) continue
+        const nRow = ny * sliceWidth
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dx !== 0 && dy !== 0) continue // 4-connectivity
+          if (dx === 0 && dy === 0) continue
+          const nx = x + dx
+          if (nx < 0 || nx >= sliceWidth) continue
+          const nIdx = nRow + nx
+          if (foreground[nIdx] !== 0 || exterior[nIdx] !== 0 || visited[nIdx] !== 0) continue
+          visited[nIdx] = 1
+          queue[qTail++] = nIdx
+        }
       }
     }
 
@@ -458,23 +477,27 @@ export function applyStrokeStrengthToPixels(
   let activeIndexes = indexes
   for (let pass = 0; pass < fullPasses; pass++) {
     const expanded = new Uint8Array(mask)
-    const nextIndexes = activeIndexes.slice()
-    activeIndexes.forEach(index => {
-      const y = Math.floor(index / width)
+    const nextIndexes: number[] = []
+    const actLen = activeIndexes.length
+    for (let i = 0; i < actLen; i++) {
+      const index = activeIndexes[i]
+      nextIndexes.push(index)
+      const y = (index / width) | 0
       const x = index - y * width
       for (let dy = -1; dy <= 1; dy++) {
         const nextY = y + dy
         if (nextY < 0 || nextY >= height) continue
+        const nextRowOffset = nextY * width
         for (let dx = -1; dx <= 1; dx++) {
           const nextX = x + dx
           if (nextX < 0 || nextX >= width) continue
-          const nextIndex = nextY * width + nextX
+          const nextIndex = nextRowOffset + nextX
           if (expanded[nextIndex] !== 0 || !exterior[nextIndex]) continue
           expanded[nextIndex] = 1
           nextIndexes.push(nextIndex)
         }
       }
-    })
+    }
     mask.set(expanded)
     activeIndexes = nextIndexes
   }
@@ -488,27 +511,33 @@ export function applyStrokeStrengthToPixels(
     pixels[pixelIndex + 2] = Math.round(pixels[pixelIndex + 2] + (foreground - pixels[pixelIndex + 2]) * amount)
   }
 
-  if (fullPasses > 0) activeIndexes.forEach(index => setForeground(index, 1))
+  if (fullPasses > 0) {
+    for (let i = 0; i < activeIndexes.length; i++) {
+      setForeground(activeIndexes[i], 1)
+    }
+  }
   const fractional = strength - fullPasses
   if (fractional <= 0) return
 
-  activeIndexes.forEach(index => {
+  for (let i = 0; i < activeIndexes.length; i++) {
+    const index = activeIndexes[i]
     setForeground(index, fractional)
-    const y = Math.floor(index / width)
+    const y = (index / width) | 0
     const x = index - y * width
     for (let dy = -1; dy <= 1; dy++) {
       const nextY = y + dy
       if (nextY < 0 || nextY >= height) continue
+      const nextRowOffset = nextY * width
       for (let dx = -1; dx <= 1; dx++) {
         if (dx === 0 && dy === 0) continue
         const nextX = x + dx
         if (nextX < 0 || nextX >= width) continue
-        const nextIndex = nextY * width + nextX
+        const nextIndex = nextRowOffset + nextX
         if (!exterior[nextIndex]) continue
         setForeground(nextIndex, fractional * (Math.abs(dx) + Math.abs(dy) === 1 ? 0.7 : 0.45))
       }
     }
-  })
+  }
 }
 
 export function buildInkMap(
@@ -537,18 +566,29 @@ export function buildInkMap(
   const radius = strokeStrength >= 2.0 ? 2 : (strokeStrength >= 0.8 ? 1 : 0)
   if (radius === 0) return ink
 
-  const expanded = new Uint8Array(ink)
+  // Separable horizontal dilation
+  const tempH = new Uint8Array(width * height)
   for (let y = 0; y < height; y++) {
+    const rowOffset = y * width
     for (let x = 0; x < width; x++) {
-      if (ink[y * width + x] === 0) continue
-      for (let dy = -radius; dy <= radius; dy++) {
-        const ny = y + dy
-        if (ny < 0 || ny >= height) continue
-        for (let dx = -radius; dx <= radius; dx++) {
-          const nx = x + dx
-          if (nx < 0 || nx >= width) continue
-          expanded[ny * width + nx] = 1
-        }
+      if (ink[rowOffset + x] === 0) continue
+      const minX = Math.max(0, x - radius)
+      const maxX = Math.min(width - 1, x + radius)
+      for (let nx = minX; nx <= maxX; nx++) {
+        tempH[rowOffset + nx] = 1
+      }
+    }
+  }
+
+  // Separable vertical dilation
+  const expanded = new Uint8Array(width * height)
+  for (let y = 0; y < height; y++) {
+    const minY = Math.max(0, y - radius)
+    const maxY = Math.min(height - 1, y + radius)
+    for (let x = 0; x < width; x++) {
+      if (tempH[y * width + x] === 0) continue
+      for (let ny = minY; ny <= maxY; ny++) {
+        expanded[ny * width + x] = 1
       }
     }
   }
@@ -1254,6 +1294,133 @@ export function grayscaleTextColor(
   return {r: outputLuma, g: outputLuma, b: outputLuma}
 }
 
+export function colorWithLuma(
+  r: number,
+  g: number,
+  b: number,
+  targetLuma: number,
+): {r: number, g: number, b: number} {
+  const currentLuma = pixelLuma(r, g, b)
+  const target = Math.min(255, Math.max(0, targetLuma))
+  if (currentLuma <= 0 || currentLuma >= 255) {
+    const value = Math.round(target)
+    return {r: value, g: value, b: value}
+  }
+  if (target >= currentLuma) {
+    const amount = (target - currentLuma) / (255 - currentLuma)
+    return {
+      r: Math.min(255, Math.max(0, Math.round(r + (255 - r) * amount))),
+      g: Math.min(255, Math.max(0, Math.round(g + (255 - g) * amount))),
+      b: Math.min(255, Math.max(0, Math.round(b + (255 - b) * amount))),
+    }
+  } else {
+    const amount = target / currentLuma
+    return {
+      r: Math.min(255, Math.max(0, Math.round(r * amount))),
+      g: Math.min(255, Math.max(0, Math.round(g * amount))),
+      b: Math.min(255, Math.max(0, Math.round(b * amount))),
+    }
+  }
+}
+
+export function originalTextColor(
+  r: number,
+  g: number,
+  b: number,
+  backgroundLuma: number,
+  options: LocalReflowOptions,
+): {r: number, g: number, b: number} {
+  if (options.matchBackground && !options.contrastEnhancement && !options.darkDisplay) {
+    return {r, g, b}
+  }
+  const sourceDark = backgroundLuma < 128
+  const sourceLuma = Math.min(255, Math.max(0, pixelLuma(r, g, b)))
+  let outputLuma: number
+  if (options.contrastEnhancement) {
+    const delta = sourceDark ? sourceLuma - backgroundLuma : backgroundLuma - sourceLuma
+    const baseMinDelta = 8.0
+    if (delta <= baseMinDelta) return {r, g, b}
+    const maxDelta = sourceDark ? 255.0 - backgroundLuma : backgroundLuma
+    const contrastRange = Math.max(24.0, maxDelta * 0.55)
+    const norm = Math.min(1.0, Math.max(0.0, (delta - baseMinDelta) / contrastRange))
+    const smooth = norm * norm * (3.0 - 2.0 * norm)
+    const fg = Math.pow(smooth, 0.8)
+    outputLuma = options.darkDisplay ? 255.0 * fg : 255.0 * (1.0 - fg)
+  } else if (options.darkDisplay !== sourceDark) {
+    outputLuma = 255.0 - sourceLuma
+  } else {
+    outputLuma = sourceLuma
+  }
+  return colorWithLuma(r, g, b, outputLuma)
+}
+
+export function matchBackgroundMask(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  roi: Roi,
+  backgroundLuma: number,
+): Uint8Array {
+  const blockW = roi.w
+  const blockH = roi.h
+  const total = blockW * blockH
+  const deltas = new Float32Array(total)
+  const strong = new Uint8Array(total)
+  const foreground = new Uint8Array(total)
+  const sourceDark = backgroundLuma < 128
+  const maxDelta = sourceDark ? 255 - backgroundLuma : backgroundLuma
+  const weakDelta = Math.min(12, Math.max(3, maxDelta * 0.025))
+  const strongDelta = Math.min(48, Math.max(18, maxDelta * 0.12))
+
+  for (let y = 0; y < blockH; y++) {
+    const srcY = roi.y + y
+    if (srcY < 0 || srcY >= height) continue
+    const rowOffset = y * blockW
+    const srcRowOffset = srcY * width
+    for (let x = 0; x < blockW; x++) {
+      const srcX = roi.x + x
+      if (srcX < 0 || srcX >= width) continue
+      const idx = (srcRowOffset + srcX) * 4
+      const r = pixels[idx]
+      const g = pixels[idx + 1]
+      const b = pixels[idx + 2]
+      const luma = pixelLuma(r, g, b)
+      const delta = sourceDark ? luma - backgroundLuma : backgroundLuma - luma
+      const index = rowOffset + x
+      deltas[index] = delta
+      const isColored = Math.abs(r - g) > 16 || Math.abs(g - b) > 16 || Math.abs(r - b) > 16
+      if (delta > strongDelta || (isColored && delta > Math.max(2, weakDelta * 0.5))) {
+        strong[index] = 1
+      }
+    }
+  }
+
+  for (let y = 0; y < blockH; y++) {
+    const rowOffset = y * blockW
+    for (let x = 0; x < blockW; x++) {
+      const index = rowOffset + x
+      if (strong[index]) {
+        foreground[index] = 1
+      } else if (deltas[index] > weakDelta) {
+        let has = false
+        const minY = Math.max(0, y - 1)
+        const maxY = Math.min(blockH - 1, y + 1)
+        const minX = Math.max(0, x - 1)
+        const maxX = Math.min(blockW - 1, x + 1)
+        for (let ny = minY; ny <= maxY && !has; ny++) {
+          const nRowOffset = ny * blockW
+          for (let nx = minX; nx <= maxX && !has; nx++) {
+            if (nx === x && ny === y) continue
+            if (strong[nRowOffset + nx] !== 0) has = true
+          }
+        }
+        if (has) foreground[index] = 1
+      }
+    }
+  }
+  return foreground
+}
+
 export function detectWords(
   ink: Uint8Array,
   width: number,
@@ -1308,6 +1475,197 @@ export function detectWords(
   return separateOverlappingHorizontalBlocks(merged)
 }
 
+export type BlockEdges = {
+  left: boolean,
+  right: boolean,
+  top: boolean,
+  bottom: boolean,
+}
+
+export type EdgeAdjustedBlock = {
+  block: WordBlock,
+  dirtyEdges: BlockEdges,
+}
+
+function clampRoi(roi: Roi, width: number, height: number): Roi {
+  const x = Math.max(0, Math.min(width - 1, roi.x))
+  const y = Math.max(0, Math.min(height - 1, roi.y))
+  const w = Math.max(1, Math.min(width - x, roi.w))
+  const h = Math.max(1, Math.min(height - y, roi.h))
+  return {x, y, w, h}
+}
+
+function edgePixelIsInk(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  x: number,
+  y: number,
+  backgroundLuma: number,
+): boolean {
+  if (x < 0 || x >= width || y < 0 || y >= height) return false
+  const idx = (y * width + x) * 4
+  if (pixels[idx + 3] === 0) return false
+  const luma = pixelLuma(pixels[idx], pixels[idx + 1], pixels[idx + 2])
+  return backgroundLuma < 128
+    ? luma > Math.min(255, backgroundLuma + 12)
+    : luma < Math.max(0, Math.min(EDGE_INK_THRESHOLD, backgroundLuma - 12))
+}
+
+function verticalLineHasInk(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  x: number,
+  top: number,
+  bottom: number,
+  backgroundLuma: number,
+): boolean {
+  if (x < 0 || x >= width) return true
+  const startY = Math.max(0, top)
+  const endY = Math.min(height, bottom)
+  for (let y = startY; y < endY; y++) {
+    if (edgePixelIsInk(pixels, width, height, x, y, backgroundLuma)) return true
+  }
+  return false
+}
+
+function horizontalLineHasInk(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  y: number,
+  left: number,
+  right: number,
+  backgroundLuma: number,
+): boolean {
+  if (y < 0 || y >= height) return true
+  const startX = Math.max(0, left)
+  const endX = Math.min(width, right)
+  for (let x = startX; x < endX; x++) {
+    if (edgePixelIsInk(pixels, width, height, x, y, backgroundLuma)) return true
+  }
+  return false
+}
+
+function findClearVerticalLine(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  start: number,
+  end: number,
+  step: number,
+  top: number,
+  bottom: number,
+  backgroundLuma: number,
+): number | null {
+  if ((step > 0 && start > end) || (step < 0 && start < end)) return null
+  let x = start
+  while (step > 0 ? x <= end : x >= end) {
+    if (!verticalLineHasInk(pixels, width, height, x, top, bottom, backgroundLuma)) return x
+    x += step
+  }
+  return null
+}
+
+function findClearHorizontalLine(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  start: number,
+  end: number,
+  step: number,
+  left: number,
+  right: number,
+  backgroundLuma: number,
+): number | null {
+  if ((step > 0 && start > end) || (step < 0 && start < end)) return null
+  let y = start
+  while (step > 0 ? y <= end : y >= end) {
+    if (!horizontalLineHasInk(pixels, width, height, y, left, right, backgroundLuma)) return y
+    y += step
+  }
+  return null
+}
+
+export function adjustWordBlockEdges(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  original: WordBlock,
+  bgLuma: number,
+  adjustHorizontalEdges: boolean = true,
+  adjustVerticalEdges: boolean = true,
+  horizontalLimits?: {start: number, end: number},
+): EdgeAdjustedBlock {
+  const block = clampRoi(original, width, height)
+  let left = block.x
+  let right = block.x + block.w
+  let top = block.y
+  let bottom = block.y + block.h
+  const trimDistance = Math.max(2, Math.min(MAX_EDGE_TRIM, Math.round(block.h * 0.08)))
+  const expansionDistance = Math.max(3, Math.min(MAX_EDGE_EXPANSION, Math.round(block.h * 0.16)))
+
+  const dirtyEdges: BlockEdges = {left: false, right: false, top: false, bottom: false}
+
+  if (adjustHorizontalEdges && verticalLineHasInk(pixels, width, height, left, top, bottom, bgLuma)) {
+    const inner = findClearVerticalLine(pixels, width, height, left + 1, Math.min(right - 2, left + trimDistance), 1, top, bottom, bgLuma)
+    if (inner !== null) {
+      left = inner
+    } else {
+      const minLeft = Math.max(horizontalLimits ? horizontalLimits.start : 0, left - expansionDistance)
+      const outer = findClearVerticalLine(pixels, width, height, left - 1, minLeft, -1, top, bottom, bgLuma)
+      if (outer !== null) {
+        left = outer + 1
+      } else if (!horizontalLimits) {
+        dirtyEdges.left = true
+      }
+    }
+  }
+
+  if (adjustHorizontalEdges && verticalLineHasInk(pixels, width, height, right - 1, top, bottom, bgLuma)) {
+    const inner = findClearVerticalLine(pixels, width, height, right - 2, Math.max(left + 1, right - 1 - trimDistance), -1, top, bottom, bgLuma)
+    if (inner !== null) {
+      right = inner + 1
+    } else {
+      const maxRight = Math.min(horizontalLimits ? horizontalLimits.end - 1 : width - 1, right - 1 + expansionDistance)
+      const outer = findClearVerticalLine(pixels, width, height, right, maxRight, 1, top, bottom, bgLuma)
+      if (outer !== null) {
+        right = outer
+      } else if (!horizontalLimits) {
+        dirtyEdges.right = true
+      }
+    }
+  }
+
+  if (adjustVerticalEdges && horizontalLineHasInk(pixels, width, height, top, left, right, bgLuma)) {
+    const inner = findClearHorizontalLine(pixels, width, height, top + 1, Math.min(bottom - 2, top + trimDistance), 1, left, right, bgLuma)
+    if (inner !== null) {
+      top = inner
+    } else {
+      const outer = findClearHorizontalLine(pixels, width, height, top - 1, Math.max(0, top - expansionDistance), -1, left, right, bgLuma)
+      if (outer !== null) top = outer + 1
+      else dirtyEdges.top = true
+    }
+  }
+
+  if (adjustVerticalEdges && horizontalLineHasInk(pixels, width, height, bottom - 1, left, right, bgLuma)) {
+    const inner = findClearHorizontalLine(pixels, width, height, bottom - 2, Math.max(top + 1, bottom - 1 - trimDistance), -1, left, right, bgLuma)
+    if (inner !== null) {
+      bottom = inner + 1
+    } else {
+      const outer = findClearHorizontalLine(pixels, width, height, bottom, Math.min(height - 1, bottom - 1 + expansionDistance), 1, left, right, bgLuma)
+      if (outer !== null) bottom = outer
+      else dirtyEdges.bottom = true
+    }
+  }
+
+  return {
+    block: {x: left, y: top, w: Math.max(1, right - left), h: Math.max(1, bottom - top)},
+    dirtyEdges,
+  }
+}
+
 export function adjustBlockEdges(
   pixels: Uint8ClampedArray,
   width: number,
@@ -1315,48 +1673,56 @@ export function adjustBlockEdges(
   original: WordBlock,
   bgLuma: number,
 ): WordBlock {
-  let left = original.x
-  let right = original.x + original.w
-  const top = original.y
-  const bottom = original.y + original.h
+  return adjustWordBlockEdges(pixels, width, height, original, bgLuma).block
+}
 
-  const inkThreshold = adaptiveInkThreshold(185, bgLuma)
-  const isDark = bgLuma < 128
-  const isInk = (x: number, y: number): boolean => {
-    if (x < 0 || x >= width || y < 0 || y >= height) return false
-    const idx = (y * width + x) * 4
-    const luma = pixelLuma(pixels[idx], pixels[idx + 1], pixels[idx + 2])
-    return isDark ? luma > inkThreshold : luma < inkThreshold
+export function clearDirtyBlockEdges(
+  sliceData: Uint8ClampedArray,
+  sliceW: number,
+  sliceH: number,
+  dirtyEdges: BlockEdges,
+  bounds: Roi,
+  bgR: number,
+  bgG: number,
+  bgB: number,
+): void {
+  if (!dirtyEdges.left && !dirtyEdges.right && !dirtyEdges.top && !dirtyEdges.bottom) return
+  const left = Math.max(0, Math.min(sliceW - 1, bounds.x))
+  const right = Math.max(0, Math.min(sliceW - 1, bounds.x + bounds.w - 1))
+  const top = Math.max(0, Math.min(sliceH - 1, bounds.y))
+  const bottom = Math.max(0, Math.min(sliceH - 1, bounds.y + bounds.h - 1))
+
+  const setPixel = (x: number, y: number) => {
+    const idx = (y * sliceW + x) * 4
+    sliceData[idx] = bgR
+    sliceData[idx + 1] = bgG
+    sliceData[idx + 2] = bgB
+    sliceData[idx + 3] = 255
   }
 
-  const verticalLineHasInk = (x: number, y0: number, y1: number): boolean => {
-    let count = 0
-    for (let y = y0; y <= y1; y++) {
-      if (isInk(x, y)) count++
-    }
-    return count >= 1
+  if (dirtyEdges.left) {
+    for (let y = top; y <= bottom; y++) setPixel(left, y)
   }
-
-  const maxTrim = Math.max(2, Math.min(MAX_EDGE_TRIM, Math.round(original.h * 0.08)))
-  if (verticalLineHasInk(left, top, bottom)) {
-    for (let step = 1; step <= maxTrim && left + step < right - 2; step++) {
-      if (!verticalLineHasInk(left + step, top, bottom)) {
-        left += step
-        break
-      }
-    }
+  if (dirtyEdges.right) {
+    for (let y = top; y <= bottom; y++) setPixel(right, y)
   }
-
-  if (verticalLineHasInk(right - 1, top, bottom)) {
-    for (let step = 1; step <= maxTrim && right - 1 - step > left + 2; step++) {
-      if (!verticalLineHasInk(right - 1 - step, top, bottom)) {
-        right -= step
-        break
-      }
-    }
+  if (dirtyEdges.top) {
+    for (let x = left; x <= right; x++) setPixel(x, top)
   }
+  if (dirtyEdges.bottom) {
+    for (let x = left; x <= right; x++) setPixel(x, bottom)
+  }
+}
 
-  return {x: left, y: top, w: Math.max(1, right - left), h: Math.max(1, bottom - top)}
+export function edgeBackgroundColor(
+  options: LocalReflowOptions,
+  backgroundLuma: number,
+): {r: number, g: number, b: number} {
+  if (options.darkDisplay) return {r: 0, g: 0, b: 0}
+  const normalized = options.contrastEnhancement || options.matchBackground || options.matchBackgroundMode !== 'original'
+  if (normalized) return {r: 255, g: 255, b: 255}
+  const luma = clamp(Math.round(backgroundLuma), 0, 255)
+  return {r: luma, g: luma, b: luma}
 }
 
 export function applyGlobalPageTextureProcessing(
@@ -1936,15 +2302,23 @@ export function reflowPageFromPixels(
 
       // 1. Expand short horizontal glyphs and adjust edges for all words in line
       const effectiveGlyphHeight = colGlyphHeight > 0 ? colGlyphHeight : avgColLineH
-      const adjustedWordsMap = new Map<WordBlock, WordBlock>()
+      const adjustedWordsMap = new Map<WordBlock, EdgeAdjustedBlock>()
       words.forEach(w => {
         const expanded = expandShortHorizontalGlyphBlock(w, effectiveGlyphHeight, workH)
-        const adjusted = adjustBlockEdges(workPixels, workW, workH, expanded, pageBgLuma)
-        const valid = (adjusted.w >= 1 && adjusted.h >= 1) ? adjusted : expanded
-        adjustedWordsMap.set(w, valid)
+        const adjusted = adjustWordBlockEdges(
+          workPixels,
+          workW,
+          workH,
+          expanded,
+          pageBgLuma,
+          true,
+          true,
+          {start: expanded.x, end: expanded.x + expanded.w},
+        )
+        adjustedWordsMap.set(w, adjusted)
       })
 
-      const lineAdjustedWords = Array.from(adjustedWordsMap.values())
+      const lineAdjustedWords = Array.from(adjustedWordsMap.values()).map(a => a.block)
       const outputTop = lineAdjustedWords.length > 0 ? Math.min(...lineAdjustedWords.map(b => b.y)) : line.start
       const outputBottom = lineAdjustedWords.length > 0 ? Math.max(...lineAdjustedWords.map(b => b.y + b.h)) : line.end
       const outputHeight = Math.max(1, outputBottom - outputTop)
@@ -1966,8 +2340,9 @@ export function reflowPageFromPixels(
         }
 
         const word = unit.word
-        const adjusted = adjustedWordsMap.get(word)
-        if (!adjusted) return
+        const edgeAdjusted = adjustedWordsMap.get(word)
+        if (!edgeAdjusted) return
+        const adjusted = edgeAdjusted.block
 
         // Slice word pixels
         const sliceW = adjusted.w
@@ -1992,27 +2367,11 @@ export function reflowPageFromPixels(
 
         const bgVal = options.darkDisplay ? 0 : 255
         const sliceData = new Uint8ClampedArray(sliceW * sliceH * 4)
-        for (let i = 0; i < sliceW * sliceH; i++) {
-          const pIdx = i * 4
-          sliceData[pIdx] = bgVal
-          sliceData[pIdx + 1] = bgVal
-          sliceData[pIdx + 2] = bgVal
-          sliceData[pIdx + 3] = 255
+        sliceData.fill(bgVal)
+        for (let i = 3; i < sliceData.length; i += 4) {
+          sliceData[i] = 255
         }
 
-        for (let y = 0; y < adjusted.h; y++) {
-          const targetY = offsetY + y
-          if (targetY < 0 || targetY >= sliceH) continue
-          const sy = adjusted.y + y
-          if (sy < 0 || sy >= workH) continue
-          const srcIdx = (sy * workW + adjusted.x) * 4
-          const dstIdx = targetY * sliceW * 4
-          for (let b = 0; b < sliceW * 4; b++) {
-            sliceData[dstIdx + b] = workPixels[srcIdx + b]
-          }
-        }
-
-        // Color processing: dark display, contrast enhancement, match background
         const normalizeColors =
           options.darkDisplay ||
           options.contrastEnhancement ||
@@ -2020,61 +2379,99 @@ export function reflowPageFromPixels(
           options.matchBackgroundMode !== 'original' ||
           (options.optimizeBackground && options.optimizeBackground !== 'none')
 
-        if (normalizeColors) {
-          const inkThresh = adaptiveInkThreshold(threshold, pageBgLuma)
-          const fgVal = options.darkDisplay ? 255 : 0
+        const matchedForeground = normalizeColors && (options.matchBackground || options.matchBackgroundMode === 'original')
+          ? matchBackgroundMask(workPixels, workW, workH, adjusted, pageBgLuma)
+          : null
 
-          for (let y = 0; y < adjusted.h; y++) {
-            const targetY = offsetY + y
-            if (targetY < 0 || targetY >= sliceH) continue
-            for (let x = 0; x < adjusted.w; x++) {
-              const pIdx = (targetY * sliceW + x) * 4
-              const r = sliceData[pIdx]
-              const g = sliceData[pIdx + 1]
-              const b = sliceData[pIdx + 2]
+        const inkThresh = adaptiveInkThreshold(threshold, pageBgLuma)
+        const fgVal = options.darkDisplay ? 255 : 0
+
+        for (let y = 0; y < adjusted.h; y++) {
+          const targetY = offsetY + y
+          if (targetY < 0 || targetY >= sliceH) continue
+          const sy = adjusted.y + y
+          if (sy < 0 || sy >= workH) continue
+          const srcRowStart = (sy * workW + adjusted.x) * 4
+          const dstRowStart = targetY * sliceW * 4
+
+          for (let x = 0; x < adjusted.w; x++) {
+            const srcIdx = srcRowStart + x * 4
+            const dstIdx = dstRowStart + x * 4
+            const r = workPixels[srcIdx]
+            const g = workPixels[srcIdx + 1]
+            const b = workPixels[srcIdx + 2]
+
+            if (!normalizeColors) {
+              sliceData[dstIdx] = r
+              sliceData[dstIdx + 1] = g
+              sliceData[dstIdx + 2] = b
+              sliceData[dstIdx + 3] = 255
+              continue
+            }
+
+            const matched = matchedForeground ? matchedForeground[y * adjusted.w + x] !== 0 : true
+            if (!matched) {
+              sliceData[dstIdx] = bgVal
+              sliceData[dstIdx + 1] = bgVal
+              sliceData[dstIdx + 2] = bgVal
+              sliceData[dstIdx + 3] = 255
+              continue
+            }
+
+            if (options.matchBackgroundMode === 'original') {
+              const orig = originalTextColor(r, g, b, pageBgLuma, options)
+              sliceData[dstIdx] = orig.r
+              sliceData[dstIdx + 1] = orig.g
+              sliceData[dstIdx + 2] = orig.b
+              sliceData[dstIdx + 3] = 255
+            } else if (options.matchBackgroundMode === 'monochrome') {
               const luma = pixelLuma(r, g, b)
-
-              if (options.matchBackgroundMode === 'monochrome') {
-                const isWordInk = sourceDark ? luma > inkThresh : luma < inkThresh
-                const val = isWordInk ? fgVal : bgVal
-                sliceData[pIdx] = val
-                sliceData[pIdx + 1] = val
-                sliceData[pIdx + 2] = val
-              } else if (options.contrastEnhancement) {
-                const c = contrastEnhancedTextColor(r, g, b, pageBgLuma, options.darkDisplay)
-                sliceData[pIdx] = c.r
-                sliceData[pIdx + 1] = c.g
-                sliceData[pIdx + 2] = c.b
-              } else if (options.darkDisplay) {
-                const c = grayscaleTextColor(r, g, b, pageBgLuma, options.darkDisplay)
-                sliceData[pIdx] = c.r
-                sliceData[pIdx + 1] = c.g
-                sliceData[pIdx + 2] = c.b
-              } else {
-                const isWordInk = sourceDark ? luma > inkThresh : luma < inkThresh
-                if (isWordInk) {
-                  if (sourceDark) {
-                    const val = 255 - luma
-                    sliceData[pIdx] = val
-                    sliceData[pIdx + 1] = val
-                    sliceData[pIdx + 2] = val
-                  }
-                } else {
-                  sliceData[pIdx] = bgVal
-                  sliceData[pIdx + 1] = bgVal
-                  sliceData[pIdx + 2] = bgVal
-                }
-              }
+              const isWordInk = sourceDark ? luma > inkThresh : luma < inkThresh
+              const val = isWordInk ? fgVal : bgVal
+              sliceData[dstIdx] = val
+              sliceData[dstIdx + 1] = val
+              sliceData[dstIdx + 2] = val
+              sliceData[dstIdx + 3] = 255
+            } else if (options.contrastEnhancement) {
+              const c = contrastEnhancedTextColor(r, g, b, pageBgLuma, options.darkDisplay)
+              sliceData[dstIdx] = c.r
+              sliceData[dstIdx + 1] = c.g
+              sliceData[dstIdx + 2] = c.b
+              sliceData[dstIdx + 3] = 255
+            } else if (options.darkDisplay) {
+              const c = grayscaleTextColor(r, g, b, pageBgLuma, options.darkDisplay)
+              sliceData[dstIdx] = c.r
+              sliceData[dstIdx + 1] = c.g
+              sliceData[dstIdx + 2] = c.b
+              sliceData[dstIdx + 3] = 255
+            } else {
+              const c = grayscaleTextColor(r, g, b, pageBgLuma, options.darkDisplay)
+              sliceData[dstIdx] = c.r
+              sliceData[dstIdx + 1] = c.g
+              sliceData[dstIdx + 2] = c.b
+              sliceData[dstIdx + 3] = 255
             }
           }
         }
+
+        const edgeBg = edgeBackgroundColor(options, pageBgLuma)
+        clearDirtyBlockEdges(
+          sliceData,
+          sliceW,
+          sliceH,
+          edgeAdjusted.dirtyEdges,
+          {x: 0, y: offsetY, w: adjusted.w, h: adjusted.h},
+          edgeBg.r,
+          edgeBg.g,
+          edgeBg.b,
+        )
 
         applyStrokeStrengthToPixels(
           sliceData,
           sliceW,
           sliceH,
           threshold,
-          options.strokeStrength,
+          options.strokeStrength || 0,
           options.darkDisplay,
         )
 

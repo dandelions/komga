@@ -15,6 +15,11 @@ import {
   tightHorizontalLineBounds,
   horizontalWordBlock,
   separateOverlappingHorizontalBlocks,
+  matchBackgroundMask,
+  originalTextColor,
+  adjustWordBlockEdges,
+  clearDirtyBlockEdges,
+  edgeBackgroundColor,
   LocalReflowOptions,
 } from '@/functions/local-reflow-engine'
 
@@ -1261,6 +1266,78 @@ describe('local-reflow-engine', () => {
       expect(result.pageBackground).toBe('#000000')
       const words = result.items.filter(it => it.type === 'word')
       expect(words.length).toBeGreaterThanOrEqual(10)
+    })
+  })
+
+  describe('text rendering parity and dirty edge clearing', () => {
+    test('matchBackgroundMask preserves anti-aliased edge attached to strong text pixel', () => {
+      const width = 10
+      const height = 10
+      const pixels = new Uint8ClampedArray(width * height * 4)
+      pixels.fill(255) // white paper background (luma 255)
+
+      // (5, 5) is strong ink (luma 0, delta = 255 > strongDelta = ~30)
+      const centerIdx = (5 * width + 5) * 4
+      pixels[centerIdx] = 0; pixels[centerIdx + 1] = 0; pixels[centerIdx + 2] = 0
+
+      // (5, 6) is anti-aliased contour (luma 235, delta = 20 > weakDelta = ~6)
+      const edgeIdx = (5 * width + 6) * 4
+      pixels[edgeIdx] = 235; pixels[edgeIdx + 1] = 235; pixels[edgeIdx + 2] = 235
+
+      // (1, 1) is isolated faint noise dot (luma 235, delta = 20 > weakDelta, but NO strong neighbor)
+      const noiseIdx = (1 * width + 1) * 4
+      pixels[noiseIdx] = 235; pixels[noiseIdx + 1] = 235; pixels[noiseIdx + 2] = 235
+
+      const mask = matchBackgroundMask(pixels, width, height, {x: 0, y: 0, w: width, h: height}, 255)
+      expect(mask[5 * width + 5]).toBe(1)
+      expect(mask[5 * width + 6]).toBe(1) // anti-aliasing preserved!
+      expect(mask[1 * width + 1]).toBe(0) // isolated faint dot filtered as paper
+    })
+
+    test('originalTextColor preserves original RGB in original match background mode', () => {
+      const options: LocalReflowOptions = {
+        targetWidth: 400,
+        textScale: 100,
+        matchBackground: true,
+        matchBackgroundMode: 'original',
+        contrastEnhancement: false,
+        darkDisplay: false,
+      } as LocalReflowOptions
+
+      const color = originalTextColor(180, 180, 180, 255, options)
+      expect(color).toEqual({r: 180, g: 180, b: 180})
+    })
+
+    test('clearDirtyBlockEdges clears outer border of slice marked as dirty', () => {
+      const width = 8
+      const height = 8
+      const sliceData = new Uint8ClampedArray(width * height * 4)
+      sliceData.fill(0) // black
+
+      clearDirtyBlockEdges(
+        sliceData,
+        width,
+        height,
+        {left: true, right: false, top: true, bottom: false},
+        {x: 0, y: 0, w: width, h: height},
+        255,
+        255,
+        255,
+      )
+
+      // (0, 0) should be cleared to white
+      expect(sliceData[0]).toBe(255)
+      expect(sliceData[1]).toBe(255)
+      expect(sliceData[2]).toBe(255)
+
+      // (4, 4) interior remains black
+      const innerIdx = (4 * width + 4) * 4
+      expect(sliceData[innerIdx]).toBe(0)
+    })
+
+    test('edgeBackgroundColor returns white for normalized modes and black for darkDisplay', () => {
+      expect(edgeBackgroundColor({darkDisplay: true} as LocalReflowOptions, 255)).toEqual({r: 0, g: 0, b: 0})
+      expect(edgeBackgroundColor({darkDisplay: false, matchBackground: true} as LocalReflowOptions, 255)).toEqual({r: 255, g: 255, b: 255})
     })
   })
 })

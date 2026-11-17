@@ -1129,8 +1129,8 @@ const MAGNIFIER_DIAMETER_OPTIONS = [
 ]
 const REFLOW_CACHE_BEHIND_COUNT = 3
 const REFLOW_CONTINUATION_COUNT = 4
-const REFLOW_PREFETCH_AHEAD_COUNT = 2
-const REFLOW_PREFETCH_DELAY_MS = 500
+const REFLOW_PREFETCH_AHEAD_COUNT = 1
+const REFLOW_PREFETCH_DELAY_MS = 150
 const MAX_REFLOW_CACHE_ENTRIES = 16
 const MAX_REFLOW_CROP_REGIONS = 8
 
@@ -1550,7 +1550,7 @@ export default Vue.extend({
           this.updateRoute()
           if (this.reflowMode) {
             this.clearReflowPrefetch()
-            this.scheduleNextReflowPrefetch()
+            this.scheduleNextReflowPrefetch(true)
           } else {
             this.clearReflowPrefetch()
           }
@@ -3342,7 +3342,7 @@ export default Vue.extend({
       this.reflowStartAtEnd = false
       this.reflowCropMode = false
       this.clearReflowPrefetch()
-      this.scheduleNextReflowPrefetch()
+      this.scheduleNextReflowPrefetch(true)
       this.$nextTick(() => this.scrollToPageEdge('top'))
     },
     setReflowEnabled(enabled: boolean) {
@@ -3652,7 +3652,7 @@ export default Vue.extend({
       })
       this.pruneReflowCache()
       if (payload.pageNumber === this.reflowRootPage || payload.pageNumber === this.page || wasPrefetched) {
-        this.scheduleNextReflowPrefetch()
+        this.scheduleNextReflowPrefetch(true)
       }
     },
     reflowPageUrl(page: PageDtoWithUrl | undefined): string {
@@ -3776,7 +3776,7 @@ export default Vue.extend({
       }
       this.reflowPrefetchPages = []
     },
-    scheduleNextReflowPrefetch() {
+    scheduleNextReflowPrefetch(immediate: boolean = false) {
       if (this.reflowPrefetchTimer !== undefined) {
         window.clearTimeout(this.reflowPrefetchTimer)
         this.reflowPrefetchTimer = undefined
@@ -3815,13 +3815,19 @@ export default Vue.extend({
         this.reflowPrefetchTimer = undefined
         if (this.page !== sourcePage || this.reflowCropMode) return
         if (this.cachedReflowItems(this.pages[nextPage - 1])) {
-          this.scheduleNextReflowPrefetch()
+          this.scheduleNextReflowPrefetch(true)
           return
         }
         this.reflowPrefetchPages = [nextPage]
       }
 
-      this.reflowPrefetchTimer = window.setTimeout(startPrefetch, REFLOW_PREFETCH_DELAY_MS)
+      if (immediate) {
+        this.$nextTick(() => {
+          if (this.page === sourcePage) startPrefetch()
+        })
+      } else {
+        this.reflowPrefetchTimer = window.setTimeout(startPrefetch, REFLOW_PREFETCH_DELAY_MS)
+      }
     },
     setReflowVisiblePage(pageNumber: number) {
       const normalized = Math.max(1, Math.min(this.pagesCount, Math.round(Number(pageNumber) || this.page)))

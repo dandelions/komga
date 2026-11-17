@@ -281,11 +281,27 @@ describe('DivinaReader reflow prefetch and LRU cache', () => {
       methods.scheduleNextReflowPrefetch.call(reader)
       expect(reader.reflowPrefetchTimer).toBeDefined()
 
-      jest.advanceTimersByTime(500)
+      jest.advanceTimersByTime(150)
       expect(reader.reflowPrefetchPages).toEqual([6])
     } finally {
       jest.useRealTimers()
     }
+  })
+
+  test('scheduleNextReflowPrefetch immediate prefetches next page directly via nextTick', () => {
+    const reader: any = {
+      reflowCropMode: false,
+      page: 5,
+      pagesCount: 20,
+      pages: Array.from({length: 20}, (_, i) => ({number: i + 1})),
+      cachedReflowItems: jest.fn((page) => (page.number === 5 ? [{type: 'word'}] : undefined)),
+      reflowPrefetchPages: [],
+      reflowPrefetchTimer: undefined,
+      $nextTick: (fn: any) => fn(),
+    }
+
+    methods.scheduleNextReflowPrefetch.call(reader, true)
+    expect(reader.reflowPrefetchPages).toEqual([6])
   })
 
   test('pruneReflowCache evicts least recently accessed entries outside active window when over capacity', () => {
