@@ -899,10 +899,6 @@ type EpubTouchStart = {
   y: number,
 }
 
-type EpubRootScrollTouchStart = {
-  y: number,
-}
-
 type EpubPageAction = 'next' | 'previous'
 type EpubBackgroundImageMode = 'light' | 'dark'
 
@@ -1072,7 +1068,8 @@ export default Vue.extend({
       epubIframeEnhancementObserver: undefined as MutationObserver | undefined,
       epubIframeEnhancementTimers: [] as number[],
       epubTouchStart: undefined as EpubTouchStart | undefined,
-      epubRootScrollTouchStart: undefined as EpubRootScrollTouchStart | undefined,
+      epubRootTouchActive: false,
+      epubRootScrollRecenterTimer: undefined as number | undefined,
       epubTouchSelectionTimer: undefined as number | undefined,
       epubTouchSelectionActive: false,
       epubImageZoomVisible: false,
@@ -1135,7 +1132,12 @@ export default Vue.extend({
     this.revokeInstalledFontObjectUrls()
     this.ttsStop()
     this.clearEpubTouchSelectionState()
-    this.epubRootScrollTouchStart = undefined
+    this.epubRootTouchActive = false
+    this.clearEpubRootScrollRecenterTimer()
+    window.removeEventListener('scroll', this.handleEpubRootScroll)
+    window.removeEventListener('touchstart', this.handleEpubRootTouchStart)
+    window.removeEventListener('touchend', this.handleEpubRootTouchEnd)
+    window.removeEventListener('touchcancel', this.handleEpubRootTouchEnd)
     this.stopEpubIframeEnhancements()
     this.d2Reader?.stop?.()
   },
@@ -1152,6 +1154,10 @@ export default Vue.extend({
   async mounted() {
     document.documentElement.classList.add('html-epub-reader')
     document.body.classList.add('html-epub-reader')
+    window.addEventListener('scroll', this.handleEpubRootScroll, {passive: true})
+    window.addEventListener('touchstart', this.handleEpubRootTouchStart, {passive: true})
+    window.addEventListener('touchend', this.handleEpubRootTouchEnd, {passive: true})
+    window.addEventListener('touchcancel', this.handleEpubRootTouchEnd, {passive: true})
     Object.assign(this.settings, this.$store.state.persistedState.epubreader)
     this.settings.alwaysFullscreen = this.$store.state.persistedState.webreader.alwaysFullscreen
 
@@ -2377,9 +2383,9 @@ export default Vue.extend({
         const view = iframe.contentWindow || doc?.defaultView
         if (!doc?.documentElement || !view) return
 
-        this.bindEpubIframeTouchNavigation(doc)
-        this.bindEpubRootScrollBridge(doc)
         this.applyEpubVerticalWritingMode(doc, view)
+        this.bindEpubIframeTouchNavigation(doc)
+        this.applyEpubMobileScrollSupport(iframe, doc)
         this.applyEpubAuthorStylePreference(doc)
         this.applyEpubChineseConversion(doc)
         this.applyEpubThemeToDocument(doc)
@@ -2810,50 +2816,87 @@ export default Vue.extend({
       const normalizedB = normalize(b)
       return normalizedA === normalizedB || normalizedA.endsWith(`/${normalizedB}`) || normalizedB.endsWith(`/${normalizedA}`)
     },
-    bindEpubRootScrollBridge(doc: Document) {
+    isMobileEpubViewport(): boolean {
+      return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+        && window.matchMedia('(max-width: 959px), (hover: none) and (pointer: coarse)').matches
+    },
+    clearEpubRootScrollRecenterTimer() {
+      if (this.epubRootScrollRecenterTimer !== undefined) {
+        window.clearTimeout(this.epubRootScrollRecenterTimer)
+        this.epubRootScrollRecenterTimer = undefined
+      }
+    },
+    handleEpubRootTouchStart() {
+      this.epubRootTouchActive = true
+      this.clearEpubRootScrollRecenterTimer()
+    },
+    handleEpubRootTouchEnd() {
+      this.epubRootTouchActive = false
+      this.scheduleEpubRootScrollRecenter()
+    },
+    handleEpubRootScroll() {
+      if (this.verticalScroll || this.epubRootTouchActive) return
+      this.scheduleEpubRootScrollRecenter()
+    },
+    scheduleEpubRootScrollRecenter() {
+      this.clearEpubRootScrollRecenterTimer()
+      if (this.verticalScroll || this.epubRootTouchActive || !this.isMobileEpubViewport()) return
+      this.epubRootScrollRecenterTimer = window.setTimeout(() => {
+        this.epubRootScrollRecenterTimer = undefined
+        this.recenterEpubRootScroll()
+      }, 350)
+    },
+    recenterEpubRootScroll() {
+      if (this.verticalScroll || this.epubRootTouchActive || !this.isMobileEpubViewport()) return
+      const scroller = (document.scrollingElement || document.documentElement) as HTMLElement | null
+      if (!scroller) return
+      const maxScroll = scroller.scrollHeight - scroller.clientHeight
+      if (maxScroll >= 240 && scroller.scrollTop > maxScroll - 140) {
+        window.scrollTo({top: 120, left: 0, behavior: 'auto'})
+      }
+    },
+    applyEpubMobileScrollSupport(iframe: HTMLIFrameElement, doc: Document) {
       const html = doc.documentElement
-      if (html.dataset.komgaEpubRootScrollBridgeBound === 'true') return
-
-      html.dataset.komgaEpubRootScrollBridgeBound = 'true'
-      doc.addEventListener('touchstart', (event: TouchEvent) => {
-        if (event.touches.length !== 1) return
-        this.epubRootScrollTouchStart = {y: event.touches[0].clientY}
-      }, {capture: true, passive: true})
-      doc.addEventListener('touchmove', (event: TouchEvent) => {
-        const start = this.epubRootScrollTouchStart
-        if (!start || event.touches.length !== 1 || this.verticalScroll) return
-
-        const currentY = event.touches[0].clientY
-        const deltaY = start.y - currentY
-        if (Math.abs(deltaY) < 1) return
-        window.scrollBy(0, deltaY)
-        const scroller = (document.scrollingElement || document.documentElement) as HTMLElement | null
-        if (scroller) {
-          scroller.scrollTop += deltaY
-        }
-        this.epubRootScrollTouchStart = {y: currentY}
-      }, {capture: true, passive: true})
-      doc.addEventListener('touchend', () => {
-        this.epubRootScrollTouchStart = undefined
-      }, {capture: true, passive: true})
-      doc.addEventListener('touchcancel', () => {
-        this.epubRootScrollTouchStart = undefined
-      }, {capture: true, passive: true})
+      const body = doc.body
+      if (!this.verticalScroll && this.isMobileEpubViewport()) {
+        iframe.style.setProperty('touch-action', 'pan-y pinch-zoom')
+        html.style.setProperty('touch-action', 'pan-y pinch-zoom')
+        body?.style.setProperty('touch-action', 'pan-y pinch-zoom')
+      } else {
+        iframe.style.removeProperty('touch-action')
+        html.style.removeProperty('touch-action')
+        body?.style.removeProperty('touch-action')
+      }
     },
     bindEpubIframeTouchNavigation(doc: Document) {
       const html = doc.documentElement
-      if (html.dataset.komgaEpubTouchNavigationBound === 'true') return
-
-      html.dataset.komgaEpubTouchNavigationBound = 'true'
-      const view = doc.defaultView
-      if (view) {
-        view.addEventListener('contextmenu', this.handleEpubIframeContextMenu, {capture: true})
+      if (html.dataset.komgaEpubTouchNavigationBound !== 'true') {
+        html.dataset.komgaEpubTouchNavigationBound = 'true'
+        const view = doc.defaultView
+        if (view) {
+          view.addEventListener('contextmenu', this.handleEpubIframeContextMenu, {capture: true})
+        }
+        doc.addEventListener('contextmenu', this.handleEpubIframeContextMenu, {capture: true})
+        doc.addEventListener('touchstart', this.handleEpubRootTouchStart, {capture: true, passive: true})
+        doc.addEventListener('touchend', this.handleEpubRootTouchEnd, {capture: true, passive: true})
+        doc.addEventListener('touchcancel', this.handleEpubRootTouchEnd, {capture: true, passive: true})
       }
-      doc.addEventListener('contextmenu', this.handleEpubIframeContextMenu, {capture: true})
-      doc.addEventListener('touchstart', this.handleEpubIframeTouchStart, {capture: true, passive: true})
-      doc.addEventListener('touchmove', this.handleEpubIframeTouchMove, {capture: true, passive: false})
-      doc.addEventListener('touchend', this.handleEpubIframeTouchEnd, {capture: true, passive: false})
-      doc.addEventListener('touchcancel', this.handleEpubIframeTouchCancel, {capture: true, passive: true})
+
+      const isVerticalWriting = (html.getAttribute('data-komga-writing-mode') || '').indexOf('vertical') === 0
+      const verticalBound = html.dataset.komgaEpubVerticalTouchBound === 'true'
+      if (isVerticalWriting && !verticalBound) {
+        html.dataset.komgaEpubVerticalTouchBound = 'true'
+        doc.addEventListener('touchstart', this.handleEpubIframeTouchStart, {capture: true, passive: true})
+        doc.addEventListener('touchmove', this.handleEpubIframeTouchMove, {capture: true, passive: false})
+        doc.addEventListener('touchend', this.handleEpubIframeTouchEnd, {capture: true, passive: false})
+        doc.addEventListener('touchcancel', this.handleEpubIframeTouchCancel, {capture: true, passive: true})
+      } else if (!isVerticalWriting && verticalBound) {
+        delete html.dataset.komgaEpubVerticalTouchBound
+        doc.removeEventListener('touchstart', this.handleEpubIframeTouchStart, {capture: true})
+        doc.removeEventListener('touchmove', this.handleEpubIframeTouchMove, {capture: true})
+        doc.removeEventListener('touchend', this.handleEpubIframeTouchEnd, {capture: true})
+        doc.removeEventListener('touchcancel', this.handleEpubIframeTouchCancel, {capture: true})
+      }
     },
     handleEpubIframeContextMenu(event: Event) {
       this.epubTouchSelectionActive = true
@@ -4731,8 +4774,8 @@ body.html-epub-reader::-webkit-scrollbar {
 
 @media (max-width: 959px), (hover: none) and (pointer: coarse) {
   body.html-epub-reader {
-    min-height: calc(100vh + 150px) !important;
-    min-height: calc(100dvh + 150px) !important;
+    min-height: calc(100vh + 400px) !important;
+    min-height: calc(100dvh + 400px) !important;
   }
 
   .html-epub-reader .v-application,
@@ -4763,6 +4806,11 @@ body.html-epub-reader::-webkit-scrollbar {
     min-height: 100vh !important;
     min-height: 100dvh !important;
     overflow: visible !important;
+    touch-action: pan-y pinch-zoom !important;
+  }
+
+  .html-epub-reader .epub-reader-page:not(.epub-reader-continuous-page) #iframe-wrapper iframe {
+    touch-action: pan-y pinch-zoom !important;
   }
 }
 </style>
