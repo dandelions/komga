@@ -1,6 +1,7 @@
 import {
   adaptiveInkThreshold,
   rgbaToBmpDataUrl,
+  applyStrokeStrengthToPixels,
   repairInvertedGlyphComponents,
   reflowPageFromPixels,
   detectPageBackgroundFromPixels,
@@ -23,6 +24,23 @@ describe('local-reflow-engine', () => {
       expect(localReflowScale(7200, 4800)).toBeCloseTo(Math.sqrt(8000000 / (7200 * 4800)))
       expect(localReflowScale(12000, 1000)).toBe(1)
       expect(localReflowScale(2400, 1600)).toBe(1)
+    })
+  })
+
+  describe('applyStrokeStrengthToPixels', () => {
+    test('darkens light-background text pixels using the configured stroke strength', () => {
+      const pixels = new Uint8ClampedArray(9 * 4)
+      pixels.fill(255)
+      pixels[4 * 4] = 120
+      pixels[4 * 4 + 1] = 120
+      pixels[4 * 4 + 2] = 120
+      pixels[4 * 4 + 3] = 255
+
+      applyStrokeStrengthToPixels(pixels, 3, 3, 185, 0.1, false)
+
+      expect(pixels[4 * 4]).toBeLessThan(120)
+      expect(pixels[4 * 4 + 1]).toBe(pixels[4 * 4])
+      expect(pixels[4 * 4 + 2]).toBe(pixels[4 * 4])
     })
   })
 

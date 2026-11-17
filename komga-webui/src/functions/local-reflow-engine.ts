@@ -425,6 +425,92 @@ export function repairInvertedGlyphComponents(
   }
 }
 
+export function applyStrokeStrengthToPixels(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  threshold: number,
+  strokeStrength: number,
+  darkDisplay: boolean,
+): void {
+  const strength = clamp(strokeStrength, 0, 3)
+  if (strength <= 0 || width < 1 || height < 1) return
+
+  const strokeThreshold = Math.min(245, clamp(threshold, 50, 230) + 18)
+  const mask = new Uint8Array(width * height)
+  const indexes: number[] = []
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const index = y * width + x
+      const pixelIndex = index * 4
+      if (pixels[pixelIndex + 3] === 0) continue
+      const luma = pixelLuma(pixels[pixelIndex], pixels[pixelIndex + 1], pixels[pixelIndex + 2])
+      const isInk = darkDisplay ? luma > 255 - strokeThreshold : luma < strokeThreshold
+      if (isInk) {
+        mask[index] = 1
+        indexes.push(index)
+      }
+    }
+  }
+
+  const exterior = exteriorPaperMask(mask, width, height)
+  const fullPasses = Math.floor(strength)
+  let activeIndexes = indexes
+  for (let pass = 0; pass < fullPasses; pass++) {
+    const expanded = new Uint8Array(mask)
+    const nextIndexes = activeIndexes.slice()
+    activeIndexes.forEach(index => {
+      const y = Math.floor(index / width)
+      const x = index - y * width
+      for (let dy = -1; dy <= 1; dy++) {
+        const nextY = y + dy
+        if (nextY < 0 || nextY >= height) continue
+        for (let dx = -1; dx <= 1; dx++) {
+          const nextX = x + dx
+          if (nextX < 0 || nextX >= width) continue
+          const nextIndex = nextY * width + nextX
+          if (expanded[nextIndex] !== 0 || !exterior[nextIndex]) continue
+          expanded[nextIndex] = 1
+          nextIndexes.push(nextIndex)
+        }
+      }
+    })
+    mask.set(expanded)
+    activeIndexes = nextIndexes
+  }
+
+  const foreground = darkDisplay ? 255 : 0
+  const setForeground = (index: number, influence: number) => {
+    const pixelIndex = index * 4
+    const amount = clamp(influence, 0, 1)
+    pixels[pixelIndex] = Math.round(pixels[pixelIndex] + (foreground - pixels[pixelIndex]) * amount)
+    pixels[pixelIndex + 1] = Math.round(pixels[pixelIndex + 1] + (foreground - pixels[pixelIndex + 1]) * amount)
+    pixels[pixelIndex + 2] = Math.round(pixels[pixelIndex + 2] + (foreground - pixels[pixelIndex + 2]) * amount)
+  }
+
+  if (fullPasses > 0) activeIndexes.forEach(index => setForeground(index, 1))
+  const fractional = strength - fullPasses
+  if (fractional <= 0) return
+
+  activeIndexes.forEach(index => {
+    setForeground(index, fractional)
+    const y = Math.floor(index / width)
+    const x = index - y * width
+    for (let dy = -1; dy <= 1; dy++) {
+      const nextY = y + dy
+      if (nextY < 0 || nextY >= height) continue
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue
+        const nextX = x + dx
+        if (nextX < 0 || nextX >= width) continue
+        const nextIndex = nextY * width + nextX
+        if (!exterior[nextIndex]) continue
+        setForeground(nextIndex, fractional * (Math.abs(dx) + Math.abs(dy) === 1 ? 0.7 : 0.45))
+      }
+    }
+  })
+}
+
 export function buildInkMap(
   pixels: Uint8ClampedArray,
   width: number,
@@ -1982,6 +2068,15 @@ export function reflowPageFromPixels(
             }
           }
         }
+
+        applyStrokeStrengthToPixels(
+          sliceData,
+          sliceW,
+          sliceH,
+          threshold,
+          options.strokeStrength,
+          options.darkDisplay,
+        )
 
         // Apply server-identical inverted glyph repair AFTER color normalization
         repairInvertedGlyphComponents(
