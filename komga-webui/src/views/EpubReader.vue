@@ -2827,6 +2827,10 @@ export default Vue.extend({
         const deltaY = start.y - currentY
         if (Math.abs(deltaY) < 1) return
         window.scrollBy(0, deltaY)
+        const scroller = (document.scrollingElement || document.documentElement) as HTMLElement | null
+        if (scroller) {
+          scroller.scrollTop += deltaY
+        }
         this.epubRootScrollTouchStart = {y: currentY}
       }, {capture: true, passive: true})
       doc.addEventListener('touchend', () => {
@@ -4710,30 +4714,55 @@ export default Vue.extend({
   min-height: 100dvh;
   position: relative;
 }
+</style>
+<style>
+html.html-epub-reader,
+body.html-epub-reader {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+
+html.html-epub-reader::-webkit-scrollbar,
+body.html-epub-reader::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
 
 @media (max-width: 959px), (hover: none) and (pointer: coarse) {
-  html.html-epub-reader,
   body.html-epub-reader {
-    min-height: calc(100vh + 150px);
-    min-height: calc(100dvh + 150px);
+    min-height: calc(100vh + 150px) !important;
+    min-height: calc(100dvh + 150px) !important;
   }
 
-  html.html-epub-reader .v-application,
-  html.html-epub-reader .v-application--wrap {
-    min-height: inherit;
+  .html-epub-reader .v-application,
+  .html-epub-reader .v-application--wrap {
+    min-height: inherit !important;
   }
 
-  html.html-epub-reader .epub-reader-page:not(.epub-reader-continuous-page) #D2Reader-Container {
-    position: sticky;
-    top: 0;
-    min-height: 100vh;
-    min-height: 100dvh;
+  .html-epub-reader .epub-reader-page:not(.epub-reader-continuous-page) {
+    position: -webkit-sticky !important;
+    position: sticky !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    height: 100vh !important;
+    height: 100dvh !important;
   }
 
-  html.html-epub-reader .epub-reader-page:not(.epub-reader-continuous-page) #iframe-wrapper {
-    min-height: 100vh;
-    min-height: 100dvh;
-    overflow: visible;
+  .html-epub-reader .epub-reader-page:not(.epub-reader-continuous-page) #D2Reader-Container {
+    position: relative !important;
+    width: 100% !important;
+    height: 100% !important;
+    min-height: 100vh !important;
+    min-height: 100dvh !important;
+  }
+
+  .html-epub-reader .epub-reader-page:not(.epub-reader-continuous-page) #iframe-wrapper {
+    width: 100% !important;
+    min-height: 100vh !important;
+    min-height: 100dvh !important;
+    overflow: visible !important;
   }
 }
 </style>
