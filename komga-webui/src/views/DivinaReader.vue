@@ -3409,15 +3409,34 @@ export default Vue.extend({
       const reflow = (this.k2ReflowMode ? this.$refs.k2ReflowedPage : this.$refs.reflowedPage) as any
       return reflow?.collapseControls?.() === true
     },
-    reflowOutsideCenterClick() {
+    reflowOutsideCenterClick(event?: MouseEvent) {
+      if (this.openReflowPreviewFromEvent(event)) return
       if (this.collapseActiveReflowControls()) return
       this.toggleToolbars()
     },
-    reflowOutsideNavigateLeftSide() {
+    reflowImagePreviewAt(clientX?: number, clientY?: number): string {
+      if (clientX === undefined || clientY === undefined) return ''
+      if (typeof document === 'undefined' || typeof document.elementsFromPoint !== 'function') return ''
+      const image = document.elementsFromPoint(clientX, clientY)
+        .find(element => typeof HTMLImageElement !== 'undefined' &&
+          element instanceof HTMLImageElement &&
+          element.matches('.reflow-image-block, .k2-image')) as HTMLImageElement | undefined
+      return image?.currentSrc || image?.src || ''
+    },
+    openReflowPreviewFromEvent(event?: MouseEvent): boolean {
+      if (!event || this.magnifierActive) return false
+      const src = this.reflowImagePreviewAt(event.clientX, event.clientY)
+      if (!src) return false
+      this.openReflowImagePreview(src)
+      return true
+    },
+    reflowOutsideNavigateLeftSide(event?: MouseEvent) {
+      if (this.openReflowPreviewFromEvent(event)) return
       if (this.collapseActiveReflowControls()) return
       this.activeReflowNavigateLeftSide()
     },
-    reflowOutsideNavigateRightSide() {
+    reflowOutsideNavigateRightSide(event?: MouseEvent) {
+      if (this.openReflowPreviewFromEvent(event)) return
       if (this.collapseActiveReflowControls()) return
       this.activeReflowNavigateRightSide()
     },

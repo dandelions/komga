@@ -379,3 +379,91 @@ describe('DivinaReader reflow prefetch and LRU cache', () => {
     expect(reader.reflowPrefetchPages).toEqual([])
   })
 })
+
+describe('DivinaReader reflow image preview', () => {
+  const click = (clientX: number, clientY: number) => ({clientX, clientY} as MouseEvent)
+
+  const createReader = (overrides: Record<string, any> = {}) => Object.assign({}, methods, {
+    magnifierActive: false,
+    showToolbars: false,
+    reflowImagePreviewSrc: '',
+    collapseActiveReflowControls: jest.fn(() => false),
+    activeReflowNavigateLeftSide: jest.fn(),
+    activeReflowNavigateRightSide: jest.fn(),
+    ...overrides,
+  })
+
+  const stubImageUnderPoint = (src: string, className = 'reflow-image-block') => {
+    const image = document.createElement('img')
+    image.className = className
+    image.src = src
+    ;(document as any).elementsFromPoint = () => [image]
+    return image
+  }
+
+  afterEach(() => {
+    delete (document as any).elementsFromPoint
+  })
+
+  test('opens the preview when the center click layer covers a rendered image', () => {
+    stubImageUnderPoint('data:image/png;base64,center')
+    const reader = createReader()
+
+    methods.reflowOutsideCenterClick.call(reader, click(120, 240))
+
+    expect(reader.reflowImagePreviewSrc).toBe('data:image/png;base64,center')
+    expect(reader.showToolbars).toBe(false)
+    expect(reader.collapseActiveReflowControls).not.toHaveBeenCalled()
+  })
+
+  test('keeps toggling the toolbar when the click does not land on an image', () => {
+    ;(document as any).elementsFromPoint = () => [document.body]
+    const reader = createReader()
+
+    methods.reflowOutsideCenterClick.call(reader, click(120, 240))
+
+    expect(reader.reflowImagePreviewSrc).toBe('')
+    expect(reader.showToolbars).toBe(true)
+  })
+
+  test('side click layers open the preview instead of turning the page', () => {
+    stubImageUnderPoint('data:image/png;base64,side')
+    const leftReader = createReader()
+    const rightReader = createReader()
+
+    methods.reflowOutsideNavigateLeftSide.call(leftReader, click(20, 300))
+    methods.reflowOutsideNavigateRightSide.call(rightReader, click(700, 300))
+
+    expect(leftReader.reflowImagePreviewSrc).toBe('data:image/png;base64,side')
+    expect(leftReader.activeReflowNavigateLeftSide).not.toHaveBeenCalled()
+    expect(rightReader.reflowImagePreviewSrc).toBe('data:image/png;base64,side')
+    expect(rightReader.activeReflowNavigateRightSide).not.toHaveBeenCalled()
+  })
+
+  test('leaves taps to the magnifier while it is active', () => {
+    stubImageUnderPoint('data:image/png;base64,magnifier')
+    const reader = createReader({magnifierActive: true})
+
+    methods.reflowOutsideCenterClick.call(reader, click(120, 240))
+
+    expect(reader.reflowImagePreviewSrc).toBe('')
+    expect(reader.showToolbars).toBe(true)
+  })
+
+  test('ignores images that are not reflow image blocks', () => {
+    const image = document.createElement('img')
+    image.src = 'data:image/png;base64,other'
+    ;(document as any).elementsFromPoint = () => [image]
+
+    expect(methods.reflowImagePreviewAt.call({}, 10, 10)).toBe('')
+  })
+
+  test('detects K2 reflow images as well', () => {
+    stubImageUnderPoint('data:image/png;base64,k2', 'k2-image')
+    const reader = createReader()
+
+    methods.reflowOutsideCenterClick.call(reader, click(120, 240))
+
+    expect(reader.reflowImagePreviewSrc).toBe('data:image/png;base64,k2')
+  })
+})

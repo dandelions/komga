@@ -9,7 +9,7 @@
     @click.self="close"
     @wheel.prevent="onWheel"
     @keydown.esc.prevent="close"
-    @touchstart.stop.prevent="onTouchStart"
+    @touchstart.stop="onTouchStart"
     @touchmove.stop.prevent="onTouchMove"
     @touchend.stop="onTouchEnd"
     @touchcancel.stop="onTouchEnd"

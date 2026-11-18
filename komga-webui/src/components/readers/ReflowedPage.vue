@@ -570,8 +570,7 @@
               data-reader-magnifiable="true"
               :style="imageBlockStyle(item)"
               alt=""
-              @dblclick.stop.prevent="handleReflowImageDoubleClick(item.src)"
-              @touchend="handleReflowImageTouchEnd($event, item.src)"
+              @click.stop.prevent="handleReflowImageClick(item.src)"
             />
           </template>
         </div>
@@ -611,8 +610,7 @@
               data-reader-magnifiable="true"
               :style="imageBlockStyle(item)"
               alt=""
-              @dblclick.stop.prevent="handleReflowImageDoubleClick(item.src)"
-              @touchend="handleReflowImageTouchEnd($event, item.src)"
+              @click.stop.prevent="handleReflowImageClick(item.src)"
             />
           </template>
         </div>
@@ -652,8 +650,7 @@
             data-reader-magnifiable="true"
             :style="imageBlockStyle(item)"
             alt=""
-            @dblclick.stop.prevent="handleReflowImageDoubleClick(item.src)"
-            @touchend="handleReflowImageTouchEnd($event, item.src)"
+            @click.stop.prevent="handleReflowImageClick(item.src)"
           />
         </template>
       </template>
@@ -1100,8 +1097,6 @@ export default Vue.extend({
       requestId: 0,
       reflowRunning: false,
       reflowPending: false,
-      lastImageTouchTap: undefined as {src: string, time: number, x: number, y: number} | undefined,
-      lastImageTouchPreviewAt: 0,
       controlsCollapsed: true,
       reflowControlsTab: 'layout' as 'layout' | 'display' | 'deskew',
       controlsPosition: {x: 0, y: 0},
@@ -1723,25 +1718,9 @@ export default Vue.extend({
     this.revokeObjectUrl()
   },
   methods: {
-    handleReflowImageDoubleClick(src: string) {
-      if (Date.now() - this.lastImageTouchPreviewAt < 500) return
+    handleReflowImageClick(src: string) {
+      if (!src) return
       this.$emit('image-preview', src)
-    },
-    handleReflowImageTouchEnd(event: TouchEvent, src: string) {
-      if (!src || event.changedTouches.length !== 1) return
-      const touch = event.changedTouches[0]
-      const now = Date.now()
-      const previous = this.lastImageTouchTap
-      if (previous && previous.src === src && now - previous.time <= 350 &&
-        Math.abs(previous.x - touch.clientX) < 24 && Math.abs(previous.y - touch.clientY) < 24) {
-        this.lastImageTouchTap = undefined
-        this.lastImageTouchPreviewAt = now
-        event.stopPropagation()
-        event.preventDefault()
-        this.$emit('image-preview', src)
-        return
-      }
-      this.lastImageTouchTap = {src, time: now, x: touch.clientX, y: touch.clientY}
     },
     startMagnifierPress() {
       this.finishMagnifierPress()
