@@ -658,6 +658,20 @@
             <v-list-item v-if="!activeReflowMode">
               <settings-switch v-model="readerContrastEnhancement" label="高对比度漂白与字迹增强"/>
             </v-list-item>
+            <v-list-item v-if="!activeReflowMode">
+              <settings-switch v-model="readerBleachText" label="漂白文字背景"/>
+            </v-list-item>
+            <v-list-item v-if="!activeReflowMode">
+              <v-slider
+                v-model="readerContrastLevel"
+                label="对比度"
+                min="50"
+                max="200"
+                step="5"
+                thumb-label
+                suffix="%"
+              />
+            </v-list-item>
             <v-list-item v-if="isPdf">
               <div class="reader-rotation-setting">
                 <span class="mr-2 text-caption">旋转</span>
@@ -1207,6 +1221,8 @@ function defaultReaderImageSettings(): any {
     rotation: 0,
     skewCorrection: 0,
     contrastEnhancement: false,
+    bleachText: false,
+    contrastLevel: 100,
     cropRegionsByParity: defaultCropRegionsByParity(false),
   }
 }
@@ -1310,6 +1326,8 @@ export default Vue.extend({
         rotation: 0,
         skewCorrection: 0,
         contrastEnhancement: false,
+        bleachText: false,
+        contrastLevel: 100,
         cropRegionsByParity: defaultCropRegionsByParity(false),
       },
       readerCropMode: false,
@@ -1726,6 +1744,12 @@ export default Vue.extend({
         filters.push(`contrast(${(1 + this.readerStrokeStrength * 0.35).toFixed(2)})`)
         filters.push(`brightness(${(1 - this.readerStrokeStrength * 0.04).toFixed(2)})`)
       }
+      if (this.readerBleachText) {
+        filters.push('contrast(1.35)')
+        filters.push('brightness(1.12)')
+      }
+      const contrastLevel = this.readerContrastLevel
+      if (contrastLevel !== 100) filters.push(`contrast(${(contrastLevel / 100).toFixed(2)})`)
       if (this.nightDisplay) filters.push('invert(1) hue-rotate(180deg) brightness(0.92)')
       return filters.join(' ') || 'none'
     },
@@ -1899,6 +1923,26 @@ export default Vue.extend({
         this.settings.contrastEnhancement = contrastEnhancement === true
         this.saveReaderImageSettings()
         if (changed) this.revokeReaderDeskewedPageUrls()
+      },
+    },
+    readerBleachText: {
+      get: function (): boolean {
+        return this.settings.bleachText === true
+      },
+      set: function (bleachText: boolean): void {
+        this.settings.bleachText = bleachText === true
+        this.saveReaderImageSettings()
+      },
+    },
+    readerContrastLevel: {
+      get: function (): number {
+        const level = Number(this.settings.contrastLevel)
+        return Number.isFinite(level) ? Math.max(50, Math.min(200, level)) : 100
+      },
+      set: function (contrastLevel: number): void {
+        const normalized = Math.round(Math.max(50, Math.min(200, Number(contrastLevel) || 100)))
+        this.settings.contrastLevel = normalized
+        this.saveReaderImageSettings()
       },
     },
     readerRotation: {
@@ -2082,6 +2126,8 @@ export default Vue.extend({
       this.settings.rotation = normalized.rotation
       this.settings.skewCorrection = normalized.skewCorrection
       this.settings.contrastEnhancement = normalized.contrastEnhancement
+      this.settings.bleachText = normalized.bleachText
+      this.settings.contrastLevel = normalized.contrastLevel
       this.$set(this.settings, 'cropRegionsByParity', normalized.cropRegionsByParity)
       if (previousRotation !== normalized.rotation || previousSkew !== normalized.skewCorrection || previousContrastEnhancement !== normalized.contrastEnhancement) this.revokeReaderDeskewedPageUrls()
       this.readerCropMode = false
@@ -2108,6 +2154,8 @@ export default Vue.extend({
         rotation: this.normalizedReaderRotation(settings.rotation),
         skewCorrection: this.normalizedReaderSkewCorrection(settings.skewCorrection),
         contrastEnhancement: settings.contrastEnhancement === true,
+        bleachText: settings.bleachText === true,
+        contrastLevel: Math.round(Math.max(50, Math.min(200, Number(settings.contrastLevel) || 100))),
         cropRegionsByParity: this.normalizedReaderCropRegionsByParity(settings.cropRegionsByParity),
       }
     },
