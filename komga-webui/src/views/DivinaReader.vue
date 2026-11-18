@@ -246,6 +246,7 @@
         v-if="isPdf && k2ReflowMode && !continuousReader"
         class="reflow-reader"
         v-touch="reflowTouchHandlers"
+        @click.capture="handleReflowReaderClick"
       >
         <k2-reflowed-page
           ref="k2ReflowedPage"
@@ -272,31 +273,13 @@
           @configure-magnifier="openMagnifierSettings"
           @back-to-book="closeBook"
         />
-
-        <div
-          v-if="!reflowCropMode"
-          @click="reflowOutsideNavigateLeftSide"
-          class="reflow-click-left"
-          :style="reflowClickLayerStyle"
-        />
-        <div
-          v-if="!reflowCropMode"
-          @click="reflowOutsideNavigateRightSide"
-          class="reflow-click-right"
-          :style="reflowClickLayerStyle"
-        />
-        <div
-          v-if="!reflowCropMode"
-          @click="reflowOutsideCenterClick"
-          class="reflow-click-center"
-          :style="reflowClickLayerStyle"
-        />
       </div>
 
       <div
         v-else-if="isPdf && (reflowMode || reflowSetupMode) && !continuousReader"
         class="reflow-reader"
         v-touch="reflowTouchHandlers"
+        @click.capture="handleReflowReaderClick"
       >
         <reflowed-page
           ref="reflowedPage"
@@ -385,25 +368,6 @@
           preload
           @reflowed="cacheReflowPage"
           @page-image-transfer="recordReflowAssetTransfer"
-        />
-
-        <div
-          v-if="reflowMode && !reflowCropMode && !reflowImagePreviewSrc"
-          @click="reflowOutsideNavigateLeftSide"
-          class="reflow-click-left"
-          :style="reflowClickLayerStyle"
-        />
-        <div
-          v-if="reflowMode && !reflowCropMode && !reflowImagePreviewSrc"
-          @click="reflowOutsideNavigateRightSide"
-          class="reflow-click-right"
-          :style="reflowClickLayerStyle"
-        />
-        <div
-          v-if="reflowMode && !reflowCropMode && !reflowImagePreviewSrc"
-          @click="reflowOutsideCenterClick"
-          class="reflow-click-center"
-          :style="reflowClickLayerStyle"
         />
       </div>
 
@@ -1791,17 +1755,6 @@ export default Vue.extend({
     },
     reflowControlsTopOffset(): number {
       return this.showToolbars && !this.reflowCropMode && !this.readerCropMode ? 48 : 0
-    },
-    reflowClickLayerStyle(): object {
-      if (this.landscapeDisplay) {
-        return {}
-      }
-      const toolbarOffset = this.showToolbars && !this.reflowCropMode && !this.readerCropMode ? '48px' : '0'
-      return {
-        top: toolbarOffset,
-        bottom: toolbarOffset,
-        height: 'auto',
-      }
     },
     reflowTouchHandlers(): object {
       return {
@@ -3409,36 +3362,29 @@ export default Vue.extend({
       const reflow = (this.k2ReflowMode ? this.$refs.k2ReflowedPage : this.$refs.reflowedPage) as any
       return reflow?.collapseControls?.() === true
     },
-    reflowOutsideCenterClick(event?: MouseEvent) {
-      if (this.openReflowPreviewFromEvent(event)) return
+    handleReflowReaderClick(event: MouseEvent) {
+      const target = event.target as Element | null
+      const reader = event.currentTarget as HTMLElement
+      if (!target || this.reflowCropMode || this.reflowSetupMode) return
+      if (target.closest('.reflow-controls, .k2-controls, .reflow-measure-wrapper, .k2-measure-output, .reflow-prefetch')) return
+
+      event.preventDefault()
+      event.stopPropagation()
+      if (this.magnifierActive || this.reflowImagePreviewSrc) return
+      const image = target.closest('img[data-reader-magnifiable="true"]') as HTMLImageElement | null
+      if (image) {
+        this.openReflowImagePreview(image.currentSrc || image.src)
+        return
+      }
       if (this.collapseActiveReflowControls()) return
-      this.toggleToolbars()
-    },
-    reflowImagePreviewAt(clientX?: number, clientY?: number): string {
-      if (clientX === undefined || clientY === undefined) return ''
-      if (typeof document === 'undefined' || typeof document.elementsFromPoint !== 'function') return ''
-      const image = document.elementsFromPoint(clientX, clientY)
-        .find(element => typeof HTMLImageElement !== 'undefined' &&
-          element instanceof HTMLImageElement &&
-          element.matches('.reflow-image-block, .k2-image')) as HTMLImageElement | undefined
-      return image?.currentSrc || image?.src || ''
-    },
-    openReflowPreviewFromEvent(event?: MouseEvent): boolean {
-      if (!event || this.magnifierActive) return false
-      const src = this.reflowImagePreviewAt(event.clientX, event.clientY)
-      if (!src) return false
-      this.openReflowImagePreview(src)
-      return true
-    },
-    reflowOutsideNavigateLeftSide(event?: MouseEvent) {
-      if (this.openReflowPreviewFromEvent(event)) return
-      if (this.collapseActiveReflowControls()) return
-      this.activeReflowNavigateLeftSide()
-    },
-    reflowOutsideNavigateRightSide(event?: MouseEvent) {
-      if (this.openReflowPreviewFromEvent(event)) return
-      if (this.collapseActiveReflowControls()) return
-      this.activeReflowNavigateRightSide()
+
+      const bounds = reader.getBoundingClientRect()
+      const position = this.landscapeDisplay
+        ? (event.clientY - bounds.top) / bounds.height
+        : (event.clientX - bounds.left) / bounds.width
+      if (position < 0.3) this.activeReflowNavigateLeftSide()
+      else if (position > 0.7) this.activeReflowNavigateRightSide()
+      else this.toggleToolbars()
     },
     activeReflowNavigateLeftSide() {
       this.pagedLeftNavigationAction === PagedNavigationAction.NEXT
@@ -4179,63 +4125,6 @@ export default Vue.extend({
   top: 0;
   overflow: hidden;
   pointer-events: none;
-}
-
-.reflow-click-left {
-  position: absolute;
-  top: 0;
-  left: 0;
-  height: 100%;
-  width: 30%;
-  z-index: 3;
-  touch-action: pan-y;
-}
-
-.reflow-click-right {
-  position: absolute;
-  top: 0;
-  right: 0;
-  height: 100%;
-  width: 30%;
-  z-index: 3;
-  touch-action: pan-y;
-}
-
-.reflow-click-center {
-  position: absolute;
-  top: 0;
-  left: 30%;
-  height: 100%;
-  width: 40%;
-  z-index: 3;
-  touch-action: pan-y;
-}
-
-.reader-frame-landscape .reflow-click-left {
-  top: 0;
-  bottom: 0;
-  left: 0;
-  right: auto;
-  width: 30%;
-  height: 100%;
-}
-
-.reader-frame-landscape .reflow-click-right {
-  top: 0;
-  bottom: 0;
-  left: auto;
-  right: 0;
-  width: 30%;
-  height: 100%;
-}
-
-.reader-frame-landscape .reflow-click-center {
-  top: 0;
-  bottom: 0;
-  left: 30%;
-  right: 30%;
-  width: 40%;
-  height: 100%;
 }
 
 .reader-crop-panel {

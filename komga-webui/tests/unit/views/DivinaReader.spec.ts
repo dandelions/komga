@@ -380,90 +380,121 @@ describe('DivinaReader reflow prefetch and LRU cache', () => {
   })
 })
 
-describe('DivinaReader reflow image preview', () => {
-  const click = (clientX: number, clientY: number) => ({clientX, clientY} as MouseEvent)
-
-  const createReader = (overrides: Record<string, any> = {}) => Object.assign({}, methods, {
-    magnifierActive: false,
-    showToolbars: false,
-    reflowImagePreviewSrc: '',
-    collapseActiveReflowControls: jest.fn(() => false),
-    activeReflowNavigateLeftSide: jest.fn(),
-    activeReflowNavigateRightSide: jest.fn(),
-    ...overrides,
-  })
-
-  const stubImageUnderPoint = (src: string, className = 'reflow-image-block') => {
-    const image = document.createElement('img')
-    image.className = className
-    image.src = src
-    ;(document as any).elementsFromPoint = () => [image]
-    return image
+describe('DivinaReader reflow content clicks', () => {
+  function mountReader(overrides: Record<string, any> = {}) {
+    const reader = Object.assign({}, methods, {
+      magnifierActive: false,
+      reflowCropMode: false,
+      reflowSetupMode: false,
+      landscapeDisplay: false,
+      showToolbars: false,
+      reflowImagePreviewSrc: '',
+      collapseActiveReflowControls: jest.fn(() => false),
+      activeReflowNavigateLeftSide: jest.fn(),
+      activeReflowNavigateRightSide: jest.fn(),
+      ...overrides,
+    })
+    const element = document.createElement('div')
+    element.className = 'reflow-reader'
+    element.innerHTML = '<div class="reflow-wrapper"><img data-reader-magnifiable="true" src="data:image/png;base64,image"><span>text</span></div>'
+    element.getBoundingClientRect = () => ({left: 20, top: 30, width: 1000, height: 600} as DOMRect)
+    element.addEventListener('click', methods.handleReflowReaderClick.bind(reader), true)
+    const click = (target: Element = element, x = 520, y = 330) => {
+      target.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true, clientX: x, clientY: y}))
+    }
+    return {reader, element, click}
   }
 
-  afterEach(() => {
-    delete (document as any).elementsFromPoint
-  })
+  test.each(['reflow-wrapper', 'k2-output'])('opens images in %s through the actual capture path', wrapperClass => {
+    const {reader, element, click} = mountReader()
+    element.firstElementChild!.className = wrapperClass
+    const image = element.querySelector('img')!
+    const childClick = jest.fn()
+    image.addEventListener('click', childClick)
 
-  test('opens the preview when the center click layer covers a rendered image', () => {
-    stubImageUnderPoint('data:image/png;base64,center')
-    const reader = createReader()
+    click(image)
 
-    methods.reflowOutsideCenterClick.call(reader, click(120, 240))
-
-    expect(reader.reflowImagePreviewSrc).toBe('data:image/png;base64,center')
+    expect(reader.reflowImagePreviewSrc).toBe(image.src)
     expect(reader.showToolbars).toBe(false)
-    expect(reader.collapseActiveReflowControls).not.toHaveBeenCalled()
+    expect(reader.activeReflowNavigateLeftSide).not.toHaveBeenCalled()
+    expect(reader.activeReflowNavigateRightSide).not.toHaveBeenCalled()
+    expect(childClick).not.toHaveBeenCalled()
   })
 
-  test('keeps toggling the toolbar when the click does not land on an image', () => {
-    ;(document as any).elementsFromPoint = () => [document.body]
-    const reader = createReader()
+  test('text clicks toggle the toolbar once instead of triggering child handlers', () => {
+    const {reader, element, click} = mountReader()
+    const childClick = jest.fn()
+    element.firstElementChild!.addEventListener('click', childClick)
 
-    methods.reflowOutsideCenterClick.call(reader, click(120, 240))
-
-    expect(reader.reflowImagePreviewSrc).toBe('')
+    click(element.querySelector('span')!)
     expect(reader.showToolbars).toBe(true)
+    click(element.querySelector('span')!)
+    expect(reader.showToolbars).toBe(false)
+    expect(childClick).not.toHaveBeenCalled()
   })
 
-  test('side click layers open the preview instead of turning the page', () => {
-    stubImageUnderPoint('data:image/png;base64,side')
-    const leftReader = createReader()
-    const rightReader = createReader()
-
-    methods.reflowOutsideNavigateLeftSide.call(leftReader, click(20, 300))
-    methods.reflowOutsideNavigateRightSide.call(rightReader, click(700, 300))
-
-    expect(leftReader.reflowImagePreviewSrc).toBe('data:image/png;base64,side')
-    expect(leftReader.activeReflowNavigateLeftSide).not.toHaveBeenCalled()
-    expect(rightReader.reflowImagePreviewSrc).toBe('data:image/png;base64,side')
-    expect(rightReader.activeReflowNavigateRightSide).not.toHaveBeenCalled()
+  test('blank side areas retain left and right navigation', () => {
+    const {reader, element, click} = mountReader()
+    click(element, 120)
+    click(element, 920)
+    expect(reader.activeReflowNavigateLeftSide).toHaveBeenCalledTimes(1)
+    expect(reader.activeReflowNavigateRightSide).toHaveBeenCalledTimes(1)
   })
 
-  test('leaves taps to the magnifier while it is active', () => {
-    stubImageUnderPoint('data:image/png;base64,magnifier')
-    const reader = createReader({magnifierActive: true})
+  test('landscape navigation uses the rotated horizontal axis', () => {
+    const {reader, element, click} = mountReader({landscapeDisplay: true})
+    click(element, 520, 60)
+    click(element, 520, 590)
+    expect(reader.activeReflowNavigateLeftSide).toHaveBeenCalledTimes(1)
+    expect(reader.activeReflowNavigateRightSide).toHaveBeenCalledTimes(1)
+    expect(reader.showToolbars).toBe(false)
+  })
 
-    methods.reflowOutsideCenterClick.call(reader, click(120, 240))
-
-    expect(reader.reflowImagePreviewSrc).toBe('')
+  test('loading and error messages retain toolbar and page navigation', () => {
+    const {reader, element, click} = mountReader()
+    element.innerHTML = '<div class="reflow-status">Unable to reflow this page</div>'
+    click(element.firstElementChild!)
+    click(element.firstElementChild!, 920)
     expect(reader.showToolbars).toBe(true)
+    expect(reader.activeReflowNavigateRightSide).toHaveBeenCalledTimes(1)
   })
 
-  test('ignores images that are not reflow image blocks', () => {
-    const image = document.createElement('img')
-    image.src = 'data:image/png;base64,other'
-    ;(document as any).elementsFromPoint = () => [image]
-
-    expect(methods.reflowImagePreviewAt.call({}, 10, 10)).toBe('')
+  test('collapses expanded controls before navigating on text clicks', () => {
+    const {reader, element, click} = mountReader({collapseActiveReflowControls: jest.fn(() => true)})
+    click(element)
+    expect(reader.collapseActiveReflowControls).toHaveBeenCalledTimes(1)
+    expect(reader.showToolbars).toBe(false)
   })
 
-  test('detects K2 reflow images as well', () => {
-    stubImageUnderPoint('data:image/png;base64,k2', 'k2-image')
-    const reader = createReader()
+  test.each(['reflow-controls', 'k2-controls', 'reflow-measure-wrapper', 'k2-measure-output', 'reflow-prefetch'])('leaves %s interactions untouched', className => {
+    const {reader, element, click} = mountReader()
+    element.firstElementChild!.className = className
+    const childClick = jest.fn()
+    const image = element.querySelector('img')!
+    image.addEventListener('click', childClick)
+    click(image)
+    expect(childClick).toHaveBeenCalledTimes(1)
+    expect(reader.reflowImagePreviewSrc).toBe('')
+    expect(reader.showToolbars).toBe(false)
+  })
 
-    methods.reflowOutsideCenterClick.call(reader, click(120, 240))
+  test('consumes image clicks while the magnifier is active', () => {
+    const {reader, element, click} = mountReader({magnifierActive: true})
+    const childClick = jest.fn()
+    const image = element.querySelector('img')!
+    image.addEventListener('click', childClick)
+    click(image)
+    expect(childClick).not.toHaveBeenCalled()
+    expect(reader.reflowImagePreviewSrc).toBe('')
+    expect(reader.showToolbars).toBe(false)
+  })
 
-    expect(reader.reflowImagePreviewSrc).toBe('data:image/png;base64,k2')
+  test.each(['reflowCropMode', 'reflowSetupMode'])('leaves %s clicks to the child', mode => {
+    const {reader, element, click} = mountReader({[mode]: true})
+    const childClick = jest.fn()
+    element.firstElementChild!.addEventListener('click', childClick)
+    click(element.querySelector('span')!)
+    expect(childClick).toHaveBeenCalledTimes(1)
+    expect(reader.showToolbars).toBe(false)
   })
 })
