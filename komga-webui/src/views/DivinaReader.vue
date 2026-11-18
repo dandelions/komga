@@ -2724,6 +2724,10 @@ export default Vue.extend({
       }
     },
     keyPressed(e: KeyboardEvent) {
+      if (this.reflowImagePreviewSrc) {
+        if (e.key === 'Escape') this.closeReflowImagePreview()
+        return
+      }
       if (e.ctrlKey || e.altKey || e.shiftKey || e.metaKey) return
       if ((this.reflowMode || this.k2ReflowMode) && !this.continuousReader && this.keyPressedReflow(e)) return
       this.shortcuts[e.key]?.execute(this)

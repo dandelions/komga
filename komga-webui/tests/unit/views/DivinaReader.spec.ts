@@ -489,6 +489,34 @@ describe('DivinaReader reflow content clicks', () => {
     expect(reader.showToolbars).toBe(false)
   })
 
+  test.each(['ArrowLeft', 'ArrowRight', 'PageDown', ' ', 'Escape'])('blocks reader shortcuts for %s while preview is open', key => {
+    const execute = jest.fn()
+    const reader = Object.assign({}, methods, {
+      reflowImagePreviewSrc: 'image',
+      reflowMode: true,
+      continuousReader: false,
+      keyPressedReflow: jest.fn(() => true),
+      shortcuts: {[key]: {execute}},
+    })
+
+    methods.keyPressed.call(reader, new KeyboardEvent('keydown', {key}))
+
+    expect(reader.keyPressedReflow).not.toHaveBeenCalled()
+    expect(execute).not.toHaveBeenCalled()
+    expect(reader.reflowImagePreviewSrc).toBe(key === 'Escape' ? '' : 'image')
+  })
+
+  test('restores reading shortcuts after preview closes', () => {
+    const reader = {
+      reflowImagePreviewSrc: '',
+      reflowMode: true,
+      continuousReader: false,
+      keyPressedReflow: jest.fn(() => true),
+    }
+    methods.keyPressed.call(reader, new KeyboardEvent('keydown', {key: 'ArrowRight'}))
+    expect(reader.keyPressedReflow).toHaveBeenCalledTimes(1)
+  })
+
   test.each(['reflowCropMode', 'reflowSetupMode'])('leaves %s clicks to the child', mode => {
     const {reader, element, click} = mountReader({[mode]: true})
     const childClick = jest.fn()
