@@ -360,6 +360,7 @@
             <button type="button" class="reflow-control crop-finish-control" @click="finishCropMode">完成</button>
           </div>
         </div>
+        <button type="button" class="reflow-control crop-cancel-control" @click="cancelCropMode">取消</button>
         <button
           v-if="cropTarget === 'deskew'"
           type="button"
@@ -7958,6 +7959,16 @@ export default Vue.extend({
         this.errorMessage = e instanceof Error ? e.message : String(e)
       }
     },
+    cancelCropMode() {
+      this.cropMode = false
+      this.draftRoi = undefined
+      this.drawingCrop = false
+      this.clearCropAdjustment()
+      this.cropPanMode = false
+      this.cropWarning = ''
+      this.clearCropSource()
+      this.$emit('crop-mode-change', false)
+    },
     finishCropMode() {
       const sourcePageNumber = this.selectionPageNumber
       const cropChanged = this.persistCurrentCropDraft()
@@ -7969,7 +7980,7 @@ export default Vue.extend({
       this.clearCropSource()
       this.$emit('crop-mode-change', false)
       if (this.deferReflow) this.$emit('start-reflow')
-      else this.$emit('force-reflow', sourcePageNumber)
+      else if (cropChanged) this.$emit('force-reflow', sourcePageNumber)
     },
     persistCurrentCropDraft() {
       const draft = this.draftRoi

@@ -559,6 +559,71 @@ describe('ReflowedPage image preview gestures', () => {
   })
 })
 
+describe('ReflowedPage crop mode exit', () => {
+  const createContext = () => {
+    const emit = jest.fn()
+    const context: any = {
+      cropMode: true,
+      draftRoi: {x: 1, y: 2, w: 30, h: 40},
+      drawingCrop: true,
+      cropPanMode: true,
+      cropWarning: 'warn',
+      deferReflow: false,
+      selectionPageNumber: 5,
+      clearCropAdjustment: jest.fn(),
+      clearCropSource: jest.fn(),
+      persistCurrentCropDraft: jest.fn(() => true),
+      $emit: emit,
+    }
+    return {context, emit}
+  }
+
+  test('cancel returns to the current reflow without persisting or reflowing', () => {
+    const {context, emit} = createContext()
+
+    methods.cancelCropMode.call(context)
+
+    expect(context.cropMode).toBe(false)
+    expect(context.draftRoi).toBeUndefined()
+    expect(context.drawingCrop).toBe(false)
+    expect(context.persistCurrentCropDraft).not.toHaveBeenCalled()
+    expect(context.clearCropSource).toHaveBeenCalledTimes(1)
+    expect(emit).toHaveBeenCalledWith('crop-mode-change', false)
+    expect(emit).not.toHaveBeenCalledWith('force-reflow', expect.anything())
+    expect(emit).not.toHaveBeenCalledWith('start-reflow')
+  })
+
+  test('finishing without a new selection skips the reflow', () => {
+    const {context, emit} = createContext()
+    context.persistCurrentCropDraft = jest.fn(() => false)
+
+    methods.finishCropMode.call(context)
+
+    expect(context.cropMode).toBe(false)
+    expect(emit).toHaveBeenCalledWith('crop-mode-change', false)
+    expect(emit).not.toHaveBeenCalledWith('force-reflow', expect.anything())
+  })
+
+  test('finishing with a new selection forces a reflow for that page', () => {
+    const {context, emit} = createContext()
+
+    methods.finishCropMode.call(context)
+
+    expect(emit).toHaveBeenCalledWith('force-reflow', 5)
+  })
+
+  test('finishing the setup preview still starts the first reflow', () => {
+    const {context, emit} = createContext()
+    context.deferReflow = true
+    context.persistCurrentCropDraft = jest.fn(() => false)
+
+    methods.finishCropMode.call(context)
+
+    expect(emit).toHaveBeenCalledWith('start-reflow')
+    expect(emit).not.toHaveBeenCalledWith('force-reflow', expect.anything())
+  })
+})
+
 describe('ReflowedPage display columns layout', () => {
   const computed = (ReflowedPage as any).options.computed
 
