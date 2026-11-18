@@ -3375,7 +3375,7 @@ export default Vue.extend({
       event.preventDefault()
       event.stopPropagation()
       if (this.magnifierActive || this.reflowImagePreviewSrc) return
-      const image = target.closest('img[data-reader-magnifiable="true"]') as HTMLImageElement | null
+      const image = this.reflowImageAtPoint(reader, target, event.clientX, event.clientY)
       if (image) {
         this.openReflowImagePreview(image.currentSrc || image.src)
         return
@@ -3389,6 +3389,25 @@ export default Vue.extend({
       if (position < 0.3) this.activeReflowNavigateLeftSide()
       else if (position > 0.7) this.activeReflowNavigateRightSide()
       else this.toggleToolbars()
+    },
+    reflowImageAtPoint(
+      reader: HTMLElement,
+      target: Element,
+      clientX: number,
+      clientY: number,
+    ): HTMLImageElement | null {
+      const direct = target.closest('img.reflow-image-block, img.k2-image, img[data-reader-magnifiable="true"]')
+      if (direct) return direct as HTMLImageElement
+      const images = Array.from(reader.querySelectorAll<HTMLImageElement>('img.reflow-image-block, img.k2-image, img[data-reader-magnifiable="true"]'))
+      for (const image of images) {
+        if (image.closest('.reflow-measure-wrapper, .k2-measure-output, .reflow-prefetch')) continue
+        const bounds = image.getBoundingClientRect()
+        if (bounds.width <= 0 || bounds.height <= 0) continue
+        if (clientX >= bounds.left && clientX <= bounds.right && clientY >= bounds.top && clientY <= bounds.bottom) {
+          return image
+        }
+      }
+      return null
     },
     activeReflowNavigateLeftSide() {
       this.pagedLeftNavigationAction === PagedNavigationAction.NEXT

@@ -421,6 +421,20 @@ describe('DivinaReader reflow content clicks', () => {
     expect(childClick).not.toHaveBeenCalled()
   })
 
+  test('opens the preview when another element covers the rendered image', () => {
+    const {reader, element, click} = mountReader()
+    const image = element.querySelector('img')!
+    image.getBoundingClientRect = () => ({left: 400, top: 80, right: 640, bottom: 200, width: 240, height: 120, x: 400, y: 80, toJSON: () => ({})} as DOMRect)
+    const overlay = document.createElement('div')
+    overlay.className = 'word-block-sprite'
+    element.firstElementChild!.appendChild(overlay)
+
+    click(overlay, 500, 140)
+
+    expect(reader.reflowImagePreviewSrc).toBe(image.src)
+    expect(reader.showToolbars).toBe(false)
+  })
+
   test('text clicks toggle the toolbar once instead of triggering child handlers', () => {
     const {reader, element, click} = mountReader()
     const childClick = jest.fn()
