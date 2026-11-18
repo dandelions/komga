@@ -3371,6 +3371,7 @@ export default Vue.extend({
       const reader = event.currentTarget as HTMLElement
       if (!target || this.reflowCropMode || this.reflowSetupMode) return
       if (target.closest('.reflow-controls, .k2-controls, .reflow-measure-wrapper, .k2-measure-output, .reflow-prefetch')) return
+      if (target.closest('button, a, input, select, textarea')) return
 
       event.preventDefault()
       event.stopPropagation()

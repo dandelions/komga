@@ -533,14 +533,21 @@ test('K2 reflow does not reserve bottom space for its side toolbar', () => {
 })
 
 describe('ReflowedPage image preview gestures', () => {
-  test('only rendered images carry the preview click handler', () => {
+  test('rendered images expose a view button and emit the preview source', () => {
     const content = require('fs').readFileSync(require('path').resolve(__dirname, '../../../../src/components/readers/ReflowedPage.vue'), 'utf8')
     const visibleTemplates = content.match(/v-else-if="item\.type === 'image' && item\.src"/g) || []
+    const frames = content.match(/class="reflow-image-frame"/g) || []
+    const viewButtons = content.match(/class="reflow-image-view"/g) || []
     const previewHandlers = content.match(/@click\.stop\.prevent="handleReflowImageClick\(item\.src\)"/g) || []
+
     expect(visibleTemplates).toHaveLength(4)
-    expect(previewHandlers).toHaveLength(3)
+    expect(frames).toHaveLength(3)
+    expect(viewButtons).toHaveLength(3)
+    expect(previewHandlers).toHaveLength(6)
     expect(content).toContain(':key="`measure-image-${i}`"')
-    expect(content.slice(content.indexOf(':key="`measure-image-${i}`"'), content.indexOf(':key="`measure-image-${i}`"') + 260)).not.toContain('handleReflowImageClick')
+    const measureBlock = content.slice(content.indexOf(':key="`measure-image-${i}`"'), content.indexOf(':key="`measure-image-${i}`"') + 320)
+    expect(measureBlock).not.toContain('handleReflowImageClick')
+    expect(measureBlock).not.toContain('reflow-image-view')
   })
 
   test('clicking an image emits its source for the preview overlay', () => {

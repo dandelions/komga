@@ -562,16 +562,27 @@
               :style="wordBlockStyle(item)"
               alt=""
             />
-            <img
+            <span
               v-else-if="item.type === 'image' && item.src"
               :key="`l-image-${i}`"
-              :src="item.src"
-              class="reflow-image-block"
-              data-reader-magnifiable="true"
-              :style="imageBlockStyle(item)"
-              alt=""
-              @click.stop.prevent="handleReflowImageClick(item.src)"
-            />
+              class="reflow-image-frame"
+              :style="imageFrameStyle(item)"
+            >
+              <img
+                :src="item.src"
+                class="reflow-image-block"
+                data-reader-magnifiable="true"
+                alt=""
+                @click.stop.prevent="handleReflowImageClick(item.src)"
+              />
+              <button
+                type="button"
+                class="reflow-image-view"
+                title="查看图片"
+                aria-label="查看图片"
+                @click.stop.prevent="handleReflowImageClick(item.src)"
+              ><v-icon small>mdi-magnify-plus-outline</v-icon></button>
+            </span>
           </template>
         </div>
         <div class="reflow-column-divider" />
@@ -602,16 +613,27 @@
               :style="wordBlockStyle(item)"
               alt=""
             />
-            <img
+            <span
               v-else-if="item.type === 'image' && item.src"
               :key="`r-image-${i}`"
-              :src="item.src"
-              class="reflow-image-block"
-              data-reader-magnifiable="true"
-              :style="imageBlockStyle(item)"
-              alt=""
-              @click.stop.prevent="handleReflowImageClick(item.src)"
-            />
+              class="reflow-image-frame"
+              :style="imageFrameStyle(item)"
+            >
+              <img
+                :src="item.src"
+                class="reflow-image-block"
+                data-reader-magnifiable="true"
+                alt=""
+                @click.stop.prevent="handleReflowImageClick(item.src)"
+              />
+              <button
+                type="button"
+                class="reflow-image-view"
+                title="查看图片"
+                aria-label="查看图片"
+                @click.stop.prevent="handleReflowImageClick(item.src)"
+              ><v-icon small>mdi-magnify-plus-outline</v-icon></button>
+            </span>
           </template>
         </div>
       </template>
@@ -642,16 +664,27 @@
             :style="wordBlockStyle(item)"
             alt=""
           />
-          <img
+          <span
             v-else-if="item.type === 'image' && item.src"
             :key="`image-${i}`"
-            :src="item.src"
-            class="reflow-image-block"
-            data-reader-magnifiable="true"
-            :style="imageBlockStyle(item)"
-            alt=""
-            @click.stop.prevent="handleReflowImageClick(item.src)"
-          />
+            class="reflow-image-frame"
+            :style="imageFrameStyle(item)"
+          >
+            <img
+              :src="item.src"
+              class="reflow-image-block"
+              data-reader-magnifiable="true"
+              alt=""
+              @click.stop.prevent="handleReflowImageClick(item.src)"
+            />
+            <button
+              type="button"
+              class="reflow-image-view"
+              title="查看图片"
+              aria-label="查看图片"
+              @click.stop.prevent="handleReflowImageClick(item.src)"
+            ><v-icon small>mdi-magnify-plus-outline</v-icon></button>
+          </span>
         </template>
       </template>
     </div>
@@ -2856,6 +2889,12 @@ export default Vue.extend({
       return {
         width: Math.max(1, Math.round(sourceWidth * scale)),
         height: Math.max(1, Math.round(sourceHeight * scale)),
+      }
+    },
+    imageFrameStyle(item: RenderedImageBlock): object {
+      return {
+        ...this.imageBlockStyle(item),
+        position: 'relative',
       }
     },
     imageBlockStyle(item: RenderedImageBlock): object {
@@ -8418,6 +8457,44 @@ export default Vue.extend({
   mix-blend-mode: normal;
   -webkit-print-color-adjust: exact;
   print-color-adjust: exact;
+}
+
+.reflow-image-frame {
+  display: block;
+  flex: 0 0 auto;
+  align-self: center;
+  max-width: 100%;
+}
+
+.reflow-image-frame > .reflow-image-block {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.reflow-image-view {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  z-index: 2;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  cursor: pointer;
+  opacity: 0.9;
+}
+
+.reflow-image-view:hover,
+.reflow-image-view:focus-visible {
+  background: rgba(0, 0, 0, 0.78);
+  opacity: 1;
 }
 
 .reflow-image-block {

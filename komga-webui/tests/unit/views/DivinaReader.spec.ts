@@ -435,6 +435,21 @@ describe('DivinaReader reflow content clicks', () => {
     expect(reader.showToolbars).toBe(false)
   })
 
+  test('leaves in-content buttons to their own handlers', () => {
+    const {reader, element, click} = mountReader()
+    const button = document.createElement('button')
+    button.className = 'reflow-image-view'
+    element.firstElementChild!.appendChild(button)
+    const childClick = jest.fn()
+    button.addEventListener('click', childClick)
+
+    click(button)
+
+    expect(childClick).toHaveBeenCalledTimes(1)
+    expect(reader.reflowImagePreviewSrc).toBe('')
+    expect(reader.showToolbars).toBe(false)
+  })
+
   test('text clicks toggle the toolbar once instead of triggering child handlers', () => {
     const {reader, element, click} = mountReader()
     const childClick = jest.fn()
