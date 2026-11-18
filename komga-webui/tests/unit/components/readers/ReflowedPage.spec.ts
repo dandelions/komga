@@ -532,6 +532,19 @@ test('K2 reflow does not reserve bottom space for its side toolbar', () => {
   expect(pages).toHaveLength(1)
 })
 
+describe('ReflowedPage image preview gestures', () => {
+  test('double-clicking rendered images emits the preview event', () => {
+    const content = require('fs').readFileSync(require('path').resolve(__dirname, '../../../../src/components/readers/ReflowedPage.vue'), 'utf8')
+    const visibleTemplates = content.match(/v-else-if="item\.type === 'image' && item\.src"/g) || []
+    const previewHandlers = content.match(/@dblclick\.stop\.prevent="\$emit\('image-preview', item\.src\)"/g) || []
+    expect(visibleTemplates).toHaveLength(4)
+    expect(previewHandlers).toHaveLength(3)
+    expect(content).toContain('@dblclick.stop.prevent="$emit(\'image-preview\', item.src)"')
+    expect(content).toContain(':key="`measure-image-${i}`"')
+    expect(content.slice(content.indexOf(':key="`measure-image-${i}`"'), content.indexOf(':key="`measure-image-${i}`"') + 260)).not.toContain('@dblclick')
+  })
+})
+
 describe('ReflowedPage display columns layout', () => {
   const computed = (ReflowedPage as any).options.computed
 

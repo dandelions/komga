@@ -322,6 +322,7 @@
           :start-at-end="reflowStartAtEnd"
           :defer-reflow="reflowSetupMode"
           :magnifier-active="magnifierActive"
+          @image-preview="openReflowImagePreview"
           @text-scale-change="setReflowTextScale"
           @processing-mode-change="setReflowProcessingMode"
           @display-columns-change="setReflowDisplayColumns"
@@ -387,19 +388,19 @@
         />
 
         <div
-          v-if="reflowMode && !reflowCropMode"
+          v-if="reflowMode && !reflowCropMode && !reflowImagePreviewSrc"
           @click="reflowOutsideNavigateLeftSide"
           class="reflow-click-left"
           :style="reflowClickLayerStyle"
         />
         <div
-          v-if="reflowMode && !reflowCropMode"
+          v-if="reflowMode && !reflowCropMode && !reflowImagePreviewSrc"
           @click="reflowOutsideNavigateRightSide"
           class="reflow-click-right"
           :style="reflowClickLayerStyle"
         />
         <div
-          v-if="reflowMode && !reflowCropMode"
+          v-if="reflowMode && !reflowCropMode && !reflowImagePreviewSrc"
           @click="reflowOutsideCenterClick"
           class="reflow-click-center"
           :style="reflowClickLayerStyle"
@@ -455,6 +456,11 @@
         @jump-next="jumpToNext()"
       ></paged-reader>
     </div>
+
+    <reflow-image-preview
+      :src="reflowImagePreviewSrc"
+      @close="closeReflowImagePreview"
+    />
 
     <reader-image-magnifier
       :active="magnifierActive"
@@ -1091,6 +1097,7 @@ import ContinuousReader from '@/components/readers/ContinuousReader.vue'
 import ReflowedPage from '@/components/readers/ReflowedPage.vue'
 import K2ReflowedPage from '@/components/readers/K2ReflowedPage.vue'
 import ReaderImageMagnifier from '@/components/readers/ReaderImageMagnifier.vue'
+import ReflowImagePreview from '@/components/readers/ReflowImagePreview.vue'
 import TocList from '@/components/TocList.vue'
 import {ContinuousScaleType, MarginValues, PaddingPercentage, PagedNavigationAction, PagedReaderLayout, ScaleType} from '@/types/enum-reader'
 import {
@@ -1248,6 +1255,7 @@ export default Vue.extend({
     ReflowedPage,
     K2ReflowedPage,
     ReaderImageMagnifier,
+    ReflowImagePreview,
     TocList,
     SettingsSwitch,
     SettingsSelect,
@@ -1285,6 +1293,7 @@ export default Vue.extend({
       showToolbars: false,
       showSettings: false,
       showHelp: false,
+      reflowImagePreviewSrc: '',
       magnifierActive: false,
       magnifierDiameterDialog: false,
       magnifierDiameter: DEFAULT_MAGNIFIER_DIAMETER,
@@ -3927,6 +3936,12 @@ export default Vue.extend({
         this.$komgaBooks.updateReadProgress(this.bookId, {page: page})
       }
     }, 50),
+    openReflowImagePreview(src: string) {
+      this.reflowImagePreviewSrc = src
+    },
+    closeReflowImagePreview() {
+      this.reflowImagePreviewSrc = ''
+    },
     toggleMagnifier() {
       this.magnifierActive = !this.magnifierActive
       this.magnifierDiameterDialog = false
