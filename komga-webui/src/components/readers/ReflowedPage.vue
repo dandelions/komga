@@ -1149,6 +1149,7 @@ export default Vue.extend({
       cropTarget: 'text' as CropTarget,
       cropWarning: '',
       cropEntrySnapshot: '',
+      cropDirty: false,
       activeCropRegion: 0 as CropRegionIndex,
       cropRegionCount: 2,
       activeManualImageRegion: 0 as CropRegionIndex,
@@ -7933,6 +7934,7 @@ export default Vue.extend({
       await this.toggleCropModeForTarget('deskew')
     },
     emitCropSettingsChange(target: CropTarget) {
+      this.cropDirty = true
       if (target === 'image') {
         this.$emit('manual-image-rois-change', this.manualImageRoisPayload())
       } else if (target === 'deskew') {
@@ -7952,6 +7954,7 @@ export default Vue.extend({
       if (this.cropMode && this.cropTarget === target) {
         this.cropMode = false
         this.cropEntrySnapshot = ''
+        this.cropDirty = false
         this.clearCropSource()
         this.$emit('crop-mode-change', false)
         return
@@ -7962,6 +7965,7 @@ export default Vue.extend({
         this.cropPageNumber = this.displayedSourcePageNumber || this.page.number
         this.cropPageUrl = this.displayedSourcePageUrl || this.page.url
         this.cropEntrySnapshot = this.cropSettingsSnapshot()
+        this.cropDirty = false
         this.cropMode = true
         this.$emit('crop-mode-change', true)
         await this.ensureCropImage()
@@ -7976,6 +7980,7 @@ export default Vue.extend({
     cancelCropMode() {
       this.cropMode = false
       this.cropEntrySnapshot = ''
+      this.cropDirty = false
       this.draftRoi = undefined
       this.drawingCrop = false
       this.clearCropAdjustment()
@@ -7988,9 +7993,11 @@ export default Vue.extend({
       const sourcePageNumber = this.selectionPageNumber
       const draftPersisted = this.persistCurrentCropDraft()
       const snapshotRecorded = this.cropEntrySnapshot !== ''
-      const cropChanged = draftPersisted || !snapshotRecorded || this.cropEntrySnapshot !== this.cropSettingsSnapshot()
+      const cropChanged = draftPersisted || this.cropDirty || !snapshotRecorded ||
+        this.cropEntrySnapshot !== this.cropSettingsSnapshot()
       this.cropMode = false
       this.cropEntrySnapshot = ''
+      this.cropDirty = false
       this.draftRoi = undefined
       this.drawingCrop = false
       this.clearCropAdjustment()

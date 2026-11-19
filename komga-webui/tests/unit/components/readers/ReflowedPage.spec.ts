@@ -565,6 +565,7 @@ describe('ReflowedPage crop mode exit', () => {
     const context: any = {
       cropMode: true,
       cropEntrySnapshot: 'snapshot-a',
+      cropDirty: false,
       draftRoi: {x: 1, y: 2, w: 30, h: 40},
       drawingCrop: true,
       cropPanMode: true,
@@ -588,6 +589,7 @@ describe('ReflowedPage crop mode exit', () => {
 
     expect(context.cropMode).toBe(false)
     expect(context.cropEntrySnapshot).toBe('')
+    expect(context.cropDirty).toBe(false)
     expect(context.draftRoi).toBeUndefined()
     expect(context.persistCurrentCropDraft).not.toHaveBeenCalled()
     expect(context.clearCropSource).toHaveBeenCalledTimes(1)
@@ -604,6 +606,15 @@ describe('ReflowedPage crop mode exit', () => {
     expect(context.cropMode).toBe(false)
     expect(emit).toHaveBeenCalledWith('crop-mode-change', false)
     expect(emit).not.toHaveBeenCalledWith('force-reflow', expect.anything())
+  })
+
+  test('finishing after a crop interaction forces a reflow even when the payload looks unchanged', () => {
+    const {context, emit} = createContext({cropDirty: true})
+
+    methods.finishCropMode.call(context)
+
+    expect(emit).toHaveBeenCalledWith('force-reflow', 5)
+    expect(context.cropDirty).toBe(false)
   })
 
   test('finishing after the crop settings changed forces a reflow', () => {
@@ -641,6 +652,103 @@ describe('ReflowedPage crop mode exit', () => {
 
     expect(emit).toHaveBeenCalledWith('start-reflow')
     expect(emit).not.toHaveBeenCalledWith('force-reflow', expect.anything())
+  })
+})
+
+describe('ReflowedPage crop session changes', () => {
+  const createSession = () => {
+    const emit = jest.fn()
+    const reader: any = Object.assign({}, methods, {
+      cropMode: true,
+      cropTarget: 'text',
+      deferReflow: false,
+      cropDirty: false,
+      cropEntrySnapshot: '',
+      draftRoi: undefined,
+      drawingCrop: false,
+      cropPanMode: false,
+      cropWarning: '',
+      selectionPageParity: 'odd',
+      selectionPageNumber: 7,
+      page: {number: 7},
+      activeCropRegion: 0,
+      cropRegionCount: 1,
+      activeManualImageRegion: 0,
+      manualImageRegionCount: 1,
+      cropRoisByParity: {odd: [undefined], even: [undefined]},
+      explicitCropRoisByParity: {odd: [undefined], even: [undefined]},
+      manualImageRoisByPage: {},
+      deskewAnalysisRoisByParity: {odd: null, even: null},
+      $emit: emit,
+      $set: (target: any, key: string, value: any) => {
+        target[key] = value
+      },
+    })
+    Object.keys(computed).forEach(key => {
+      if (typeof computed[key] === 'function' && reader[key] === undefined) {
+        Object.defineProperty(reader, key, {
+          get: () => computed[key].call(reader),
+          configurable: true,
+        })
+      }
+    })
+    return {reader, emit}
+  }
+
+  test('a selection drawn during the session still reflows on finish', () => {
+    const {reader, emit} = createSession()
+    reader.cropEntrySnapshot = reader.cropSettingsSnapshot()
+
+    // drawing the rectangle persists it right away, like the pointerup handler does
+    reader.draftRoi = {x: 10, y: 20, w: 300, h: 400}
+    expect(reader.persistCurrentCropDraft()).toBe(true)
+    expect(reader.cropDirty).toBe(true)
+    reader.draftRoi = undefined
+
+    methods.finishCropMode.call(reader)
+
+    expect(emit).toHaveBeenCalledWith('force-reflow', 7)
+  })
+
+  test('adjusting an existing selection with the handles reflows on finish', () => {
+    const {reader, emit} = createSession()
+    // existing selection from a previous reflow
+    reader.setCurrentCropRoi({x: 10, y: 20, w: 300, h: 400})
+    reader.cropEntrySnapshot = reader.cropSettingsSnapshot()
+    reader.cropDirty = false
+
+    // drag the right handle: the pointerdown handler seeds the draft, then move updates it
+    reader.cropAdjustMode = 'right'
+    reader.cropAdjustMoved = true
+    reader.cropAdjustPointerActive = true
+    reader.cropAdjustStartRoi = {x: 10, y: 20, w: 300, h: 400}
+    reader.cropAdjustStartPoint = {x: 0, y: 0}
+    reader.draftRoi = {x: 10, y: 20, w: 200, h: 400}
+
+    // pointerup persists the adjusted selection
+    expect(reader.persistCurrentCropDraft()).toBe(true)
+    reader.draftRoi = undefined
+
+    methods.finishCropMode.call(reader)
+
+    expect(emit).toHaveBeenCalledWith('force-reflow', 7)
+  })
+
+  test('opening crop mode without touching anything keeps the current reflow', () => {
+    const {reader, emit} = createSession()
+    reader.cropEntrySnapshot = reader.cropSettingsSnapshot()
+
+    methods.finishCropMode.call(reader)
+
+    expect(emit).not.toHaveBeenCalledWith('force-reflow', expect.anything())
+  })
+
+  test('crop setting emissions mark the session as dirty', () => {
+    const {reader} = createSession()
+
+    reader.emitCropSettingsChange('text')
+
+    expect(reader.cropDirty).toBe(true)
   })
 })
 
