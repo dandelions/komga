@@ -12,11 +12,12 @@ import {
   useUpdateBookMetadata,
 } from '@/colada/books'
 import type { BookDto } from '@/generated/openapi'
-import { createEntityUpdate, type EntityUpdate } from '@/functions/poster'
+import { createEntityUpdate, type EntityUpdate } from '@/types/entityUpdate'
 import { seriesDetailQuery, useUpdateSeriesMetadata } from '@/colada/series'
+import { seriesMetadataToUpdateDto } from '@/functions/series'
 import { useQuery } from '@pinia/colada'
 import { type OneShotAttributes, vOneShotAttributes } from '@/types/oneshot'
-import { pickSchemaKeys } from '@/functions/pick'
+import { pickSchemaKeys } from '@/functions/object'
 
 export function useEditBookMetadataDialog() {
   const { confirmEdit: dialogConfirmEdit } = storeToRefs(useDialogsStore())
@@ -47,7 +48,7 @@ export function useEditBookMetadataDialog() {
       scrollable: true,
       fullscreen: display.xs.value,
     }
-    dialogConfirmEdit.value.slot = {
+    dialogConfirmEdit.value.slots.default = {
       component: markRaw(EditBook),
     }
     dialogConfirmEdit.value.record = createEntityUpdate(book)
@@ -121,11 +122,11 @@ export function useEditBookMetadataDialog() {
       if (book.oneshot && updatedData.extra) {
         await mutateUpdateSeriesMetadata({
           seriesId: book.seriesId,
-          metadata: {
+          metadata: seriesMetadataToUpdateDto({
             ...updatedData.extra,
             title: updatedData.entity.metadata.title,
             titleLock: updatedData.entity.metadata.titleLock,
-          },
+          }),
         }).catch((error) => {
           messagesStore.messages.push(error?.cause?.message ?? commonMessages.networkError)
         })

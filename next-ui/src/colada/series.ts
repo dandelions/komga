@@ -6,7 +6,6 @@ import {
 } from '@pinia/colada'
 import { client } from '@/generated/openapi/client.gen'
 import { PageRequest, type Sort, sortToString } from '@/types/PageRequest'
-import { seriesMetadataToUpdateDto } from '@/functions/series'
 import { clearSeries, clearThumbnailSeries } from '@/colada/cache'
 import { useAppStore } from '@/stores/app'
 import {
@@ -23,7 +22,7 @@ import {
   komgaSeriesAnalyze,
   komgaSeriesRefreshMetadata,
   komgaUpdateSeriesMetadata,
-  type SeriesMetadataDto,
+  type SeriesMetadataUpdateDto,
   type SeriesSearch,
 } from '@/generated/openapi'
 import { useImageCacheStore } from '@/stores/image-cache'
@@ -181,18 +180,12 @@ export const useMarkSeriesUnread = defineMutation(() => {
 export const useUpdateSeriesMetadata = defineMutation(() => {
   const appStore = useAppStore()
   return useMutation({
-    mutation: ({
-      seriesId,
-      metadata,
-    }: {
-      seriesId: string
-      metadata: Partial<SeriesMetadataDto>
-    }) =>
+    mutation: ({ seriesId, metadata }: { seriesId: string; metadata: SeriesMetadataUpdateDto }) =>
       komgaUpdateSeriesMetadata({
         path: {
           seriesId: seriesId,
         },
-        body: seriesMetadataToUpdateDto(metadata),
+        body: metadata,
       }),
     onSuccess: (_data, { seriesId }) => {
       if (appStore.sseUnavailable) clearSeries(seriesId, false)
