@@ -571,27 +571,96 @@
             <v-icon>mdi-close</v-icon>
           </v-btn>
           <v-toolbar-title>{{ $t('browse_book.pdf_toc') }}</v-toolbar-title>
+          <v-spacer />
+          <template v-if="!pdfTocEditing">
+            <v-btn icon dark :disabled="pdfTocLoading || pdfTocSaving" :aria-label="$t('browse_book.pdf_toc_edit')" :title="$t('browse_book.pdf_toc_edit')" @click="startPdfTocEditing">
+              <v-icon>mdi-pencil</v-icon>
+            </v-btn>
+            <v-menu offset-y>
+              <template v-slot:activator="{on, attrs}">
+                <v-btn icon dark :aria-label="$t('browse_book.pdf_toc_file_options')" v-bind="attrs" v-on="on">
+                  <v-icon>mdi-dots-vertical</v-icon>
+                </v-btn>
+              </template>
+              <v-list dense>
+                <v-list-item :disabled="pdfTocLoading || pdfTocSaving" @click="exportPdfToc">
+                  <v-list-item-icon><v-icon small>mdi-download</v-icon></v-list-item-icon>
+                  <v-list-item-title>{{ $t('browse_book.pdf_toc_export') }}</v-list-item-title>
+                </v-list-item>
+                <v-list-item :disabled="pdfTocLoading || pdfTocSaving" @click="$refs.pdfTocImport.click()">
+                  <v-list-item-icon><v-icon small>mdi-upload</v-icon></v-list-item-icon>
+                  <v-list-item-title>{{ $t('browse_book.pdf_toc_import') }}</v-list-item-title>
+                </v-list-item>
+              </v-list>
+            </v-menu>
+          </template>
+          <template v-else>
+            <v-btn icon dark :aria-label="$t('browse_book.pdf_toc_add')" :title="$t('browse_book.pdf_toc_add')" @click="addPdfTocEntry()">
+              <v-icon>mdi-plus</v-icon>
+            </v-btn>
+            <v-btn text dark :loading="pdfTocSaving" @click="savePdfTocEditing">{{ $t('browse_book.pdf_toc_save') }}</v-btn>
+            <v-btn icon dark :aria-label="$t('browse_book.pdf_toc_cancel')" :title="$t('browse_book.pdf_toc_cancel')" @click="cancelPdfTocEditing">
+              <v-icon>mdi-close</v-icon>
+            </v-btn>
+          </template>
+          <input
+            ref="pdfTocImport"
+            type="file"
+            accept="application/json,.json"
+            hidden
+            @change="importPdfToc"
+          />
         </v-toolbar>
 
         <v-card-text class="pa-0">
-          <v-progress-linear
-            v-if="pdfTocLoading"
-            indeterminate
-            color="primary"
-          />
+          <v-alert v-if="pdfTocError" type="error" text dense class="ma-3">
+            {{ pdfTocError }}
+          </v-alert>
+          <v-progress-linear v-if="pdfTocLoading || pdfTocSaving" indeterminate color="primary" />
+          <v-list v-else-if="pdfTocEditing" dense class="pdf-toc-editor-list">
+            <v-list-item v-for="row in pdfTocDraftRows" :key="row.path.join('-')" class="pdf-toc-editor-row">
+              <div class="pdf-toc-editor-indent" :style="{width: `${row.depth * 20}px`}" />
+              <v-text-field
+                v-model="row.entry.title"
+                dense
+                hide-details
+                :label="$t('browse_book.pdf_toc_title')"
+                class="mr-2"
+              />
+              <v-text-field
+                v-model.number="row.entry.page"
+                dense
+                hide-details
+                type="number"
+                min="1"
+                :max="pagesCount"
+                :label="$t('browse_book.pdf_toc_page')"
+                class="pdf-toc-page-field mr-1"
+              />
+              <v-btn icon small :disabled="row.path[row.path.length - 1] === 0" aria-label="上移" @click="movePdfTocEntry(row.path, -1)">
+                <v-icon small>mdi-arrow-up</v-icon>
+              </v-btn>
+              <v-btn icon small aria-label="下移" @click="movePdfTocEntry(row.path, 1)">
+                <v-icon small>mdi-arrow-down</v-icon>
+              </v-btn>
+              <v-btn icon small :aria-label="$t('browse_book.pdf_toc_add_child')" @click="addPdfTocEntry(row.path)">
+                <v-icon small>mdi-subdirectory-arrow-right</v-icon>
+              </v-btn>
+              <v-btn icon small aria-label="删除目录项" @click="removePdfTocEntry(row.path)">
+                <v-icon small>mdi-delete</v-icon>
+              </v-btn>
+            </v-list-item>
+            <v-btn v-if="pdfTocDraftRows.length === 0" text class="ma-4" @click="addPdfTocEntry()">
+              <v-icon left>mdi-plus</v-icon>{{ $t('browse_book.pdf_toc_add') }}
+            </v-btn>
+          </v-list>
           <toc-list
             v-else-if="pdfTocFlattened.length > 0"
             :toc="pdfTocFlattened"
             @goto="goToPdfTocEntry"
           />
-          <v-alert
-            v-else
-            type="info"
-            text
-            dense
-            class="ma-4"
-          >
-            {{ $t('$vuetify.noDataText') }}
+          <v-alert v-else type="info" text dense class="ma-4">
+            {{ $t('browse_book.pdf_toc_empty') }}
           </v-alert>
         </v-card-text>
       </v-card>
@@ -1096,6 +1165,14 @@ import {ItemTypes} from '@/types/items'
 import {getBookReadRouteFromMedia} from '@/functions/book-format'
 import {TocEntry} from '@/types/epub'
 import {flattenToc} from '@/functions/toc'
+import {
+  buildPdfTocFromDraft,
+  clonePdfTocDraft,
+  createPdfTocDraft,
+  flattenPdfTocDraft,
+  normalizePdfTocDraft,
+  PdfTocDraftEntry,
+} from '@/functions/pdf-toc'
 import {CLIENT_SETTING, ClientSettingUserUpdateDto} from '@/types/komga-clientsettings'
 import {enhanceTextContrast} from '@/functions/image-enhancement'
 import {canonicalPageImageUrl, loadCachedPageImageWithStats} from '@/functions/page-image-cache'
@@ -1270,6 +1347,12 @@ export default Vue.extend({
       pdfTocLoading: false,
       pdfTocLoaded: false,
       pdfToc: [] as TocEntry[],
+      pdfTocEditing: false,
+      pdfTocSaving: false,
+      pdfTocError: '',
+      pdfTocDraft: [] as PdfTocDraftEntry[],
+      pdfTocOverrides: {} as Record<string, PdfTocDraftEntry[]>,
+      pdfTocRequestId: 0,
       showToolbars: false,
       showSettings: false,
       showHelp: false,
@@ -1597,6 +1680,9 @@ export default Vue.extend({
     },
     pagesCount(): number {
       return this.pages.length
+    },
+    pdfTocDraftRows() {
+      return flattenPdfTocDraft(this.pdfTocDraft)
     },
     bookTitle(): string {
       return getBookTitleCompact(this.book.metadata.title, this.series.metadata.title, this.book.oneshot ? undefined : this.book.metadata.number)
@@ -2804,6 +2890,14 @@ export default Vue.extend({
     },
     async setup(bookId: string, page?: number) {
       const requestedPage = Number.isFinite(page) ? page : undefined
+      ++this.pdfTocRequestId
+      this.pdfTocLoading = false
+      this.pdfTocSaving = false
+      this.pdfTocLoaded = false
+      this.pdfTocEditing = false
+      this.pdfTocError = ''
+      this.pdfTocDraft = []
+      this.pdfToc = []
       this.$debug('[setup]', `bookId:${bookId}`, requestedPage !== undefined ? `page:${requestedPage}` : 'page:auto')
       this.reflowCache = {}
       this.clearReflowPrefetch()
@@ -3024,13 +3118,138 @@ export default Vue.extend({
       }
     },
     async loadPdfToc() {
+      const bookId = this.bookId
+      const requestId = ++this.pdfTocRequestId
       this.pdfTocLoading = true
+      this.pdfTocError = ''
       try {
-        const manifest = await this.$komgaBooks.getBookWebPubManifestPdf(this.bookId)
-        this.pdfToc = manifest.toc || []
+        await this.$store.dispatch('getClientSettingsUser')
+        if (this.bookId !== bookId || this.pdfTocRequestId !== requestId) return
+        const overrides = this.readServerPdfTocOverrides()
+        const manifest = await this.$komgaBooks.getBookWebPubManifestPdf(bookId)
+        if (this.bookId !== bookId || this.pdfTocRequestId !== requestId) return
+        this.pdfTocOverrides = overrides
+        const override = overrides[bookId]
+        this.pdfToc = override
+          ? this.buildPdfToc(override, bookId)
+          : manifest.toc || []
         this.pdfTocLoaded = true
+      } catch (e) {
+        if (this.bookId === bookId && this.pdfTocRequestId === requestId) this.pdfTocError = e instanceof Error ? e.message : String(e)
       } finally {
-        this.pdfTocLoading = false
+        if (this.pdfTocRequestId === requestId) this.pdfTocLoading = false
+      }
+    },
+    pdfTocStorageKey(): string {
+      return CLIENT_SETTING.WEBUI_PDF_TOC_OVERRIDES
+    },
+    readServerPdfTocOverrides(): Record<string, PdfTocDraftEntry[]> {
+      try {
+        const value = this.$store.state.komgaSettings.clientSettingsUser[this.pdfTocStorageKey()]?.value
+        return value ? JSON.parse(value) : {}
+      } catch (e) {
+        return {}
+      }
+    },
+    buildPdfToc(entries: PdfTocDraftEntry[], bookId: string = this.bookId): TocEntry[] {
+      return buildPdfTocFromDraft<TocEntry>(entries, page => bookPageUrl(bookId, page))
+    },
+    startPdfTocEditing() {
+      this.pdfTocDraft = clonePdfTocDraft(createPdfTocDraft(this.pdfToc, entry => this.getPageFromPdfTocEntry(entry as TocEntry)))
+      this.pdfTocEditing = true
+      this.pdfTocError = ''
+    },
+    cancelPdfTocEditing() {
+      this.pdfTocEditing = false
+      this.pdfTocError = ''
+      this.pdfTocDraft = []
+    },
+    pdfTocEntryAt(path: number[]): PdfTocDraftEntry | undefined {
+      let list = this.pdfTocDraft
+      let entry: PdfTocDraftEntry | undefined
+      path.forEach(index => {
+        entry = list[index]
+        list = entry?.children || []
+      })
+      return entry
+    },
+    pdfTocListAt(parentPath: number[]): PdfTocDraftEntry[] {
+      if (parentPath.length === 0) return this.pdfTocDraft
+      const parent = this.pdfTocEntryAt(parentPath)
+      if (!parent) return []
+      if (!parent.children) this.$set(parent, 'children', [])
+      return parent.children as PdfTocDraftEntry[]
+    },
+    addPdfTocEntry(parentPath: number[] = []) {
+      const list = this.pdfTocListAt(parentPath)
+      list.push({title: '', page: undefined})
+      this.pdfTocError = ''
+    },
+    removePdfTocEntry(path: number[]) {
+      const list = this.pdfTocListAt(path.slice(0, -1))
+      list.splice(path[path.length - 1], 1)
+    },
+    movePdfTocEntry(path: number[], direction: number) {
+      const list = this.pdfTocListAt(path.slice(0, -1))
+      const index = path[path.length - 1]
+      const target = index + direction
+      if (target < 0 || target >= list.length) return
+      const [entry] = list.splice(index, 1)
+      list.splice(target, 0, entry)
+    },
+    async savePdfTocEditing() {
+      const bookId = this.bookId
+      this.pdfTocSaving = true
+      this.pdfTocError = ''
+      try {
+        const normalized = normalizePdfTocDraft(this.pdfTocDraft, this.pagesCount, (key, values) => this.$t(key, values).toString())
+        await this.savePdfTocOverrides(normalized, bookId)
+        if (this.bookId !== bookId) return
+        this.pdfToc = this.buildPdfToc(normalized, bookId)
+        this.pdfTocDraft = clonePdfTocDraft(normalized)
+        this.pdfTocEditing = false
+      } catch (e) {
+        if (this.bookId === bookId) this.pdfTocError = e instanceof Error ? e.message : String(e)
+      } finally {
+        if (this.bookId === bookId) this.pdfTocSaving = false
+      }
+    },
+    async savePdfTocOverrides(entries: PdfTocDraftEntry[], bookId: string) {
+      await this.$store.dispatch('getClientSettingsUser')
+      const all = this.readServerPdfTocOverrides()
+      all[bookId] = entries
+      const setting = {[this.pdfTocStorageKey()]: {value: JSON.stringify(all)}} as Record<string, ClientSettingUserUpdateDto>
+      await this.$komgaSettings.updateClientSettingUser(setting)
+      await this.$store.dispatch('getClientSettingsUser')
+      this.pdfTocOverrides = this.readServerPdfTocOverrides()
+    },
+    exportPdfToc() {
+      const entries = this.pdfTocOverrides[this.bookId]
+        || createPdfTocDraft(this.pdfToc, entry => this.getPageFromPdfTocEntry(entry as TocEntry))
+      const blob = new Blob([JSON.stringify({version: 1, bookId: this.bookId, toc: entries}, null, 2)], {type: 'application/json'})
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = `${this.bookId}-toc.json`
+      anchor.click()
+      URL.revokeObjectURL(url)
+    },
+    async importPdfToc(event: Event) {
+      const input = event.target as HTMLInputElement
+      const file = input.files?.[0]
+      input.value = ''
+      if (!file) return
+      try {
+        const parsed = JSON.parse(await file.text())
+        if (parsed.bookId && parsed.bookId !== this.bookId) {
+          throw new Error(this.$t('browse_book.pdf_toc_book_mismatch').toString())
+        }
+        const entries = normalizePdfTocDraft(parsed, this.pagesCount, (key, values) => this.$t(key, values).toString())
+        this.pdfTocDraft = entries
+        this.pdfTocEditing = true
+        this.pdfTocError = ''
+      } catch (e) {
+        this.pdfTocError = e instanceof Error ? e.message : String(e)
       }
     },
     goToPdfTocEntry(tocEntry: TocEntry) {
@@ -4470,6 +4689,30 @@ body.html-reader::-webkit-scrollbar {
   max-height: min(480px, calc(100vh - 280px));
   max-height: min(480px, calc(100dvh - 280px));
   overflow-y: auto;
+}
+
+.pdf-toc-editor-list {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.pdf-toc-editor-row {
+  display: flex;
+  align-items: center;
+  min-width: 480px;
+}
+
+.pdf-toc-editor-row .v-input {
+  min-width: 0;
+}
+
+.pdf-toc-editor-indent {
+  flex: 0 0 auto;
+}
+
+.pdf-toc-page-field {
+  flex: 0 0 82px;
+  max-width: 82px;
 }
 
 </style>
