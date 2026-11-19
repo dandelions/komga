@@ -660,7 +660,7 @@
                 :title="$t('browse_book.pdf_toc_indent')"
                 @click="indentPdfTocEntry(row.path)"
               >
-                <v-icon small>mdi-format-indent-increase</v-icon>
+                <v-icon small>mdi-arrow-right</v-icon>
               </v-btn>
               <v-btn
                 icon
@@ -670,7 +670,7 @@
                 :title="$t('browse_book.pdf_toc_outdent')"
                 @click="outdentPdfTocEntry(row.path)"
               >
-                <v-icon small>mdi-format-indent-decrease</v-icon>
+                <v-icon small>mdi-arrow-left</v-icon>
               </v-btn>
               <v-btn icon small aria-label="删除目录项" @click="removePdfTocEntry(row.path)">
                 <v-icon small>mdi-delete</v-icon>
