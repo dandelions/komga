@@ -560,10 +560,11 @@ describe('ReflowedPage image preview gestures', () => {
 })
 
 describe('ReflowedPage crop mode exit', () => {
-  const createContext = () => {
+  const createContext = (overrides: Record<string, any> = {}) => {
     const emit = jest.fn()
     const context: any = {
       cropMode: true,
+      cropEntrySnapshot: 'snapshot-a',
       draftRoi: {x: 1, y: 2, w: 30, h: 40},
       drawingCrop: true,
       cropPanMode: true,
@@ -572,8 +573,10 @@ describe('ReflowedPage crop mode exit', () => {
       selectionPageNumber: 5,
       clearCropAdjustment: jest.fn(),
       clearCropSource: jest.fn(),
-      persistCurrentCropDraft: jest.fn(() => true),
+      persistCurrentCropDraft: jest.fn(() => false),
+      cropSettingsSnapshot: jest.fn(() => 'snapshot-a'),
       $emit: emit,
+      ...overrides,
     }
     return {context, emit}
   }
@@ -584,8 +587,8 @@ describe('ReflowedPage crop mode exit', () => {
     methods.cancelCropMode.call(context)
 
     expect(context.cropMode).toBe(false)
+    expect(context.cropEntrySnapshot).toBe('')
     expect(context.draftRoi).toBeUndefined()
-    expect(context.drawingCrop).toBe(false)
     expect(context.persistCurrentCropDraft).not.toHaveBeenCalled()
     expect(context.clearCropSource).toHaveBeenCalledTimes(1)
     expect(emit).toHaveBeenCalledWith('crop-mode-change', false)
@@ -593,19 +596,38 @@ describe('ReflowedPage crop mode exit', () => {
     expect(emit).not.toHaveBeenCalledWith('start-reflow')
   })
 
-  test('finishing applies the crop even when the selection was already persisted', () => {
+  test('finishing without changes keeps the current reflow', () => {
     const {context, emit} = createContext()
-    context.persistCurrentCropDraft = jest.fn(() => false)
 
     methods.finishCropMode.call(context)
 
     expect(context.cropMode).toBe(false)
     expect(emit).toHaveBeenCalledWith('crop-mode-change', false)
+    expect(emit).not.toHaveBeenCalledWith('force-reflow', expect.anything())
+  })
+
+  test('finishing after the crop settings changed forces a reflow', () => {
+    const {context, emit} = createContext({
+      cropSettingsSnapshot: jest.fn(() => 'snapshot-b'),
+    })
+
+    methods.finishCropMode.call(context)
+
     expect(emit).toHaveBeenCalledWith('force-reflow', 5)
   })
 
-  test('finishing with a new selection forces a reflow for that page', () => {
-    const {context, emit} = createContext()
+  test('finishing after a new draft was persisted forces a reflow', () => {
+    const {context, emit} = createContext({
+      persistCurrentCropDraft: jest.fn(() => true),
+    })
+
+    methods.finishCropMode.call(context)
+
+    expect(emit).toHaveBeenCalledWith('force-reflow', 5)
+  })
+
+  test('finishing without a recorded snapshot still forces a reflow', () => {
+    const {context, emit} = createContext({cropEntrySnapshot: ''})
 
     methods.finishCropMode.call(context)
 
@@ -613,8 +635,7 @@ describe('ReflowedPage crop mode exit', () => {
   })
 
   test('finishing the setup preview still starts the first reflow', () => {
-    const {context, emit} = createContext()
-    context.deferReflow = true
+    const {context, emit} = createContext({deferReflow: true})
 
     methods.finishCropMode.call(context)
 

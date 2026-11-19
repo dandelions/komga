@@ -1148,6 +1148,7 @@ export default Vue.extend({
       cropMode: false,
       cropTarget: 'text' as CropTarget,
       cropWarning: '',
+      cropEntrySnapshot: '',
       activeCropRegion: 0 as CropRegionIndex,
       cropRegionCount: 2,
       activeManualImageRegion: 0 as CropRegionIndex,
@@ -5333,6 +5334,17 @@ export default Vue.extend({
       if (![x, y, w, h].every(Number.isFinite) || w <= MIN_CROP_SIZE || h <= MIN_CROP_SIZE) return undefined
       return {x, y, w, h}
     },
+    cropSettingsSnapshot(): string {
+      try {
+        return JSON.stringify({
+          text: this.cropRoisPayload(),
+          image: this.manualImageRoisPayload(),
+          deskew: this.deskewAnalysisRoisPayload(),
+        })
+      } catch (e) {
+        return ''
+      }
+    },
     cropRoisPayload(): Record<string, any> {
       const odd = this.payloadRegions('odd')
       const even = this.payloadRegions('even')
@@ -7939,6 +7951,7 @@ export default Vue.extend({
       this.cropWarning = ''
       if (this.cropMode && this.cropTarget === target) {
         this.cropMode = false
+        this.cropEntrySnapshot = ''
         this.clearCropSource()
         this.$emit('crop-mode-change', false)
         return
@@ -7948,6 +7961,7 @@ export default Vue.extend({
         this.cropTarget = target
         this.cropPageNumber = this.displayedSourcePageNumber || this.page.number
         this.cropPageUrl = this.displayedSourcePageUrl || this.page.url
+        this.cropEntrySnapshot = this.cropSettingsSnapshot()
         this.cropMode = true
         this.$emit('crop-mode-change', true)
         await this.ensureCropImage()
@@ -7961,6 +7975,7 @@ export default Vue.extend({
     },
     cancelCropMode() {
       this.cropMode = false
+      this.cropEntrySnapshot = ''
       this.draftRoi = undefined
       this.drawingCrop = false
       this.clearCropAdjustment()
@@ -7971,8 +7986,11 @@ export default Vue.extend({
     },
     finishCropMode() {
       const sourcePageNumber = this.selectionPageNumber
-      this.persistCurrentCropDraft()
+      const draftPersisted = this.persistCurrentCropDraft()
+      const snapshotRecorded = this.cropEntrySnapshot !== ''
+      const cropChanged = draftPersisted || !snapshotRecorded || this.cropEntrySnapshot !== this.cropSettingsSnapshot()
       this.cropMode = false
+      this.cropEntrySnapshot = ''
       this.draftRoi = undefined
       this.drawingCrop = false
       this.clearCropAdjustment()
@@ -7980,7 +7998,7 @@ export default Vue.extend({
       this.clearCropSource()
       this.$emit('crop-mode-change', false)
       if (this.deferReflow) this.$emit('start-reflow')
-      else this.$emit('force-reflow', sourcePageNumber)
+      else if (cropChanged) this.$emit('force-reflow', sourcePageNumber)
     },
     persistCurrentCropDraft() {
       const draft = this.draftRoi
