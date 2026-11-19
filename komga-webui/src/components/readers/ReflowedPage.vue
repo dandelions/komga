@@ -7971,7 +7971,7 @@ export default Vue.extend({
     },
     finishCropMode() {
       const sourcePageNumber = this.selectionPageNumber
-      const cropChanged = this.persistCurrentCropDraft()
+      this.persistCurrentCropDraft()
       this.cropMode = false
       this.draftRoi = undefined
       this.drawingCrop = false
@@ -7980,7 +7980,7 @@ export default Vue.extend({
       this.clearCropSource()
       this.$emit('crop-mode-change', false)
       if (this.deferReflow) this.$emit('start-reflow')
-      else if (cropChanged) this.$emit('force-reflow', sourcePageNumber)
+      else this.$emit('force-reflow', sourcePageNumber)
     },
     persistCurrentCropDraft() {
       const draft = this.draftRoi

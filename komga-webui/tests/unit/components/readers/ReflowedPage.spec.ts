@@ -593,7 +593,7 @@ describe('ReflowedPage crop mode exit', () => {
     expect(emit).not.toHaveBeenCalledWith('start-reflow')
   })
 
-  test('finishing without a new selection skips the reflow', () => {
+  test('finishing applies the crop even when the selection was already persisted', () => {
     const {context, emit} = createContext()
     context.persistCurrentCropDraft = jest.fn(() => false)
 
@@ -601,7 +601,7 @@ describe('ReflowedPage crop mode exit', () => {
 
     expect(context.cropMode).toBe(false)
     expect(emit).toHaveBeenCalledWith('crop-mode-change', false)
-    expect(emit).not.toHaveBeenCalledWith('force-reflow', expect.anything())
+    expect(emit).toHaveBeenCalledWith('force-reflow', 5)
   })
 
   test('finishing with a new selection forces a reflow for that page', () => {
@@ -615,7 +615,6 @@ describe('ReflowedPage crop mode exit', () => {
   test('finishing the setup preview still starts the first reflow', () => {
     const {context, emit} = createContext()
     context.deferReflow = true
-    context.persistCurrentCropDraft = jest.fn(() => false)
 
     methods.finishCropMode.call(context)
 
