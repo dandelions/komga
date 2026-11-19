@@ -660,7 +660,10 @@
             @goto="goToPdfTocEntry"
           />
           <v-alert v-else type="info" text dense class="ma-4">
-            {{ $t('browse_book.pdf_toc_empty') }}
+            <div>{{ $t('browse_book.pdf_toc_empty') }}</div>
+            <v-btn small text class="mt-2" @click="startPdfTocEditing(); addPdfTocEntry()">
+              <v-icon left small>mdi-plus</v-icon>{{ $t('browse_book.pdf_toc_add') }}
+            </v-btn>
           </v-alert>
         </v-card-text>
       </v-card>
