@@ -4,6 +4,7 @@ import {
   createPdfTocDraft,
   flattenPdfTocDraft,
   normalizePdfTocDraft,
+  PdfTocDraftEntry,
 } from '@/functions/pdf-toc'
 import {TocEntry} from '@/types/epub'
 
@@ -26,12 +27,24 @@ describe('PDF table of contents', () => {
     expect(rebuilt[0].children?.[0].href).toBe('/api/v1/books/book-1/pages/4')
   })
 
-  test('flattens rows with stable tree paths and clones without sharing objects', () => {
-    const source = [{title: 'Part', children: [{title: 'Chapter', page: 3}]}]
+  test('keeps nested paths for adding children repeatedly', () => {
+    const source: PdfTocDraftEntry[] = [{title: 'Part'}]
+    source[0].children = [{title: 'Chapter'}]
+    source[0].children[0].children = [{title: 'Section', page: 3}]
     const rows = flattenPdfTocDraft(source)
+
+    expect(rows.map(row => [row.path, row.depth])).toEqual([
+      [[0], 0],
+      [[0, 0], 1],
+      [[0, 0, 0], 2],
+    ])
+    expect(source[0].children[0].children?.[0].title).toBe('Section')
+  })
+
+  test('clones nested entries without sharing objects', () => {
+    const source = [{title: 'Part', children: [{title: 'Chapter', page: 3}]}]
     const copy = clonePdfTocDraft(source)
 
-    expect(rows.map(row => [row.path, row.depth])).toEqual([[[0], 0], [[0, 0], 1]])
     copy[0].children![0].title = 'Changed'
     expect(source[0].children![0].title).toBe('Chapter')
   })

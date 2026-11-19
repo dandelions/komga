@@ -643,7 +643,13 @@
               <v-btn icon small aria-label="下移" @click="movePdfTocEntry(row.path, 1)">
                 <v-icon small>mdi-arrow-down</v-icon>
               </v-btn>
-              <v-btn icon small :aria-label="$t('browse_book.pdf_toc_add_child')" @click="addPdfTocEntry(row.path)">
+              <v-btn
+                icon
+                small
+                :aria-label="$t('browse_book.pdf_toc_add_child')"
+                :title="$t('browse_book.pdf_toc_add_child')"
+                @click="addPdfTocEntry(row.path)"
+              >
                 <v-icon small>mdi-subdirectory-arrow-right</v-icon>
               </v-btn>
               <v-btn icon small aria-label="删除目录项" @click="removePdfTocEntry(row.path)">
