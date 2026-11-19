@@ -57,6 +57,45 @@ export function clonePdfTocDraft(entries: PdfTocDraftEntry[]): PdfTocDraftEntry[
   }))
 }
 
+function pdfTocDraftListAt(entries: PdfTocDraftEntry[], path: number[]): PdfTocDraftEntry[] | undefined {
+  let list = entries
+  for (const index of path) {
+    const entry = list[index]
+    if (!entry) return undefined
+    list = entry.children || []
+  }
+  return list
+}
+
+export function indentPdfTocDraft(entries: PdfTocDraftEntry[], path: number[]): PdfTocDraftEntry[] {
+  const result = clonePdfTocDraft(entries)
+  if (path.length === 0) return result
+  const list = pdfTocDraftListAt(result, path.slice(0, -1))
+  const index = path[path.length - 1]
+  if (!list || index < 1 || index >= list.length) return result
+
+  const [entry] = list.splice(index, 1)
+  const previous = list[index - 1]
+  if (!previous.children) previous.children = []
+  previous.children.push(entry)
+  return result
+}
+
+export function outdentPdfTocDraft(entries: PdfTocDraftEntry[], path: number[]): PdfTocDraftEntry[] {
+  const result = clonePdfTocDraft(entries)
+  if (path.length < 2) return result
+  const parentPath = path.slice(0, -1)
+  const parentList = pdfTocDraftListAt(result, parentPath)
+  const parentIndex = parentPath[parentPath.length - 1]
+  const grandparentList = pdfTocDraftListAt(result, parentPath.slice(0, -1))
+  const index = path[path.length - 1]
+  if (!parentList || !grandparentList || index < 0 || index >= parentList.length) return result
+
+  const [entry] = parentList.splice(index, 1)
+  grandparentList.splice(parentIndex + 1, 0, entry)
+  return result
+}
+
 export function normalizePdfTocDraft(
   value: unknown,
   pageCount: number,

@@ -650,7 +650,27 @@
                 :title="$t('browse_book.pdf_toc_add_child')"
                 @click="addPdfTocEntry(row.path)"
               >
-                <v-icon small>mdi-subdirectory-arrow-right</v-icon>
+                <v-icon small>mdi-plus</v-icon>
+              </v-btn>
+              <v-btn
+                icon
+                small
+                :disabled="row.path[row.path.length - 1] === 0"
+                :aria-label="$t('browse_book.pdf_toc_indent')"
+                :title="$t('browse_book.pdf_toc_indent')"
+                @click="indentPdfTocEntry(row.path)"
+              >
+                <v-icon small>mdi-format-indent-increase</v-icon>
+              </v-btn>
+              <v-btn
+                icon
+                small
+                :disabled="row.path.length < 2"
+                :aria-label="$t('browse_book.pdf_toc_outdent')"
+                :title="$t('browse_book.pdf_toc_outdent')"
+                @click="outdentPdfTocEntry(row.path)"
+              >
+                <v-icon small>mdi-format-indent-decrease</v-icon>
               </v-btn>
               <v-btn icon small aria-label="删除目录项" @click="removePdfTocEntry(row.path)">
                 <v-icon small>mdi-delete</v-icon>
@@ -1178,6 +1198,8 @@ import {
   buildPdfTocFromDraft,
   clonePdfTocDraft,
   createPdfTocDraft,
+  indentPdfTocDraft,
+  outdentPdfTocDraft,
   flattenPdfTocDraft,
   normalizePdfTocDraft,
   PdfTocDraftEntry,
@@ -3205,6 +3227,14 @@ export default Vue.extend({
       if (target < 0 || target >= list.length) return
       const [entry] = list.splice(index, 1)
       list.splice(target, 0, entry)
+    },
+    indentPdfTocEntry(path: number[]) {
+      this.pdfTocDraft = indentPdfTocDraft(this.pdfTocDraft, path)
+      this.pdfTocError = ''
+    },
+    outdentPdfTocEntry(path: number[]) {
+      this.pdfTocDraft = outdentPdfTocDraft(this.pdfTocDraft, path)
+      this.pdfTocError = ''
     },
     async savePdfTocEditing() {
       const bookId = this.bookId

@@ -188,6 +188,8 @@
     "pdf_toc_edit": "Edit table of contents",
     "pdf_toc_add": "Add entry",
     "pdf_toc_add_child": "Add child entry",
+    "pdf_toc_indent": "Move into previous entry",
+    "pdf_toc_outdent": "Move to parent level",
     "pdf_toc_title": "Title",
     "pdf_toc_page": "Page",
     "pdf_toc_save": "Save",

@@ -1,6 +1,8 @@
 import {
   buildPdfTocFromDraft,
   clonePdfTocDraft,
+  indentPdfTocDraft,
+  outdentPdfTocDraft,
   createPdfTocDraft,
   flattenPdfTocDraft,
   normalizePdfTocDraft,
@@ -39,6 +41,36 @@ describe('PDF table of contents', () => {
       [[0, 0, 0], 2],
     ])
     expect(source[0].children[0].children?.[0].title).toBe('Section')
+  })
+
+  test('indents an entry into the previous sibling and preserves its children', () => {
+    const source: PdfTocDraftEntry[] = [
+      {title: 'Part 1'},
+      {title: 'Part 2', children: [{title: 'Chapter 2'}]},
+    ]
+    const indented = indentPdfTocDraft(source, [1])
+
+    expect(indented).toEqual([{
+      title: 'Part 1',
+      page: undefined,
+      children: [{title: 'Part 2', page: undefined, children: [{title: 'Chapter 2', page: undefined}]}],
+    }])
+  })
+
+  test('outdents an entry after its parent and preserves its children', () => {
+    const source: PdfTocDraftEntry[] = [{
+      title: 'Part 1',
+      children: [
+        {title: 'Chapter 1'},
+        {title: 'Chapter 2', children: [{title: 'Section 2'}]},
+      ],
+    }]
+    const outdented = outdentPdfTocDraft(source, [0, 1])
+
+    expect(outdented).toEqual([
+      {title: 'Part 1', page: undefined, children: [{title: 'Chapter 1', page: undefined}]},
+      {title: 'Chapter 2', page: undefined, children: [{title: 'Section 2', page: undefined}]},
+    ])
   })
 
   test('clones nested entries without sharing objects', () => {
