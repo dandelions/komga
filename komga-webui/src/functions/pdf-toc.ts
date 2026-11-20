@@ -11,6 +11,7 @@ export interface PdfTocDraftRow {
 }
 
 const MAX_TOC_ENTRIES = 1000
+export const PDF_TOC_EDIT_EXPAND_LIMIT = 120
 const MAX_TOC_DEPTH = 20
 const MAX_TOC_TITLE_LENGTH = 300
 export const PDF_TOC_EDITOR_HEIGHT_STORAGE_KEY = 'komga.pdf.toc.editor.height'
@@ -68,6 +69,18 @@ export function clonePdfTocDraft(entries: PdfTocDraftEntry[]): PdfTocDraftEntry[
     page: entry.page,
     children: entry.children?.length ? clonePdfTocDraft(entry.children) : undefined,
   }))
+}
+
+export function countPdfTocEntries(entries: PdfTocDraftEntry[]): number {
+  let total = 0
+  const visit = (items: PdfTocDraftEntry[]) => {
+    items.forEach(entry => {
+      total++
+      if (entry.children?.length) visit(entry.children)
+    })
+  }
+  visit(entries)
+  return total
 }
 
 function pdfTocDraftListAt(entries: PdfTocDraftEntry[], path: number[]): PdfTocDraftEntry[] | undefined {

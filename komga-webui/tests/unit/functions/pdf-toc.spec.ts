@@ -1,6 +1,7 @@
 import {
   buildPdfTocFromDraft,
   clampPdfTocEditorHeight,
+  countPdfTocEntries,
   clonePdfTocDraft,
   indentPdfTocDraft,
   insertPdfTocDraftAfter,
@@ -50,6 +51,15 @@ describe('PDF table of contents', () => {
       [[0, 0, 0], 2],
       [[1], 0],
     ])
+  })
+
+  test('counts all nested entries to determine large-editor mode', () => {
+    const source: PdfTocDraftEntry[] = [
+      {title: 'Part 1', children: [{title: 'Chapter 1', children: [{title: 'Section 1'}]}]},
+      {title: 'Part 2'},
+    ]
+
+    expect(countPdfTocEntries(source)).toBe(4)
   })
 
   test('keeps nested paths for adding children repeatedly', () => {

@@ -718,7 +718,7 @@
           />
           <v-alert v-else type="info" text dense class="ma-4">
             <div>{{ $t('browse_book.pdf_toc_empty') }}</div>
-            <v-btn small text class="mt-2" @click="startPdfTocEditing(); addPdfTocEntry()">
+            <v-btn small text class="mt-2" @click="startPdfTocEditing(true)">
               <v-icon left small>mdi-plus</v-icon>{{ $t('browse_book.pdf_toc_add') }}
             </v-btn>
           </v-alert>
@@ -1230,12 +1230,14 @@ import {
   buildPdfTocFromDraft,
   clampPdfTocEditorHeight,
   clonePdfTocDraft,
+  countPdfTocEntries,
   createPdfTocDraft,
   indentPdfTocDraft,
   insertPdfTocDraftAfter,
   outdentPdfTocDraft,
   flattenPdfTocDraft,
   normalizePdfTocDraft,
+  PDF_TOC_EDIT_EXPAND_LIMIT,
   PDF_TOC_EDITOR_HEIGHT_STORAGE_KEY,
   PdfTocDraftEntry,
 } from '@/functions/pdf-toc'
@@ -3210,13 +3212,17 @@ export default Vue.extend({
         await this.$store.dispatch('getClientSettingsUser')
         if (this.bookId !== bookId || this.pdfTocRequestId !== requestId) return
         const overrides = this.readServerPdfTocOverrides()
+        const override = overrides[bookId]
+        if (override) {
+          this.pdfTocOverrides = overrides
+          this.pdfToc = this.buildPdfToc(override, bookId)
+          this.pdfTocLoaded = true
+          return
+        }
         const manifest = await this.$komgaBooks.getBookWebPubManifestPdf(bookId)
         if (this.bookId !== bookId || this.pdfTocRequestId !== requestId) return
         this.pdfTocOverrides = overrides
-        const override = overrides[bookId]
-        this.pdfToc = override
-          ? this.buildPdfToc(override, bookId)
-          : manifest.toc || []
+        this.pdfToc = manifest.toc || []
         this.pdfTocLoaded = true
       } catch (e) {
         if (this.bookId === bookId && this.pdfTocRequestId === requestId) this.pdfTocError = e instanceof Error ? e.message : String(e)
@@ -3264,13 +3270,30 @@ export default Vue.extend({
       this.pdfTocEditorResizing = false
       window.localStorage.setItem(PDF_TOC_EDITOR_HEIGHT_STORAGE_KEY, String(this.pdfTocEditorHeight))
     },
-    startPdfTocEditing() {
+    async startPdfTocEditing() {
       this.loadPdfTocEditorHeight()
-      this.pdfTocDraft = clonePdfTocDraft(createPdfTocDraft(this.pdfToc, entry => this.getPageFromPdfTocEntry(entry as TocEntry)))
-      this.pdfTocActivePath = undefined
-      this.pdfTocMinimized = false
-      this.pdfTocEditing = true
+      this.pdfTocSaving = true
       this.pdfTocError = ''
+      try {
+        const bookId = this.bookId
+        await this.$store.dispatch('getClientSettingsUser')
+        const overrides = this.readServerPdfTocOverrides()
+        let entries = overrides[bookId]
+        if (!entries) {
+          entries = createPdfTocDraft(this.pdfToc, entry => this.getPageFromPdfTocEntry(entry as TocEntry))
+          await this.savePdfTocOverrides(entries, bookId)
+        }
+        if (this.bookId !== bookId) return
+        this.pdfTocOverrides = this.readServerPdfTocOverrides()
+        this.pdfTocDraft = entries
+        this.pdfTocActivePath = countPdfTocEntries(this.pdfTocDraft) > PDF_TOC_EDIT_EXPAND_LIMIT ? [] : undefined
+        this.pdfTocMinimized = false
+        this.pdfTocEditing = true
+      } catch (e) {
+        this.pdfTocError = e instanceof Error ? e.message : String(e)
+      } finally {
+        this.pdfTocSaving = false
+      }
     },
     cancelPdfTocEditing() {
       this.pdfTocEditing = false
