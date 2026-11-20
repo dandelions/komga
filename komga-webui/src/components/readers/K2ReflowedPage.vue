@@ -314,6 +314,7 @@ import {
   DocumentRemoveBackgroundMode,
   DocumentRemoveWatermarkMode,
   enhanceTextContrast,
+  enhanceTextContrastData,
   preprocessDocumentCanvas,
 } from '@/functions/image-enhancement'
 import {canonicalPageImageUrl, loadCachedPageImageWithStats} from '@/functions/page-image-cache'
@@ -357,6 +358,9 @@ const OUTPUT_PADDING = 16
 const DETECTION_MAX_SIDE = 1800
 const DETECTION_MAX_PIXELS = 2000000
 const DETECTION_MIN_SCALE = 0.28
+const K2_SLICE_MIME = 'image/jpeg'
+const K2_SLICE_QUALITY = 0.92
+const K2_YIELD_EVERY_WORDS = 24
 
 export default Vue.extend({
   name: 'K2ReflowedPage',
@@ -835,7 +839,7 @@ export default Vue.extend({
         const scaledImageRegions = this.scaleImageRegions(imageRegions, detectionSource.scale, canvas.width, canvas.height)
         if (requestId !== this.requestId) return
 
-        this.items = this.renderK2Items(canvas, lines, scaledImageRegions)
+        this.items = await this.renderK2Items(canvas, lines, scaledImageRegions)
         if (this.items.length === 0 && canvas.width >= 2 && canvas.height >= 2) {
           const sliceCanvas = document.createElement('canvas')
           const sliceContext = this.canvasContext(sliceCanvas, true)
@@ -1027,6 +1031,39 @@ export default Vue.extend({
         matchBackground: false,
       })
       this.pageBackground = '#fff'
+    },
+    async yieldToBrowser() {
+      await new Promise<void>(resolve => {
+        let settled = false
+        const finish = () => {
+          if (settled) return
+          settled = true
+          resolve()
+        }
+        if (typeof requestAnimationFrame === 'function') requestAnimationFrame(finish)
+        setTimeout(finish, 32)
+      })
+    },
+    applyWordSliceEffects(context: CanvasRenderingContext2D, width: number, height: number) {
+      const textModeEnabled = this.matchBackgroundMode !== 'original'
+      const originalDarkMode = this.matchBackgroundMode === 'original' && this.darkDisplay
+      const needsStroke = this.strokeStrength > 0 && this.matchBackgroundMode !== 'original'
+      const needsContrast = this.contrastEnhancement || this.matchBackground || textModeEnabled || originalDarkMode
+      if (!needsStroke && !needsContrast) return
+
+      const imageData = context.getImageData(0, 0, width, height)
+      const data = imageData.data
+      if (needsStroke) this.strengthenInkData(data, width, height)
+      if (needsContrast) {
+        enhanceTextContrastData(data, width, height, {
+          enabled: this.contrastEnhancement,
+          nightDisplay: this.darkDisplay,
+          matchBackground: this.matchBackground,
+          matchBackgroundMode: this.matchBackgroundMode,
+          backgroundLuma: this.sourceBackgroundLuma(),
+        })
+      }
+      context.putImageData(imageData, 0, 0)
     },
     finishWordSlice(context: CanvasRenderingContext2D, width: number, height: number) {
       const textModeEnabled = this.matchBackgroundMode !== 'original'
@@ -2164,7 +2201,7 @@ export default Vue.extend({
         h: bottom - top + 1,
       }
     },
-    renderK2Items(sourceCanvas: HTMLCanvasElement, lines: WordLine[], imageRegions: ImageRegion[]): K2Item[] {
+    async renderK2Items(sourceCanvas: HTMLCanvasElement, lines: WordLine[], imageRegions: ImageRegion[]): Promise<K2Item[]> {
       const sourceContext = this.canvasContext(sourceCanvas)
       if (!sourceContext) return []
       const sliceCanvas = document.createElement('canvas')
@@ -2180,7 +2217,9 @@ export default Vue.extend({
       const items = [] as K2Item[]
       const imageSlots = this.horizontalImageSlots(imageRegions, lines)
 
-      lines.forEach((line, index) => {
+      let renderedWords = 0
+      for (let index = 0; index < lines.length; index++) {
+        const line = lines[index]
         if (this.appendK2ImageItems(items, sourceCanvas, sliceCanvas, sliceContext, imageSlots[index])) lineWidth = 0
         const previousLine = lines[index - 1]
         const glyphHeight = line.words[0]?.h || line.row.end - line.row.start
@@ -2201,7 +2240,7 @@ export default Vue.extend({
           lineWidth = indentWidth + wordGap
         }
 
-        line.words.forEach(word => {
+        for (const word of line.words) {
           const scaledWidth = Math.max(1, Math.round(word.w * scale))
           const scaledHeight = Math.max(1, Math.round(word.h * scale))
           if (lineWidth > 0 && lineWidth + scaledWidth + wordGap > maxLineWidth) {
@@ -2213,20 +2252,21 @@ export default Vue.extend({
           sliceCanvas.height = word.h
           this.fillWordSliceBackground(sliceContext, word.w, word.h)
           sliceContext.drawImage(sourceCanvas, word.x, word.y, word.w, word.h, 0, 0, word.w, word.h)
-          if (this.strokeStrength > 0 && this.matchBackgroundMode !== 'original') this.strengthenInk(sliceContext, word.w, word.h)
-          this.finishWordSlice(sliceContext, word.w, word.h)
+          this.applyWordSliceEffects(sliceContext, word.w, word.h)
 
           items.push({
             type: 'word',
-            src: sliceCanvas.toDataURL('image/png'),
+            src: sliceCanvas.toDataURL(K2_SLICE_MIME, K2_SLICE_QUALITY),
             sourceWidth: word.w,
             sourceHeight: word.h,
             width: scaledWidth,
             height: scaledHeight,
           })
           lineWidth += scaledWidth + wordGap
-        })
-      })
+          renderedWords++
+          if (renderedWords % K2_YIELD_EVERY_WORDS === 0) await this.yieldToBrowser()
+        }
+      }
       this.appendK2ImageItems(items, sourceCanvas, sliceCanvas, sliceContext, imageSlots[lines.length])
 
       return items
@@ -2260,7 +2300,7 @@ export default Vue.extend({
         outW,
         outH,
       )
-      const dataUrl = sliceCanvas.toDataURL('image/png')
+      const dataUrl = sliceCanvas.toDataURL(K2_SLICE_MIME, K2_SLICE_QUALITY)
       const targetWidth = (typeof this.pageContentWidth === 'function' ? this.pageContentWidth() : 0) || this.targetWidth
       const displayScale = Math.min(1, targetWidth / Math.max(1, outW))
       return {
@@ -2343,7 +2383,7 @@ export default Vue.extend({
       if (this.darkDisplay && this.matchBackgroundMode !== 'original') this.normalizeImageSliceForDarkDisplay(sliceContext, source.w, source.h)
       return {
         type: 'image',
-        src: sliceCanvas.toDataURL('image/png'),
+        src: sliceCanvas.toDataURL(K2_SLICE_MIME, K2_SLICE_QUALITY),
         sourceWidth: source.w,
         sourceHeight: source.h,
         ...this.scaledImageDimensions(source.w, source.h),
@@ -2666,7 +2706,10 @@ export default Vue.extend({
     },
     strengthenInk(context: CanvasRenderingContext2D, width: number, height: number) {
       const imageData = context.getImageData(0, 0, width, height)
-      const data = imageData.data
+      this.strengthenInkData(imageData.data, width, height)
+      context.putImageData(imageData, 0, 0)
+    },
+    strengthenInkData(data: Uint8ClampedArray, width: number, height: number) {
       const source = new Uint8ClampedArray(data)
       const threshold = Math.min(245, this.threshold + 18)
       const strength = this.clampNumber(this.strokeStrength, 0, 3, 0)
@@ -2711,8 +2754,6 @@ export default Vue.extend({
           }
         }
       }
-
-      context.putImageData(imageData, 0, 0)
     },
     darkenPixel(data: Uint8ClampedArray, offset: number, influence: number) {
       const clampedInfluence = Math.max(0, Math.min(1, influence))
