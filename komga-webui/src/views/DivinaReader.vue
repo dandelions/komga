@@ -217,6 +217,13 @@
                 :max="pagesCount"
               >
                 <template v-slot:prepend>
+                  <v-icon
+                    v-if="isPdf"
+                    class="mr-2"
+                    :aria-label="$t('browse_book.pdf_toc')"
+                    :title="$t('browse_book.pdf_toc')"
+                    @click="openPdfToc"
+                  >mdi-table-of-contents</v-icon>
                   <v-icon @click="previousBook" class="">mdi-undo</v-icon>
                   <v-icon @click="goToFirst" class="mx-2">mdi-skip-previous</v-icon>
                   <v-label>
