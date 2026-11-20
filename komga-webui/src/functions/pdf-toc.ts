@@ -13,6 +13,13 @@ export interface PdfTocDraftRow {
 const MAX_TOC_ENTRIES = 1000
 const MAX_TOC_DEPTH = 20
 const MAX_TOC_TITLE_LENGTH = 300
+export const PDF_TOC_EDITOR_HEIGHT_STORAGE_KEY = 'komga.pdf.toc.editor.height'
+
+export function clampPdfTocEditorHeight(value: number, viewportHeight: number): number {
+  const maxHeight = Math.max(1, Math.floor(viewportHeight / 3))
+  const minHeight = Math.min(120, maxHeight)
+  return Math.min(maxHeight, Math.max(minHeight, Math.round(value)))
+}
 
 export function createPdfTocDraft(
   toc: Array<{title?: string, href?: string, children?: any[]}>,

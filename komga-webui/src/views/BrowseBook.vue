@@ -372,7 +372,8 @@
                 {{ pdfTocError }}
               </v-alert>
               <v-progress-linear v-if="pdfTocLoading || pdfTocSaving" indeterminate color="primary" />
-              <v-list v-else-if="pdfTocEditing" dense class="pdf-toc-editor-list">
+              <div v-else-if="pdfTocEditing" class="pdf-toc-editor-scroll" :style="pdfTocEditorScrollStyle">
+                <v-list dense class="pdf-toc-editor-list">
                 <v-list-item
                   v-for="row in pdfTocDraftRows"
                   :key="row.path.join('-')"
@@ -450,7 +451,11 @@
                 <v-btn v-if="pdfTocDraftRows.length === 0" text class="ma-4" @click="addPdfTocEntry()">
                   <v-icon left>mdi-plus</v-icon>{{ $t('browse_book.pdf_toc_add') }}
                 </v-btn>
-              </v-list>
+                </v-list>
+                <div class="pdf-toc-editor-resize-handle" @pointerdown="startPdfTocEditorResize">
+                  <v-icon small>mdi-drag-horizontal</v-icon>
+                </div>
+              </div>
               <toc-list
                 v-else-if="pdfTocFlattened.length > 0"
                 :toc="pdfTocFlattened"
@@ -672,12 +677,14 @@ import {TocEntry} from '@/types/epub'
 import {flattenToc} from '@/functions/toc'
 import {
   buildPdfTocFromDraft,
+  clampPdfTocEditorHeight,
   clonePdfTocDraft,
   createPdfTocDraft,
   indentPdfTocDraft,
   outdentPdfTocDraft,
   flattenPdfTocDraft,
   normalizePdfTocDraft,
+  PDF_TOC_EDITOR_HEIGHT_STORAGE_KEY,
   PdfTocDraftEntry,
 } from '@/functions/pdf-toc'
 import {CLIENT_SETTING, ClientSettingUserUpdateDto} from '@/types/komga-clientsettings'
@@ -703,6 +710,10 @@ export default Vue.extend({
       pdfTocLoaded: false,
       pdfTocEditing: false,
       pdfTocMinimized: false,
+      pdfTocEditorHeight: 240,
+      pdfTocEditorResizing: false,
+      pdfTocEditorResizeStartY: 0,
+      pdfTocEditorResizeStartHeight: 0,
       pdfTocSaving: false,
       pdfTocError: '',
       pdfTocDraft: [] as PdfTocDraftEntry[],
@@ -713,6 +724,10 @@ export default Vue.extend({
     }
   },
   async created() {
+    this.loadPdfTocEditorHeight()
+    window.addEventListener('resize', this.clampPdfTocEditorHeightToViewport)
+    window.addEventListener('pointermove', this.resizePdfTocEditor)
+    window.addEventListener('pointerup', this.stopPdfTocEditorResize)
     this.loadBook(this.bookId)
     this.$eventHub.$on(BOOK_CHANGED, this.bookChanged)
     this.$eventHub.$on(BOOK_DELETED, this.bookDeleted)
@@ -724,6 +739,9 @@ export default Vue.extend({
     this.$eventHub.$on(READLIST_DELETED, this.readListChanged)
   },
   beforeDestroy() {
+    window.removeEventListener('resize', this.clampPdfTocEditorHeightToViewport)
+    window.removeEventListener('pointermove', this.resizePdfTocEditor)
+    window.removeEventListener('pointerup', this.stopPdfTocEditorResize)
     this.$eventHub.$off(BOOK_CHANGED, this.bookChanged)
     this.$eventHub.$off(BOOK_DELETED, this.bookDeleted)
     this.$eventHub.$off(READPROGRESS_CHANGED, this.readProgressChanged)
@@ -769,6 +787,9 @@ export default Vue.extend({
     },
     pdfTocDraftRows() {
       return flattenPdfTocDraft(this.pdfTocDraft, this.pdfTocActivePath)
+    },
+    pdfTocEditorScrollStyle(): Record<string, string> {
+      return {maxHeight: `${this.pdfTocEditorHeight}px`}
     },
     isAdmin(): boolean {
       return this.$store.getters.meAdmin
@@ -997,7 +1018,34 @@ export default Vue.extend({
     buildPdfToc(entries: PdfTocDraftEntry[], bookId: string = this.bookId): TocEntry[] {
       return buildPdfTocFromDraft<TocEntry>(entries, page => bookPageUrl(bookId, page))
     },
+    loadPdfTocEditorHeight() {
+      const stored = Number(window.localStorage.getItem(PDF_TOC_EDITOR_HEIGHT_STORAGE_KEY))
+      if (Number.isFinite(stored) && stored > 0) this.pdfTocEditorHeight = clampPdfTocEditorHeight(stored, window.innerHeight)
+      else this.clampPdfTocEditorHeightToViewport()
+    },
+    clampPdfTocEditorHeightToViewport() {
+      this.pdfTocEditorHeight = clampPdfTocEditorHeight(this.pdfTocEditorHeight, window.innerHeight)
+    },
+    startPdfTocEditorResize(event: PointerEvent) {
+      this.pdfTocEditorResizing = true
+      this.pdfTocEditorResizeStartY = event.clientY
+      this.pdfTocEditorResizeStartHeight = this.pdfTocEditorHeight
+      event.preventDefault()
+    },
+    resizePdfTocEditor(event: PointerEvent) {
+      if (!this.pdfTocEditorResizing) return
+      this.pdfTocEditorHeight = clampPdfTocEditorHeight(
+        this.pdfTocEditorResizeStartHeight + this.pdfTocEditorResizeStartY - event.clientY,
+        window.innerHeight,
+      )
+    },
+    stopPdfTocEditorResize() {
+      if (!this.pdfTocEditorResizing) return
+      this.pdfTocEditorResizing = false
+      window.localStorage.setItem(PDF_TOC_EDITOR_HEIGHT_STORAGE_KEY, String(this.pdfTocEditorHeight))
+    },
     startPdfTocEditing() {
+      this.loadPdfTocEditorHeight()
       this.pdfTocDraft = clonePdfTocDraft(createPdfTocDraft(this.pdfToc, entry => this.getPageFromPdfTocEntry(entry as TocEntry)))
       this.pdfTocActivePath = undefined
       this.pdfTocMinimized = false
@@ -1147,9 +1195,31 @@ export default Vue.extend({
     padding-bottom: 96px;
   }
 }
+.pdf-toc-editor-scroll {
+  max-width: 100%;
+  overflow: auto;
+  position: relative;
+}
+
 .pdf-toc-editor-list {
   max-width: 100%;
   overflow-x: auto;
+}
+
+.pdf-toc-editor-resize-handle {
+  align-items: center;
+  background: var(--v-primary-base);
+  color: #fff;
+  cursor: ns-resize;
+  display: flex;
+  height: 8px;
+  justify-content: center;
+  opacity: 0.55;
+  touch-action: none;
+}
+
+.pdf-toc-editor-resize-handle:hover {
+  opacity: 1;
 }
 
 .pdf-toc-editor-row {

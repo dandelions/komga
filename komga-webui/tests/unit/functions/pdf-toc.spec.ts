@@ -1,5 +1,6 @@
 import {
   buildPdfTocFromDraft,
+  clampPdfTocEditorHeight,
   clonePdfTocDraft,
   indentPdfTocDraft,
   outdentPdfTocDraft,
@@ -11,6 +12,12 @@ import {
 import {TocEntry} from '@/types/epub'
 
 describe('PDF table of contents', () => {
+  test('clamps editor height to one third of the viewport and a usable minimum', () => {
+    expect(clampPdfTocEditorHeight(600, 900)).toBe(300)
+    expect(clampPdfTocEditorHeight(100, 900)).toBe(120)
+    expect(clampPdfTocEditorHeight(100, 300)).toBe(100)
+  })
+
   test('converts manifest links to editable page entries and back', () => {
     const manifest = [
       {title: 'Part 1', href: '/api/v1/books/book-1/pages/2', children: [
