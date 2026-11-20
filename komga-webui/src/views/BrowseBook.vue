@@ -341,24 +341,6 @@
                   </v-menu>
                 </template>
                 <template v-else>
-                  <v-btn icon :disabled="!pdfTocSelectedPath" :aria-label="$t('browse_book.pdf_toc_insert')" :title="$t('browse_book.pdf_toc_insert')" @click="insertSelectedPdfTocEntry">
-                    <v-icon>mdi-plus</v-icon>
-                  </v-btn>
-                  <v-btn icon :disabled="!pdfTocSelectedPath || isSelectedPdfTocFirst" aria-label="Move up" @click="moveSelectedPdfTocEntry(-1)">
-                    <v-icon>mdi-arrow-up</v-icon>
-                  </v-btn>
-                  <v-btn icon :disabled="!pdfTocSelectedPath" aria-label="Move down" @click="moveSelectedPdfTocEntry(1)">
-                    <v-icon>mdi-arrow-down</v-icon>
-                  </v-btn>
-                  <v-btn icon :disabled="!pdfTocSelectedPath || isSelectedPdfTocFirst" :aria-label="$t('browse_book.pdf_toc_indent')" @click="indentSelectedPdfTocEntry">
-                    <v-icon>mdi-arrow-right</v-icon>
-                  </v-btn>
-                  <v-btn icon :disabled="!pdfTocSelectedPath || pdfTocSelectedPath.length < 2" :aria-label="$t('browse_book.pdf_toc_outdent')" @click="outdentSelectedPdfTocEntry">
-                    <v-icon>mdi-arrow-left</v-icon>
-                  </v-btn>
-                  <v-btn icon :disabled="!pdfTocSelectedPath" aria-label="Delete entry" @click="removeSelectedPdfTocEntry">
-                    <v-icon>mdi-delete</v-icon>
-                  </v-btn>
                   <v-btn text :loading="pdfTocSaving" @click="savePdfTocEditing">
                     {{ $t('browse_book.pdf_toc_save') }}
                   </v-btn>
@@ -382,6 +364,26 @@
                   @change="importPdfToc"
                 />
               </v-toolbar>
+              <div v-if="pdfTocEditing && !pdfTocMinimized" class="pdf-toc-editor-actions">
+                <v-btn icon small :disabled="!pdfTocSelectedPath" :aria-label="$t('browse_book.pdf_toc_insert')" :title="$t('browse_book.pdf_toc_insert')" @click="insertSelectedPdfTocEntry">
+                  <v-icon small>mdi-plus</v-icon>
+                </v-btn>
+                <v-btn icon small :disabled="!pdfTocSelectedPath || isSelectedPdfTocFirst" aria-label="Move up" @click="moveSelectedPdfTocEntry(-1)">
+                  <v-icon small>mdi-arrow-up</v-icon>
+                </v-btn>
+                <v-btn icon small :disabled="!pdfTocSelectedPath" aria-label="Move down" @click="moveSelectedPdfTocEntry(1)">
+                  <v-icon small>mdi-arrow-down</v-icon>
+                </v-btn>
+                <v-btn icon small :disabled="!pdfTocSelectedPath || isSelectedPdfTocFirst" :aria-label="$t('browse_book.pdf_toc_indent')" @click="indentSelectedPdfTocEntry">
+                  <v-icon small>mdi-arrow-right</v-icon>
+                </v-btn>
+                <v-btn icon small :disabled="!pdfTocSelectedPath || pdfTocSelectedPath.length < 2" :aria-label="$t('browse_book.pdf_toc_outdent')" @click="outdentSelectedPdfTocEntry">
+                  <v-icon small>mdi-arrow-left</v-icon>
+                </v-btn>
+                <v-btn icon small :disabled="!pdfTocSelectedPath" aria-label="Delete entry" @click="removeSelectedPdfTocEntry">
+                  <v-icon small>mdi-delete</v-icon>
+                </v-btn>
+              </div>
               <template v-if="!pdfTocMinimized">
               <v-alert v-if="pdfTocError" type="error" text dense class="ma-3">
                 {{ pdfTocError }}
@@ -1289,7 +1291,16 @@ export default Vue.extend({
 
 .pdf-toc-editor-list {
   max-width: 100%;
-  overflow-x: auto;
+  overflow-x: hidden;
+}
+
+.pdf-toc-editor-actions {
+  align-items: center;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.12);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 2px 8px;
 }
 
 .pdf-toc-editor-resize-handle {
@@ -1311,7 +1322,10 @@ export default Vue.extend({
 .pdf-toc-editor-row {
   display: flex;
   align-items: center;
-  min-width: 480px;
+  min-width: 0;
+  max-width: 100%;
+  padding-left: 8px !important;
+  padding-right: 8px !important;
 }
 
 .pdf-toc-editor-row .v-input {
@@ -1331,8 +1345,19 @@ export default Vue.extend({
 }
 
 .pdf-toc-page-field {
-  flex: 0 0 82px;
-  max-width: 82px;
+  flex: 0 0 72px;
+  max-width: 72px;
+}
+
+@media (max-width: 599px) {
+  .pdf-toc-editor-title {
+    font-size: 13px;
+  }
+
+  .pdf-toc-page-field {
+    flex: 0 0 60px;
+    max-width: 60px;
+  }
 }
 
 .pdf-toc-editor-title {
