@@ -595,8 +595,23 @@
             </v-menu>
           </template>
           <template v-else>
-            <v-btn icon dark :aria-label="$t('browse_book.pdf_toc_add')" :title="$t('browse_book.pdf_toc_add')" @click="addPdfTocEntry()">
+            <v-btn icon dark :disabled="!pdfTocSelectedPath" :aria-label="$t('browse_book.pdf_toc_insert')" :title="$t('browse_book.pdf_toc_insert')" @click="insertSelectedPdfTocEntry">
               <v-icon>mdi-plus</v-icon>
+            </v-btn>
+            <v-btn icon dark :disabled="!pdfTocSelectedPath || isSelectedPdfTocFirst" aria-label="Move up" @click="moveSelectedPdfTocEntry(-1)">
+              <v-icon>mdi-arrow-up</v-icon>
+            </v-btn>
+            <v-btn icon dark :disabled="!pdfTocSelectedPath" aria-label="Move down" @click="moveSelectedPdfTocEntry(1)">
+              <v-icon>mdi-arrow-down</v-icon>
+            </v-btn>
+            <v-btn icon dark :disabled="!pdfTocSelectedPath || isSelectedPdfTocFirst" :aria-label="$t('browse_book.pdf_toc_indent')" @click="indentSelectedPdfTocEntry">
+              <v-icon>mdi-arrow-right</v-icon>
+            </v-btn>
+            <v-btn icon dark :disabled="!pdfTocSelectedPath || pdfTocSelectedPath.length < 2" :aria-label="$t('browse_book.pdf_toc_outdent')" @click="outdentSelectedPdfTocEntry">
+              <v-icon>mdi-arrow-left</v-icon>
+            </v-btn>
+            <v-btn icon dark :disabled="!pdfTocSelectedPath" aria-label="Delete entry" @click="removeSelectedPdfTocEntry">
+              <v-icon>mdi-delete</v-icon>
             </v-btn>
             <v-btn text dark :loading="pdfTocSaving" @click="savePdfTocEditing">{{ $t('browse_book.pdf_toc_save') }}</v-btn>
             <v-btn
@@ -635,7 +650,8 @@
               :key="row.path.join('-')"
               class="pdf-toc-editor-row"
               :style="{height: `${pdfTocEditorRowHeight}px`}"
-              @click="focusPdfTocEntry(row.path)"
+              :class="{ 'pdf-toc-editor-row-selected': isPdfTocPathSelected(row.path) }"
+              @click="selectPdfTocEntry(row.path)"
             >
               <v-btn
                 v-if="row.entry.children && row.entry.children.length"
@@ -649,61 +665,29 @@
                 <v-icon small>{{ isPdfTocPathExpanded(row.path) ? 'mdi-chevron-down' : 'mdi-chevron-right' }}</v-icon>
               </v-btn>
               <div class="pdf-toc-editor-indent" :style="{width: `${row.depth * 20}px`}" />
-              <v-text-field
-                v-model="row.entry.title"
-                dense
-                hide-details
-                :label="$t('browse_book.pdf_toc_title')"
-                class="mr-2"
-              />
-              <v-text-field
-                v-model.number="row.entry.page"
-                dense
-                hide-details
-                type="number"
-                min="1"
-                :max="pagesCount"
-                :label="$t('browse_book.pdf_toc_page')"
-                class="pdf-toc-page-field mr-1"
-              />
-              <v-btn icon small :disabled="row.path[row.path.length - 1] === 0" aria-label="上移" @click="movePdfTocEntry(row.path, -1)">
-                <v-icon small>mdi-arrow-up</v-icon>
-              </v-btn>
-              <v-btn icon small aria-label="下移" @click="movePdfTocEntry(row.path, 1)">
-                <v-icon small>mdi-arrow-down</v-icon>
-              </v-btn>
-              <v-btn
-                icon
-                small
-                :aria-label="$t('browse_book.pdf_toc_insert')"
-                :title="$t('browse_book.pdf_toc_insert')"
-                @click="insertPdfTocEntry(row.path)"
-              >
-                <v-icon small>mdi-plus</v-icon>
-              </v-btn>
-              <v-btn
-                icon
-                small
-                :disabled="row.path[row.path.length - 1] === 0"
-                :aria-label="$t('browse_book.pdf_toc_indent')"
-                :title="$t('browse_book.pdf_toc_indent')"
-                @click="indentPdfTocEntry(row.path)"
-              >
-                <v-icon small>mdi-arrow-right</v-icon>
-              </v-btn>
-              <v-btn
-                icon
-                small
-                :disabled="row.path.length < 2"
-                :aria-label="$t('browse_book.pdf_toc_outdent')"
-                :title="$t('browse_book.pdf_toc_outdent')"
-                @click="outdentPdfTocEntry(row.path)"
-              >
-                <v-icon small>mdi-arrow-left</v-icon>
-              </v-btn>
-              <v-btn icon small aria-label="删除目录项" @click="removePdfTocEntry(row.path)">
-                <v-icon small>mdi-delete</v-icon>
-              </v-btn>
+              <template v-if="isPdfTocPathSelected(row.path)">
+                <v-text-field
+                  v-model="row.entry.title"
+                  dense
+                  hide-details
+                  :label="$t('browse_book.pdf_toc_title')"
+                  class="mr-2"
+                />
+                <v-text-field
+                  v-model.number="row.entry.page"
+                  dense
+                  hide-details
+                  type="number"
+                  min="1"
+                  :max="pagesCount"
+                  :label="$t('browse_book.pdf_toc_page')"
+                  class="pdf-toc-page-field mr-1"
+                />
+              </template>
+              <template v-else>
+                <span class="pdf-toc-editor-title">{{ row.entry.title }}</span>
+                <span class="pdf-toc-editor-page">{{ row.entry.page || '' }}</span>
+              </template>
             </v-list-item>
             <v-btn v-if="pdfTocDraftRows.length === 0" text class="ma-4" @click="addPdfTocEntry()">
               <v-icon left>mdi-plus</v-icon>{{ $t('browse_book.pdf_toc_add') }}
@@ -1431,6 +1415,7 @@ export default Vue.extend({
       pdfTocError: '',
       pdfTocDraft: [] as PdfTocDraftEntry[],
       pdfTocActivePath: undefined as number[] | undefined,
+      pdfTocSelectedPath: undefined as number[] | undefined,
       pdfTocOverrides: {} as Record<string, PdfTocDraftEntry[]>,
       pdfTocRequestId: 0,
       showToolbars: false,
@@ -1770,6 +1755,9 @@ export default Vue.extend({
     },
     pdfTocDraftRows() {
       return flattenPdfTocDraft(this.pdfTocDraft, this.pdfTocActivePath)
+    },
+    isSelectedPdfTocFirst(): boolean {
+      return !this.pdfTocSelectedPath || this.pdfTocSelectedPath[this.pdfTocSelectedPath.length - 1] === 0
     },
     pdfTocEditorRowHeight(): number {
       return PDF_TOC_EDITOR_ROW_HEIGHT
@@ -3003,6 +2991,7 @@ export default Vue.extend({
       this.pdfTocError = ''
       this.pdfTocDraft = []
       this.pdfTocActivePath = undefined
+      this.pdfTocSelectedPath = undefined
       this.pdfToc = []
       this.$debug('[setup]', `bookId:${bookId}`, requestedPage !== undefined ? `page:${requestedPage}` : 'page:auto')
       this.reflowCache = {}
@@ -3307,6 +3296,7 @@ export default Vue.extend({
         this.pdfTocOverrides = this.readServerPdfTocOverrides()
         this.pdfTocDraft = entries
         this.pdfTocActivePath = countPdfTocEntries(this.pdfTocDraft) > PDF_TOC_EDIT_EXPAND_LIMIT ? [] : undefined
+        this.pdfTocSelectedPath = undefined
         this.pdfTocMinimized = false
         this.pdfTocEditing = true
       } catch (e) {
@@ -3321,12 +3311,22 @@ export default Vue.extend({
       this.pdfTocError = ''
       this.pdfTocDraft = []
       this.pdfTocActivePath = undefined
+      this.pdfTocSelectedPath = undefined
     },
     onPdfTocEditorScroll(event: Event) {
       this.pdfTocEditorScrollTop = (event.target as HTMLElement).scrollTop
     },
     focusPdfTocEntry(path: number[]) {
       this.pdfTocActivePath = [...path]
+    },
+    selectPdfTocEntry(path: number[]) {
+      this.pdfTocSelectedPath = [...path]
+      this.pdfTocActivePath = [...path]
+    },
+    isPdfTocPathSelected(path: number[]): boolean {
+      if (!this.pdfTocSelectedPath) return false
+      return path.length === this.pdfTocSelectedPath.length
+        && path.every((index, depth) => this.pdfTocSelectedPath?.[depth] === index)
     },
     isPdfTocPathExpanded(path: number[]): boolean {
       if (!this.pdfTocActivePath) return true
@@ -3371,12 +3371,44 @@ export default Vue.extend({
       list.splice(target, 0, entry)
     },
     indentPdfTocEntry(path: number[]) {
+      const previousChildren = this.pdfTocListAt(path.slice(0, -1))[path[path.length - 1] - 1]?.children?.length || 0
       this.pdfTocDraft = indentPdfTocDraft(this.pdfTocDraft, path)
+      this.pdfTocSelectedPath = [...path.slice(0, -1), path[path.length - 1] - 1, previousChildren]
       this.pdfTocError = ''
     },
     outdentPdfTocEntry(path: number[]) {
       this.pdfTocDraft = outdentPdfTocDraft(this.pdfTocDraft, path)
+      this.pdfTocSelectedPath = [...path.slice(0, -2), path[path.length - 2] + 1]
       this.pdfTocError = ''
+    },
+    insertSelectedPdfTocEntry() {
+      if (!this.pdfTocSelectedPath) return
+      this.insertPdfTocEntry(this.pdfTocSelectedPath)
+      const path = [...this.pdfTocSelectedPath]
+      path[path.length - 1] += 1
+      this.pdfTocSelectedPath = path
+      this.pdfTocActivePath = [...path]
+    },
+    moveSelectedPdfTocEntry(direction: number) {
+      if (!this.pdfTocSelectedPath) return
+      this.movePdfTocEntry(this.pdfTocSelectedPath, direction)
+      const path = [...this.pdfTocSelectedPath]
+      path[path.length - 1] += direction
+      this.pdfTocSelectedPath = path
+      this.pdfTocActivePath = [...path]
+    },
+    indentSelectedPdfTocEntry() {
+      if (!this.pdfTocSelectedPath) return
+      this.indentPdfTocEntry(this.pdfTocSelectedPath)
+    },
+    outdentSelectedPdfTocEntry() {
+      if (!this.pdfTocSelectedPath) return
+      this.outdentPdfTocEntry(this.pdfTocSelectedPath)
+    },
+    removeSelectedPdfTocEntry() {
+      if (!this.pdfTocSelectedPath) return
+      this.removePdfTocEntry(this.pdfTocSelectedPath)
+      this.pdfTocSelectedPath = undefined
     },
     async savePdfTocEditing() {
       const bookId = this.bookId
@@ -3388,6 +3420,7 @@ export default Vue.extend({
         if (this.bookId !== bookId) return
         this.pdfToc = this.buildPdfToc(normalized, bookId)
         this.pdfTocDraft = clonePdfTocDraft(normalized)
+        this.pdfTocSelectedPath = undefined
         this.pdfTocEditing = false
       } catch (e) {
         if (this.bookId === bookId) this.pdfTocError = e instanceof Error ? e.message : String(e)
@@ -4924,6 +4957,28 @@ body.html-reader::-webkit-scrollbar {
 .pdf-toc-page-field {
   flex: 0 0 82px;
   max-width: 82px;
+}
+
+.pdf-toc-editor-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pdf-toc-editor-page {
+  flex: 0 0 64px;
+  text-align: right;
+}
+
+.pdf-toc-editor-row {
+  cursor: pointer;
+}
+
+.pdf-toc-editor-row-selected {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
 }
 
 </style>
