@@ -364,7 +364,23 @@
               </v-alert>
               <v-progress-linear v-if="pdfTocLoading || pdfTocSaving" indeterminate color="primary" />
               <v-list v-else-if="pdfTocEditing" dense class="pdf-toc-editor-list">
-                <v-list-item v-for="row in pdfTocDraftRows" :key="row.path.join('-')" class="pdf-toc-editor-row">
+                <v-list-item
+                  v-for="row in pdfTocDraftRows"
+                  :key="row.path.join('-')"
+                  class="pdf-toc-editor-row"
+                  @click="focusPdfTocEntry(row.path)"
+                >
+                  <v-btn
+                    v-if="row.entry.children && row.entry.children.length"
+                    icon
+                    small
+                    class="pdf-toc-editor-toggle"
+                    :aria-label="$t('browse_book.pdf_toc_focus')"
+                    :title="$t('browse_book.pdf_toc_focus')"
+                    @click.stop="focusPdfTocEntry(row.path)"
+                  >
+                    <v-icon small>{{ isPdfTocPathExpanded(row.path) ? 'mdi-chevron-down' : 'mdi-chevron-right' }}</v-icon>
+                  </v-btn>
                   <div class="pdf-toc-editor-indent" :style="{width: `${row.depth * 20}px`}" />
                   <v-text-field
                     v-model="row.entry.title"
@@ -679,6 +695,7 @@ export default Vue.extend({
       pdfTocSaving: false,
       pdfTocError: '',
       pdfTocDraft: [] as PdfTocDraftEntry[],
+      pdfTocActivePath: undefined as number[] | undefined,
       pdfTocOverrides: {} as Record<string, PdfTocDraftEntry[]>,
       pdfTocRequestId: 0,
       pdfToc: [] as TocEntry[],
@@ -721,6 +738,7 @@ export default Vue.extend({
       this.pdfTocEditing = false
       this.pdfTocError = ''
       this.pdfTocDraft = []
+      this.pdfTocActivePath = undefined
       this.pdfToc = []
       this.loadBook(to.params.bookId)
     }
@@ -738,7 +756,7 @@ export default Vue.extend({
       return flattenToc(this.pdfToc, 1)
     },
     pdfTocDraftRows() {
-      return flattenPdfTocDraft(this.pdfTocDraft)
+      return flattenPdfTocDraft(this.pdfTocDraft, this.pdfTocActivePath)
     },
     isAdmin(): boolean {
       return this.$store.getters.meAdmin
@@ -969,6 +987,7 @@ export default Vue.extend({
     },
     startPdfTocEditing() {
       this.pdfTocDraft = clonePdfTocDraft(createPdfTocDraft(this.pdfToc, entry => this.getPageFromPdfTocEntry(entry as TocEntry)))
+      this.pdfTocActivePath = undefined
       this.pdfTocEditing = true
       this.pdfTocError = ''
     },
@@ -976,6 +995,15 @@ export default Vue.extend({
       this.pdfTocEditing = false
       this.pdfTocError = ''
       this.pdfTocDraft = []
+      this.pdfTocActivePath = undefined
+    },
+    focusPdfTocEntry(path: number[]) {
+      this.pdfTocActivePath = [...path]
+    },
+    isPdfTocPathExpanded(path: number[]): boolean {
+      if (!this.pdfTocActivePath) return true
+      return this.pdfTocActivePath.every((index, depth) => path[depth] === index)
+        || path.every((index, depth) => this.pdfTocActivePath?.[depth] === index)
     },
     pdfTocEntryAt(path: number[]): PdfTocDraftEntry | undefined {
       let list = this.pdfTocDraft
@@ -1118,6 +1146,10 @@ export default Vue.extend({
 
 .pdf-toc-editor-row .v-input {
   min-width: 0;
+}
+
+.pdf-toc-editor-toggle {
+  flex: 0 0 32px;
 }
 
 .pdf-toc-editor-indent {

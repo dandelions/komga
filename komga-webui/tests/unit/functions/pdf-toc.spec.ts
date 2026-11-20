@@ -29,6 +29,21 @@ describe('PDF table of contents', () => {
     expect(rebuilt[0].children?.[0].href).toBe('/api/v1/books/book-1/pages/4')
   })
 
+  test('keeps only the active branch expanded while showing sibling entries', () => {
+    const source: PdfTocDraftEntry[] = [
+      {title: 'Part 1', children: [{title: 'Chapter 1', children: [{title: 'Section 1'}]}]},
+      {title: 'Part 2', children: [{title: 'Chapter 2', children: [{title: 'Section 2'}]}]},
+    ]
+    const rows = flattenPdfTocDraft(source, [0, 0])
+
+    expect(rows.map(row => [row.path, row.depth])).toEqual([
+      [[0], 0],
+      [[0, 0], 1],
+      [[0, 0, 0], 2],
+      [[1], 0],
+    ])
+  })
+
   test('keeps nested paths for adding children repeatedly', () => {
     const source: PdfTocDraftEntry[] = [{title: 'Part'}]
     source[0].children = [{title: 'Chapter'}]

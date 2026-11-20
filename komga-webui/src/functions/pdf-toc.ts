@@ -36,13 +36,19 @@ export function buildPdfTocFromDraft<T extends {title: string, href?: string, ch
   } as T))
 }
 
-export function flattenPdfTocDraft(entries: PdfTocDraftEntry[]): PdfTocDraftRow[] {
+export function flattenPdfTocDraft(entries: PdfTocDraftEntry[], activePath?: number[]): PdfTocDraftRow[] {
   const rows: PdfTocDraftRow[] = []
+  const isPrefix = (path: number[]): boolean => {
+    if (!activePath) return true
+    const pathContainsActive = activePath.every((index, depth) => path[depth] === index)
+    const pathContainsParent = path.every((index, depth) => activePath[depth] === index)
+    return pathContainsActive || pathContainsParent
+  }
   const visit = (items: PdfTocDraftEntry[], parentPath: number[], depth: number) => {
     items.forEach((entry, index) => {
       const path = [...parentPath, index]
       rows.push({entry, path, depth})
-      if (entry.children?.length) visit(entry.children, path, depth + 1)
+      if (entry.children?.length && isPrefix(path)) visit(entry.children, path, depth + 1)
     })
   }
   visit(entries, [], 0)

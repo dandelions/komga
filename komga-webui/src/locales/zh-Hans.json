@@ -188,6 +188,7 @@
     "pdf_toc_edit": "编辑目录",
     "pdf_toc_add": "添加目录项",
     "pdf_toc_add_child": "添加子目录",
+    "pdf_toc_focus": "展开当前目录并收起其他同级目录",
     "pdf_toc_indent": "移入上一个目录的子目录",
     "pdf_toc_outdent": "提升为父目录的同级目录",
     "pdf_toc_title": "目录标题",
