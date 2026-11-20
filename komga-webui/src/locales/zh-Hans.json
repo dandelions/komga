@@ -194,6 +194,8 @@
     "pdf_toc_title": "目录标题",
     "pdf_toc_page": "页码",
     "pdf_toc_save": "保存",
+    "pdf_toc_minimize": "临时收起目录编辑器",
+    "pdf_toc_restore": "恢复目录编辑器",
     "pdf_toc_cancel": "取消编辑",
     "pdf_toc_import": "导入目录 JSON",
     "pdf_toc_export": "导出目录 JSON",

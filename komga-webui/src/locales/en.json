@@ -194,6 +194,8 @@
     "pdf_toc_title": "Title",
     "pdf_toc_page": "Page",
     "pdf_toc_save": "Save",
+    "pdf_toc_minimize": "Minimize table of contents editor",
+    "pdf_toc_restore": "Restore table of contents editor",
     "pdf_toc_cancel": "Cancel editing",
     "pdf_toc_import": "Import table of contents JSON",
     "pdf_toc_export": "Export table of contents JSON",

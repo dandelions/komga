@@ -347,6 +347,14 @@
                   <v-btn text :loading="pdfTocSaving" @click="savePdfTocEditing">
                     {{ $t('browse_book.pdf_toc_save') }}
                   </v-btn>
+                  <v-btn
+                    icon
+                    :aria-label="$t(pdfTocMinimized ? 'browse_book.pdf_toc_restore' : 'browse_book.pdf_toc_minimize')"
+                    :title="$t(pdfTocMinimized ? 'browse_book.pdf_toc_restore' : 'browse_book.pdf_toc_minimize')"
+                    @click="pdfTocMinimized = !pdfTocMinimized"
+                  >
+                    <v-icon>{{ pdfTocMinimized ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
+                  </v-btn>
                   <v-btn icon :aria-label="$t('browse_book.pdf_toc_cancel')" :title="$t('browse_book.pdf_toc_cancel')" @click="cancelPdfTocEditing">
                     <v-icon>mdi-close</v-icon>
                   </v-btn>
@@ -359,6 +367,7 @@
                   @change="importPdfToc"
                 />
               </v-toolbar>
+              <template v-if="!pdfTocMinimized">
               <v-alert v-if="pdfTocError" type="error" text dense class="ma-3">
                 {{ pdfTocError }}
               </v-alert>
@@ -453,6 +462,7 @@
                   <v-icon left small>mdi-plus</v-icon>{{ $t('browse_book.pdf_toc_add') }}
                 </v-btn>
               </v-alert>
+              </template>
             </v-card>
           </v-col>
         </v-row>
@@ -692,6 +702,7 @@ export default Vue.extend({
       pdfTocLoading: false,
       pdfTocLoaded: false,
       pdfTocEditing: false,
+      pdfTocMinimized: false,
       pdfTocSaving: false,
       pdfTocError: '',
       pdfTocDraft: [] as PdfTocDraftEntry[],
@@ -736,6 +747,7 @@ export default Vue.extend({
       this.pdfTocSaving = false
       this.pdfTocLoaded = false
       this.pdfTocEditing = false
+      this.pdfTocMinimized = false
       this.pdfTocError = ''
       this.pdfTocDraft = []
       this.pdfTocActivePath = undefined
@@ -988,11 +1000,13 @@ export default Vue.extend({
     startPdfTocEditing() {
       this.pdfTocDraft = clonePdfTocDraft(createPdfTocDraft(this.pdfToc, entry => this.getPageFromPdfTocEntry(entry as TocEntry)))
       this.pdfTocActivePath = undefined
+      this.pdfTocMinimized = false
       this.pdfTocEditing = true
       this.pdfTocError = ''
     },
     cancelPdfTocEditing() {
       this.pdfTocEditing = false
+      this.pdfTocMinimized = false
       this.pdfTocError = ''
       this.pdfTocDraft = []
       this.pdfTocActivePath = undefined
