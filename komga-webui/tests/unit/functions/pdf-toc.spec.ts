@@ -3,6 +3,7 @@ import {
   clampPdfTocEditorHeight,
   clonePdfTocDraft,
   indentPdfTocDraft,
+  insertPdfTocDraftAfter,
   outdentPdfTocDraft,
   createPdfTocDraft,
   flattenPdfTocDraft,
@@ -77,6 +78,17 @@ describe('PDF table of contents', () => {
       page: undefined,
       children: [{title: 'Part 2', page: undefined, children: [{title: 'Chapter 2', page: undefined}]}],
     }])
+  })
+
+  test('inserts a sibling after the current entry without nesting it', () => {
+    const source: PdfTocDraftEntry[] = [{title: 'Part', children: [{title: 'Chapter'}]}, {title: 'Next'}]
+    const inserted = insertPdfTocDraftAfter(source, [0])
+
+    expect(inserted).toEqual([
+      {title: 'Part', page: undefined, children: [{title: 'Chapter', page: undefined}]},
+      {title: '', page: undefined},
+      {title: 'Next', page: undefined},
+    ])
   })
 
   test('outdents an entry after its parent and preserves its children', () => {

@@ -109,6 +109,20 @@ export function outdentPdfTocDraft(entries: PdfTocDraftEntry[], path: number[]):
   return result
 }
 
+export function insertPdfTocDraftAfter(entries: PdfTocDraftEntry[], path: number[]): PdfTocDraftEntry[] {
+  const result = clonePdfTocDraft(entries)
+  if (path.length === 0) {
+    result.push({title: '', page: undefined})
+    return result
+  }
+  const list = pdfTocDraftListAt(result, path.slice(0, -1))
+  const index = path[path.length - 1]
+  if (!list || index < 0 || index >= list.length) return result
+
+  list.splice(index + 1, 0, {title: '', page: undefined})
+  return result
+}
+
 export function normalizePdfTocDraft(
   value: unknown,
   pageCount: number,

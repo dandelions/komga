@@ -673,9 +673,9 @@
               <v-btn
                 icon
                 small
-                :aria-label="$t('browse_book.pdf_toc_add_child')"
-                :title="$t('browse_book.pdf_toc_add_child')"
-                @click="addPdfTocEntry(row.path)"
+                :aria-label="$t('browse_book.pdf_toc_insert')"
+                :title="$t('browse_book.pdf_toc_insert')"
+                @click="insertPdfTocEntry(row.path)"
               >
                 <v-icon small>mdi-plus</v-icon>
               </v-btn>
@@ -1232,6 +1232,7 @@ import {
   clonePdfTocDraft,
   createPdfTocDraft,
   indentPdfTocDraft,
+  insertPdfTocDraftAfter,
   outdentPdfTocDraft,
   flattenPdfTocDraft,
   normalizePdfTocDraft,
@@ -3307,6 +3308,10 @@ export default Vue.extend({
       list.push({title: '', page: undefined})
       this.pdfTocError = ''
     },
+    insertPdfTocEntry(path: number[]) {
+      this.pdfTocDraft = insertPdfTocDraftAfter(this.pdfTocDraft, path)
+      this.pdfTocError = ''
+    },
     removePdfTocEntry(path: number[]) {
       const list = this.pdfTocListAt(path.slice(0, -1))
       list.splice(path[path.length - 1], 1)
@@ -4856,6 +4861,10 @@ body.html-reader::-webkit-scrollbar {
 
 .pdf-toc-editor-row .v-input {
   min-width: 0;
+}
+
+.pdf-toc-editor-row > .v-btn {
+  flex: 0 0 32px;
 }
 
 .pdf-toc-editor-toggle {
