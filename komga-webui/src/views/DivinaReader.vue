@@ -1303,7 +1303,7 @@ function defaultReflowSettings(): any {
     columnGap: 15,
     wordGap: 3,
     strokeStrength: 0.1,
-    contrastEnhancement: false,
+    contrastEnhancement: true,
     matchBackground: false,
     matchBackgroundMode: 'grayscale',
     optimizeBackground: 'none',
@@ -1314,7 +1314,7 @@ function defaultReflowSettings(): any {
     blockSpacing: 6,
     verticalText: false,
     verticalDirection: 'rtl',
-    formulaProtection: true,
+    formulaProtection: false,
     marginTop: 0,
     marginRight: 0,
     marginBottom: 0,
@@ -1330,7 +1330,7 @@ function defaultReflowSettings(): any {
       maxColumns: 2,
       threshold: 185,
       strokeStrength: 0.8,
-      contrastEnhancement: false,
+      contrastEnhancement: true,
       matchBackground: false,
       matchBackgroundMode: 'grayscale',
       optimizeBackground: 'none',
@@ -1363,7 +1363,7 @@ function defaultReaderImageSettings(): any {
     strokeStrength: 0,
     rotation: 0,
     skewCorrection: 0,
-    contrastEnhancement: false,
+    contrastEnhancement: true,
     bleachText: false,
     contrastLevel: 100,
     cropRegionsByParity: defaultCropRegionsByParity(false),
@@ -1482,7 +1482,7 @@ export default Vue.extend({
         strokeStrength: 0,
         rotation: 0,
         skewCorrection: 0,
-        contrastEnhancement: false,
+        contrastEnhancement: true,
         bleachText: false,
         contrastLevel: 100,
         cropRegionsByParity: defaultCropRegionsByParity(false),
@@ -2012,7 +2012,7 @@ export default Vue.extend({
         algorithmMode: this.reflowSettings.algorithmMode,
         verticalText: this.reflowSettings.verticalText,
         verticalDirection: this.reflowSettings.verticalDirection,
-        formulaProtection: this.reflowSettings.formulaProtection !== false,
+        formulaProtection: this.reflowSettings.formulaProtection === true,
         marginTop: this.reflowSettings.marginTop,
         marginRight: this.reflowSettings.marginRight,
         marginBottom: this.reflowSettings.marginBottom,
@@ -2103,7 +2103,7 @@ export default Vue.extend({
     },
     readerContrastEnhancement: {
       get: function (): boolean {
-        return this.settings.contrastEnhancement === true
+        return this.settings.contrastEnhancement !== false
       },
       set: function (contrastEnhancement: boolean): void {
         const changed = this.settings.contrastEnhancement !== (contrastEnhancement === true)
@@ -2340,7 +2340,7 @@ export default Vue.extend({
         strokeStrength: Math.round(Math.max(0, Math.min(3, Number(settings.strokeStrength) || 0)) * 10) / 10,
         rotation: this.normalizedReaderRotation(settings.rotation),
         skewCorrection: this.normalizedReaderSkewCorrection(settings.skewCorrection),
-        contrastEnhancement: settings.contrastEnhancement === true,
+        contrastEnhancement: settings.contrastEnhancement !== false,
         bleachText: settings.bleachText === true,
         contrastLevel: Math.round(Math.max(50, Math.min(200, Number(settings.contrastLevel) || 100))),
         cropRegionsByParity: this.normalizedReaderCropRegionsByParity(settings.cropRegionsByParity),
@@ -3606,7 +3606,7 @@ export default Vue.extend({
         columnGap: this.clampReflowNumber(settings.columnGap, 5, 80, this.reflowSettings.columnGap),
         wordGap: this.clampReflowNumber(settings.wordGap, 1, 30, this.reflowSettings.wordGap),
         strokeStrength: Math.round(this.clampReflowNumber(settings.strokeStrength, 0.1, 3, this.reflowSettings.strokeStrength) * 10) / 10,
-        contrastEnhancement: settings.contrastEnhancement === true,
+        contrastEnhancement: settings.contrastEnhancement !== false,
         matchBackground: settings.matchBackground === true,
         matchBackgroundMode: settings.matchBackgroundMode === 'original'
           ? 'original'
@@ -3629,7 +3629,7 @@ export default Vue.extend({
         blockSpacing: Math.round(this.clampReflowNumber(settings.blockSpacing, 0, 24, this.reflowSettings.blockSpacing)),
         verticalText: typeof settings.verticalText === 'boolean' ? settings.verticalText : this.reflowSettings.verticalText,
         verticalDirection: settings.verticalDirection === 'ltr' ? 'ltr' : 'rtl',
-        formulaProtection: settings.formulaProtection !== false,
+        formulaProtection: settings.formulaProtection === true,
         marginTop: this.clampReflowNumber(settings.marginTop, 0, 45, this.reflowSettings.marginTop),
         marginRight: this.clampReflowNumber(settings.marginRight, 0, 45, this.reflowSettings.marginRight),
         marginBottom: this.clampReflowNumber(settings.marginBottom, 0, 45, this.reflowSettings.marginBottom),
@@ -3647,7 +3647,7 @@ export default Vue.extend({
         maxColumns: Math.round(this.clampReflowNumber(settings.maxColumns, 1, 4, this.reflowSettings.k2Settings.maxColumns)),
         threshold: this.clampReflowNumber(settings.threshold, 50, 230, this.reflowSettings.k2Settings.threshold),
         strokeStrength: Math.round(this.clampReflowNumber(settings.strokeStrength, 0, 3, this.reflowSettings.k2Settings.strokeStrength) * 10) / 10,
-        contrastEnhancement: settings.contrastEnhancement === true,
+        contrastEnhancement: settings.contrastEnhancement !== false,
         matchBackground: settings.matchBackground === true,
         matchBackgroundMode: settings.matchBackgroundMode === 'original'
           ? 'original'
@@ -3667,7 +3667,7 @@ export default Vue.extend({
           : 'none',
         wordGap: Math.round(this.clampReflowNumber(settings.wordGap, 1, 30, this.reflowSettings.k2Settings.wordGap)),
         outputPadding: Math.round(this.clampReflowNumber(settings.outputPadding, 0, 48, this.reflowSettings.k2Settings.outputPadding)),
-        formulaProtection: settings.formulaProtection !== false,
+        formulaProtection: settings.formulaProtection === true,
       }
     },
     normalizedReflowCropRois(cropRoisByParity: any): Record<string, any> {
@@ -3996,13 +3996,13 @@ export default Vue.extend({
       this.reflowSettings.algorithmMode = algorithmMode === 'koreader' ? 'koreader' : 'original'
     },
     setReflowFormulaProtection(formulaProtection: boolean) {
-      this.reflowSettings.formulaProtection = formulaProtection !== false
+      this.reflowSettings.formulaProtection = formulaProtection === true
       if (this.reflowSettings.k2Settings) {
-        this.reflowSettings.k2Settings.formulaProtection = formulaProtection !== false
+        this.reflowSettings.k2Settings.formulaProtection = formulaProtection === true
       }
     },
     setReflowContrastEnhancement(contrastEnhancement: boolean) {
-      this.reflowSettings.contrastEnhancement = contrastEnhancement === true
+      this.reflowSettings.contrastEnhancement = contrastEnhancement !== false
     },
     setReflowMatchBackground(matchBackground: boolean) {
       this.reflowSettings.matchBackground = matchBackground === true

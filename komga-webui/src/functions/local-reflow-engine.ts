@@ -1009,7 +1009,7 @@ export function detectLines(
   const avgHeight = heights.length > 0 ? heights.reduce((a, b) => a + b, 0) / heights.length : 36
 
   // Merge intra-formula / fraction lines where gap is small
-  const formulaProtection = options?.formulaProtection !== false
+  const formulaProtection = options?.formulaProtection === true
   const maxFormulaGap = formulaProtection ? Math.max(12, Math.round(avgHeight * 0.22)) : 0
 
   const lines: Array<{start: number, end: number}> = []

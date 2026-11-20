@@ -1185,8 +1185,8 @@ export default Vue.extend({
       pendingVerticalText: false,
       pendingVerticalDirection: 'rtl' as VerticalDirection,
       pendingStrokeStrength: 0.1,
-      pendingContrastEnhancement: false,
-      pendingFormulaProtection: true,
+      pendingContrastEnhancement: true,
+      pendingFormulaProtection: false,
       pendingMatchBackground: false,
       pendingMatchBackgroundMode: 'grayscale' as MatchBackgroundMode,
       pendingOptimizeBackground: 'none' as DocumentRemoveBackgroundMode,
@@ -1301,7 +1301,7 @@ export default Vue.extend({
       return REFLOW_IMAGE_QUALITY_OPTIONS
     },
     contrastEnhancement(): boolean {
-      return this.options.contrastEnhancement === true
+      return this.options.contrastEnhancement !== false
     },
     matchBackground(): boolean {
       return this.options.matchBackground === true
@@ -1359,10 +1359,10 @@ export default Vue.extend({
       return this.roundStrokeStrength(this.pendingStrokeStrength)
     },
     controlContrastEnhancement(): boolean {
-      return this.pendingContrastEnhancement === true
+      return this.pendingContrastEnhancement !== false
     },
     controlFormulaProtection(): boolean {
-      return this.pendingFormulaProtection !== false
+      return this.pendingFormulaProtection === true
     },
     controlMatchBackground(): boolean {
       return this.pendingMatchBackground === true
@@ -1930,7 +1930,7 @@ export default Vue.extend({
       if (force || !previous || snapshot.verticalDirection !== previous.verticalDirection) this.pendingVerticalDirection = snapshot.verticalDirection
       if (force || !previous || snapshot.strokeStrength !== previous.strokeStrength) this.pendingStrokeStrength = snapshot.strokeStrength
       if (force || !previous || snapshot.contrastEnhancement !== previous.contrastEnhancement) this.pendingContrastEnhancement = snapshot.contrastEnhancement
-      if (force || !previous || snapshot.formulaProtection !== previous.formulaProtection) this.pendingFormulaProtection = snapshot.formulaProtection !== false
+      if (force || !previous || snapshot.formulaProtection !== previous.formulaProtection) this.pendingFormulaProtection = snapshot.formulaProtection === true
       if (force || !previous || snapshot.matchBackground !== previous.matchBackground) this.pendingMatchBackground = snapshot.matchBackground
       if (force || !previous || snapshot.matchBackgroundMode !== previous.matchBackgroundMode) this.pendingMatchBackgroundMode = snapshot.matchBackgroundMode
       if (force || !previous || snapshot.optimizeBackground !== previous.optimizeBackground || snapshot.removeBackground !== previous.removeBackground) {
@@ -1955,7 +1955,7 @@ export default Vue.extend({
         verticalText: this.options.verticalText === true,
         verticalDirection: this.options.verticalDirection === 'ltr' ? 'ltr' : 'rtl',
         strokeStrength: this.roundStrokeStrength(this.options.strokeStrength),
-        contrastEnhancement: this.options.contrastEnhancement === true,
+        contrastEnhancement: this.options.contrastEnhancement !== false,
         matchBackground: this.options.matchBackground === true,
         matchBackgroundMode: this.options.matchBackgroundMode === 'original'
           ? 'original'
@@ -1980,7 +1980,7 @@ export default Vue.extend({
         cropRoisKey: JSON.stringify(this.options.cropRoisByParity || {}),
         manualImageRoisKey: JSON.stringify(this.options.manualImageRoisByPage || {}),
         deskewAnalysisRoisKey: JSON.stringify(this.options.deskewAnalysisRoisByParity || {}),
-        formulaProtection: this.options?.formulaProtection !== false,
+        formulaProtection: this.options?.formulaProtection === true,
       }
     },
     async reflow() {
@@ -2097,7 +2097,7 @@ export default Vue.extend({
             marginLeft: this.clampPercent(this.options.marginLeft),
             darkDisplay: this.darkDisplay,
             rotation: 0,
-            formulaProtection: this.options?.formulaProtection !== false,
+            formulaProtection: this.options?.formulaProtection === true,
             deskewAnalysisRoi: this.currentDeskewAnalysisRoi()
               ? this.scaleRoi(this.currentDeskewAnalysisRoi() as Roi, analysisSource.scale, imageData.width, imageData.height)
               : undefined,
@@ -6154,7 +6154,7 @@ export default Vue.extend({
 
       const heights = rawLines.map(l => l.end - l.start).filter(h => h >= 16)
       const avgHeight = heights.length > 0 ? heights.reduce((a, b) => a + b, 0) / heights.length : 36
-      const formulaProtection = this.options?.formulaProtection !== false
+      const formulaProtection = this.options?.formulaProtection === true
       const maxFormulaGap = formulaProtection ? Math.max(12, Math.round(avgHeight * 0.22)) : 0
 
       const lines = [] as Line[]
@@ -6274,7 +6274,7 @@ export default Vue.extend({
       const singleGlyphWidthLimit = glyphHeight * (hasSmallFragment || hasNarrowVerticalStroke ? 2.25 : 1.42)
       if (union.w > singleGlyphWidthLimit) return false
 
-      const formulaProtection = this.options?.formulaProtection !== false
+      const formulaProtection = this.options?.formulaProtection === true
       const aligned = overlap >= minHeight * 0.2 ||
         centerGap <= glyphHeight * (formulaProtection ? 0.75 : 0.56) ||
         hasSmallFragment ||

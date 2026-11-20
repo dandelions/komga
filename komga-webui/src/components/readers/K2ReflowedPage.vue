@@ -434,7 +434,7 @@ export default Vue.extend({
     maxColumns: 2,
     threshold: DEFAULT_THRESHOLD,
     strokeStrength: 0.8,
-    contrastEnhancement: false,
+    contrastEnhancement: true,
     matchBackground: false,
     matchBackgroundMode: 'grayscale' as MatchBackgroundMode,
     optimizeBackground: 'none' as DocumentOptimizeBackgroundMode,
@@ -442,7 +442,7 @@ export default Vue.extend({
     removeWatermark: 'none' as DocumentRemoveWatermarkMode,
     wordGap: DEFAULT_WORD_GAP,
     outputPadding: DEFAULT_OUTPUT_PADDING,
-    formulaProtection: true,
+    formulaProtection: false,
     magnifierPressTimer: undefined as number | undefined,
     magnifierLongPressTriggered: false,
   }),
@@ -745,7 +745,7 @@ export default Vue.extend({
       this.maxColumns = Math.round(this.clampNumber(Number(this.settings.maxColumns), 1, 4, 2))
       this.threshold = this.clampNumber(Number(this.settings.threshold), 50, 230, DEFAULT_THRESHOLD)
       this.strokeStrength = Math.round(this.clampNumber(Number(this.settings.strokeStrength), 0, 3, 0.8) * 10) / 10
-      this.contrastEnhancement = this.settings.contrastEnhancement === true
+      this.contrastEnhancement = this.settings.contrastEnhancement !== false
       this.matchBackground = this.settings.matchBackground === true
       this.matchBackgroundMode = this.settings.matchBackgroundMode === 'original'
         ? 'original'
@@ -761,7 +761,7 @@ export default Vue.extend({
         : 'none'
       this.wordGap = Math.round(this.clampNumber(Number(this.settings.wordGap), 1, 30, DEFAULT_WORD_GAP))
       this.outputPadding = Math.round(this.clampNumber(Number(this.settings.outputPadding), 0, 48, DEFAULT_OUTPUT_PADDING))
-      this.formulaProtection = this.settings.formulaProtection !== false
+      this.formulaProtection = this.settings.formulaProtection === true
     },
     emitSettingsChange() {
       this.$emit('settings-change', {
@@ -1960,7 +1960,7 @@ export default Vue.extend({
       if (inRow && this.validRow(rowInk, start, roi.y + roi.h, column)) rows.push({start, end: roi.y + roi.h, rowInk})
       if (rows.length <= 1) return rows
 
-      const formulaProtection = this.formulaProtection !== false
+      const formulaProtection = this.formulaProtection === true
       if (!formulaProtection) return rows
 
       const heights = rows.map(r => r.end - r.start).filter(h => h >= 16)
