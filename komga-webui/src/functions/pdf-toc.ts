@@ -10,8 +10,34 @@ export interface PdfTocDraftRow {
   depth: number,
 }
 
+export interface PdfTocVirtualWindow {
+  start: number,
+  end: number,
+  offsetTop: number,
+  totalHeight: number,
+}
+
+export function getPdfTocVirtualWindow(
+  itemCount: number,
+  scrollTop: number,
+  viewportHeight: number,
+  rowHeight: number,
+  overscan: number = 6,
+): PdfTocVirtualWindow {
+  const start = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan)
+  const visibleCount = Math.ceil(viewportHeight / rowHeight) + overscan * 2
+  const end = Math.min(itemCount, start + visibleCount)
+  return {
+    start,
+    end,
+    offsetTop: start * rowHeight,
+    totalHeight: itemCount * rowHeight,
+  }
+}
+
 const MAX_TOC_ENTRIES = 1000
 export const PDF_TOC_EDIT_EXPAND_LIMIT = 120
+export const PDF_TOC_EDITOR_ROW_HEIGHT = 48
 const MAX_TOC_DEPTH = 20
 const MAX_TOC_TITLE_LENGTH = 300
 export const PDF_TOC_EDITOR_HEIGHT_STORAGE_KEY = 'komga.pdf.toc.editor.height'

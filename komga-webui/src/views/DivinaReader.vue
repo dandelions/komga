@@ -627,12 +627,14 @@
             {{ pdfTocError }}
           </v-alert>
           <v-progress-linear v-if="pdfTocLoading || pdfTocSaving" indeterminate color="primary" />
-          <div v-else-if="pdfTocEditing" class="pdf-toc-editor-scroll" :style="pdfTocEditorScrollStyle">
+          <div v-else-if="pdfTocEditing" class="pdf-toc-editor-scroll" :style="pdfTocEditorScrollStyle" @scroll.passive="onPdfTocEditorScroll">
             <v-list dense class="pdf-toc-editor-list">
+              <div :style="{height: `${pdfTocVirtualWindow.offsetTop}px`}" />
             <v-list-item
-              v-for="row in pdfTocDraftRows"
+              v-for="row in pdfTocVirtualRows"
               :key="row.path.join('-')"
               class="pdf-toc-editor-row"
+              :style="{height: `${pdfTocEditorRowHeight}px`}"
               @click="focusPdfTocEntry(row.path)"
             >
               <v-btn
@@ -706,6 +708,7 @@
             <v-btn v-if="pdfTocDraftRows.length === 0" text class="ma-4" @click="addPdfTocEntry()">
               <v-icon left>mdi-plus</v-icon>{{ $t('browse_book.pdf_toc_add') }}
             </v-btn>
+              <div :style="{height: `${Math.max(0, pdfTocVirtualWindow.totalHeight - pdfTocVirtualWindow.offsetTop - pdfTocVirtualRows.length * pdfTocEditorRowHeight)}px`}" />
             </v-list>
             <div class="pdf-toc-editor-resize-handle" @pointerdown="startPdfTocEditorResize">
               <v-icon small>mdi-drag-horizontal</v-icon>
@@ -1239,6 +1242,8 @@ import {
   normalizePdfTocDraft,
   PDF_TOC_EDIT_EXPAND_LIMIT,
   PDF_TOC_EDITOR_HEIGHT_STORAGE_KEY,
+  PDF_TOC_EDITOR_ROW_HEIGHT,
+  getPdfTocVirtualWindow,
   PdfTocDraftEntry,
 } from '@/functions/pdf-toc'
 import {CLIENT_SETTING, ClientSettingUserUpdateDto} from '@/types/komga-clientsettings'
@@ -1418,6 +1423,7 @@ export default Vue.extend({
       pdfTocEditing: false,
       pdfTocMinimized: false,
       pdfTocEditorHeight: 240,
+      pdfTocEditorScrollTop: 0,
       pdfTocEditorResizing: false,
       pdfTocEditorResizeStartY: 0,
       pdfTocEditorResizeStartHeight: 0,
@@ -1764,6 +1770,20 @@ export default Vue.extend({
     },
     pdfTocDraftRows() {
       return flattenPdfTocDraft(this.pdfTocDraft, this.pdfTocActivePath)
+    },
+    pdfTocEditorRowHeight(): number {
+      return PDF_TOC_EDITOR_ROW_HEIGHT
+    },
+    pdfTocVirtualWindow() {
+      return getPdfTocVirtualWindow(
+        this.pdfTocDraftRows.length,
+        this.pdfTocEditorScrollTop,
+        this.pdfTocEditorHeight,
+        this.pdfTocEditorRowHeight,
+      )
+    },
+    pdfTocVirtualRows(): typeof this.pdfTocDraftRows {
+      return this.pdfTocDraftRows.slice(this.pdfTocVirtualWindow.start, this.pdfTocVirtualWindow.end)
     },
     pdfTocEditorScrollStyle(): Record<string, string> {
       return {maxHeight: `${this.pdfTocEditorHeight}px`}
@@ -3301,6 +3321,9 @@ export default Vue.extend({
       this.pdfTocError = ''
       this.pdfTocDraft = []
       this.pdfTocActivePath = undefined
+    },
+    onPdfTocEditorScroll(event: Event) {
+      this.pdfTocEditorScrollTop = (event.target as HTMLElement).scrollTop
     },
     focusPdfTocEntry(path: number[]) {
       this.pdfTocActivePath = [...path]

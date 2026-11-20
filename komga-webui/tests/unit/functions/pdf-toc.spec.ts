@@ -3,6 +3,7 @@ import {
   clampPdfTocEditorHeight,
   countPdfTocEntries,
   clonePdfTocDraft,
+  getPdfTocVirtualWindow,
   indentPdfTocDraft,
   insertPdfTocDraftAfter,
   outdentPdfTocDraft,
@@ -14,6 +15,21 @@ import {
 import {TocEntry} from '@/types/epub'
 
 describe('PDF table of contents', () => {
+  test('calculates a buffered virtual window for large editor lists', () => {
+    expect(getPdfTocVirtualWindow(1000, 4800, 240, 48)).toEqual({
+      start: 94,
+      end: 111,
+      offsetTop: 4512,
+      totalHeight: 48000,
+    })
+    expect(getPdfTocVirtualWindow(4, 0, 240, 48)).toEqual({
+      start: 0,
+      end: 4,
+      offsetTop: 0,
+      totalHeight: 192,
+    })
+  })
+
   test('clamps editor height to one third of the viewport and a usable minimum', () => {
     expect(clampPdfTocEditorHeight(600, 900)).toBe(300)
     expect(clampPdfTocEditorHeight(100, 900)).toBe(120)
