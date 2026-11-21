@@ -361,6 +361,7 @@ const DETECTION_MIN_SCALE = 0.28
 const K2_SLICE_MIME = 'image/jpeg'
 const K2_SLICE_QUALITY = 0.92
 const K2_YIELD_EVERY_WORDS = 24
+const K2_PAGE_WIDE_EFFECTS_MAX_PIXELS = 12_000_000
 
 export default Vue.extend({
   name: 'K2ReflowedPage',
@@ -447,6 +448,7 @@ export default Vue.extend({
     wordGap: DEFAULT_WORD_GAP,
     outputPadding: DEFAULT_OUTPUT_PADDING,
     formulaProtection: false,
+    pageSliceEffectsApplied: false,
     magnifierPressTimer: undefined as number | undefined,
     magnifierLongPressTriggered: false,
   }),
@@ -839,6 +841,13 @@ export default Vue.extend({
         const scaledImageRegions = this.scaleImageRegions(imageRegions, detectionSource.scale, canvas.width, canvas.height)
         if (requestId !== this.requestId) return
 
+        const canUsePageWideEffects = scaledImageRegions.length === 0
+          && canvas.width * canvas.height <= K2_PAGE_WIDE_EFFECTS_MAX_PIXELS
+          && this.needsWordSliceEffects()
+        if (canUsePageWideEffects) {
+          this.applyPageSliceEffects(context, canvas.width, canvas.height)
+        }
+        this.pageSliceEffectsApplied = canUsePageWideEffects
         this.items = await this.renderK2Items(canvas, lines, scaledImageRegions)
         if (this.items.length === 0 && canvas.width >= 2 && canvas.height >= 2) {
           const sliceCanvas = document.createElement('canvas')
@@ -1031,6 +1040,31 @@ export default Vue.extend({
         matchBackground: false,
       })
       this.pageBackground = '#fff'
+    },
+    needsWordSliceEffects(): boolean {
+      const textModeEnabled = this.matchBackgroundMode !== 'original'
+      const originalDarkMode = this.matchBackgroundMode === 'original' && this.darkDisplay
+      const needsStroke = this.strokeStrength > 0 && textModeEnabled
+      const needsContrast = this.contrastEnhancement || this.matchBackground || textModeEnabled || originalDarkMode
+      return needsStroke || needsContrast
+    },
+    applyPageSliceEffects(context: CanvasRenderingContext2D, width: number, height: number) {
+      if (width <= 0 || height <= 0) return
+      const textModeEnabled = this.matchBackgroundMode !== 'original'
+      const originalDarkMode = this.matchBackgroundMode === 'original' && this.darkDisplay
+      const imageData = context.getImageData(0, 0, width, height)
+      const data = imageData.data
+      if (this.strokeStrength > 0 && textModeEnabled) this.strengthenInkData(data, width, height)
+      if (this.contrastEnhancement || this.matchBackground || textModeEnabled || originalDarkMode) {
+        enhanceTextContrastData(data, width, height, {
+          enabled: this.contrastEnhancement,
+          nightDisplay: this.darkDisplay,
+          matchBackground: this.matchBackground,
+          matchBackgroundMode: this.matchBackgroundMode,
+          backgroundLuma: this.sourceBackgroundLuma(),
+        })
+      }
+      context.putImageData(imageData, 0, 0)
     },
     async yieldToBrowser() {
       await new Promise<void>(resolve => {
@@ -2252,7 +2286,7 @@ export default Vue.extend({
           sliceCanvas.height = word.h
           this.fillWordSliceBackground(sliceContext, word.w, word.h)
           sliceContext.drawImage(sourceCanvas, word.x, word.y, word.w, word.h, 0, 0, word.w, word.h)
-          this.applyWordSliceEffects(sliceContext, word.w, word.h)
+          if (!this.pageSliceEffectsApplied) this.applyWordSliceEffects(sliceContext, word.w, word.h)
 
           items.push({
             type: 'word',
