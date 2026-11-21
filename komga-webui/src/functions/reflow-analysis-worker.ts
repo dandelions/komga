@@ -1,5 +1,6 @@
 import {
   reflowPageFromPixels,
+  rgbaToBmpDataUrl,
   LocalReflowOptions,
   LocalReflowItem,
   Roi,
@@ -114,14 +115,29 @@ async function encodeSlicesToDataUrls(items: LocalReflowItem[]) {
   const reader = new (self as any).FileReaderSync()
   for (const item of items) {
     if (!item.pixels) continue
+    const pixels = item.pixels
     const width = Math.max(1, Math.round(item.w || 0))
     const height = Math.max(1, Math.round(item.h || item.height || 0))
-    const canvas = new OffscreenCanvasCtor(width, height)
-    const context = canvas.getContext('2d')
-    if (!context) continue
-    context.putImageData(new ImageData(new Uint8ClampedArray(item.pixels), width, height), 0, 0)
-    const blob = await canvas.convertToBlob({type: 'image/jpeg', quality: 0.92})
-    item.src = reader.readAsDataURL(blob)
+    try {
+      // slice bounds are not always integral, so the declared size and the buffer
+      // length can disagree; ImageData would throw and fail the whole page
+      let data = pixels
+      const expected = width * height * 4
+      if (data.length !== expected) {
+        const resized = new Uint8ClampedArray(expected)
+        resized.set(data.subarray(0, Math.min(data.length, expected)))
+        data = resized
+      }
+      const canvas = new OffscreenCanvasCtor(width, height)
+      const context = canvas.getContext('2d')
+      if (!context) throw new Error('OffscreenCanvas context is unavailable')
+      context.putImageData(new ImageData(data, width, height), 0, 0)
+      const blob = await canvas.convertToBlob({type: 'image/jpeg', quality: 0.92})
+      item.src = reader.readAsDataURL(blob)
+    } catch (_) {
+      // never fail the page because one slice could not be encoded
+      item.src = rgbaToBmpDataUrl(pixels, width, height, width, 0, 0)
+    }
     delete item.pixels
   }
 }

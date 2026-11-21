@@ -991,6 +991,7 @@ function reflowPool(): FilterWorkerPool {
   return reflowWorkerPool
 }
 
+const LOCAL_REFLOW_WORKER_TIMEOUT_MS = 15000
 const THRESHOLD = 185
 const COLUMN_GAP = 15
 const WORD_GAP = 3
@@ -2303,11 +2304,16 @@ export default Vue.extend({
       if (!this.supportsLocalAnalysisWorker()) return undefined
       this.terminateLocalAnalysisWorker()
       try {
-        const worker = await reflowPool().acquireAsync(this.preload ? 'low' : 'high')
+        const worker = await reflowPool().acquireAsync(this.preload ? 'low' : 'high', LOCAL_REFLOW_WORKER_TIMEOUT_MS)
         if (!worker) return undefined
         const pixels = imageData.data
         return await new Promise<LocalReflowResult | undefined>((resolve) => {
+          let settled = false
+          let timer: number | undefined
           const finish = () => {
+            if (settled) return
+            settled = true
+            if (timer !== undefined) window.clearTimeout(timer)
             reflowPool().release(worker)
           }
           worker.onmessage = (event: MessageEvent<ReflowAnalysisWorkerResponse>) => {
@@ -2336,16 +2342,27 @@ export default Vue.extend({
             finish()
             resolve(undefined)
           }
-          worker.postMessage({
-            type: 'reflow',
-            requestId,
-            pixels,
-            width: imageData.width,
-            height: imageData.height,
-            options,
-            cropRois,
-            manualImageRegions,
-          }, [pixels.buffer])
+          // a worker that stops answering would otherwise hold the pool slot forever
+          timer = (window.setTimeout(() => {
+            finish()
+            resolve(undefined)
+          }, LOCAL_REFLOW_WORKER_TIMEOUT_MS * 4) as unknown) as number
+          try {
+            worker.postMessage({
+              type: 'reflow',
+              requestId,
+              pixels,
+              width: imageData.width,
+              height: imageData.height,
+              options,
+              cropRois,
+              manualImageRegions,
+            }, [pixels.buffer])
+          } catch (_) {
+            // the buffer may already be detached: release instead of leaking the slot
+            finish()
+            resolve(undefined)
+          }
         })
       } catch (_) {
         this.terminateLocalAnalysisWorker()
@@ -2361,11 +2378,16 @@ export default Vue.extend({
       if (!this.supportsLocalAnalysisWorker()) return undefined
       this.terminateLocalAnalysisWorker()
       try {
-        const worker = await reflowPool().acquireAsync(this.preload ? 'low' : 'high')
+        const worker = await reflowPool().acquireAsync(this.preload ? 'low' : 'high', LOCAL_REFLOW_WORKER_TIMEOUT_MS)
         if (!worker) throw new Error('Local analysis worker is unavailable')
         const pixels = imageData.data
         return await new Promise<Roi | undefined>((resolve, reject) => {
+          let settled = false
+          let timer: number | undefined
           const finish = () => {
+            if (settled) return
+            settled = true
+            if (timer !== undefined) window.clearTimeout(timer)
             reflowPool().release(worker)
           }
           worker.onmessage = (event: MessageEvent<ReflowAnalysisWorkerResponse>) => {
@@ -2379,14 +2401,23 @@ export default Vue.extend({
             finish()
             reject(new Error('Local analysis worker failed'))
           }
-          worker.postMessage({
-            type: 'analyze',
-            requestId,
-            pixels,
-            width: imageData.width,
-            height: imageData.height,
-            threshold: this.clampNumber(this.options.threshold, 50, 230, THRESHOLD),
-          }, [pixels.buffer])
+          timer = (window.setTimeout(() => {
+            finish()
+            resolve(undefined)
+          }, LOCAL_REFLOW_WORKER_TIMEOUT_MS * 4) as unknown) as number
+          try {
+            worker.postMessage({
+              type: 'analyze',
+              requestId,
+              pixels,
+              width: imageData.width,
+              height: imageData.height,
+              threshold: this.clampNumber(this.options.threshold, 50, 230, THRESHOLD),
+            }, [pixels.buffer])
+          } catch (_) {
+            finish()
+            resolve(undefined)
+          }
         })
       } catch (_) {
         this.terminateLocalAnalysisWorker()
