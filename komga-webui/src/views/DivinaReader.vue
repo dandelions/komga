@@ -1389,7 +1389,7 @@ function defaultReaderImageSettings(): any {
     strokeStrength: 0,
     rotation: 0,
     skewCorrection: 0,
-    contrastEnhancement: true,
+    contrastEnhancement: false,
     bleachText: false,
     contrastLevel: 100,
     cropRegionsByParity: defaultCropRegionsByParity(false),
@@ -1509,7 +1509,7 @@ export default Vue.extend({
         strokeStrength: 0,
         rotation: 0,
         skewCorrection: 0,
-        contrastEnhancement: true,
+        contrastEnhancement: false,
         bleachText: false,
         contrastLevel: 100,
         cropRegionsByParity: defaultCropRegionsByParity(false),
@@ -2131,7 +2131,7 @@ export default Vue.extend({
     },
     readerContrastEnhancement: {
       get: function (): boolean {
-        return this.settings.contrastEnhancement !== false
+        return this.settings.contrastEnhancement === true
       },
       set: function (contrastEnhancement: boolean): void {
         const changed = this.settings.contrastEnhancement !== (contrastEnhancement === true)
@@ -2368,7 +2368,7 @@ export default Vue.extend({
         strokeStrength: Math.round(Math.max(0, Math.min(3, Number(settings.strokeStrength) || 0)) * 10) / 10,
         rotation: this.normalizedReaderRotation(settings.rotation),
         skewCorrection: this.normalizedReaderSkewCorrection(settings.skewCorrection),
-        contrastEnhancement: settings.contrastEnhancement !== false,
+        contrastEnhancement: settings.contrastEnhancement === true,
         bleachText: settings.bleachText === true,
         contrastLevel: Math.round(Math.max(50, Math.min(200, Number(settings.contrastLevel) || 100))),
         cropRegionsByParity: this.normalizedReaderCropRegionsByParity(settings.cropRegionsByParity),
