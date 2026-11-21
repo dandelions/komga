@@ -2770,7 +2770,7 @@ export default Vue.extend({
       const pageUrl = this.currentPage?.url
       const rotation = this.readerRotation
       const angle = this.readerSkewCorrection || 0
-      const contrastEnhancement = this.readerContrastEnhancement
+      const contrastEnhancement = false
       if (!pageNumber || !pageUrl) {
         this.revokeReaderCropImageUrl()
         return

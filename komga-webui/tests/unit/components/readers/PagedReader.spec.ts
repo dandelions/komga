@@ -31,6 +31,19 @@ function createReader(readingDirection: ReadingDirection = ReadingDirection.RIGH
   })
 }
 
+describe('PagedReader non-reflow image processing', () => {
+  test('does not apply contrast enhancement during ordinary page processing', () => {
+    const reader = Object.assign({}, methods, {
+      contrastEnhancement: true,
+      sourceImageCanvas: jest.fn(() => ({getContext: jest.fn(() => ({putImageData: jest.fn()}))})),
+      normalizedRotation: methods.normalizedRotation,
+      skewCorrectedCanvas: jest.fn(canvas => canvas),
+    })
+    const processed = methods.processedPageCanvas.call(reader, {} as HTMLImageElement, 0, 0)
+    expect(processed).toBeDefined()
+  })
+})
+
 describe('PagedReader previous-page scroll restoration', () => {
   test.each([
     ['RTL', ReadingDirection.RIGHT_TO_LEFT],

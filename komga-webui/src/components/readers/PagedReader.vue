@@ -101,7 +101,6 @@ import {PagedNavigationAction, PagedReaderLayout, ScaleType} from '@/types/enum-
 import {shortcutsLTR, shortcutsRTL, shortcutsVertical} from '@/functions/shortcuts/paged-reader'
 import {PageDtoWithUrl} from '@/types/komga-books'
 import {buildSpreads} from '@/functions/book-spreads'
-import {enhanceTextContrast} from '@/functions/image-enhancement'
 import {loadCachedPageImage, markPageImageBrowserLoaded} from '@/functions/page-image-cache'
 
 type CropRegion = {
@@ -850,13 +849,12 @@ export default Vue.extend({
     async ensureDeskewedPageUrl(page: PageDtoWithUrl, event?: Event) {
       const rotation = this.normalizedRotation(this.rotation)
       const angle = this.skewCorrection || 0
-      const contrastEnhancement = this.contrastEnhancement
       // pageDisplayUrls are produced by DivinaReader's rotation/correction
       // pipeline (for example after finishing a crop). Processing them again
       // would rotate an already rotated page and make the crop coordinates no
       // longer match the displayed image.
       if (this.pageDisplayUrls[page.number]) return
-      if ((!rotation && !angle && !this.contrastEnhancement) || this.deskewedPageUrls[page.number] || this.deskewedPagePending[page.number]) return
+      if ((!rotation && !angle) || this.deskewedPageUrls[page.number] || this.deskewedPagePending[page.number]) return
 
       const image = event?.target as HTMLImageElement | undefined
       if (image && (!image.complete || image.naturalWidth <= 0)) return
@@ -865,12 +863,12 @@ export default Vue.extend({
       try {
         const pageIsCurrent = this.isCurrentSpreadPage(page.number)
         if (!pageIsCurrent) await this.waitForReaderIdle()
-        if (this.normalizedRotation(this.rotation) !== rotation || this.skewCorrection !== angle || this.contrastEnhancement !== contrastEnhancement || this.deskewedPageUrls[page.number]) return
+        if (this.normalizedRotation(this.rotation) !== rotation || this.skewCorrection !== angle || this.deskewedPageUrls[page.number]) return
         const sourceImage = await this.loadSourceImage(page, image)
-        if (this.normalizedRotation(this.rotation) !== rotation || this.skewCorrection !== angle || this.contrastEnhancement !== contrastEnhancement || this.deskewedPageUrls[page.number]) return
+        if (this.normalizedRotation(this.rotation) !== rotation || this.skewCorrection !== angle || this.deskewedPageUrls[page.number]) return
         const canvas = this.processedPageCanvas(sourceImage, rotation, angle)
         const url = await this.canvasObjectUrl(canvas)
-        if (this.normalizedRotation(this.rotation) === rotation && this.skewCorrection === angle && this.contrastEnhancement === contrastEnhancement) {
+        if (this.normalizedRotation(this.rotation) === rotation && this.skewCorrection === angle) {
           this.$set(this.deskewedPageUrls, page.number, url)
           const ratio = canvas.width / canvas.height
           if (this.pageAspectRatios[page.number] !== ratio) this.$set(this.pageAspectRatios, page.number, ratio)
@@ -885,10 +883,6 @@ export default Vue.extend({
     processedPageCanvas(image: HTMLImageElement, rotation: number, skewCorrection: number): HTMLCanvasElement {
       const rotatedCanvas = rotation ? this.rotatedImageCanvas(image, rotation) : this.sourceImageCanvas(image)
       const canvas = skewCorrection ? this.skewCorrectedCanvas(rotatedCanvas, skewCorrection) : rotatedCanvas
-      if (this.contrastEnhancement) {
-        const context = canvas.getContext('2d')
-        if (context) enhanceTextContrast(context, canvas.width, canvas.height, {enabled: true})
-      }
       return canvas
     },
     sourceImageCanvas(image: HTMLImageElement): HTMLCanvasElement {
