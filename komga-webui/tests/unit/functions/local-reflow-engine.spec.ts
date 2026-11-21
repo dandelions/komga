@@ -7,6 +7,7 @@ import {
   detectPageBackgroundFromPixels,
   buildInkMap,
   localReflowScale,
+  detectRoi,
   detectHorizontalColumns,
   detectLines,
   rotatePixels,
@@ -33,6 +34,30 @@ describe('local-reflow-engine', () => {
       expect(localReflowScale(7200, 4800)).toBeCloseTo(Math.sqrt(2000000 / (7200 * 4800)))
       expect(localReflowScale(12000, 1000)).toBe(1)
       expect(localReflowScale(2400, 1600)).toBeCloseTo(Math.sqrt(2000000 / (2400 * 1600)))
+    })
+  })
+
+  describe('automatic text ROI', () => {
+    test('uses detected text bounds as the default ROI when margins are automatic', () => {
+      const width = 20
+      const height = 20
+      const ink = new Uint8Array(width * height)
+      for (let y = 5; y < 15; y++) {
+        for (let x = 6; x < 14; x++) ink[y * width + x] = 1
+      }
+      const options = {
+        targetWidth: 20,
+        autoCropBorder: true,
+        marginTop: 0,
+        marginRight: 0,
+        marginBottom: 0,
+        marginLeft: 0,
+      } as LocalReflowOptions
+      const roi = detectRoi(ink, width, height, options)
+      expect(roi.x).toBeGreaterThan(0)
+      expect(roi.y).toBeGreaterThan(0)
+      expect(roi.w).toBeLessThan(width)
+      expect(roi.h).toBeLessThan(height)
     })
   })
 

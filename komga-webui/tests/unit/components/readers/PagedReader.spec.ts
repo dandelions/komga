@@ -120,7 +120,23 @@ describe('PagedReader previous-page scroll restoration', () => {
     })
   })
 
-  test('rebuilds spreads and refreshes deskewed urls on rotation change', () => {
+  test('does not process adjacent pages through canvas before they are visible', async () => {
+    const reader = createReader()
+    reader.rotation = 0
+    reader.skewCorrection = 1
+    reader.contrastEnhancement = true
+    reader.pageDisplayUrls = {}
+    reader.deskewedPageUrls = {}
+    reader.deskewedPagePending = {}
+    reader.isCurrentSpreadPage = jest.fn(() => false)
+    reader.$set = (_target: any, key: string, value: any) => { _target[key] = value }
+    reader.$delete = (_target: any, key: string) => { delete _target[key] }
+    reader.loadSourceImage = jest.fn()
+    await methods.ensureDeskewedPageUrl.call(reader, reader.pages[0])
+    expect(reader.loadSourceImage).not.toHaveBeenCalled()
+  })
+
+test('rebuilds spreads and refreshes deskewed urls on rotation change', () => {
     const reader = createReader()
     reader.page = 2
     reader.pageAspectRatios = {1: 2.0, 2: 2.0}

@@ -2252,9 +2252,12 @@ export function reflowPageFromPixels(
     .filter(r => r.w >= 8 && r.h >= 8)
 
   const hasManualMargin = (options.marginTop || 0) > 0 || (options.marginBottom || 0) > 0 || (options.marginLeft || 0) > 0 || (options.marginRight || 0) > 0
+  // Use the detected text bounds for automatic border cropping. Using the full page
+  // here makes line-end whitespace dominate trailing-blank and paragraph decisions,
+  // causing a few otherwise fitting words to wrap onto the next line.
   const defaultPageRoi: Roi = hasManualMargin
     ? detectRoi(ink, workW, workH, {...options, autoCropBorder: false})
-    : {x: 0, y: 0, w: workW, h: workH}
+    : detectRoi(ink, workW, workH, options)
 
   const effectiveRois = scaledCropRois.length > 0
     ? scaledCropRois

@@ -864,7 +864,10 @@ export default Vue.extend({
       this.$set(this.deskewedPagePending, page.number, true)
       try {
         const pageIsCurrent = this.isCurrentSpreadPage(page.number)
-        if (!pageIsCurrent) await this.waitForReaderIdle()
+        // Rotation/deskew/contrast read back the whole source image through Canvas.
+        // Defer adjacent pages until they become visible so page turns keep the main
+        // thread available for the interaction and current image decode.
+        if (!pageIsCurrent) return
         if (this.normalizedRotation(this.rotation) !== rotation || this.skewCorrection !== angle || this.contrastEnhancement !== contrastEnhancement || this.deskewedPageUrls[page.number]) return
         const sourceImage = await this.loadSourceImage(page, image)
         if (this.normalizedRotation(this.rotation) !== rotation || this.skewCorrection !== angle || this.contrastEnhancement !== contrastEnhancement || this.deskewedPageUrls[page.number]) return
