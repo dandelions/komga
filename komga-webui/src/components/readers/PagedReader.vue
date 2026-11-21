@@ -869,6 +869,10 @@ export default Vue.extend({
         // thread available for the interaction and current image decode.
         if (!pageIsCurrent) return
         if (this.normalizedRotation(this.rotation) !== rotation || this.skewCorrection !== angle || this.contrastEnhancement !== contrastEnhancement || this.deskewedPageUrls[page.number]) return
+        // Let the first click after a page load reach the reader before the large
+        // Canvas readback and JPEG encode occupy the main thread.
+        await this.deferDeskewProcessing()
+        if (this.normalizedRotation(this.rotation) !== rotation || this.skewCorrection !== angle || this.contrastEnhancement !== contrastEnhancement || this.deskewedPageUrls[page.number]) return
         const sourceImage = await this.loadSourceImage(page, image)
         if (this.normalizedRotation(this.rotation) !== rotation || this.skewCorrection !== angle || this.contrastEnhancement !== contrastEnhancement || this.deskewedPageUrls[page.number]) return
         const canvas = this.processedPageCanvas(sourceImage, rotation, angle)
@@ -884,6 +888,13 @@ export default Vue.extend({
       } finally {
         this.$delete(this.deskewedPagePending, page.number)
       }
+    },
+    deferDeskewProcessing(): Promise<void> {
+      const requestIdleCallback = (window as any).requestIdleCallback
+      if (requestIdleCallback) {
+        return new Promise(resolve => requestIdleCallback(() => resolve(), {timeout: 120}))
+      }
+      return new Promise(resolve => window.setTimeout(resolve, 80))
     },
     processedPageCanvas(image: HTMLImageElement, rotation: number, skewCorrection: number): HTMLCanvasElement {
       const rotatedCanvas = rotation ? this.rotatedImageCanvas(image, rotation) : this.sourceImageCanvas(image)
