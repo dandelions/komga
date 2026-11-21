@@ -2142,7 +2142,7 @@ export function reflowPageFromPixels(
     : [defaultPageRoi]
 
   const items: LocalReflowItem[] = []
-  const textScale = clamp((options.textScale || 100) / 100, 0.1, 1.4)
+  const textScale = clamp((options.textScale || 100) / 100, 0.2, 2)
 
   const isSpriteMode = options.renderMode === 'sprite'
   let pageTextureUrl = ''

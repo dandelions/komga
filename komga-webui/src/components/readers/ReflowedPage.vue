@@ -755,6 +755,7 @@ import {
 import {mergeVerticalColumnBands} from '@/functions/vertical-reflow'
 import type {ReflowAnalysisWorkerResponse, ReflowWorkerRoi} from '@/functions/reflow-analysis-worker'
 import {createReflowAnalysisWorker} from '@/functions/reflow-analysis-worker-factory'
+import {FilterWorkerPool} from '@/functions/worker-pool'
 import {localReflowScale, repairInvertedGlyphComponents} from '@/functions/local-reflow-engine'
 import type {LocalReflowOptions, LocalReflowResult} from '@/functions/local-reflow-engine'
 import {
@@ -975,6 +976,13 @@ type ReflowOptionsSnapshot = {
   deskewAnalysisRoisKey: string,
   displayColumns?: string,
   formulaProtection?: boolean,
+}
+
+let reflowWorkerPool: FilterWorkerPool | undefined
+
+function reflowPool(): FilterWorkerPool {
+  if (!reflowWorkerPool) reflowWorkerPool = new FilterWorkerPool(createReflowAnalysisWorker)
+  return reflowWorkerPool
 }
 
 const THRESHOLD = 185
@@ -2253,14 +2261,12 @@ export default Vue.extend({
       if (!this.supportsLocalAnalysisWorker()) return undefined
       this.terminateLocalAnalysisWorker()
       try {
-        const worker = createReflowAnalysisWorker()
+        const worker = reflowPool().acquire()
         if (!worker) return undefined
-        this.localAnalysisWorker = worker
         const pixels = imageData.data
         return await new Promise<LocalReflowResult | undefined>((resolve) => {
           const finish = () => {
-            if (this.localAnalysisWorker === worker) this.localAnalysisWorker = undefined
-            worker.terminate()
+            reflowPool().release(worker)
           }
           worker.onmessage = (event: MessageEvent<ReflowAnalysisWorkerResponse>) => {
             const response = event.data
@@ -2313,13 +2319,12 @@ export default Vue.extend({
       if (!this.supportsLocalAnalysisWorker()) return undefined
       this.terminateLocalAnalysisWorker()
       try {
-        const worker = createReflowAnalysisWorker()
-        this.localAnalysisWorker = worker
+        const worker = reflowPool().acquire()
+        if (!worker) throw new Error('Local analysis worker is unavailable')
         const pixels = imageData.data
         return await new Promise<Roi | undefined>((resolve, reject) => {
           const finish = () => {
-            if (this.localAnalysisWorker === worker) this.localAnalysisWorker = undefined
-            worker.terminate()
+            reflowPool().release(worker)
           }
           worker.onmessage = (event: MessageEvent<ReflowAnalysisWorkerResponse>) => {
             const response = event.data

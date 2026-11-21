@@ -959,8 +959,8 @@
                       <v-slider
                         v-model="reflowSettings.textScale"
                         label="文字大小"
-                        min="10"
-                        max="140"
+                        min="20"
+                        max="200"
                         thumb-label
                         suffix="%"
                       />
@@ -1315,7 +1315,7 @@ function defaultReflowSettings(): any {
   return {
     processingMode: 'server',
     autoCropBorder: true,
-    textScale: 40,
+    textScale: 65,
     columnCount: 1,
     displayColumns: 'auto',
     skewCorrection: 0,
@@ -3620,7 +3620,7 @@ export default Vue.extend({
       return {
         processingMode: settings.processingMode === 'server' ? 'server' : 'local',
         autoCropBorder: typeof settings.autoCropBorder === 'boolean' ? settings.autoCropBorder : this.reflowSettings.autoCropBorder,
-        textScale: this.clampReflowNumber(settings.textScale, 10, 140, this.reflowSettings.textScale),
+        textScale: this.clampReflowNumber(settings.textScale, 20, 200, this.reflowSettings.textScale),
         columnCount: Math.round(this.clampReflowNumber(settings.columnCount, 1, 4, this.reflowSettings.columnCount)),
         displayColumns: settings.displayColumns === '1' || settings.displayColumns === '2' ? settings.displayColumns : 'auto',
         skewCorrection: this.normalizedReflowSkewCorrection(settings.skewCorrection),
