@@ -319,6 +319,7 @@ import {
 } from '@/functions/image-enhancement'
 import {canonicalPageImageUrl, loadCachedPageImageWithStats} from '@/functions/page-image-cache'
 import {createK2SliceWorker} from '@/functions/reflow-analysis-worker-factory'
+import {FilterWorkerPool} from '@/functions/worker-pool'
 
 type Roi = { x: number, y: number, w: number, h: number }
 type PageParity = 'odd' | 'even'
@@ -363,6 +364,13 @@ const K2_SLICE_MIME = 'image/jpeg'
 const K2_SLICE_QUALITY = 0.92
 const K2_YIELD_EVERY_WORDS = 24
 const K2_PAGE_WIDE_EFFECTS_MAX_PIXELS = 12_000_000
+
+let k2SliceWorkerPool: FilterWorkerPool | undefined
+
+function k2SlicePool(): FilterWorkerPool {
+  if (!k2SliceWorkerPool) k2SliceWorkerPool = new FilterWorkerPool(createK2SliceWorker)
+  return k2SliceWorkerPool
+}
 
 export default Vue.extend({
   name: 'K2ReflowedPage',
@@ -1098,7 +1106,7 @@ export default Vue.extend({
       if (words.length === 0 || !this.supportsK2SliceWorker()) return undefined
       let worker: Worker | undefined
       try {
-        worker = createK2SliceWorker()
+        worker = k2SlicePool().acquire()
         if (!worker) return undefined
         const activeWorker = worker
         const requestId = ++this.k2SliceRequestId
@@ -1124,7 +1132,7 @@ export default Vue.extend({
       } catch (e) {
         return undefined
       } finally {
-        worker?.terminate()
+        if (worker) k2SlicePool().release(worker)
       }
     },
     needsWordSliceEffects(): boolean {

@@ -1257,7 +1257,13 @@ const MAGNIFIER_DIAMETER_OPTIONS = [
 ]
 const REFLOW_CACHE_BEHIND_COUNT = 3
 const REFLOW_CONTINUATION_COUNT = 4
-const REFLOW_PREFETCH_AHEAD_COUNT = 1
+const REFLOW_PREFETCH_AHEAD_COUNT = 3
+
+function reflowPrefetchConcurrency(): number {
+  const cores = typeof navigator !== 'undefined' ? Number(navigator.hardwareConcurrency) : 0
+  if (!Number.isFinite(cores) || cores <= 0) return 2
+  return Math.max(1, Math.min(3, Math.floor(cores) - 1))
+}
 const REFLOW_PREFETCH_DELAY_MS = 150
 const MAX_REFLOW_CACHE_ENTRIES = 16
 const MAX_REFLOW_CROP_REGIONS = 8
@@ -4302,11 +4308,14 @@ export default Vue.extend({
       const startPrefetch = () => {
         this.reflowPrefetchTimer = undefined
         if (this.page !== sourcePage || this.reflowCropMode) return
-        if (this.cachedReflowItems(this.pages[nextPage - 1])) {
+        const pending = pageNumbers.filter(pageNumber => !this.cachedReflowItems(this.pages[pageNumber - 1]))
+        if (pending.length === 0) {
+          this.reflowPrefetchPages = []
           this.scheduleNextReflowPrefetch(true)
           return
         }
-        this.reflowPrefetchPages = [nextPage]
+        // one reflow per available core keeps several pages rendering in parallel
+        this.reflowPrefetchPages = pending.slice(0, reflowPrefetchConcurrency())
       }
 
       if (immediate) {

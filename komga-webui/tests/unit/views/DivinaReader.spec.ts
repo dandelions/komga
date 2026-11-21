@@ -282,7 +282,9 @@ describe('DivinaReader reflow prefetch and LRU cache', () => {
       expect(reader.reflowPrefetchTimer).toBeDefined()
 
       jest.advanceTimersByTime(150)
-      expect(reader.reflowPrefetchPages).toEqual([6])
+      expect(reader.reflowPrefetchPages[0]).toBe(6)
+      expect(reader.reflowPrefetchPages.length).toBeGreaterThanOrEqual(1)
+      expect(reader.reflowPrefetchPages.length).toBeLessThanOrEqual(3)
     } finally {
       jest.useRealTimers()
     }
@@ -301,7 +303,9 @@ describe('DivinaReader reflow prefetch and LRU cache', () => {
     }
 
     methods.scheduleNextReflowPrefetch.call(reader, true)
-    expect(reader.reflowPrefetchPages).toEqual([6])
+    expect(reader.reflowPrefetchPages[0]).toBe(6)
+    expect(reader.reflowPrefetchPages.length).toBeGreaterThanOrEqual(1)
+    expect(reader.reflowPrefetchPages.length).toBeLessThanOrEqual(3)
   })
 
   test('pruneReflowCache evicts least recently accessed entries outside active window when over capacity', () => {
