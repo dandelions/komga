@@ -120,47 +120,7 @@ describe('PagedReader previous-page scroll restoration', () => {
     })
   })
 
-  test('does not process adjacent pages through canvas before they are visible', async () => {
-    const reader = createReader()
-    reader.rotation = 0
-    reader.skewCorrection = 1
-    reader.contrastEnhancement = true
-    reader.pageDisplayUrls = {}
-    reader.deskewedPageUrls = {}
-    reader.deskewedPagePending = {}
-    reader.isCurrentSpreadPage = jest.fn(() => false)
-    reader.$set = (_target: any, key: string, value: any) => { _target[key] = value }
-    reader.$delete = (_target: any, key: string) => { delete _target[key] }
-    reader.loadSourceImage = jest.fn()
-    await methods.ensureDeskewedPageUrl.call(reader, reader.pages[0])
-    expect(reader.loadSourceImage).not.toHaveBeenCalled()
-  })
-
-test('defers current-page canvas processing to an idle turn', async () => {
-  const reader = createReader()
-  reader.rotation = 0
-  reader.skewCorrection = 1
-  reader.contrastEnhancement = true
-  reader.pageDisplayUrls = {}
-  reader.deskewedPageUrls = {}
-  reader.deskewedPagePending = {}
-  reader.isCurrentSpreadPage = jest.fn(() => true)
-  reader.$set = (_target: any, key: string, value: any) => { _target[key] = value }
-  reader.$delete = (_target: any, key: string) => { delete _target[key] }
-  reader.deferDeskewProcessing = jest.fn(() => new Promise(resolve => setTimeout(resolve, 0)))
-  reader.loadSourceImage = jest.fn(() => Promise.resolve({naturalWidth: 100, naturalHeight: 100} as HTMLImageElement))
-  reader.processedPageCanvas = jest.fn(() => ({width: 100, height: 100} as HTMLCanvasElement))
-  reader.canvasObjectUrl = jest.fn(() => Promise.resolve('blob:processed'))
-  const image = {complete: true, naturalWidth: 100, naturalHeight: 100} as HTMLImageElement
-
-  const pending = methods.ensureDeskewedPageUrl.call(reader, reader.pages[1], {target: image})
-  expect(reader.loadSourceImage).not.toHaveBeenCalled()
-  await pending
-  expect(reader.deferDeskewProcessing).toHaveBeenCalled()
-  expect(reader.processedPageCanvas).toHaveBeenCalled()
-})
-
-test('rebuilds spreads and refreshes deskewed urls on rotation change', () => {
+  test('rebuilds spreads and refreshes deskewed urls on rotation change', () => {
     const reader = createReader()
     reader.page = 2
     reader.pageAspectRatios = {1: 2.0, 2: 2.0}

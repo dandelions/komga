@@ -864,14 +864,7 @@ export default Vue.extend({
       this.$set(this.deskewedPagePending, page.number, true)
       try {
         const pageIsCurrent = this.isCurrentSpreadPage(page.number)
-        // Rotation/deskew/contrast read back the whole source image through Canvas.
-        // Defer adjacent pages until they become visible so page turns keep the main
-        // thread available for the interaction and current image decode.
-        if (!pageIsCurrent) return
-        if (this.normalizedRotation(this.rotation) !== rotation || this.skewCorrection !== angle || this.contrastEnhancement !== contrastEnhancement || this.deskewedPageUrls[page.number]) return
-        // Let the first click after a page load reach the reader before the large
-        // Canvas readback and JPEG encode occupy the main thread.
-        await this.deferDeskewProcessing()
+        if (!pageIsCurrent) await this.waitForReaderIdle()
         if (this.normalizedRotation(this.rotation) !== rotation || this.skewCorrection !== angle || this.contrastEnhancement !== contrastEnhancement || this.deskewedPageUrls[page.number]) return
         const sourceImage = await this.loadSourceImage(page, image)
         if (this.normalizedRotation(this.rotation) !== rotation || this.skewCorrection !== angle || this.contrastEnhancement !== contrastEnhancement || this.deskewedPageUrls[page.number]) return
@@ -888,13 +881,6 @@ export default Vue.extend({
       } finally {
         this.$delete(this.deskewedPagePending, page.number)
       }
-    },
-    deferDeskewProcessing(): Promise<void> {
-      const requestIdleCallback = (window as any).requestIdleCallback
-      if (requestIdleCallback) {
-        return new Promise(resolve => requestIdleCallback(() => resolve(), {timeout: 120}))
-      }
-      return new Promise(resolve => window.setTimeout(resolve, 80))
     },
     processedPageCanvas(image: HTMLImageElement, rotation: number, skewCorrection: number): HTMLCanvasElement {
       const rotatedCanvas = rotation ? this.rotatedImageCanvas(image, rotation) : this.sourceImageCanvas(image)
