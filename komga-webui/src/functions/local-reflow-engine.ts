@@ -776,6 +776,63 @@ export function detectImageRegions(
   return regions
 }
 
+export function regionOverlapRatio(outer: Roi, inner: Roi): number {
+  const left = Math.max(outer.x, inner.x)
+  const top = Math.max(outer.y, inner.y)
+  const right = Math.min(outer.x + outer.w, inner.x + inner.w)
+  const bottom = Math.min(outer.y + outer.h, inner.y + inner.h)
+  if (right <= left || bottom <= top) return 0
+  const intersection = (right - left) * (bottom - top)
+  return intersection / Math.max(1, inner.w * inner.h)
+}
+
+function clampRoiToPage(region: Roi, width: number, height: number): Roi | undefined {
+  const left = clamp(Math.floor(region.x), 0, Math.max(0, width - 1))
+  const top = clamp(Math.floor(region.y), 0, Math.max(0, height - 1))
+  const right = clamp(Math.ceil(region.x + region.w), left + 1, width)
+  const bottom = clamp(Math.ceil(region.y + region.h), top + 1, height)
+  if (right - left < 2 || bottom - top < 2) return undefined
+  return {x: left, y: top, w: right - left, h: bottom - top}
+}
+
+/**
+ * Manual image selections win over auto-detected ones: a detected region that is
+ * already covered by a manual region must not be rendered again, otherwise the
+ * same picture is emitted twice (once complete, once as a leftover fragment).
+ */
+export function mergeManualImageRegions(
+  detected: Roi[],
+  manual: Roi[],
+  width: number,
+  height: number,
+): Roi[] {
+  const manualRegions: Roi[] = []
+  manual.forEach(region => {
+    const clamped = clampRoiToPage(region, width, height)
+    if (!clamped) return
+    const overlapping = manualRegions.find(existing => regionOverlapRatio(existing, clamped) > 0.6)
+    if (overlapping) {
+      const right = Math.max(overlapping.x + overlapping.w, clamped.x + clamped.w)
+      const bottom = Math.max(overlapping.y + overlapping.h, clamped.y + clamped.h)
+      overlapping.x = Math.min(overlapping.x, clamped.x)
+      overlapping.y = Math.min(overlapping.y, clamped.y)
+      overlapping.w = right - overlapping.x
+      overlapping.h = bottom - overlapping.y
+      return
+    }
+    manualRegions.push(clamped)
+  })
+
+  if (manualRegions.length === 0) return detected
+
+  const keptDetected = detected
+    .map(region => clampRoiToPage(region, width, height))
+    .filter((region): region is Roi => !!region)
+    .filter(region => manualRegions.every(manualRegion => regionOverlapRatio(manualRegion, region) <= 0))
+
+  return [...manualRegions, ...keptDetected]
+}
+
 export function maskInkRegions(
   ink: Uint8Array,
   width: number,
@@ -2195,7 +2252,7 @@ export function reflowPageFromPixels(
         r.x + r.w > effectiveRoi.x && r.x < effectiveRoi.x + effectiveRoi.w &&
         r.y + r.h > effectiveRoi.y && r.y < effectiveRoi.y + effectiveRoi.h,
       )
-    const allImageRegions = [...detectedImages, ...roiManualImages]
+    const allImageRegions = mergeManualImageRegions(detectedImages, roiManualImages, workW, workH)
 
     const textInk = maskInkRegions(ink, workW, workH, allImageRegions)
 

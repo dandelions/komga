@@ -23,6 +23,7 @@ import {
   isColoredPixel,
   normalizeImageSliceForDarkDisplay,
   LocalReflowOptions,
+  mergeManualImageRegions,
 } from '@/functions/local-reflow-engine'
 
 describe('local-reflow-engine', () => {
@@ -1526,4 +1527,50 @@ describe('local-reflow-engine', () => {
       expect(readBmpPixel(darkFallback!.src!, 10, 10).r).toBeLessThan(15)
     })
   })
+  describe('mergeManualImageRegions', () => {
+    test('drops auto-detected regions already covered by a manual selection', () => {
+      const manual = [{x: 100, y: 100, w: 400, h: 300}]
+      const detected = [
+        {x: 110, y: 110, w: 380, h: 120},
+        {x: 100, y: 360, w: 400, h: 200},
+      ]
+
+      const merged = mergeManualImageRegions(detected, manual, 1000, 1200)
+
+      expect(merged).toHaveLength(1)
+      expect(merged[0]).toEqual({x: 100, y: 100, w: 400, h: 300})
+    })
+
+    test('keeps detected regions that are unrelated to the manual selection', () => {
+      const merged = mergeManualImageRegions(
+        [{x: 600, y: 700, w: 200, h: 150}],
+        [{x: 100, y: 100, w: 400, h: 300}],
+        1000,
+        1200,
+      )
+
+      expect(merged).toHaveLength(2)
+    })
+
+    test('merges overlapping manual selections into a single region', () => {
+      const merged = mergeManualImageRegions(
+        [],
+        [
+          {x: 100, y: 100, w: 200, h: 200},
+          {x: 120, y: 120, w: 200, h: 200},
+        ],
+        1000,
+        1200,
+      )
+
+      expect(merged).toHaveLength(1)
+      expect(merged[0]).toEqual({x: 100, y: 100, w: 220, h: 220})
+    })
+
+    test('falls back to detected regions when no manual selection exists', () => {
+      const detected = [{x: 10, y: 10, w: 50, h: 50}]
+      expect(mergeManualImageRegions(detected, [], 100, 100)).toEqual(detected)
+    })
+  })
 })
+
