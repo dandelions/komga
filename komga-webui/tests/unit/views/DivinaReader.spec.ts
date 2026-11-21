@@ -425,6 +425,17 @@ describe('DivinaReader reflow content clicks', () => {
     expect(childClick).not.toHaveBeenCalled()
   })
 
+  test('opens an automatically detected reflow image while the magnifier is active', () => {
+    const {reader, element, click} = mountReader({magnifierActive: true})
+    const image = element.querySelector('img')!
+
+    click(image)
+
+    expect(reader.reflowImagePreviewSrc).toBe(image.src)
+    expect(reader.activeReflowNavigateLeftSide).not.toHaveBeenCalled()
+    expect(reader.activeReflowNavigateRightSide).not.toHaveBeenCalled()
+  })
+
   test('opens the preview when another element covers the rendered image', () => {
     const {reader, element, click} = mountReader()
     const image = element.querySelector('img')!
@@ -511,15 +522,14 @@ describe('DivinaReader reflow content clicks', () => {
     expect(reader.showToolbars).toBe(false)
   })
 
-  test('consumes image clicks while the magnifier is active', () => {
+  test('opens image preview while the magnifier is active', () => {
     const {reader, element, click} = mountReader({magnifierActive: true})
-    const childClick = jest.fn()
     const image = element.querySelector('img')!
-    image.addEventListener('click', childClick)
     click(image)
-    expect(childClick).not.toHaveBeenCalled()
-    expect(reader.reflowImagePreviewSrc).toBe('')
+    expect(reader.reflowImagePreviewSrc).toBe(image.src)
     expect(reader.showToolbars).toBe(false)
+    expect(reader.activeReflowNavigateLeftSide).not.toHaveBeenCalled()
+    expect(reader.activeReflowNavigateRightSide).not.toHaveBeenCalled()
   })
 
   test.each(['ArrowLeft', 'ArrowRight', 'PageDown', ' ', 'Escape'])('blocks reader shortcuts for %s while preview is open', key => {
