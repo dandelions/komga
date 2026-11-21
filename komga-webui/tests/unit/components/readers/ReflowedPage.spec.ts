@@ -499,6 +499,28 @@ describe.each([
   })
 })
 
+test('horizontal reflow keeps inline word spacing separate from paragraph spacing', () => {
+  const context = {
+    targetWidth: 120,
+    blockSpacing: 6,
+    reflowInlineGap: () => 0,
+    pageContentHeight: () => 700,
+    horizontalContentPadding: () => 0,
+    reflowItemDisplayWidth: (item: any) => item.width,
+    reflowItemDisplayHeight: (item: any) => item.height,
+  }
+  const items = [
+    {type: 'word', width: 40, height: 20},
+    {type: 'word', width: 40, height: 20},
+    {type: 'word', width: 40, height: 20},
+  ]
+
+  const pages = methods.paginateItemsEstimated.call(context, items)
+
+  expect(pages).toHaveLength(1)
+  expect(pages[0]).toHaveLength(3)
+})
+
 test('standard reflow does not reserve bottom space for its side toolbar', () => {
   const context = {
     targetWidth: 200,

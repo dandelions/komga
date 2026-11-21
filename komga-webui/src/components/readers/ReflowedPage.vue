@@ -1266,6 +1266,11 @@ export default Vue.extend({
       const totalWidth = (typeof this.pageContentWidth === 'function' ? this.pageContentWidth() : 0) || this.targetWidth || 320
       return Math.max(16, Math.min(40, Math.round(totalWidth * 0.025)))
     },
+    reflowInlineGap(): number {
+      // Word slices already retain the source glyph positions. Reusing paragraph
+      // spacing between every slice makes Chinese lines wrap several characters early.
+      return Math.min(1, Math.max(0, this.blockSpacing * 0.2))
+    },
     columnPaneStyle(): object {
       const width = this.columnContentWidth()
       return {
@@ -1279,7 +1284,7 @@ export default Vue.extend({
         flexWrap: 'wrap',
         alignItems: 'flex-end',
         alignContent: 'flex-start',
-        columnGap: `${this.blockSpacing}px`,
+        columnGap: `${this.reflowInlineGap()}px`,
         rowGap: `${Math.round(this.blockSpacing * 1.5)}px`,
         boxSizing: 'border-box',
         overflow: 'hidden',
@@ -1430,7 +1435,7 @@ export default Vue.extend({
     },
     reflowWrapperStyle(): object {
       const style = {
-        columnGap: `${this.blockSpacing}px`,
+        columnGap: `${this.reflowInlineGap()}px`,
         rowGap: `${Math.round(this.blockSpacing * 1.5)}px`,
         height: `${this.pageContentHeight()}px`,
         minHeight: '100vh',
@@ -1467,7 +1472,7 @@ export default Vue.extend({
         : this.pageContentWidth()
       const style = {
         width: `${measureWidth}px`,
-        columnGap: `${this.blockSpacing}px`,
+        columnGap: `${this.reflowInlineGap()}px`,
         rowGap: `${Math.round(this.blockSpacing * 1.5)}px`,
       }
       if (!this.verticalText) return style
@@ -2792,7 +2797,7 @@ export default Vue.extend({
         : Math.max(120, targetWidth - (typeof this.horizontalContentPadding === 'function' ? this.horizontalContentPadding() * 2 : 32))
       const pageHeight = Math.max(120, this.pageContentHeight() - 32)
       const rowGap = Math.max(0, Math.round(this.blockSpacing * 1.5))
-      const columnGap = this.blockSpacing
+      const columnGap = typeof this.reflowInlineGap === 'function' ? this.reflowInlineGap() : 0
       const pages = [] as ReflowItem[][]
       let currentPage = [] as ReflowItem[]
       let currentPageHeight = 0
