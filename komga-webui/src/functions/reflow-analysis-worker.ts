@@ -50,9 +50,16 @@ export type ReflowAnalysisWorkerResponse = {
   message?: string,
 }
 
+let queue: Promise<void> = Promise.resolve()
+
 self.onmessage = (event: MessageEvent<ReflowAnalysisWorkerRequest>) => {
   const request = event.data
   if (!request) return
+  // keep requests serialized: slice encoding is async but the engine output order matters
+  queue = queue.then(() => handleRequest(request)).catch(() => undefined)
+}
+
+async function handleRequest(request: ReflowAnalysisWorkerRequest): Promise<void> {
 
   if (request.type === 'analyze') {
     try {
@@ -70,14 +77,17 @@ self.onmessage = (event: MessageEvent<ReflowAnalysisWorkerRequest>) => {
 
   if (request.type === 'reflow') {
     try {
+      const canEncodeJpeg = typeof (self as any).OffscreenCanvas !== 'undefined'
+        && typeof (self as any).FileReaderSync !== 'undefined'
       const result = reflowPageFromPixels(
         request.pixels,
         request.width,
         request.height,
-        request.options,
+        canEncodeJpeg ? {...request.options, sliceEncoding: 'raw'} : request.options,
         request.cropRois || [],
         request.manualImageRegions || [],
       )
+      if (canEncodeJpeg) await encodeSlicesToDataUrls(result.items)
       postMessage({
         type: 'reflowed',
         requestId: request.requestId,
@@ -96,6 +106,23 @@ self.onmessage = (event: MessageEvent<ReflowAnalysisWorkerRequest>) => {
         message: error instanceof Error ? error.message : String(error),
       } as ReflowAnalysisWorkerResponse)
     }
+  }
+}
+
+async function encodeSlicesToDataUrls(items: LocalReflowItem[]) {
+  const OffscreenCanvasCtor = (self as any).OffscreenCanvas
+  const reader = new (self as any).FileReaderSync()
+  for (const item of items) {
+    if (!item.pixels) continue
+    const width = Math.max(1, Math.round(item.w || 0))
+    const height = Math.max(1, Math.round(item.h || item.height || 0))
+    const canvas = new OffscreenCanvasCtor(width, height)
+    const context = canvas.getContext('2d')
+    if (!context) continue
+    context.putImageData(new ImageData(new Uint8ClampedArray(item.pixels), width, height), 0, 0)
+    const blob = await canvas.convertToBlob({type: 'image/jpeg', quality: 0.92})
+    item.src = reader.readAsDataURL(blob)
+    delete item.pixels
   }
 }
 

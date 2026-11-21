@@ -24,6 +24,7 @@ import {
   normalizeImageSliceForDarkDisplay,
   LocalReflowOptions,
   mergeManualImageRegions,
+  buildNormalizedPagePixels,
 } from '@/functions/local-reflow-engine'
 
 describe('local-reflow-engine', () => {
@@ -973,6 +974,96 @@ describe('local-reflow-engine', () => {
       // Both words in the same line must share identical y and h in slices mode too
       expect(words[0].y).toBe(words[1].y)
       expect(words[0].h).toBe(words[1].h)
+    })
+  })
+
+
+  describe('worker-side slice encoding', () => {
+    const makePage = () => {
+      const width = 400
+      const height = 200
+      const pixels = new Uint8ClampedArray(width * height * 4)
+      pixels.fill(255)
+      for (let y = 30; y < 60; y++) {
+        for (let x = 20; x < 180; x++) {
+          const idx = (y * width + x) * 4
+          pixels[idx] = 0; pixels[idx + 1] = 0; pixels[idx + 2] = 0
+        }
+      }
+      return {pixels, width, height}
+    }
+
+    test('raw slice encoding returns pixels instead of inline BMP data URLs', () => {
+      const {pixels, width, height} = makePage()
+      const options = {
+        targetWidth: 400,
+        renderMode: 'slices' as const,
+        textScale: 100,
+        sliceEncoding: 'raw' as const,
+      } as LocalReflowOptions
+      const result = reflowPageFromPixels(pixels, width, height, options)
+      const words = result.items.filter(it => it.type === 'word')
+      expect(words.length).toBeGreaterThan(0)
+      for (const word of words) {
+        expect(word.src).toBeUndefined()
+        expect(word.pixels).toBeInstanceOf(Uint8ClampedArray)
+        expect(word.pixels!.length).toBe((word.w || 0) * (word.h || 0) * 4)
+      }
+    })
+
+    test('default slice encoding still emits BMP data URLs', () => {
+      const {pixels, width, height} = makePage()
+      const options = {
+        targetWidth: 400,
+        renderMode: 'slices' as const,
+        textScale: 100,
+      } as LocalReflowOptions
+      const result = reflowPageFromPixels(pixels, width, height, options)
+      const words = result.items.filter(it => it.type === 'word')
+      expect(words.length).toBeGreaterThan(0)
+      for (const word of words) {
+        expect(word.src).toContain('data:image/bmp')
+        expect(word.pixels).toBeUndefined()
+      }
+    })
+  })
+
+  describe('page-wide text normalization', () => {
+    test('contrast enhancement is applied page-wide for slices output', () => {
+      const width = 300
+      const height = 200
+      const pixels = new Uint8ClampedArray(width * height * 4)
+      pixels.fill(255)
+      for (let y = 30; y < 60; y++) {
+        for (let x = 20; x < 160; x++) {
+          const idx = (y * width + x) * 4
+          pixels[idx] = 120; pixels[idx + 1] = 120; pixels[idx + 2] = 120
+        }
+      }
+      const options = {
+        targetWidth: 300,
+        renderMode: 'slices' as const,
+        textScale: 100,
+        contrastEnhancement: true,
+      } as LocalReflowOptions
+      const result = reflowPageFromPixels(pixels, width, height, options)
+      const words = result.items.filter(it => it.type === 'word')
+      expect(words.length).toBeGreaterThan(0)
+      expect(words.every(word => typeof word.src === 'string' && word.src.length > 0)).toBe(true)
+    })
+
+    test('buildNormalizedPagePixels keeps original pixels untouched in the source buffer', () => {
+      const pixels = new Uint8ClampedArray([10, 10, 10, 255, 250, 250, 250, 255])
+      const before = Array.from(pixels)
+      const options = {
+        targetWidth: 100,
+        contrastEnhancement: true,
+        matchBackgroundMode: 'matched',
+      } as LocalReflowOptions
+      const normalized = buildNormalizedPagePixels(pixels, options, 250, 200, false)
+      expect(Array.from(pixels)).toEqual(before)
+      expect(normalized.length).toBe(pixels.length)
+      expect(normalized[3]).toBe(255)
     })
   })
 

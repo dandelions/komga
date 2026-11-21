@@ -42,11 +42,13 @@ export type LocalReflowOptions = {
   formulaProtection?: boolean,
   deskewAnalysisRoi?: Roi | null,
   renderMode?: 'sprite' | 'slices',
+  sliceEncoding?: 'bmp' | 'raw',
 }
 
 export type LocalReflowItem = {
   type: 'word' | 'image' | 'break' | 'indent',
   src?: string,
+  pixels?: Uint8ClampedArray,
   pageTextureUrl?: string,
   workWidth?: number,
   workHeight?: number,
@@ -831,6 +833,58 @@ export function mergeManualImageRegions(
     .filter(region => manualRegions.every(manualRegion => regionOverlapRatio(manualRegion, region) <= 0))
 
   return [...manualRegions, ...keptDetected]
+}
+
+/**
+ * Applies the per-slice color normalization to the whole page once so text slices
+ * can be plain pixel copies. Detection keeps using the original pixels.
+ */
+export function buildNormalizedPagePixels(
+  pixels: Uint8ClampedArray,
+  options: LocalReflowOptions,
+  pageBgLuma: number,
+  threshold: number,
+  sourceDark: boolean,
+): Uint8ClampedArray {
+  const out = new Uint8ClampedArray(pixels.length)
+  const bgVal = options.darkDisplay ? 0 : 255
+  const fgVal = options.darkDisplay ? 255 : 0
+  const inkThresh = adaptiveInkThreshold(threshold, pageBgLuma)
+  const monochrome = options.matchBackgroundMode === 'monochrome'
+  for (let i = 0; i < pixels.length; i += 4) {
+    const r = pixels[i]
+    const g = pixels[i + 1]
+    const b = pixels[i + 2]
+    let outR = r
+    let outG = g
+    let outB = b
+    if (monochrome) {
+      const luma = pixelLuma(r, g, b)
+      const isWordInk = sourceDark ? luma > inkThresh : luma < inkThresh
+      const val = isWordInk ? fgVal : bgVal
+      outR = val
+      outG = val
+      outB = val
+    } else if (options.contrastEnhancement) {
+      const c = contrastEnhancedTextColor(r, g, b, pageBgLuma, options.darkDisplay)
+      outR = c.r
+      outG = c.g
+      outB = c.b
+    } else {
+      const luma = pixelLuma(r, g, b)
+      const isInk = sourceDark ? luma > inkThresh : luma < inkThresh
+      if (!isInk) {
+        outR = bgVal
+        outG = bgVal
+        outB = bgVal
+      }
+    }
+    out[i] = outR
+    out[i + 1] = outG
+    out[i + 2] = outB
+    out[i + 3] = 255
+  }
+  return out
 }
 
 export function maskInkRegions(
@@ -2159,7 +2213,25 @@ export function reflowPageFromPixels(
     pageTextureUrl = rgbaToBmpDataUrl(texturePixels, workW, workH, workW, 0, 0)
   }
 
+  // Normalize text colors once for the whole page; detection still uses workPixels.
+  const pageNormalizationApplies =
+    options.matchBackgroundMode !== 'original' &&
+    !isSpriteMode &&
+    workW * workH <= 12_000_000 &&
+    (options.darkDisplay === true ||
+      options.contrastEnhancement === true ||
+      options.matchBackground === true ||
+      (!!options.optimizeBackground && options.optimizeBackground !== 'none'))
+  const renderPixels = pageNormalizationApplies
+    ? buildNormalizedPagePixels(workPixels, options, pageBgLuma, threshold, sourceDark)
+    : workPixels
+
   const usedImageIndices = new Set<number>()
+
+  const sliceEncoding = options.sliceEncoding === 'raw' ? 'raw' : 'bmp'
+  const encodeSlice = (data: Uint8ClampedArray, w: number, h: number): {src?: string, pixels?: Uint8ClampedArray} => (
+    sliceEncoding === 'raw' ? {pixels: data} : {src: rgbaToBmpDataUrl(data, w, h, w, 0, 0)}
+  )
 
   const renderImageSlice = (reg: Roi, isInline: boolean): LocalReflowItem => {
     const startX = clamp(Math.floor(reg.x), 0, Math.max(0, workW - 1))
@@ -2211,12 +2283,12 @@ export function reflowPageFromPixels(
       }
     }
 
-    const dataUrl = rgbaToBmpDataUrl(sliceData, sliceW, sliceH, sliceW, 0, 0)
+    const encoded = encodeSlice(sliceData, sliceW, sliceH)
     if (isInline) {
       return {
         type: 'image',
         isInline: true,
-        src: dataUrl,
+        ...encoded,
         x: reg.x,
         y: reg.y,
         w: sliceW,
@@ -2228,7 +2300,7 @@ export function reflowPageFromPixels(
     return {
       type: 'image',
       isInline: false,
-      src: dataUrl,
+      ...encoded,
       x: reg.x,
       y: reg.y,
       w: sliceW,
@@ -2603,12 +2675,13 @@ export function reflowPageFromPixels(
           sliceData[i] = 255
         }
 
-        const normalizeColors =
+        const normalizeColors = !pageNormalizationApplies && (
           options.darkDisplay ||
           options.contrastEnhancement ||
           options.matchBackground ||
           options.matchBackgroundMode !== 'original' ||
           (options.optimizeBackground && options.optimizeBackground !== 'none')
+        )
 
         const matchedForeground = normalizeColors && (options.matchBackground || options.matchBackgroundMode === 'original')
           ? matchBackgroundMask(workPixels, workW, workH, adjusted, pageBgLuma)
@@ -2628,9 +2701,9 @@ export function reflowPageFromPixels(
           for (let x = 0; x < adjusted.w; x++) {
             const srcIdx = srcRowStart + x * 4
             const dstIdx = dstRowStart + x * 4
-            const r = workPixels[srcIdx]
-            const g = workPixels[srcIdx + 1]
-            const b = workPixels[srcIdx + 2]
+            const r = renderPixels[srcIdx]
+            const g = renderPixels[srcIdx + 1]
+            const b = renderPixels[srcIdx + 2]
 
             if (!normalizeColors) {
               sliceData[dstIdx] = r
@@ -2722,10 +2795,9 @@ export function reflowPageFromPixels(
           offsetY,
         )
 
-        const dataUrl = rgbaToBmpDataUrl(sliceData, sliceW, sliceH, sliceW, 0, 0)
         items.push({
           type: 'word',
-          src: dataUrl,
+          ...encodeSlice(sliceData, sliceW, sliceH),
           x: adjusted.x,
           y: outputTop,
           w: sliceW,
