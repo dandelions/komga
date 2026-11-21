@@ -2453,6 +2453,7 @@ export function reflowPageFromPixels(
       // Paragraph break & indent detection
       let isNewParagraph = false
       let indentWidth = 0
+      let listMarkerGap = 0
 
       if (words.length > 0) {
         const firstWord = words[0]
@@ -2523,6 +2524,11 @@ export function reflowPageFromPixels(
           if (hasPrefixOffset && alignsWithP1 && indentedFromP0 && !previousBlankCue) {
             isHangingContinuation = true
           }
+        }
+
+        if (isListItemPrefix && words.length >= 2) {
+          const gap = words[1].x - (words[0].x + words[0].w)
+          if (gap > 0) listMarkerGap = gap
         }
 
         let isListItemContinuation = isHangingContinuation
@@ -2606,8 +2612,12 @@ export function reflowPageFromPixels(
             isListItemPrefix
 
           if (isNewParagraph) {
-            if (isCentered || isRightAligned || isListItemPrefix) {
+            if (isCentered || isRightAligned) {
               indentWidth = 0
+            } else if (isListItemPrefix) {
+              // bullets and numbers are indented in the source; flushing them to the
+              // column edge is what made them look like they had no leading space
+              indentWidth = rawIndent > indentThreshold ? rawIndent : 0
             } else if (lineIndent > 0) {
               indentWidth = lineIndent
             } else if (previousBlankCue || hasParagraphGap) {
@@ -2674,7 +2684,14 @@ export function reflowPageFromPixels(
         return ax - bx
       })
 
-      lineUnits.forEach(unit => {
+      lineUnits.forEach((unit, unitIndex) => {
+        if (unitIndex === 1 && listMarkerGap > 0) {
+          items.push({
+            type: 'indent',
+            width: listMarkerGap * textScale,
+            sourceWidth: listMarkerGap,
+          })
+        }
         if (unit.kind === 'inline-img') {
           items.push(renderImageSlice(unit.reg, true))
           return

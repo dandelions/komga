@@ -1230,7 +1230,11 @@ describe('local-reflow-engine', () => {
 
       // Continuation line must NOT be treated as a new paragraph (no break between line 1 and line 2)
       expect(breaks.length).toBe(0)
-      expect(indents.length).toBe(0)
+      // the bullet sits on the column edge, so no paragraph indent is allowed; the
+      // only spacer is the gap that follows the marker itself
+      const paragraphIndents = indents.filter(indent => Number((indent as any).sourceWidth) > 30)
+      expect(paragraphIndents.length).toBe(0)
+      expect(indents.length).toBeLessThanOrEqual(1)
     })
 
     test('indented bullet list items with 2-character indent start on new lines', () => {
@@ -1665,3 +1669,100 @@ describe('local-reflow-engine', () => {
   })
 })
 
+describe('local reflow list marker layout', () => {
+  const drawRun = (pixels: Uint8ClampedArray, width: number, left: number, top: number, glyphs: number, glyphWidth: number, glyphHeight: number) => {
+    for (let g = 0; g < glyphs; g++) {
+      const x0 = left + g * glyphWidth
+      for (let dy = 0; dy < glyphHeight; dy++) {
+        for (let dx = 2; dx < glyphWidth - 2; dx++) {
+          if (dy > 2 && dy < glyphHeight - 3 && dx > 3 && dx < glyphWidth - 4) continue
+          const idx = ((top + dy) * width + x0 + dx) * 4
+          pixels[idx] = 0
+          pixels[idx + 1] = 0
+          pixels[idx + 2] = 0
+        }
+      }
+    }
+  }
+
+  const buildPage = () => {
+    const width = 1000
+    const height = 900
+    const pixels = new Uint8ClampedArray(width * height * 4)
+    pixels.fill(255)
+    for (let i = 3; i < pixels.length; i += 4) pixels[i] = 255
+    drawRun(pixels, width, 60, 40, 20, 32, 34)
+    for (const top of [120, 200, 280, 360]) {
+      drawRun(pixels, width, 60, top, 2, 26, 34)
+      drawRun(pixels, width, 130, top, 22, 32, 34)
+    }
+    for (const top of [460, 540]) {
+      drawRun(pixels, width, 90, top + 14, 1, 12, 12)
+      drawRun(pixels, width, 130, top, 22, 32, 34)
+    }
+    return {pixels, width, height}
+  }
+
+  const options = {
+    targetWidth: 500,
+    autoCropBorder: false,
+    textScale: 100,
+    columnCount: 1,
+    skewCorrection: 0,
+    threshold: 185,
+    columnGap: 15,
+    wordGap: 3,
+    strokeStrength: 0.1,
+    contrastEnhancement: false,
+    matchBackground: false,
+    matchBackgroundMode: 'original',
+    blockSpacing: 6,
+    verticalText: false,
+    verticalDirection: 'rtl',
+    marginTop: 0,
+    marginRight: 0,
+    marginBottom: 0,
+    marginLeft: 0,
+    darkDisplay: false,
+    renderMode: 'slices' as const,
+  } as LocalReflowOptions
+
+  test('keeps the bullet indented instead of flushing it to the column edge', () => {
+    const {pixels, width, height} = buildPage()
+    const result = reflowPageFromPixels(pixels, width, height, options)
+    const bulletIndex = result.items.findIndex(item => item.type === 'word' && (item as any).w <= 16)
+    expect(bulletIndex).toBeGreaterThan(0)
+    const indent = result.items.slice(0, bulletIndex).reverse().find(item => item.type === 'indent') as any
+    expect(indent).toBeDefined()
+    expect(indent.sourceWidth).toBeGreaterThan(0)
+  })
+
+  test('keeps the gap between a list marker and its content', () => {
+    const {pixels, width, height} = buildPage()
+    const result = reflowPageFromPixels(pixels, width, height, options)
+    const bulletIndex = result.items.findIndex(item => item.type === 'word' && (item as any).w <= 16)
+    expect(bulletIndex).toBeGreaterThan(0)
+    const spacer = result.items[bulletIndex + 1] as any
+    expect(spacer.type).toBe('indent')
+    expect(spacer.sourceWidth).toBeGreaterThan(10)
+  })
+
+  test('numbered list lines keep their own left offset', () => {
+    const width = 1000
+    const height = 500
+    const pixels = new Uint8ClampedArray(width * height * 4)
+    pixels.fill(255)
+    for (let i = 3; i < pixels.length; i += 4) pixels[i] = 255
+    drawRun(pixels, width, 60, 40, 18, 32, 34)
+    // marker indented by ~30px, content starts further right
+    drawRun(pixels, width, 90, 140, 2, 26, 34)
+    drawRun(pixels, width, 160, 140, 18, 32, 34)
+
+    const result = reflowPageFromPixels(pixels, width, height, options)
+    const numberedLineIndex = result.items.findIndex(item => item.type === 'word' && Math.round((item as any).y) >= 130)
+    expect(numberedLineIndex).toBeGreaterThan(0)
+    const indent = result.items.slice(0, numberedLineIndex).reverse().find(item => item.type === 'indent') as any
+    expect(indent).toBeDefined()
+    expect(indent.sourceWidth).toBeGreaterThan(10)
+  })
+})
