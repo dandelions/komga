@@ -318,6 +318,7 @@ import {
   preprocessDocumentCanvas,
 } from '@/functions/image-enhancement'
 import {canonicalPageImageUrl, loadCachedPageImageWithStats} from '@/functions/page-image-cache'
+import {createK2SliceWorker} from '@/functions/reflow-analysis-worker-factory'
 
 type Roi = { x: number, y: number, w: number, h: number }
 type PageParity = 'odd' | 'even'
@@ -449,6 +450,7 @@ export default Vue.extend({
     outputPadding: DEFAULT_OUTPUT_PADDING,
     formulaProtection: false,
     pageSliceEffectsApplied: false,
+    k2SliceRequestId: 0,
     magnifierPressTimer: undefined as number | undefined,
     magnifierLongPressTriggered: false,
   }),
@@ -1040,6 +1042,90 @@ export default Vue.extend({
         matchBackground: false,
       })
       this.pageBackground = '#fff'
+    },
+    async fillPendingWordSlices(
+      sourceCanvas: HTMLCanvasElement,
+      sliceCanvas: HTMLCanvasElement,
+      sliceContext: CanvasRenderingContext2D,
+      pendingWords: Array<{itemIndex: number, word: WordBlock}>,
+      items: K2Item[],
+    ) {
+      if (pendingWords.length === 0) return
+
+      const sourceContext = this.canvasContext(sourceCanvas)
+      if (sourceContext) {
+        const pageData = sourceContext.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height)
+        const slices = await this.sliceWordsInWorker(
+          pageData.data,
+          pageData.width,
+          pageData.height,
+          pendingWords.map(pending => ({x: pending.word.x, y: pending.word.y, w: pending.word.w, h: pending.word.h})),
+          this.wordOutputBackground(),
+        )
+        if (slices && slices.length === pendingWords.length) {
+          slices.forEach((slice, index) => {
+            items[pendingWords[index].itemIndex].src = slice
+          })
+          return
+        }
+      }
+
+      let rendered = 0
+      for (const pending of pendingWords) {
+        const word = pending.word
+        sliceCanvas.width = word.w
+        sliceCanvas.height = word.h
+        this.fillWordSliceBackground(sliceContext, word.w, word.h)
+        sliceContext.drawImage(sourceCanvas, word.x, word.y, word.w, word.h, 0, 0, word.w, word.h)
+        if (!this.pageSliceEffectsApplied) this.applyWordSliceEffects(sliceContext, word.w, word.h)
+        items[pending.itemIndex].src = sliceCanvas.toDataURL(K2_SLICE_MIME, K2_SLICE_QUALITY)
+        rendered++
+        if (rendered % K2_YIELD_EVERY_WORDS === 0) await this.yieldToBrowser()
+      }
+    },
+    supportsK2SliceWorker(): boolean {
+      return typeof Worker !== 'undefined'
+        && typeof (globalThis as any).OffscreenCanvas !== 'undefined'
+        && typeof (globalThis as any).FileReaderSync !== 'undefined'
+    },
+    async sliceWordsInWorker(
+      pixels: Uint8ClampedArray,
+      width: number,
+      height: number,
+      words: Array<{x: number, y: number, w: number, h: number}>,
+      background: string,
+    ): Promise<string[] | undefined> {
+      if (words.length === 0 || !this.supportsK2SliceWorker()) return undefined
+      let worker: Worker | undefined
+      try {
+        worker = createK2SliceWorker()
+        if (!worker) return undefined
+        const activeWorker = worker
+        const requestId = ++this.k2SliceRequestId
+        return await new Promise<string[] | undefined>(resolve => {
+          activeWorker.onmessage = (event: MessageEvent<any>) => {
+            const response = event.data
+            if (!response || response.requestId !== requestId) return
+            resolve(response.type === 'sliced' && Array.isArray(response.slices) ? response.slices : undefined)
+          }
+          activeWorker.onerror = () => resolve(undefined)
+          activeWorker.postMessage({
+            type: 'slice',
+            requestId,
+            pixels,
+            width,
+            height,
+            words,
+            mimeType: K2_SLICE_MIME,
+            quality: K2_SLICE_QUALITY,
+            background,
+          }, [pixels.buffer])
+        })
+      } catch (e) {
+        return undefined
+      } finally {
+        worker?.terminate()
+      }
     },
     needsWordSliceEffects(): boolean {
       const textModeEnabled = this.matchBackgroundMode !== 'original'
@@ -2249,6 +2335,7 @@ export default Vue.extend({
       const maxLineWidth = Math.max(80, targetWidth - outputPadding * 2)
       let lineWidth = 0
       const items = [] as K2Item[]
+      const pendingWords: Array<{itemIndex: number, word: WordBlock}> = []
       const imageSlots = this.horizontalImageSlots(imageRegions, lines)
 
       let renderedWords = 0
@@ -2282,15 +2369,10 @@ export default Vue.extend({
             lineWidth = 0
           }
 
-          sliceCanvas.width = word.w
-          sliceCanvas.height = word.h
-          this.fillWordSliceBackground(sliceContext, word.w, word.h)
-          sliceContext.drawImage(sourceCanvas, word.x, word.y, word.w, word.h, 0, 0, word.w, word.h)
-          if (!this.pageSliceEffectsApplied) this.applyWordSliceEffects(sliceContext, word.w, word.h)
-
+          pendingWords.push({itemIndex: items.length, word})
           items.push({
             type: 'word',
-            src: sliceCanvas.toDataURL(K2_SLICE_MIME, K2_SLICE_QUALITY),
+            src: '',
             sourceWidth: word.w,
             sourceHeight: word.h,
             width: scaledWidth,
@@ -2301,6 +2383,7 @@ export default Vue.extend({
           if (renderedWords % K2_YIELD_EVERY_WORDS === 0) await this.yieldToBrowser()
         }
       }
+      await this.fillPendingWordSlices(sourceCanvas, sliceCanvas, sliceContext, pendingWords, items)
       this.appendK2ImageItems(items, sourceCanvas, sliceCanvas, sliceContext, imageSlots[lines.length])
 
       return items
