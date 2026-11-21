@@ -78,7 +78,7 @@ const EDGE_INK_THRESHOLD = 238
 const MAX_EDGE_TRIM = 6
 const MAX_EDGE_EXPANSION = 10
 const LOCAL_REFLOW_MAX_SIDE = 3600
-const LOCAL_REFLOW_MAX_PIXELS = 8_000_000
+const LOCAL_REFLOW_MAX_PIXELS = 2_000_000
 const LOCAL_REFLOW_STRIP_ASPECT_RATIO = 2.0
 const LOCAL_REFLOW_STRIP_MAX_SHORT_SIDE = 1800
 const LOCAL_REFLOW_STRIP_MAX_LONG_SIDE = 65000
@@ -1065,6 +1065,9 @@ export function detectHorizontalColumns(
 
   const noiseLimit = Math.max(1, Math.round(roi.h * 0.003))
   const minGutterWidth = Math.max(20, Math.round(roi.w * 0.015))
+  const inkPrefix = new Float64Array(roi.w + 1)
+  for (let x = 0; x < roi.w; x++) inkPrefix[x + 1] = inkPrefix[x] + colInk[x]
+  const inkInRange = (from: number, to: number) => (to > from ? inkPrefix[to] - inkPrefix[from] : 0)
 
   const splitPoints: number[] = []
   let inGutter = false
@@ -1086,9 +1089,33 @@ export function detectHorizontalColumns(
             const split = Math.round((gutterStart + x) / 2)
             splitPoints.push(split)
           } else if (roi.w >= 400 && roi.h >= 400 && gutterWidth >= Math.max(50, Math.round(roi.w * 0.03))) {
+            // A single-column page must not be sliced into a narrow strip just because
+            // a few marks (list markers, bullets, dust) sit left of the text. Such a
+            // strip is emitted before the body and pushes everything out of order.
             const maxMarginalWidth = Math.max(40, Math.round(roi.w * 0.12))
-            const isMarginal = leftWidth <= maxMarginalWidth || rightWidth <= maxMarginalWidth
-            if (isMarginal) {
+            const leftIsMarginal = leftWidth <= maxMarginalWidth
+            const rightIsMarginal = rightWidth <= maxMarginalWidth
+            const marginalWidth = leftIsMarginal ? leftWidth : rightWidth
+            // A real marginal column runs down most of the page; list markers, bullets or
+            // dust only touch a handful of rows and must stay part of the main column.
+            const bandStart = leftIsMarginal ? firstInk : x
+            const bandEnd = leftIsMarginal ? gutterStart : lastInk + 1
+            let rowsWithInk = 0
+            for (let y = roi.y; y < roi.y + roi.h; y++) {
+              const rowOffset = y * width
+              for (let gx = roi.x + bandStart; gx < roi.x + bandEnd; gx++) {
+                if (ink[rowOffset + gx] === 1) {
+                  rowsWithInk++
+                  break
+                }
+              }
+            }
+            const rowCoverage = roi.h > 0 ? rowsWithInk / roi.h : 0
+            const minMarginalWidth = Math.max(40, Math.round(roi.w * 0.05))
+            const isRealMarginalColumn = (leftIsMarginal || rightIsMarginal) &&
+              marginalWidth >= minMarginalWidth &&
+              rowCoverage >= 0.5
+            if (isRealMarginalColumn) {
               const split = Math.round((gutterStart + x) / 2)
               splitPoints.push(split)
             }
@@ -2401,8 +2428,29 @@ export function reflowPageFromPixels(
         }
       })
     })
-    const effectiveColStart = Number.isFinite(colTextLeft) ? colTextLeft : col.start
-    const effectiveColEnd = colTextRight > effectiveColStart ? colTextRight : col.end
+    // Percentiles instead of min/max: a single speck or page-edge mark must not be able
+    // to define the column edge, which inflated every paragraph indent.
+    const firstWordXs = linesWords
+      .map(words => words.filter(word => word.w >= 2 && word.h >= 2)[0])
+      .filter((word): word is WordBlock => !!word)
+      .map(word => word.x)
+      .sort((a, b) => a - b)
+    const lastWordRights = linesWords
+      .map(words => words.filter(word => word.w >= 2 && word.h >= 2).slice(-1)[0])
+      .filter((word): word is WordBlock => !!word)
+      .map(word => word.x + word.w)
+      .sort((a, b) => a - b)
+    const percentile = (values: number[], ratio: number) => {
+      if (values.length === 0) return undefined
+      const index = Math.min(values.length - 1, Math.max(0, Math.round((values.length - 1) * ratio)))
+      return values[index]
+    }
+    const robustLeft = percentile(firstWordXs, 0.1)
+    const robustRight = percentile(lastWordRights, 0.9)
+    const effectiveColStart = robustLeft !== undefined ? robustLeft : (Number.isFinite(colTextLeft) ? colTextLeft : col.start)
+    const effectiveColEnd = robustRight !== undefined && robustRight > effectiveColStart
+      ? robustRight
+      : (colTextRight > effectiveColStart ? colTextRight : col.end)
     const allColWords = linesWords.flat()
     const colGlyphHeight = horizontalCharacterSourceHeight(allColWords)
 
@@ -2449,6 +2497,12 @@ export function reflowPageFromPixels(
 
       const words = linesWords[lineIdx] || []
       if (words.length === 0 && inlineImagesInLine.length === 0) return
+      // A single undersized speck (dust, scanner noise, page-edge mark) is not a text
+      // line: keeping it drags the column left edge with it and inflates every indent.
+      if (words.length === 1 && inlineImagesInLine.length === 0 && colGlyphHeight > 0 &&
+        words[0].h < colGlyphHeight * 0.4 && words[0].w < colGlyphHeight * 1.5) {
+        return
+      }
 
       // Paragraph break & indent detection
       let isNewParagraph = false

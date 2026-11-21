@@ -29,10 +29,10 @@ import {
 
 describe('local-reflow-engine', () => {
   describe('localReflowScale', () => {
-    test('uses the same 3600px and 8MP limits as the server', () => {
-      expect(localReflowScale(7200, 4800)).toBeCloseTo(Math.sqrt(8000000 / (7200 * 4800)))
+    test('uses the same 3600px and 2MP local analysis limit', () => {
+      expect(localReflowScale(7200, 4800)).toBeCloseTo(Math.sqrt(2000000 / (7200 * 4800)))
       expect(localReflowScale(12000, 1000)).toBe(1)
-      expect(localReflowScale(2400, 1600)).toBe(1)
+      expect(localReflowScale(2400, 1600)).toBeCloseTo(Math.sqrt(2000000 / (2400 * 1600)))
     })
   })
 
