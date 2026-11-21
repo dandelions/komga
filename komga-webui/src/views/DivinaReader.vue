@@ -996,6 +996,19 @@
                         suffix="px"
                       />
                     </v-list-item>
+                    <v-list-item>
+                      <v-slider
+                        :value="reflowPrefetchAhead"
+                        @input="setReflowPrefetchAhead"
+                        label="预重排页数"
+                        min="0"
+                        :max="10"
+                        step="1"
+                        thumb-label
+                        hint="0 = 关闭预重排"
+                        persistent-hint
+                      />
+                    </v-list-item>
                   </v-tab-item>
 
                   <v-tab-item>
@@ -1258,6 +1271,8 @@ const MAGNIFIER_DIAMETER_OPTIONS = [
 const REFLOW_CACHE_BEHIND_COUNT = 3
 const REFLOW_CONTINUATION_COUNT = 4
 const REFLOW_PREFETCH_AHEAD_COUNT = 3
+const REFLOW_PREFETCH_MAX_AHEAD = 10
+const REFLOW_PREFETCH_STORAGE_KEY = 'komga.reflowPrefetchAhead'
 
 function reflowPrefetchConcurrency(): number {
   const cores = typeof navigator !== 'undefined' ? Number(navigator.hardwareConcurrency) : 0
@@ -1468,6 +1483,7 @@ export default Vue.extend({
       reflowSessionResponseTransferBytes: 0,
       reflowSessionOriginalTransferBytes: 0,
       reflowSessionTransferPages: {} as Record<string, boolean>,
+      reflowPrefetchAhead: REFLOW_PREFETCH_AHEAD_COUNT,
       reflowPrefetchPages: [] as number[],
       reflowPrefetchTimer: undefined as number | undefined,
       reflowSettings: defaultReflowSettings(),
@@ -1631,6 +1647,7 @@ export default Vue.extend({
     window.addEventListener('resize', this.updateViewportMetrics)
     window.visualViewport?.addEventListener('resize', this.updateViewportMetrics)
     this.loadMagnifierSettings()
+    this.loadReflowPrefetchAhead()
 
     this.$debug('[mounted]', 'route.query:', this.$route.query)
 
@@ -4236,7 +4253,7 @@ export default Vue.extend({
         this.pagesCount,
         Math.max(
           this.reflowRootPage + REFLOW_CONTINUATION_COUNT,
-          this.page + REFLOW_PREFETCH_AHEAD_COUNT,
+          this.page + this.reflowPrefetchAhead,
         ),
       )
 
@@ -4275,7 +4292,7 @@ export default Vue.extend({
         window.clearTimeout(this.reflowPrefetchTimer)
         this.reflowPrefetchTimer = undefined
       }
-      if (this.reflowCropMode || this.showSettings) {
+      if (this.reflowCropMode || this.showSettings || this.reflowPrefetchAhead <= 0) {
         this.reflowPrefetchPages = []
         return
       }
@@ -4285,7 +4302,7 @@ export default Vue.extend({
           sourcePage,
           this.pagesCount,
           0,
-          REFLOW_PREFETCH_AHEAD_COUNT,
+          this.reflowPrefetchAhead,
         )
           .filter(pageNumber => !this.cachedReflowItems(this.pages[pageNumber - 1]))
       if (pageNumbers.length === 0) {
@@ -4474,6 +4491,28 @@ export default Vue.extend({
       this.setMagnifierDiameter(diameter)
       this.magnifierDiameterDialog = false
       this.magnifierActive = true
+    },
+    loadReflowPrefetchAhead() {
+      try {
+        const saved = Number(window.localStorage.getItem(REFLOW_PREFETCH_STORAGE_KEY))
+        if (Number.isFinite(saved) && saved >= 0 && saved <= REFLOW_PREFETCH_MAX_AHEAD) {
+          this.reflowPrefetchAhead = Math.round(saved)
+        }
+      } catch (_) {
+        this.reflowPrefetchAhead = REFLOW_PREFETCH_AHEAD_COUNT
+      }
+    },
+    setReflowPrefetchAhead(value: number) {
+      const count = Number(value)
+      if (!Number.isFinite(count)) return
+      this.reflowPrefetchAhead = Math.max(0, Math.min(REFLOW_PREFETCH_MAX_AHEAD, Math.round(count)))
+      try {
+        window.localStorage.setItem(REFLOW_PREFETCH_STORAGE_KEY, String(this.reflowPrefetchAhead))
+      } catch (_) {
+        // Keeps the value for this session only.
+      }
+      this.reflowCache = {...this.reflowCache}
+      this.scheduleNextReflowPrefetch(true)
     },
     loadMagnifierSettings() {
       try {
