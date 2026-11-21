@@ -1276,7 +1276,10 @@ const REFLOW_PREFETCH_AHEAD_COUNT = 3
 const REFLOW_PREFETCH_MAX_AHEAD = 10
 const REFLOW_PREFETCH_STORAGE_KEY = 'komga.reflowPrefetchAhead'
 
-function reflowPrefetchConcurrency(): number {
+function reflowPrefetchConcurrency(serverMode: boolean): number {
+  // local reflow is CPU bound: prefetching several pages at once only steals time
+  // from the page the reader is actually waiting for
+  if (!serverMode) return 1
   const cores = typeof navigator !== 'undefined' ? Number(navigator.hardwareConcurrency) : 0
   if (!Number.isFinite(cores) || cores <= 0) return 2
   return Math.max(1, Math.min(3, Math.floor(cores) - 1))
@@ -4334,7 +4337,8 @@ export default Vue.extend({
           return
         }
         // one reflow per available core keeps several pages rendering in parallel
-        this.reflowPrefetchPages = pending.slice(0, reflowPrefetchConcurrency())
+        const serverMode = !!(this.reflowSettings && this.reflowSettings.processingMode === 'server')
+        this.reflowPrefetchPages = pending.slice(0, reflowPrefetchConcurrency(serverMode))
       }
 
       if (immediate) {

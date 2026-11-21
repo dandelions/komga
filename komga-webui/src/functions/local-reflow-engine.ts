@@ -301,36 +301,60 @@ export function exteriorPaperMask(
   width: number,
   height: number,
 ): Uint8Array {
-  const exterior = new Uint8Array(width * height)
-  const queue = new Int32Array(width * height)
+  const size = width * height
+  const exterior = new Uint8Array(size)
+  const queue = new Int32Array(size)
   let head = 0
   let tail = 0
 
-  const enqueue = (x: number, y: number) => {
-    if (x < 0 || x >= width || y < 0 || y >= height) return
-    const idx = y * width + x
+  const seed = (idx: number) => {
     if (mask[idx] !== 0 || exterior[idx] !== 0) return
     exterior[idx] = 1
     queue[tail++] = idx
   }
 
   for (let x = 0; x < width; x++) {
-    enqueue(x, 0)
-    enqueue(x, height - 1)
+    seed(x)
+    seed(size - width + x)
   }
   for (let y = 1; y < height - 1; y++) {
-    enqueue(0, y)
-    enqueue(width - 1, y)
+    const rowStart = y * width
+    seed(rowStart)
+    seed(rowStart + width - 1)
   }
 
   while (head < tail) {
     const idx = queue[head++]
-    const x = idx % width
-    const y = Math.floor(idx / width)
-    enqueue(x - 1, y)
-    enqueue(x + 1, y)
-    enqueue(x, y - 1)
-    enqueue(x, y + 1)
+    const rowStart = idx - (idx % width)
+    const x = idx - rowStart
+    if (x > 0) {
+      const left = idx - 1
+      if (mask[left] === 0 && exterior[left] === 0) {
+        exterior[left] = 1
+        queue[tail++] = left
+      }
+    }
+    if (x < width - 1) {
+      const right = idx + 1
+      if (mask[right] === 0 && exterior[right] === 0) {
+        exterior[right] = 1
+        queue[tail++] = right
+      }
+    }
+    if (idx >= width) {
+      const up = idx - width
+      if (mask[up] === 0 && exterior[up] === 0) {
+        exterior[up] = 1
+        queue[tail++] = up
+      }
+    }
+    if (idx + width < size) {
+      const down = idx + width
+      if (mask[down] === 0 && exterior[down] === 0) {
+        exterior[down] = 1
+        queue[tail++] = down
+      }
+    }
   }
 
   return exterior
@@ -463,23 +487,22 @@ export function applyStrokeStrengthToPixels(
   if (isOriginalMode && strength <= 0.3) return
 
   const strokeThreshold = Math.min(245, clamp(threshold, 50, 230) + 18)
-  const mask = new Uint8Array(width * height)
+  const size = width * height
+  const mask = new Uint8Array(size)
   const indexes: number[] = []
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const index = y * width + x
-      const pixelIndex = index * 4
-      if (pixels[pixelIndex + 3] === 0) continue
-      const r = pixels[pixelIndex]
-      const g = pixels[pixelIndex + 1]
-      const b = pixels[pixelIndex + 2]
-      if (isColoredPixel(r, g, b)) continue
-      const luma = pixelLuma(r, g, b)
-      const isInk = darkDisplay ? luma > 255 - strokeThreshold : luma < strokeThreshold
-      if (isInk) {
-        mask[index] = 1
-        indexes.push(index)
-      }
+  const darkInkLimit = 255 - strokeThreshold
+  for (let index = 0; index < size; index++) {
+    const pixelIndex = index * 4
+    if (pixels[pixelIndex + 3] === 0) continue
+    const r = pixels[pixelIndex]
+    const g = pixels[pixelIndex + 1]
+    const b = pixels[pixelIndex + 2]
+    if (isColoredPixel(r, g, b)) continue
+    const luma = (0.299 * r + 0.587 * g + 0.114 * b) | 0
+    const isInk = darkDisplay ? luma > darkInkLimit : luma < strokeThreshold
+    if (isInk) {
+      mask[index] = 1
+      indexes.push(index)
     }
   }
 
@@ -535,26 +558,38 @@ export function applyStrokeStrengthToPixels(
   const fractional = strength - fullPasses
   if (fractional <= 0) return
 
-  for (let i = 0; i < activeIndexes.length; i++) {
-    const index = activeIndexes[i]
-    if (!isOriginalMode && mask[index]) {
-      setForeground(index, fractional)
+  // Classify every exterior neighbour once instead of visiting each ink pixel and
+  // its eight neighbours: the old shape repainted the same pixels over and over and
+  // cost several seconds per page.
+  const orthoAmount = fractional * 0.7
+  const diagAmount = fractional * 0.45
+
+  if (!isOriginalMode) {
+    for (let i = 0; i < activeIndexes.length; i++) {
+      const index = activeIndexes[i]
+      if (mask[index] !== 0) setForeground(index, fractional)
     }
-    const y = (index / width) | 0
-    const x = index - y * width
-    for (let dy = -1; dy <= 1; dy++) {
-      const nextY = y + dy
-      if (nextY < 0 || nextY >= height) continue
-      const nextRowOffset = nextY * width
-      for (let dx = -1; dx <= 1; dx++) {
-        if (dx === 0 && dy === 0) continue
-        const nextX = x + dx
-        if (nextX < 0 || nextX >= width) continue
-        const nextIndex = nextRowOffset + nextX
-        if (!exterior[nextIndex]) continue
-        const nIdx = nextIndex * 4
-        if (isColoredPixel(pixels[nIdx], pixels[nIdx + 1], pixels[nIdx + 2])) continue
-        setForeground(nextIndex, fractional * (Math.abs(dx) + Math.abs(dy) === 1 ? 0.7 : 0.45))
+  }
+
+  for (let y = 0; y < height; y++) {
+    const rowStart = y * width
+    for (let x = 0; x < width; x++) {
+      const index = rowStart + x
+      if (exterior[index] === 0 || mask[index] !== 0) continue
+      const leftInk = x > 0 && mask[index - 1] !== 0
+      const rightInk = x < width - 1 && mask[index + 1] !== 0
+      const upInk = y > 0 && mask[index - width] !== 0
+      const downInk = y < height - 1 && mask[index + width] !== 0
+      if (leftInk || rightInk || upInk || downInk) {
+        setForeground(index, orthoAmount)
+        continue
+      }
+      const upLeftInk = x > 0 && y > 0 && mask[index - width - 1] !== 0
+      const upRightInk = x < width - 1 && y > 0 && mask[index - width + 1] !== 0
+      const downLeftInk = x > 0 && y < height - 1 && mask[index + width - 1] !== 0
+      const downRightInk = x < width - 1 && y < height - 1 && mask[index + width + 1] !== 0
+      if (upLeftInk || upRightInk || downLeftInk || downRightInk) {
+        setForeground(index, diagAmount)
       }
     }
   }
@@ -839,6 +874,81 @@ export function mergeManualImageRegions(
  * Applies the per-slice color normalization to the whole page once so text slices
  * can be plain pixel copies. Detection keeps using the original pixels.
  */
+const KEEP_ORIGINAL_VALUE = -1
+
+function lutLuma(r: number, g: number, b: number): number {
+  const luma = (0.299 * r + 0.587 * g + 0.114 * b) | 0
+  return luma < 0 ? 0 : (luma > 255 ? 255 : luma)
+}
+
+/**
+ * Colour normalization only depends on a pixel's luma, so the whole per-pixel
+ * pass collapses into a 256 entry lookup table. This is the single hottest loop
+ * of a local reflow (about 1.6s of ~2.4s per page before the table).
+ */
+function buildNormalizationLut(
+  options: LocalReflowOptions,
+  pageBgLuma: number,
+  threshold: number,
+  sourceDark: boolean,
+): Int16Array {
+  const lut = new Int16Array(256)
+  const bgVal = options.darkDisplay ? 0 : 255
+  const fgVal = options.darkDisplay ? 255 : 0
+  const inkThresh = adaptiveInkThreshold(threshold, pageBgLuma)
+  const monochrome = options.matchBackgroundMode === 'monochrome'
+  for (let luma = 0; luma < 256; luma++) {
+    if (monochrome) {
+      const isWordInk = sourceDark ? luma > inkThresh : luma < inkThresh
+      lut[luma] = isWordInk ? fgVal : bgVal
+    } else if (options.contrastEnhancement) {
+      lut[luma] = contrastEnhancedTextColor(luma, luma, luma, pageBgLuma, options.darkDisplay).r
+    } else {
+      const isInk = sourceDark ? luma > inkThresh : luma < inkThresh
+      lut[luma] = isInk ? KEEP_ORIGINAL_VALUE : bgVal
+    }
+  }
+  return lut
+}
+
+function buildTextureNormalizationLut(
+  options: LocalReflowOptions,
+  pageBgLuma: number,
+  threshold: number,
+  sourceDark: boolean,
+): Int16Array {
+  const lut = new Int16Array(256)
+  const bgVal = options.darkDisplay ? 0 : 255
+  const fgVal = options.darkDisplay ? 255 : 0
+  const inkThresh = adaptiveInkThreshold(threshold, pageBgLuma)
+  const baseMinDelta = 8
+  const maxDelta = sourceDark ? 255 - pageBgLuma : pageBgLuma
+  const monochrome = options.matchBackgroundMode === 'monochrome'
+  for (let luma = 0; luma < 256; luma++) {
+    if (monochrome) {
+      const isWordInk = sourceDark ? luma > inkThresh : luma < inkThresh
+      lut[luma] = isWordInk ? fgVal : bgVal
+    } else if (options.contrastEnhancement) {
+      const delta = sourceDark ? luma - pageBgLuma : pageBgLuma - luma
+      if (delta <= baseMinDelta) {
+        lut[luma] = bgVal
+      } else {
+        const foreground = calculateEnhancedForeground(delta, maxDelta, baseMinDelta)
+        lut[luma] = options.darkDisplay
+          ? Math.round(255 * foreground)
+          : Math.round(255 * (1 - foreground))
+      }
+    } else if (options.darkDisplay) {
+      const isWordInk = sourceDark ? luma > inkThresh : luma < inkThresh
+      lut[luma] = isWordInk ? (sourceDark ? luma : 255 - luma) : bgVal
+    } else {
+      const isWordInk = sourceDark ? luma > inkThresh : luma < inkThresh
+      lut[luma] = isWordInk ? (sourceDark ? 255 - luma : KEEP_ORIGINAL_VALUE) : bgVal
+    }
+  }
+  return lut
+}
+
 export function buildNormalizedPagePixels(
   pixels: Uint8ClampedArray,
   options: LocalReflowOptions,
@@ -847,41 +957,18 @@ export function buildNormalizedPagePixels(
   sourceDark: boolean,
 ): Uint8ClampedArray {
   const out = new Uint8ClampedArray(pixels.length)
-  const bgVal = options.darkDisplay ? 0 : 255
-  const fgVal = options.darkDisplay ? 255 : 0
-  const inkThresh = adaptiveInkThreshold(threshold, pageBgLuma)
-  const monochrome = options.matchBackgroundMode === 'monochrome'
+  const lut = buildNormalizationLut(options, pageBgLuma, threshold, sourceDark)
   for (let i = 0; i < pixels.length; i += 4) {
-    const r = pixels[i]
-    const g = pixels[i + 1]
-    const b = pixels[i + 2]
-    let outR = r
-    let outG = g
-    let outB = b
-    if (monochrome) {
-      const luma = pixelLuma(r, g, b)
-      const isWordInk = sourceDark ? luma > inkThresh : luma < inkThresh
-      const val = isWordInk ? fgVal : bgVal
-      outR = val
-      outG = val
-      outB = val
-    } else if (options.contrastEnhancement) {
-      const c = contrastEnhancedTextColor(r, g, b, pageBgLuma, options.darkDisplay)
-      outR = c.r
-      outG = c.g
-      outB = c.b
+    const value = lut[lutLuma(pixels[i], pixels[i + 1], pixels[i + 2])]
+    if (value === KEEP_ORIGINAL_VALUE) {
+      out[i] = pixels[i]
+      out[i + 1] = pixels[i + 1]
+      out[i + 2] = pixels[i + 2]
     } else {
-      const luma = pixelLuma(r, g, b)
-      const isInk = sourceDark ? luma > inkThresh : luma < inkThresh
-      if (!isInk) {
-        outR = bgVal
-        outG = bgVal
-        outB = bgVal
-      }
+      out[i] = value
+      out[i + 1] = value
+      out[i + 2] = value
     }
-    out[i] = outR
-    out[i + 1] = outG
-    out[i + 2] = outB
     out[i + 3] = 255
   }
   return out
@@ -2027,66 +2114,17 @@ export function applyGlobalPageTextureProcessing(
   }
 
   const output = new Uint8ClampedArray(pixels)
-  const bgVal = options.darkDisplay ? 0 : 255
-  const fgVal = options.darkDisplay ? 255 : 0
-  const inkThresh = adaptiveInkThreshold(threshold, pageBgLuma)
-  const baseMinDelta = 8
-  const maxDelta = sourceDark ? 255 - pageBgLuma : pageBgLuma
+  const lut = buildTextureNormalizationLut(options, pageBgLuma, threshold, sourceDark)
 
   const total = width * height
   for (let i = 0; i < total; i++) {
     const pIdx = i * 4
     if (output[pIdx + 3] === 0) continue
-    const luma = pixelLuma(output[pIdx], output[pIdx + 1], output[pIdx + 2])
-
-    if (options.matchBackgroundMode === 'monochrome') {
-      const isWordInk = sourceDark ? luma > inkThresh : luma < inkThresh
-      const val = isWordInk ? fgVal : bgVal
-      output[pIdx] = val
-      output[pIdx + 1] = val
-      output[pIdx + 2] = val
-    } else if (options.contrastEnhancement) {
-      const delta = sourceDark ? luma - pageBgLuma : pageBgLuma - luma
-      if (delta <= baseMinDelta) {
-        output[pIdx] = bgVal
-        output[pIdx + 1] = bgVal
-        output[pIdx + 2] = bgVal
-      } else {
-        const foreground = calculateEnhancedForeground(delta, maxDelta, baseMinDelta)
-        const val = options.darkDisplay
-          ? Math.round(255 * foreground)
-          : Math.round(255 * (1 - foreground))
-        output[pIdx] = val
-        output[pIdx + 1] = val
-        output[pIdx + 2] = val
-      }
-    } else if (options.darkDisplay) {
-      const isWordInk = sourceDark ? luma > inkThresh : luma < inkThresh
-      if (isWordInk) {
-        const val = sourceDark ? luma : 255 - luma
-        output[pIdx] = val
-        output[pIdx + 1] = val
-        output[pIdx + 2] = val
-      } else {
-        output[pIdx] = bgVal
-        output[pIdx + 1] = bgVal
-        output[pIdx + 2] = bgVal
-      }
-    } else {
-      const isWordInk = sourceDark ? luma > inkThresh : luma < inkThresh
-      if (isWordInk) {
-        if (sourceDark) {
-          const val = 255 - luma
-          output[pIdx] = val
-          output[pIdx + 1] = val
-          output[pIdx + 2] = val
-        }
-      } else {
-        output[pIdx] = bgVal
-        output[pIdx + 1] = bgVal
-        output[pIdx + 2] = bgVal
-      }
-    }
+    const value = lut[lutLuma(output[pIdx], output[pIdx + 1], output[pIdx + 2])]
+    if (value === KEEP_ORIGINAL_VALUE) continue
+    output[pIdx] = value
+    output[pIdx + 1] = value
+    output[pIdx + 2] = value
   }
 
   return output

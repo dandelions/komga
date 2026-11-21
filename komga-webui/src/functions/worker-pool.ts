@@ -15,6 +15,7 @@ export class FilterWorkerPool {
   private idle: PoolEntry[] = []
   private active = 0
   private waiters: Array<(worker: Worker | undefined) => void> = []
+  private highPriorityWaiters = 0
   private readonly maxSize: number
 
   constructor(
@@ -46,11 +47,18 @@ export class FilterWorkerPool {
    * Waits for a slot instead of failing, so a page that must be visible can never
    * be starved by background prefetch work.
    */
-  acquireAsync(waitForSlot: boolean = true): Promise<Worker | undefined> {
+  acquireAsync(priority: 'high' | 'low' = 'high'): Promise<Worker | undefined> {
     const worker = this.acquire()
     if (worker) return Promise.resolve(worker)
-    if (!waitForSlot) return Promise.resolve(undefined)
-    return new Promise<Worker | undefined>(resolve => this.waiters.push(resolve))
+    return new Promise<Worker | undefined>(resolve => {
+      if (priority === 'high') {
+        const insertAt = this.highPriorityWaiters
+        this.waiters.splice(insertAt, 0, resolve)
+        this.highPriorityWaiters++
+      } else {
+        this.waiters.push(resolve)
+      }
+    })
   }
 
   release(worker: Worker) {
@@ -59,6 +67,7 @@ export class FilterWorkerPool {
     const waiter = this.waiters.shift()
     if (waiter) {
       // hand the worker straight to the next task, it stays counted as active
+      if (this.highPriorityWaiters > 0) this.highPriorityWaiters--
       waiter(worker)
       return
     }

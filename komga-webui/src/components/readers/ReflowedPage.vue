@@ -2303,7 +2303,7 @@ export default Vue.extend({
       if (!this.supportsLocalAnalysisWorker()) return undefined
       this.terminateLocalAnalysisWorker()
       try {
-        const worker = await reflowPool().acquireAsync()
+        const worker = await reflowPool().acquireAsync(this.preload ? 'low' : 'high')
         if (!worker) return undefined
         const pixels = imageData.data
         return await new Promise<LocalReflowResult | undefined>((resolve) => {
@@ -2361,7 +2361,7 @@ export default Vue.extend({
       if (!this.supportsLocalAnalysisWorker()) return undefined
       this.terminateLocalAnalysisWorker()
       try {
-        const worker = await reflowPool().acquireAsync()
+        const worker = await reflowPool().acquireAsync(this.preload ? 'low' : 'high')
         if (!worker) throw new Error('Local analysis worker is unavailable')
         const pixels = imageData.data
         return await new Promise<Roi | undefined>((resolve, reject) => {

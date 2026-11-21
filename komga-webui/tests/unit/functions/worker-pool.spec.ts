@@ -47,11 +47,11 @@ describe('FilterWorkerPool', () => {
     pool.release(c as Worker)
   })
 
-  test('never asks for more than the pool can serve when it cannot wait', async () => {
+  test('never hands out more workers than the pool can serve', async () => {
     const pool = new FilterWorkerPool(fakeWorker, 1)
     const worker = await pool.acquireAsync()
     expect(worker).toBeDefined()
-    expect(await pool.acquireAsync(false)).toBeUndefined()
+    expect(pool.acquire()).toBeUndefined()
     pool.release(worker as Worker)
   })
 
