@@ -199,6 +199,12 @@
               </select>
             </label>
             <label class="reflow-column-control">
+              <span>预重排页数</span>
+              <select :value="String(prefetchAheadCount)" @change="setPrefetchAhead">
+                <option v-for="count in 11" :key="`prefetch-${count}`" :value="String(count - 1)">{{ count - 1 }}</option>
+              </select>
+            </label>
+            <label class="reflow-column-control">
               <span>旋转</span>
               <select :value="normalizedRotation(rotation)" @change="setRotation">
                 <option value="-90">-90°</option>
@@ -1076,6 +1082,10 @@ export default Vue.extend({
       type: Boolean,
       default: false,
     },
+    prefetchAhead: {
+      type: Number,
+      default: 3,
+    },
     serverReflow: {
       type: Boolean,
       default: false,
@@ -1205,6 +1215,7 @@ export default Vue.extend({
       pendingDisplayColumns: 'auto',
       optionsSnapshot: undefined as ReflowOptionsSnapshot | undefined,
       forceReflowOnce: false,
+      reflowRetryBudget: 2,
     }
   },
   computed: {
@@ -1213,6 +1224,11 @@ export default Vue.extend({
       if (val === '1' || val === 1) return '1'
       if (val === '2' || val === 2) return '2'
       return 'auto'
+    },
+    prefetchAheadCount(): number {
+      const value = Number(this.prefetchAhead)
+      if (!Number.isFinite(value)) return 0
+      return Math.max(0, Math.min(10, Math.round(value)))
     },
     controlDisplayColumns(): string {
       const val = this.pendingDisplayColumns
@@ -1635,6 +1651,7 @@ export default Vue.extend({
         this.cropPageUrl = ''
         this.displayedSourcePageNumber = this.page.number
         this.displayedSourcePageUrl = this.page.url
+        this.reflowRetryBudget = 2
         this.cropImageSize = {w: 0, h: 0}
         this.$emit('crop-mode-change', false)
         this.revokeObjectUrl()
@@ -2005,8 +2022,26 @@ export default Vue.extend({
           this.reflowPending = false
           await this.runReflow()
         } while (this.reflowPending)
+      } catch (e) {
+        this.error = true
+        this.errorMessage = e instanceof Error ? e.message : String(e)
       } finally {
         this.reflowRunning = false
+        // A superseded run leaves `loading` true on purpose (a newer run owns the
+        // indicator). Once the queue drained nobody owns it any more, so clear it
+        // here: otherwise the reader stays on "Reflowing..." until the page changes.
+        if (!this.reflowPending && this.loading) {
+          this.loading = false
+        }
+        // A superseded run can also drop the result on the floor; retry a couple of
+        // times so the first render of a page never stays empty until a page turn.
+        if (!this.reflowPending && !this.error && !this.preload && !this.deferReflow
+          && this.reflowItems.length === 0 && this.reflowRetryBudget > 0) {
+          this.reflowRetryBudget -= 1
+          this.$nextTick(() => {
+            if (!this.reflowRunning && !this.error && this.reflowItems.length === 0) this.reflow()
+          })
+        }
       }
     },
     async runReflow() {
@@ -2139,6 +2174,13 @@ export default Vue.extend({
           }
         }
 
+        // hidden prefetch pages only ever run in the worker: falling back to the
+        // main thread here would compete with the page the reader is looking at
+        if (this.preload) {
+          this.loading = false
+          return
+        }
+
         const context = this.canvasContext(canvas, true)
         if (!context) throw new Error('Canvas is unavailable')
         this.pageBackground = this.detectPageBackground(context, canvas.width, canvas.height)
@@ -2261,7 +2303,7 @@ export default Vue.extend({
       if (!this.supportsLocalAnalysisWorker()) return undefined
       this.terminateLocalAnalysisWorker()
       try {
-        const worker = reflowPool().acquire()
+        const worker = await reflowPool().acquireAsync()
         if (!worker) return undefined
         const pixels = imageData.data
         return await new Promise<LocalReflowResult | undefined>((resolve) => {
@@ -2319,7 +2361,7 @@ export default Vue.extend({
       if (!this.supportsLocalAnalysisWorker()) return undefined
       this.terminateLocalAnalysisWorker()
       try {
-        const worker = reflowPool().acquire()
+        const worker = await reflowPool().acquireAsync()
         if (!worker) throw new Error('Local analysis worker is unavailable')
         const pixels = imageData.data
         return await new Promise<Roi | undefined>((resolve, reject) => {
@@ -7691,6 +7733,12 @@ export default Vue.extend({
     setRotation(event: Event) {
       const target = event.target as HTMLSelectElement
       this.$emit('rotation-change', this.normalizedRotation(Number(target.value)))
+    },
+    setPrefetchAhead(event: Event) {
+      const target = event.target as HTMLSelectElement | null
+      if (!target) return
+      const value = Math.max(0, Math.min(10, Math.round(Number(target.value) || 0)))
+      this.$emit('prefetch-ahead-change', value)
     },
     setDisplayColumns(event: Event) {
       const target = event.target as HTMLSelectElement | null

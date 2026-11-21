@@ -14,6 +14,7 @@ type PoolEntry = {
 export class FilterWorkerPool {
   private idle: PoolEntry[] = []
   private active = 0
+  private waiters: Array<(worker: Worker | undefined) => void> = []
   private readonly maxSize: number
 
   constructor(
@@ -41,10 +42,27 @@ export class FilterWorkerPool {
     return worker
   }
 
+  /**
+   * Waits for a slot instead of failing, so a page that must be visible can never
+   * be starved by background prefetch work.
+   */
+  acquireAsync(waitForSlot: boolean = true): Promise<Worker | undefined> {
+    const worker = this.acquire()
+    if (worker) return Promise.resolve(worker)
+    if (!waitForSlot) return Promise.resolve(undefined)
+    return new Promise<Worker | undefined>(resolve => this.waiters.push(resolve))
+  }
+
   release(worker: Worker) {
-    this.active = Math.max(0, this.active - 1)
     worker.onmessage = null
     worker.onerror = null
+    const waiter = this.waiters.shift()
+    if (waiter) {
+      // hand the worker straight to the next task, it stays counted as active
+      waiter(worker)
+      return
+    }
+    this.active = Math.max(0, this.active - 1)
     const entry: PoolEntry = {worker}
     entry.timer = (setTimeout(() => {
       const index = this.idle.indexOf(entry)
@@ -67,5 +85,6 @@ export class FilterWorkerPool {
 export function suggestedConcurrency(): number {
   const cores = typeof navigator !== 'undefined' ? Number(navigator.hardwareConcurrency) : 0
   if (!Number.isFinite(cores) || cores <= 0) return 2
-  return Math.max(1, Math.min(4, Math.floor(cores) - 1))
+  // one extra slot keeps background prefetch from starving the visible page
+  return Math.max(2, Math.min(6, Math.floor(cores) - 1))
 }

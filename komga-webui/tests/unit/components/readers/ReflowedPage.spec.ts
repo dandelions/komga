@@ -1351,3 +1351,28 @@ describe('ReflowedPage odd/even crop parity inheritance and override', () => {
   })
 })
 
+describe('ReflowedPage prefetch control', () => {
+  test('exposes the prefetch page count inside the in-reader layout panel', () => {
+    expect((ReflowedPage as any).options.props.prefetchAhead).toBeDefined()
+    expect(typeof methods.setPrefetchAhead).toBe('function')
+  })
+
+  test('clamps the prefetch page count to the supported range before emitting', () => {
+    const emitted: number[] = []
+    const context = {$emit: (_event: string, value: number) => emitted.push(value)}
+
+    methods.setPrefetchAhead.call(context, {target: {value: '4'}})
+    methods.setPrefetchAhead.call(context, {target: {value: '-3'}})
+    methods.setPrefetchAhead.call(context, {target: {value: '99'}})
+    methods.setPrefetchAhead.call(context, {target: null})
+
+    expect(emitted).toEqual([4, 0, 10])
+  })
+
+  test('normalizes the displayed value from the incoming prop', () => {
+    expect(computed.prefetchAheadCount.call({prefetchAhead: 3})).toBe(3)
+    expect(computed.prefetchAheadCount.call({prefetchAhead: 42})).toBe(10)
+    expect(computed.prefetchAheadCount.call({prefetchAhead: -1})).toBe(0)
+    expect(computed.prefetchAheadCount.call({prefetchAhead: undefined})).toBe(0)
+  })
+})
