@@ -3893,13 +3893,12 @@ export default Vue.extend({
 
       event.preventDefault()
       event.stopPropagation()
-      if (this.reflowImagePreviewSrc) return
+      if (this.magnifierActive || this.reflowImagePreviewSrc) return
       const image = this.reflowImageAtPoint(reader, target, event.clientX, event.clientY)
       if (image) {
         this.openReflowImagePreview(image.currentSrc || image.src)
         return
       }
-      if (this.magnifierActive) return
       if (this.collapseActiveReflowControls()) return
 
       const bounds = reader.getBoundingClientRect()
