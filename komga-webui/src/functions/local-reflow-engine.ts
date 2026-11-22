@@ -43,6 +43,9 @@ export type LocalReflowOptions = {
   deskewAnalysisRoi?: Roi | null,
   renderMode?: 'sprite' | 'slices',
   sliceEncoding?: 'bmp' | 'raw',
+  renderPixels?: Uint8ClampedArray,
+  renderWidth?: number,
+  renderHeight?: number,
 }
 
 export type LocalReflowItem = {
@@ -59,6 +62,8 @@ export type LocalReflowItem = {
   height?: number,
   width?: number,
   sourceWidth?: number,
+  pixelWidth?: number,
+  pixelHeight?: number,
   isInline?: boolean,
 }
 
@@ -79,11 +84,12 @@ const MAX_EDGE_TRIM = 6
 const MAX_EDGE_EXPANSION = 10
 const LOCAL_REFLOW_MAX_SIDE = 3600
 const LOCAL_REFLOW_MAX_PIXELS = 2_000_000
+const LOCAL_REFLOW_RENDER_MAX_PIXELS = 8_000_000
 const LOCAL_REFLOW_STRIP_ASPECT_RATIO = 2.0
 const LOCAL_REFLOW_STRIP_MAX_SHORT_SIDE = 1800
 const LOCAL_REFLOW_STRIP_MAX_LONG_SIDE = 65000
 
-export function localReflowScale(sourceW: number, sourceH: number): number {
+function reflowScaleForPixels(sourceW: number, sourceH: number, maxPixels: number): number {
   const shortSide = Math.min(sourceW, sourceH)
   const longSide = Math.max(sourceW, sourceH)
   const aspectRatio = longSide / Math.max(1, shortSide)
@@ -95,8 +101,16 @@ export function localReflowScale(sourceW: number, sourceH: number): number {
   }
 
   const maxSideScale = LOCAL_REFLOW_MAX_SIDE / Math.max(1, longSide)
-  const pixelScale = Math.sqrt(LOCAL_REFLOW_MAX_PIXELS / Math.max(1, sourceW * sourceH))
+  const pixelScale = Math.sqrt(maxPixels / Math.max(1, sourceW * sourceH))
   return Math.min(1, Math.min(maxSideScale, pixelScale))
+}
+
+export function localReflowScale(sourceW: number, sourceH: number): number {
+  return reflowScaleForPixels(sourceW, sourceH, LOCAL_REFLOW_MAX_PIXELS)
+}
+
+export function localReflowRenderScale(sourceW: number, sourceH: number): number {
+  return reflowScaleForPixels(sourceW, sourceH, LOCAL_REFLOW_RENDER_MAX_PIXELS)
 }
 
 export function clamp(v: number, min: number, max: number): number {
@@ -2185,6 +2199,7 @@ export function reflowPageFromPixels(
 
   // 2. Downscale if excessively large (aligned with downscaleServerImage)
   const scale = localReflowScale(sourceW, sourceH)
+  const hasMappedRenderPixels = !!options.renderPixels && !!options.renderWidth && !!options.renderHeight
 
   let workPixels = sourcePixels
   let workW = sourceW
@@ -2285,16 +2300,24 @@ export function reflowPageFromPixels(
   const pageNormalizationApplies =
     options.matchBackgroundMode !== 'original' &&
     !isSpriteMode &&
+    !hasMappedRenderPixels &&
     workW * workH <= 12_000_000 &&
     (options.darkDisplay === true ||
       options.contrastEnhancement === true ||
       options.matchBackground === true ||
       (!!options.optimizeBackground && options.optimizeBackground !== 'none'))
-  const renderPixels = pageNormalizationApplies
+  const normalizedRenderPixels = pageNormalizationApplies
     ? buildNormalizedPagePixels(workPixels, options, pageBgLuma, threshold, sourceDark)
     : workPixels
 
   const usedImageIndices = new Set<number>()
+  const renderPixels = options.renderPixels && options.renderWidth && options.renderHeight
+    ? options.renderPixels
+    : normalizedRenderPixels
+  const renderW = options.renderWidth || workW
+  const renderH = options.renderHeight || workH
+  const renderScaleX = renderW / Math.max(1, workW)
+  const renderScaleY = renderH / Math.max(1, workH)
 
   const sliceEncoding = options.sliceEncoding === 'raw' ? 'raw' : 'bmp'
   const encodeSlice = (data: Uint8ClampedArray, w: number, h: number): {src?: string, pixels?: Uint8ClampedArray} => (
@@ -2304,20 +2327,28 @@ export function reflowPageFromPixels(
   const renderImageSlice = (reg: Roi, isInline: boolean): LocalReflowItem => {
     const startX = clamp(Math.floor(reg.x), 0, Math.max(0, workW - 1))
     const startY = clamp(Math.floor(reg.y), 0, Math.max(0, workH - 1))
-    const sliceW = clamp(Math.ceil(reg.w), 1, Math.max(1, workW - startX))
-    const sliceH = clamp(Math.ceil(reg.h), 1, Math.max(1, workH - startY))
+    const layoutSliceW = clamp(Math.ceil(reg.w), 1, Math.max(1, workW - startX))
+    const layoutSliceH = clamp(Math.ceil(reg.h), 1, Math.max(1, workH - startY))
+    const sliceW = Math.max(1, Math.round(layoutSliceW * renderScaleX))
+    const sliceH = Math.max(1, Math.round(layoutSliceH * renderScaleY))
     const sliceData = new Uint8ClampedArray(sliceW * sliceH * 4)
+    const imageRenderPixels = hasMappedRenderPixels ? renderPixels : workPixels
 
     for (let y = 0; y < sliceH; y++) {
-      const sy = Math.min(workH - 1, startY + y)
-      const srcIdx = (sy * workW + startX) * 4
-      const dstIdx = y * sliceW * 4
-      for (let b = 0; b < sliceW * 4; b++) {
-        sliceData[dstIdx + b] = workPixels[srcIdx + b]
+      const sy = Math.min(renderH - 1, Math.round((startY + y / renderScaleY) * renderScaleY))
+      const dstRow = y * sliceW * 4
+      for (let x = 0; x < sliceW; x++) {
+        const sx = Math.min(renderW - 1, Math.round((startX + x / renderScaleX) * renderScaleX))
+        const srcIdx = (sy * renderW + sx) * 4
+        const dstIdx = dstRow + x * 4
+        sliceData[dstIdx] = imageRenderPixels[srcIdx]
+        sliceData[dstIdx + 1] = imageRenderPixels[srcIdx + 1]
+        sliceData[dstIdx + 2] = imageRenderPixels[srcIdx + 2]
+        sliceData[dstIdx + 3] = imageRenderPixels[srcIdx + 3]
       }
     }
 
-    if (options.darkDisplay) {
+    if (options.darkDisplay && !hasMappedRenderPixels) {
       normalizeImageSliceForDarkDisplay(sliceData, sliceW, sliceH, threshold)
     } else if (isHighContrast && options.matchBackgroundMode !== 'original') {
       const bgVal = 255
@@ -2359,10 +2390,10 @@ export function reflowPageFromPixels(
         ...encoded,
         x: reg.x,
         y: reg.y,
-        w: sliceW,
-        h: sliceH,
-        height: sliceH * textScale,
-        width: sliceW * textScale,
+        w: layoutSliceW,
+        h: layoutSliceH,
+        height: layoutSliceH * textScale,
+        width: layoutSliceW * textScale,
       }
     }
     return {
@@ -2371,10 +2402,10 @@ export function reflowPageFromPixels(
       ...encoded,
       x: reg.x,
       y: reg.y,
-      w: sliceW,
-      h: sliceH,
-      width: Math.min(options.targetWidth, sliceW * textScale),
-      height: sliceH * textScale,
+      w: layoutSliceW,
+      h: layoutSliceH,
+      width: Math.min(options.targetWidth, layoutSliceW * textScale),
+      height: layoutSliceH * textScale,
     }
   }
 
@@ -2759,10 +2790,13 @@ export function reflowPageFromPixels(
         if (!edgeAdjusted) return
         const adjusted = edgeAdjusted.block
 
-        // Slice word pixels
-        const sliceW = adjusted.w
-        const sliceH = outputHeight
-        const offsetY = adjusted.y - outputTop
+        // Slice word pixels. Detection coordinates stay in the analysis image;
+        // render dimensions are mapped back to the higher-resolution source.
+        const layoutSliceW = adjusted.w
+        const layoutSliceH = outputHeight
+        const sliceW = Math.max(1, Math.round(layoutSliceW * renderScaleX))
+        const sliceH = Math.max(1, Math.round(layoutSliceH * renderScaleY))
+        const offsetY = Math.max(0, Math.round((adjusted.y - outputTop) * renderScaleY))
 
         if (isSpriteMode) {
           items.push({
@@ -2802,16 +2836,17 @@ export function reflowPageFromPixels(
         const inkThresh = adaptiveInkThreshold(threshold, pageBgLuma)
         const fgVal = options.darkDisplay ? 255 : 0
 
-        for (let y = 0; y < adjusted.h; y++) {
-          const targetY = offsetY + y
-          if (targetY < 0 || targetY >= sliceH) continue
-          const sy = adjusted.y + y
+        for (let y = 0; y < sliceH; y++) {
+          const layoutY = Math.min(layoutSliceH - 1, Math.round(y / renderScaleY))
+          const targetY = y
+          const sy = adjusted.y + layoutY
           if (sy < 0 || sy >= workH) continue
-          const srcRowStart = (sy * workW + adjusted.x) * 4
           const dstRowStart = targetY * sliceW * 4
 
-          for (let x = 0; x < adjusted.w; x++) {
-            const srcIdx = srcRowStart + x * 4
+          for (let x = 0; x < sliceW; x++) {
+            const layoutX = Math.min(layoutSliceW - 1, Math.round(x / renderScaleX))
+            const analysisX = adjusted.x + layoutX
+            const srcIdx = (sy * renderW + Math.min(renderW - 1, Math.round(analysisX * renderScaleX))) * 4
             const dstIdx = dstRowStart + x * 4
             const r = renderPixels[srcIdx]
             const g = renderPixels[srcIdx + 1]
@@ -2876,7 +2911,7 @@ export function reflowPageFromPixels(
           sliceW,
           sliceH,
           edgeAdjusted.dirtyEdges,
-          {x: 0, y: offsetY, w: adjusted.w, h: adjusted.h},
+          {x: 0, y: offsetY, w: sliceW, h: sliceH},
           edgeBg.r,
           edgeBg.g,
           edgeBg.b,
@@ -2912,9 +2947,9 @@ export function reflowPageFromPixels(
           ...encodeSlice(sliceData, sliceW, sliceH),
           x: adjusted.x,
           y: outputTop,
-          w: sliceW,
-          h: sliceH,
-          height: sliceH * textScale,
+          w: layoutSliceW,
+          h: layoutSliceH,
+          height: layoutSliceH * textScale,
         })
       })
     })

@@ -762,7 +762,7 @@ import {mergeVerticalColumnBands} from '@/functions/vertical-reflow'
 import type {ReflowAnalysisWorkerResponse, ReflowWorkerRoi} from '@/functions/reflow-analysis-worker'
 import {createReflowAnalysisWorker} from '@/functions/reflow-analysis-worker-factory'
 import {FilterWorkerPool} from '@/functions/worker-pool'
-import {localReflowScale, repairInvertedGlyphComponents} from '@/functions/local-reflow-engine'
+import {localReflowRenderScale, localReflowScale, repairInvertedGlyphComponents} from '@/functions/local-reflow-engine'
 import type {LocalReflowOptions, LocalReflowResult} from '@/functions/local-reflow-engine'
 import {
   contiguousReflowPageCount,
@@ -2152,12 +2152,28 @@ export default Vue.extend({
               : undefined,
             renderMode: 'slices',
           }
+          const canMapHighResolutionSlices = !this.controlAutoSkewCorrection &&
+            !this.currentDeskewAnalysisRoi() &&
+            !this.controlOptimizeBackground &&
+            !this.controlRemoveBackground &&
+            !this.controlRemoveWatermark &&
+            !this.darkDisplay &&
+            !this.controlVerticalText &&
+            this.normalizedRotation(this.rotation) === 0
+          const renderScale = localReflowRenderScale(canvas.width, canvas.height)
+          const renderCanvas = canMapHighResolutionSlices && renderScale < 0.995
+            ? this.localReflowScaledCanvas(canvas, renderScale)
+            : canvas
+          const renderImageData = canMapHighResolutionSlices
+            ? this.canvasContext(renderCanvas, true)?.getImageData(0, 0, renderCanvas.width, renderCanvas.height)
+            : undefined
           const workerResult = await this.runLocalWorkerReflow(
             imageData,
             workerOptions,
             analysisCropRois,
             analysisManualRegions,
             requestId,
+            renderImageData,
           )
           if (requestId !== this.requestId) return
           if (workerResult && workerResult.items && workerResult.items.length > 0) {
@@ -2285,6 +2301,18 @@ export default Vue.extend({
     supportsLocalAnalysisWorker(): boolean {
       return typeof Worker !== 'undefined' && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function'
     },
+    localReflowScaledCanvas(sourceCanvas: HTMLCanvasElement, scale: number): HTMLCanvasElement {
+      if (scale >= 0.995) return sourceCanvas
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.max(1, Math.round(sourceCanvas.width * scale))
+      canvas.height = Math.max(1, Math.round(sourceCanvas.height * scale))
+      const context = this.canvasContext(canvas, true)
+      if (!context) return sourceCanvas
+      context.imageSmoothingEnabled = true
+      context.imageSmoothingQuality = 'high'
+      context.drawImage(sourceCanvas, 0, 0, sourceCanvas.width, sourceCanvas.height, 0, 0, canvas.width, canvas.height)
+      return canvas
+    },
     localReflowAnalysisCanvas(sourceCanvas: HTMLCanvasElement): {canvas: HTMLCanvasElement, scale: number} {
       const scale = localReflowScale(sourceCanvas.width, sourceCanvas.height)
       if (scale >= 0.995) return {canvas: sourceCanvas, scale: 1}
@@ -2305,6 +2333,7 @@ export default Vue.extend({
       cropRois: Roi[],
       manualImageRegions: Roi[],
       requestId: number,
+      renderImageData?: ImageData,
     ): Promise<LocalReflowResult | undefined> {
       if (!this.supportsLocalAnalysisWorker()) return undefined
       this.terminateLocalAnalysisWorker()
@@ -2362,7 +2391,10 @@ export default Vue.extend({
               options,
               cropRois,
               manualImageRegions,
-            }, [pixels.buffer])
+              renderPixels: renderImageData?.data,
+              renderWidth: renderImageData?.width,
+              renderHeight: renderImageData?.height,
+            }, renderImageData ? [pixels.buffer, renderImageData.data.buffer] : [pixels.buffer])
           } catch (_) {
             // the buffer may already be detached: release instead of leaking the slot
             finish()

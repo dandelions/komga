@@ -1003,6 +1003,65 @@ describe('local-reflow-engine', () => {
   })
 
 
+  describe('mapped high-resolution slice rendering', () => {
+    test('keeps analysis layout coordinates while slicing from the higher-resolution pixels', () => {
+      const lowWidth = 40
+      const lowHeight = 30
+      const highWidth = 80
+      const highHeight = 60
+      const low = new Uint8ClampedArray(lowWidth * lowHeight * 4)
+      const high = new Uint8ClampedArray(highWidth * highHeight * 4)
+      low.fill(255)
+      high.fill(255)
+      for (let y = 8; y < 18; y++) {
+        for (let x = 8; x < 24; x++) {
+          const lowIndex = (y * lowWidth + x) * 4
+          low[lowIndex] = 0; low[lowIndex + 1] = 0; low[lowIndex + 2] = 0
+          for (let dy = 0; dy < 2; dy++) {
+            for (let dx = 0; dx < 2; dx++) {
+              const highIndex = ((y * 2 + dy) * highWidth + x * 2 + dx) * 4
+              high[highIndex] = 0; high[highIndex + 1] = 0; high[highIndex + 2] = 0
+            }
+          }
+        }
+      }
+      const options = {
+        targetWidth: lowWidth,
+        autoCropBorder: false,
+        textScale: 100,
+        columnCount: 1,
+        skewCorrection: 0,
+        threshold: 185,
+        columnGap: 15,
+        wordGap: 3,
+        strokeStrength: 0,
+        contrastEnhancement: false,
+        matchBackground: false,
+        matchBackgroundMode: 'original',
+        blockSpacing: 0,
+        verticalText: false,
+        verticalDirection: 'rtl',
+        marginTop: 0,
+        marginRight: 0,
+        marginBottom: 0,
+        marginLeft: 0,
+        darkDisplay: false,
+        renderMode: 'slices' as const,
+        sliceEncoding: 'raw' as const,
+        renderPixels: high,
+        renderWidth: highWidth,
+        renderHeight: highHeight,
+      } as LocalReflowOptions
+
+      const result = reflowPageFromPixels(low, lowWidth, lowHeight, options)
+      const word = result.items.find(item => item.type === 'word') as any
+      expect(word).toBeDefined()
+      expect(word.w).toBeLessThan(word.pixels.length / (word.h * 4))
+      expect(word.x).toBeLessThan(lowWidth)
+      expect(word.pixels).toBeInstanceOf(Uint8ClampedArray)
+    })
+  })
+
   describe('worker-side slice encoding', () => {
     const makePage = () => {
       const width = 400
