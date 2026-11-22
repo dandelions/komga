@@ -629,6 +629,23 @@ describe('ReflowedPage image preview gestures', () => {
   })
 })
 
+describe('ReflowedPage large image decode reuse', () => {
+  test('reuses the decoded page image for crop preparation', async () => {
+    const image = {naturalWidth: 8000, naturalHeight: 5000} as HTMLImageElement
+    const context: any = {
+      decodedImage: image,
+      decodedImageSource: 'page-source',
+      decodeImageUrl: jest.fn(),
+      objectUrl: 'blob:page',
+    }
+
+    const result = await methods.decodeCurrentImage.call(context, 'blob:page', 'page-source')
+
+    expect(result).toBe(image)
+    expect(context.decodeImageUrl).not.toHaveBeenCalled()
+  })
+})
+
 describe('ReflowedPage crop mode exit', () => {
   const createContext = (overrides: Record<string, any> = {}) => {
     const emit = jest.fn()

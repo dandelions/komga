@@ -1153,6 +1153,8 @@ export default Vue.extend({
       objectUrlBytes: 0,
       objectUrlTransferBytes: 0,
       objectUrlLoadSource: undefined as PageImageLoadSource | undefined,
+      decodedImage: undefined as HTMLImageElement | undefined,
+      decodedImageSource: '',
       cropObjectUrl: '',
       cropObjectUrlSkewCorrection: 0,
       cropObjectUrlSource: '',
@@ -3245,7 +3247,7 @@ export default Vue.extend({
         ) return
         this.loading = true
         try {
-          const image = await this.decodeImageUrl(this.objectUrl)
+          const image = await this.decodeCurrentImage(this.objectUrl, sourceKey)
           if (cropImageRequestId !== this.cropImageRequestId) return
           await this.prepareCropObjectUrl(image, normalizedSkewCorrection, cropImageRequestId, sourceKey, false, pageParity, preparationKey)
         } finally {
@@ -3267,7 +3269,7 @@ export default Vue.extend({
         ) return
         this.loading = true
         try {
-          const image = await this.decodeImageUrl(this.cropSourceObjectUrl)
+          const image = await this.decodeCurrentImage(this.cropSourceObjectUrl, sourceKey)
           if (cropImageRequestId !== this.cropImageRequestId) return
           this.cropImageSize = {w: image.naturalWidth, h: image.naturalHeight}
           if (!needsPreparation) {
@@ -3338,14 +3340,19 @@ export default Vue.extend({
         }
         const sourceChanged = url !== this.page.url || rotation !== this.normalizedRotation(this.rotation)
         if (sourceChanged || (requestId !== undefined && requestId !== this.requestId)) {
-          if (sourceChanged && retainCropSource) this.setCropSourceObjectUrl(nextObjectUrl, sourceKey)
-          else URL.revokeObjectURL(nextObjectUrl)
+          if (sourceChanged && retainCropSource) {
+            this.setCropSourceObjectUrl(nextObjectUrl, sourceKey)
+            this.decodedImage = image
+            this.decodedImageSource = sourceKey
+          } else URL.revokeObjectURL(nextObjectUrl)
           return image
         }
         const previousObjectUrl = this.objectUrl
         this.revokeCropObjectUrl(false)
         this.objectUrl = nextObjectUrl
         this.objectUrlSource = sourceKey
+        this.decodedImage = image
+        this.decodedImageSource = sourceKey
         this.objectUrlBytes = blob.size
         this.objectUrlTransferBytes = pageImage.transferBytes
         this.objectUrlLoadSource = pageImage.source
@@ -3355,6 +3362,16 @@ export default Vue.extend({
         URL.revokeObjectURL(nextObjectUrl)
         throw e
       }
+    },
+    decodeCurrentImage(url: string, sourceKey: string): Promise<HTMLImageElement> {
+      if (this.decodedImage && this.decodedImageSource === sourceKey) return Promise.resolve(this.decodedImage)
+      return this.decodeImageUrl(url).then(image => {
+        if (this.objectUrl === url) {
+          this.decodedImage = image
+          this.decodedImageSource = sourceKey
+        }
+        return image
+      })
     },
     decodeImageUrl(url: string): Promise<HTMLImageElement> {
       return new Promise((resolve, reject) => {
@@ -3846,6 +3863,8 @@ export default Vue.extend({
       if (this.objectUrl) URL.revokeObjectURL(this.objectUrl)
       this.objectUrl = ''
       this.objectUrlSource = ''
+      this.decodedImage = undefined
+      this.decodedImageSource = ''
       this.objectUrlBytes = 0
       this.objectUrlTransferBytes = 0
       this.objectUrlLoadSource = undefined
