@@ -326,6 +326,16 @@ describe('local-reflow-engine', () => {
       expect(wordItems.length).toBeGreaterThanOrEqual(1)
       expect(wordItems[0].src).toBeDefined()
       expect(wordItems[0].src?.startsWith('data:image/bmp;base64,')).toBe(true)
+      expect(result.timings?.processedWidth).toBe(width)
+      expect(result.timings?.processedHeight).toBe(height)
+      expect(result.timings?.rowCount).toBeGreaterThan(0)
+      expect(result.timings?.wordCount).toBe(wordItems.length)
+      expect(result.timings?.prepareMs).toBeGreaterThanOrEqual(0)
+      expect(result.timings?.inkMapMs).toBeGreaterThanOrEqual(0)
+      expect(result.timings?.roiMs).toBeGreaterThanOrEqual(0)
+      expect(result.timings?.imageDetectionMs).toBeGreaterThanOrEqual(0)
+      expect(result.timings?.textLayoutMs).toBeGreaterThanOrEqual(0)
+      expect(result.timings?.sliceRenderMs).toBeGreaterThanOrEqual(0)
     })
 
     test('keeps raw word slice pixel dimensions consistent with the single processing buffer', () => {

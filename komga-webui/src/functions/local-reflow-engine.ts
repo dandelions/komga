@@ -76,6 +76,21 @@ export type LocalReflowResult = {
   encodingTimeMs?: number,
   workerTotalTimeMs?: number,
   items: LocalReflowItem[],
+  timings?: LocalReflowTimings,
+}
+
+export type LocalReflowTimings = {
+  prepareMs: number,
+  inkMapMs: number,
+  roiMs: number,
+  imageDetectionMs: number,
+  textLayoutMs: number,
+  sliceRenderMs: number,
+  processedWidth: number,
+  processedHeight: number,
+  rowCount: number,
+  wordCount: number,
+  imageRegionCount: number,
 }
 
 const EDGE_INK_THRESHOLD = 238
@@ -2176,6 +2191,21 @@ export function reflowPageFromPixels(
   manualImageRegions: Roi[] = [],
 ): LocalReflowResult {
   const startedAt = Date.now()
+  const now = () => typeof performance !== 'undefined' ? performance.now() : Date.now()
+  const timings: LocalReflowTimings = {
+    prepareMs: 0,
+    inkMapMs: 0,
+    roiMs: 0,
+    imageDetectionMs: 0,
+    textLayoutMs: 0,
+    sliceRenderMs: 0,
+    processedWidth: 0,
+    processedHeight: 0,
+    rowCount: 0,
+    wordCount: 0,
+    imageRegionCount: 0,
+  }
+  const prepareStartedAt = now()
 
   // 1. Detect background
   let pageBackground = detectPageBackgroundFromPixels(sourcePixels, sourceW, sourceH)
@@ -2246,11 +2276,16 @@ export function reflowPageFromPixels(
   if (Math.abs(effectiveSkew) >= 0.1) {
     workPixels = rotatePixels(workPixels, workW, workH, effectiveSkew, pageBackground)
   }
+  timings.prepareMs = now() - prepareStartedAt
+  timings.processedWidth = workW
+  timings.processedHeight = workH
 
   // 5. Build ink map
   const threshold = clamp(options.threshold || 185, 50, 230)
   const strokeStrength = options.strokeStrength || 0
+  const inkMapStartedAt = now()
   const ink = buildInkMap(workPixels, workW, workH, threshold, strokeStrength, pageBgLuma)
+  timings.inkMapMs = now() - inkMapStartedAt
 
   // 5. Detect ROI
   const scaledCropRois = cropRois
@@ -2262,6 +2297,7 @@ export function reflowPageFromPixels(
     }))
     .filter(r => r.w >= 8 && r.h >= 8)
 
+  const roiStartedAt = now()
   const hasManualMargin = (options.marginTop || 0) > 0 || (options.marginBottom || 0) > 0 || (options.marginLeft || 0) > 0 || (options.marginRight || 0) > 0
   // Use the detected text bounds for automatic border cropping. Using the full page
   // here makes line-end whitespace dominate trailing-blank and paragraph decisions,
@@ -2273,6 +2309,7 @@ export function reflowPageFromPixels(
   const effectiveRois = scaledCropRois.length > 0
     ? scaledCropRois
     : [defaultPageRoi]
+  timings.roiMs = now() - roiStartedAt
 
   const items: LocalReflowItem[] = []
   const textScale = clamp((options.textScale || 100) / 100, 0.2, 2)
@@ -2398,6 +2435,7 @@ export function reflowPageFromPixels(
   }
 
   effectiveRois.forEach((effectiveRoi, roiIdx) => {
+    const imageDetectionStartedAt = now()
     // 6. Detect image regions
     const detectedImages = detectImageRegions(workPixels, workW, workH, effectiveRoi, threshold, pageBgLuma)
     const roiManualImages = manualImageRegions
@@ -2412,15 +2450,19 @@ export function reflowPageFromPixels(
         r.y + r.h > effectiveRoi.y && r.y < effectiveRoi.y + effectiveRoi.h,
       )
     const allImageRegions = mergeManualImageRegions(detectedImages, roiManualImages, workW, workH)
-
+    timings.imageRegionCount += allImageRegions.length
     const textInk = maskInkRegions(ink, workW, workH, allImageRegions)
+    timings.imageDetectionMs += now() - imageDetectionStartedAt
 
+    const textLayoutStartedAt = now()
+    const sliceRenderBeforeRoi = timings.sliceRenderMs
     // 7. Extract text columns, lines, and words
     const columns = detectHorizontalColumns(ink, workW, workH, effectiveRoi, options.columnCount || 1, allImageRegions)
 
   columns.forEach((col, colIdx) => {
     const colWidth = col.end - col.start
     const lines = detectLines(textInk, workW, col, effectiveRoi, options)
+    timings.rowCount += lines.length
     const avgColLineH = lines.length > 0
       ? lines.reduce((acc, l) => acc + (l.end - l.start), 0) / lines.length
       : 36
@@ -2760,6 +2802,7 @@ export function reflowPageFromPixels(
         return ax - bx
       })
 
+      const sliceRenderStartedAt = now()
       lineUnits.forEach((unit, unitIndex) => {
         if (unitIndex === 1 && listMarkerGap > 0) {
           items.push({
@@ -2936,7 +2979,9 @@ export function reflowPageFromPixels(
           h: layoutSliceH,
           height: layoutSliceH * textScale,
         })
+        timings.wordCount++
       })
+      timings.sliceRenderMs += now() - sliceRenderStartedAt
     })
 
     // Trailing images for this column
@@ -2967,6 +3012,7 @@ export function reflowPageFromPixels(
     if (roiIdx < effectiveRois.length - 1 && items.length > 0 && items[items.length - 1].type !== 'break') {
       items.push({type: 'break'})
     }
+    timings.textLayoutMs += now() - textLayoutStartedAt - (timings.sliceRenderMs - sliceRenderBeforeRoi)
   })
 
   // Fallback: If no text blocks or images detected (e.g. pure illustration, cover, unusual background),
@@ -2990,5 +3036,6 @@ export function reflowPageFromPixels(
     detectedAutoSkew,
     processingTimeMs: Date.now() - startedAt,
     items,
+    timings,
   }
 }

@@ -2235,6 +2235,7 @@ export default Vue.extend({
               workerAlgorithmMs: Math.round(workerResult.processingTimeMs || 0),
               workerEncodingMs: Math.round((workerResult as any).encodingTimeMs || 0),
               workerTotalMs: Math.round((workerResult as any).workerTotalTimeMs || 0),
+              algorithmStages: workerResult.timings,
               repaginateMs: Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - repaginateStartedAt),
               totalMs: Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - reflowStartedAt),
               items: this.reflowItems.length,
