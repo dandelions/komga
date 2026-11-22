@@ -27,6 +27,7 @@ import {
   mergeManualImageRegions,
   buildNormalizedPagePixels,
   grayscaleTextColor,
+  contrastEnhancedTextColor,
   buildGrayscalePagePixels,
 } from '@/functions/local-reflow-engine'
 
@@ -264,6 +265,28 @@ describe('local-reflow-engine', () => {
       const centerIdx = (10 * width + 10) * 4
       expect(slicePixels[centerIdx]).toBe(255)
     })
+  })
+
+  describe('page-level color preprocessing', () => {
+    test('matches contrast bleaching per-pixel output for the whole page', () => {
+      const pixels = new Uint8ClampedArray([
+        220, 220, 220, 255,
+        120, 120, 120, 255,
+        40, 40, 40, 255,
+      ])
+      const pageLuma = 220
+      const options = {
+        contrastEnhancement: true,
+        darkDisplay: false,
+        matchBackground: false,
+        matchBackgroundMode: 'grayscale',
+      } as LocalReflowOptions
+      const output = buildNormalizedPagePixels(pixels, options, pageLuma, 185, false)
+      const expected = [220, 120, 40].map(value => contrastEnhancedTextColor(value, value, value, pageLuma, false).r)
+
+      expect(Array.from(output.filter((_, index) => index % 4 !== 3))).toEqual(expected.flatMap(value => [value, value, value]))
+    })
+
   })
 
   describe('page-level grayscale preprocessing', () => {

@@ -2360,11 +2360,11 @@ export function reflowPageFromPixels(
   // Normalize text colors once for the whole page; detection still uses workPixels.
   const pageNormalizationApplies =
     options.matchBackgroundMode !== 'original' &&
+    !options.matchBackground &&
     !isSpriteMode &&
     workW * workH <= 12_000_000 &&
     (options.darkDisplay === true ||
       options.contrastEnhancement === true ||
-      options.matchBackground === true ||
       (!!options.optimizeBackground && options.optimizeBackground !== 'none'))
   const simpleGrayscaleApplies = !isSpriteMode &&
     options.matchBackgroundMode === 'grayscale' &&
