@@ -521,6 +521,54 @@ test('horizontal reflow keeps inline word spacing separate from paragraph spacin
   expect(pages[0]).toHaveLength(3)
 })
 
+test('restores a persistent local reflow result without loading the source page', async () => {
+  const cachedItems = [{type: 'word', src: 'data:image/png;base64,cached', x: 0, y: 0, w: 24, h: 18, height: 18}]
+  const context = Object.assign({}, methods, {
+    requestId: 0,
+    error: false,
+    errorMessage: '',
+    forceReflowOnce: false,
+    cachedItems: undefined,
+    serverReflow: false,
+    preload: false,
+    deferReflow: false,
+    page: {number: 7, url: 'https://example.test/page/7'},
+    bookId: 'book-1',
+    reflowItems: [],
+    pageBackground: '#fff',
+    localPageTextureUrl: '',
+    localTextureWidth: 0,
+    localTextureHeight: 0,
+    transferStats: undefined,
+    loading: true,
+    cacheKey: 'settings-key',
+    reflowDetectionKey: jest.fn(() => 'detection-key'),
+    localReflowResultCacheKey: jest.fn(() => 'persistent-key'),
+    repaginate: jest.fn(),
+    emitReflowed: jest.fn(),
+    loadPageImage: jest.fn(),
+    $emit: jest.fn(),
+  })
+  const cacheModule = require('@/functions/reflow-result-cache')
+  const readSpy = jest.spyOn(cacheModule, 'getReflowResult').mockResolvedValue({
+    items: cachedItems,
+    pageBackground: '#fefefe',
+    savedAt: Date.now(),
+  })
+
+  try {
+    await methods.runReflow.call(context)
+    expect(readSpy).toHaveBeenCalledWith('persistent-key')
+    expect(context.reflowItems).toEqual(cachedItems)
+    expect(context.pageBackground).toBe('#fefefe')
+    expect(context.loadPageImage).not.toHaveBeenCalled()
+    expect(context.loading).toBe(false)
+    expect(context.repaginate).toHaveBeenCalled()
+  } finally {
+    readSpy.mockRestore()
+  }
+})
+
 test('standard reflow does not reserve bottom space for its side toolbar', () => {
   const context = {
     targetWidth: 200,

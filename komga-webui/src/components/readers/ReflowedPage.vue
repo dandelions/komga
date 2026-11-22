@@ -762,6 +762,7 @@ import {mergeVerticalColumnBands} from '@/functions/vertical-reflow'
 import type {ReflowAnalysisWorkerResponse, ReflowWorkerRoi} from '@/functions/reflow-analysis-worker'
 import {createReflowAnalysisWorker} from '@/functions/reflow-analysis-worker-factory'
 import {FilterWorkerPool} from '@/functions/worker-pool'
+import {getReflowResult, putReflowResult} from '@/functions/reflow-result-cache'
 import {localReflowRenderScale, localReflowScale, repairInvertedGlyphComponents} from '@/functions/local-reflow-engine'
 import type {LocalReflowOptions, LocalReflowResult} from '@/functions/local-reflow-engine'
 import {
@@ -2081,6 +2082,24 @@ export default Vue.extend({
         return
       }
 
+      if (!forceReflow && !this.serverReflow && !this.preload && !this.deferReflow) {
+        const entry = await getReflowResult<ReflowItem>(this.localReflowResultCacheKey())
+        if (requestId !== this.requestId) return
+        if (entry && Array.isArray(entry.items) && entry.items.length > 0) {
+          this.reflowItems = entry.items
+          this.pageBackground = entry.pageBackground || '#fff'
+          this.localPageTextureUrl = entry.pageTextureUrl || ''
+          this.localTextureWidth = entry.workWidth || 0
+          this.localTextureHeight = entry.workHeight || 0
+          this.transferStats = entry.transferStats as ReflowTransferStats | undefined
+          this.repaginate()
+          this.lastDetectionKey = detectionKey
+          this.loading = false
+          this.emitReflowed()
+          return
+        }
+      }
+
       this.loading = true
       this.reflowItems = []
       this.transferStats = undefined
@@ -2182,6 +2201,7 @@ export default Vue.extend({
             this.localTextureHeight = workerResult.workHeight || imageData.height
             this.reflowItems = workerResult.items as ReflowItem[]
             if (!this.preload) {
+              void this.persistLocalReflowResult()
               this.repaginate()
             }
             this.lastDetectionKey = detectionKey
@@ -2261,6 +2281,7 @@ export default Vue.extend({
         if (requestId !== this.requestId) return
         this.transferStats = this.localTransferStats()
         this.reflowItems = this.joinRegionReflowItems(regionItems)
+        if (!this.preload && this.reflowItems.length > 0) void this.persistLocalReflowResult()
         if (this.reflowItems.length === 0 && canvas.width >= 2 && canvas.height >= 2) {
           const sliceCanvas = document.createElement('canvas')
           const sliceContext = this.canvasContext(sliceCanvas, true)
@@ -3067,6 +3088,27 @@ export default Vue.extend({
     },
     reflowAlgorithmMode(): ReflowAlgorithmMode {
       return this.options.algorithmMode === 'koreader' ? 'koreader' : 'original'
+    },
+    localReflowResultCacheKey(): string {
+      return JSON.stringify({
+        version: 1,
+        bookId: this.bookId,
+        page: this.page.number,
+        pageUrl: canonicalPageImageUrl(this.page.url),
+        detection: this.reflowDetectionKey(),
+      })
+    },
+    async persistLocalReflowResult(): Promise<void> {
+      if (this.serverReflow || this.preload || !this.reflowItems.length) return
+      await putReflowResult(this.localReflowResultCacheKey(), {
+        items: this.reflowItems,
+        pageBackground: this.pageBackground,
+        pageTextureUrl: this.localPageTextureUrl || undefined,
+        workWidth: this.localTextureWidth || undefined,
+        workHeight: this.localTextureHeight || undefined,
+        transferStats: this.transferStats,
+        savedAt: Date.now(),
+      })
     },
     reflowDetectionKey(): string {
       return JSON.stringify({
