@@ -2912,8 +2912,9 @@ export function reflowPageFromPixels(
         const fgVal = options.darkDisplay ? 255 : 0
 
         for (let y = 0; y < sliceH; y++) {
-          const analysisY = adjusted.y + y
+          const analysisY = outputTop + y
           if (analysisY < 0 || analysisY >= workH) continue
+          const sourceMaskY = analysisY - adjusted.y
           const dstRowStart = y * sliceW * 4
 
           for (let x = 0; x < sliceW; x++) {
@@ -2932,7 +2933,9 @@ export function reflowPageFromPixels(
               continue
             }
 
-            const matched = matchedForeground ? matchedForeground[y * adjusted.w + x] !== 0 : true
+            const matched = matchedForeground && sourceMaskY >= 0 && sourceMaskY < adjusted.h
+              ? matchedForeground[sourceMaskY * adjusted.w + x] !== 0
+              : !matchedForeground
             if (!matched) {
               sliceData[dstIdx] = bgVal
               sliceData[dstIdx + 1] = bgVal

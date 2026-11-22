@@ -835,6 +835,50 @@ describe('local-reflow-engine', () => {
       })
     })
 
+    test('slice pixels follow the shared outputTop for uneven words in one line', () => {
+      const width = 180
+      const height = 100
+      const pixels = new Uint8ClampedArray(width * height * 4)
+      pixels.fill(255)
+
+      // Uneven words share a line, while a separate dark band sits below them.
+      for (let y = 30; y < 45; y++) {
+        for (let x = 20; x < 45; x++) {
+          const idx = (y * width + x) * 4
+          pixels[idx] = 0; pixels[idx + 1] = 0; pixels[idx + 2] = 0
+        }
+      }
+      for (let y = 20; y < 50; y++) {
+        for (let x = 70; x < 95; x++) {
+          const idx = (y * width + x) * 4
+          pixels[idx] = 0; pixels[idx + 1] = 0; pixels[idx + 2] = 0
+        }
+      }
+      for (let y = 55; y < 65; y++) {
+        for (let x = 20; x < 95; x++) {
+          const idx = (y * width + x) * 4
+          pixels[idx] = 0; pixels[idx + 1] = 0; pixels[idx + 2] = 0
+        }
+      }
+
+      const result = reflowPageFromPixels(pixels, width, height, {
+        targetWidth: 300,
+        renderMode: 'slices',
+        sliceEncoding: 'raw',
+        textScale: 100,
+        strokeStrength: 0,
+        darkDisplay: true,
+        matchBackgroundMode: 'grayscale',
+      } as LocalReflowOptions)
+      const words = result.items.filter(item => item.type === 'word' && item.pixels)
+      expect(words.length).toBeGreaterThanOrEqual(2)
+      const first = words.find(item => (item.x || 0) < 60) as any
+      expect(first).toBeDefined()
+      const firstPixels = first.pixels as Uint8ClampedArray
+      const bottom = (first.pixelHeight! - 1) * first.pixelWidth! * 4
+      expect(firstPixels[bottom]).toBe(0)
+    })
+
     test('words in the same line share normalized outputTop and outputHeight', () => {
       const width = 300
       const height = 100
