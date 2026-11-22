@@ -1454,9 +1454,10 @@ export function horizontalWordBlock(
   let minX = width
   let maxX = -1
 
-  for (let x = wordBand.start; x < wordBand.end; x++) {
-    for (let y = line.start; y < line.end; y++) {
-      if (ink[y * width + x] === 0) continue
+  for (let y = line.start; y < line.end; y++) {
+    const rowOffset = y * width
+    for (let x = wordBand.start; x < wordBand.end; x++) {
+      if (ink[rowOffset + x] === 0) continue
       if (x < minX) minX = x
       if (x > maxX) maxX = x
     }
@@ -1850,15 +1851,22 @@ export function detectWords(
   const lineH = line.end - line.start
   const effectiveHeight = height > 0 ? height : Math.max(line.end + 10, 10000)
 
-  const lineBounds = tightHorizontalLineBounds(width, effectiveHeight, ink, column, line)
-  if (!lineBounds) return []
-
   const hasInkByColumn = new Uint8Array(column.end - column.start)
+  let minInkY = effectiveHeight
+  let maxInkY = -1
   for (let y = line.start; y < line.end; y++) {
     const rowOffset = y * width + column.start
     for (let x = 0; x < hasInkByColumn.length; x++) {
-      if (ink[rowOffset + x] !== 0) hasInkByColumn[x] = 1
+      if (ink[rowOffset + x] === 0) continue
+      hasInkByColumn[x] = 1
+      if (y < minInkY) minInkY = y
+      if (y > maxInkY) maxInkY = y
     }
+  }
+  if (maxInkY < minInkY) return []
+  const lineBounds = {
+    start: Math.max(line.start, minInkY - 1),
+    end: Math.min(line.end, maxInkY + 2),
   }
   const wordBands = detectBands(column.start, column.end, x => hasInkByColumn[x - column.start] !== 0)
 
