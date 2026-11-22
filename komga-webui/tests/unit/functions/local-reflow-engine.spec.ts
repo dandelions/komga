@@ -26,6 +26,8 @@ import {
   LocalReflowOptions,
   mergeManualImageRegions,
   buildNormalizedPagePixels,
+  grayscaleTextColor,
+  buildGrayscalePagePixels,
 } from '@/functions/local-reflow-engine'
 
 describe('local-reflow-engine', () => {
@@ -264,6 +266,27 @@ describe('local-reflow-engine', () => {
     })
   })
 
+  describe('page-level grayscale preprocessing', () => {
+    test('matches grayscaleTextColor for light and dark source backgrounds', () => {
+      const pixels = new Uint8ClampedArray([
+        100, 120, 140, 255,
+        40, 40, 40, 255,
+        200, 180, 160, 0,
+      ])
+      const light = buildGrayscalePagePixels(pixels, false, false)
+      const dark = buildGrayscalePagePixels(pixels, false, true)
+      const lightExpected = grayscaleTextColor(100, 120, 140, 255, false).r
+      const darkExpected = grayscaleTextColor(100, 120, 140, 0, false).r
+
+      expect(Array.from(light.slice(0, 4))).toEqual([lightExpected, lightExpected, lightExpected, 255])
+      expect(Array.from(dark.slice(0, 4))).toEqual([darkExpected, darkExpected, darkExpected, 255])
+      expect(Array.from(light.slice(4, 8))).toEqual([40, 40, 40, 255])
+      expect(Array.from(dark.slice(4, 8))).toEqual([215, 215, 215, 255])
+      const transparentExpected = grayscaleTextColor(200, 180, 160, 255, false).r
+      expect(Array.from(light.slice(8, 12))).toEqual([transparentExpected, transparentExpected, transparentExpected, 255])
+    })
+  })
+
   describe('reflowPageFromPixels', () => {
     test('extracts word items from page pixels matching server format', () => {
       const width = 200
@@ -336,6 +359,8 @@ describe('local-reflow-engine', () => {
       expect(result.timings?.imageDetectionMs).toBeGreaterThanOrEqual(0)
       expect(result.timings?.textLayoutMs).toBeGreaterThanOrEqual(0)
       expect(result.timings?.sliceRenderMs).toBeGreaterThanOrEqual(0)
+      const firstWord = wordItems[0] as any
+      expect(firstWord.pixels).toBeUndefined()
     })
 
     test('keeps raw word slice pixel dimensions consistent with the single processing buffer', () => {

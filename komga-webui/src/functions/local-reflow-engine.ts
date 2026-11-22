@@ -81,6 +81,7 @@ export type LocalReflowResult = {
 
 export type LocalReflowTimings = {
   prepareMs: number,
+  pageColorMs: number,
   inkMapMs: number,
   roiMs: number,
   imageDetectionMs: number,
@@ -972,6 +973,23 @@ function buildTextureNormalizationLut(
     }
   }
   return lut
+}
+
+export function buildGrayscalePagePixels(
+  pixels: Uint8ClampedArray,
+  darkDisplay: boolean,
+  sourceDark: boolean,
+): Uint8ClampedArray {
+  const output = new Uint8ClampedArray(pixels.length)
+  for (let i = 0; i < pixels.length; i += 4) {
+    const luma = Math.min(255, Math.max(0, Math.round(pixelLuma(pixels[i], pixels[i + 1], pixels[i + 2]))))
+    const value = darkDisplay !== sourceDark ? 255 - luma : luma
+    output[i] = value
+    output[i + 1] = value
+    output[i + 2] = value
+    output[i + 3] = 255
+  }
+  return output
 }
 
 export function buildNormalizedPagePixels(
@@ -2202,6 +2220,7 @@ export function reflowPageFromPixels(
   const now = () => typeof performance !== 'undefined' ? performance.now() : Date.now()
   const timings: LocalReflowTimings = {
     prepareMs: 0,
+    pageColorMs: 0,
     inkMapMs: 0,
     roiMs: 0,
     imageDetectionMs: 0,
@@ -2322,6 +2341,7 @@ export function reflowPageFromPixels(
   const items: LocalReflowItem[] = []
   const textScale = clamp((options.textScale || 100) / 100, 0.2, 2)
 
+  const pageColorStartedAt = now()
   const isSpriteMode = options.renderMode === 'sprite'
   let pageTextureUrl = ''
   if (isSpriteMode) {
@@ -2346,9 +2366,19 @@ export function reflowPageFromPixels(
       options.contrastEnhancement === true ||
       options.matchBackground === true ||
       (!!options.optimizeBackground && options.optimizeBackground !== 'none'))
-  const normalizedRenderPixels = pageNormalizationApplies
-    ? buildNormalizedPagePixels(workPixels, options, pageBgLuma, threshold, sourceDark)
-    : workPixels
+  const simpleGrayscaleApplies = !isSpriteMode &&
+    options.matchBackgroundMode === 'grayscale' &&
+    !options.darkDisplay &&
+    !options.contrastEnhancement &&
+    !options.matchBackground &&
+    (!options.optimizeBackground || options.optimizeBackground === 'none') &&
+    (!options.removeBackground || options.removeBackground === 'none')
+  const normalizedRenderPixels = simpleGrayscaleApplies
+    ? buildGrayscalePagePixels(workPixels, options.darkDisplay, sourceDark)
+    : pageNormalizationApplies
+      ? buildNormalizedPagePixels(workPixels, options, pageBgLuma, threshold, sourceDark)
+      : workPixels
+  timings.pageColorMs = now() - pageColorStartedAt
 
   const usedImageIndices = new Set<number>()
 
@@ -2860,7 +2890,7 @@ export function reflowPageFromPixels(
           sliceData[i] = 255
         }
 
-        const normalizeColors = !pageNormalizationApplies && (
+        const normalizeColors = !pageNormalizationApplies && !simpleGrayscaleApplies && (
           options.darkDisplay ||
           options.contrastEnhancement ||
           options.matchBackground ||

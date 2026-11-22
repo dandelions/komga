@@ -139,7 +139,7 @@ async function encodeSlicesToDataUrls(items: LocalReflowItem[], imageQuality: nu
       const canvas = new OffscreenCanvasCtor(width, height)
       const context = canvas.getContext('2d')
       if (!context) throw new Error('OffscreenCanvas context is unavailable')
-      context.putImageData(new ImageData(data, width, height), 0, 0)
+      context.putImageData(new ImageData(pixels, width, height), 0, 0)
       const quality = Math.max(0.4, Math.min(0.9, Number(imageQuality || 80) / 100))
       // Match the server path: keep small text slices lossless, and use JPEG only
       // when the PNG would be too large. This avoids ringing around glyph edges.
