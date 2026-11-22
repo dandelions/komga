@@ -546,7 +546,8 @@ test('restores a persistent local reflow result without loading the source page'
     localReflowResultCacheKey: jest.fn(() => 'persistent-key'),
     repaginate: jest.fn(),
     emitReflowed: jest.fn(),
-    loadPageImage: jest.fn(),
+    loadPageImage: jest.fn().mockResolvedValue({naturalWidth: 8000, naturalHeight: 5000}),
+    $debug: jest.fn(),
     $emit: jest.fn(),
   })
   const cacheModule = require('@/functions/reflow-result-cache')
@@ -561,7 +562,7 @@ test('restores a persistent local reflow result without loading the source page'
     expect(readSpy).toHaveBeenCalledWith('persistent-key')
     expect(context.reflowItems).toEqual(cachedItems)
     expect(context.pageBackground).toBe('#fefefe')
-    expect(context.loadPageImage).not.toHaveBeenCalled()
+    expect(context.loadPageImage).toHaveBeenCalledWith(context.page.url, context.requestId, true, context.page.number)
     expect(context.loading).toBe(false)
     expect(context.repaginate).toHaveBeenCalled()
   } finally {
@@ -644,6 +645,19 @@ describe('ReflowedPage large image decode reuse', () => {
     expect(result).toBe(image)
     expect(context.decodeImageUrl).not.toHaveBeenCalled()
   })
+})
+
+test('source image prewarming failures do not fail the displayed reflow page', async () => {
+  const context = {
+    page: {number: 195},
+    requestId: 4,
+    loadPageImage: jest.fn().mockRejectedValue(new Error('decode failed')),
+    $debug: jest.fn(),
+  }
+
+  await expect(methods.prewarmSourceImage.call(context, '/pages/195', 195)).resolves.toBeUndefined()
+  expect(context.loadPageImage).toHaveBeenCalledWith('/pages/195', 4, true, 195)
+  expect(context.$debug).toHaveBeenCalled()
 })
 
 describe('ReflowedPage crop mode exit', () => {

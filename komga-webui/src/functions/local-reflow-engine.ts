@@ -516,7 +516,7 @@ export function applyStrokeStrengthToPixels(
   const size = width * height
   const mask = new Uint8Array(size)
   const indexes: number[] = []
-  const darkInkLimit = 255 - strokeThreshold
+  const darkInkLimit = 220
   for (let index = 0; index < size; index++) {
     const pixelIndex = index * 4
     if (pixels[pixelIndex + 3] === 0) continue
@@ -570,6 +570,10 @@ export function applyStrokeStrengthToPixels(
   const setForeground = (index: number, influence: number) => {
     const pixelIndex = index * 4
     if (isColoredPixel(pixels[pixelIndex], pixels[pixelIndex + 1], pixels[pixelIndex + 2])) return
+    if (darkDisplay) {
+      const currentLuma = pixelLuma(pixels[pixelIndex], pixels[pixelIndex + 1], pixels[pixelIndex + 2])
+      if (currentLuma > 0 && currentLuma < darkInkLimit) return
+    }
     const amount = clamp(influence, 0, 1)
     pixels[pixelIndex] = Math.round(pixels[pixelIndex] + (foreground - pixels[pixelIndex]) * amount)
     pixels[pixelIndex + 1] = Math.round(pixels[pixelIndex + 1] + (foreground - pixels[pixelIndex + 1]) * amount)
@@ -931,7 +935,9 @@ function buildNormalizationLut(
       lut[luma] = contrastEnhancedTextColor(luma, luma, luma, pageBgLuma, options.darkDisplay).r
     } else {
       const isInk = sourceDark ? luma > inkThresh : luma < inkThresh
-      lut[luma] = isInk ? KEEP_ORIGINAL_VALUE : bgVal
+      lut[luma] = options.darkDisplay
+        ? (isInk ? (sourceDark ? luma : 255 - luma) : bgVal)
+        : (isInk ? KEEP_ORIGINAL_VALUE : bgVal)
     }
   }
   return lut

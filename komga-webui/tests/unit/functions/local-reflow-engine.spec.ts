@@ -79,6 +79,25 @@ describe('local-reflow-engine', () => {
       expect(pixels[4 * 4 + 1]).toBe(pixels[4 * 4])
       expect(pixels[4 * 4 + 2]).toBe(pixels[4 * 4])
     })
+
+    test('does not turn gray dark-mode edges into white stroke artifacts', () => {
+      const pixels = new Uint8ClampedArray(5 * 5 * 4)
+      pixels.fill(0)
+      for (let i = 3; i < pixels.length; i += 4) pixels[i] = 255
+      const gray = (2 * 5 + 1) * 4
+      pixels[gray] = 160
+      pixels[gray + 1] = 160
+      pixels[gray + 2] = 160
+      const white = (2 * 5 + 2) * 4
+      pixels[white] = 255
+      pixels[white + 1] = 255
+      pixels[white + 2] = 255
+
+      applyStrokeStrengthToPixels(pixels, 5, 5, 185, 0.8, true)
+
+      expect(pixels[gray]).toBe(160)
+      expect(pixels[white]).toBe(255)
+    })
   })
 
   describe('adaptiveInkThreshold', () => {
@@ -285,6 +304,25 @@ describe('local-reflow-engine', () => {
       const expected = [220, 120, 40].map(value => contrastEnhancedTextColor(value, value, value, pageLuma, false).r)
 
       expect(Array.from(output.filter((_, index) => index % 4 !== 3))).toEqual(expected.flatMap(value => [value, value, value]))
+    })
+
+    test('inverts light-page foreground pixels for dark display before slice rendering', () => {
+      const pixels = new Uint8ClampedArray([
+        255, 255, 255, 255,
+        0, 0, 0, 255,
+        180, 180, 180, 255,
+      ])
+      const options = {
+        contrastEnhancement: false,
+        darkDisplay: true,
+        matchBackground: false,
+        matchBackgroundMode: 'grayscale',
+      } as LocalReflowOptions
+      const output = buildNormalizedPagePixels(pixels, options, 252, 185, false)
+
+      expect(Array.from(output.slice(0, 4))).toEqual([0, 0, 0, 255])
+      expect(Array.from(output.slice(4, 8))).toEqual([255, 255, 255, 255])
+      expect(Array.from(output.slice(8, 12))).toEqual([75, 75, 75, 255])
     })
 
   })

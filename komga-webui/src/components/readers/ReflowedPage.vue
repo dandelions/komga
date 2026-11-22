@@ -1155,6 +1155,8 @@ export default Vue.extend({
       objectUrlLoadSource: undefined as PageImageLoadSource | undefined,
       decodedImage: undefined as HTMLImageElement | undefined,
       decodedImageSource: '',
+      sourceImagePromise: undefined as Promise<HTMLImageElement> | undefined,
+      sourceImagePromiseKey: '',
       cropObjectUrl: '',
       cropObjectUrlSkewCorrection: 0,
       cropObjectUrlSource: '',
@@ -2086,7 +2088,6 @@ export default Vue.extend({
       this.forceReflowOnce = false
 
       if (!forceReflow && Array.isArray(this.cachedItems)) {
-        this.revokeObjectUrl()
         this.reflowItems = this.cachedItems
         this.pageBackground = this.cachedPageBackground || '#fff'
         this.transferStats = this.cachedTransferStats
@@ -2096,6 +2097,7 @@ export default Vue.extend({
         this.repaginate()
         this.lastDetectionKey = detectionKey
         this.loading = false
+        if (!this.serverReflow && !this.preload && this.page?.url) void this.prewarmSourceImage(this.page.url, this.page.number)
         return
       }
 
@@ -2125,6 +2127,7 @@ export default Vue.extend({
           this.lastDetectionKey = detectionKey
           this.loading = false
           this.emitReflowed()
+          void this.prewarmSourceImage(this.page.url, this.page.number)
           return
         }
       }
@@ -3182,7 +3185,7 @@ export default Vue.extend({
         deskewDetectionVersion: 10,
         imageExclusionVersion: 4,
         detectionScaleVersion: 5,
-        darkWordRenderVersion: 7,
+        darkWordRenderVersion: 8,
         wordSegmentationVersion: 11,
       })
     },
@@ -3323,8 +3326,45 @@ export default Vue.extend({
       const sourceUrl = this.pageImageUrl(url)
       const rotation = this.normalizedRotation(this.rotation)
       const sourceKey = `${sourceUrl}#rotation=${rotation}`
-      if (this.objectUrl && this.objectUrlSource === sourceKey) return this.decodeImageUrl(this.objectUrl)
-
+      if (this.objectUrl && this.objectUrlSource === sourceKey) {
+        return this.decodeCurrentImage(this.objectUrl, sourceKey)
+      }
+      if (this.sourceImagePromise && this.sourceImagePromiseKey === sourceKey) return this.sourceImagePromise
+      const loadPromise = this.loadPageImageUnshared(url, requestId, retainCropSource, sourcePageNumber, sourceUrl, sourceKey, rotation)
+      this.sourceImagePromise = loadPromise
+      this.sourceImagePromiseKey = sourceKey
+      try {
+        return await loadPromise
+      } finally {
+        if (this.sourceImagePromise === loadPromise) {
+          this.sourceImagePromise = undefined
+          this.sourceImagePromiseKey = ''
+        }
+      }
+    },
+    async prewarmSourceImage(url: string, sourcePageNumber: number): Promise<void> {
+      const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
+      const requestId = this.requestId
+      try {
+        await this.loadPageImage(url, requestId, true, sourcePageNumber)
+        this.$debug?.('[reflow-image-prewarm]', `page:${sourcePageNumber}`, {
+          durationMs: Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt),
+          width: this.decodedImage?.naturalWidth || 0,
+          height: this.decodedImage?.naturalHeight || 0,
+        })
+      } catch (error) {
+        this.$debug?.('[reflow-image-prewarm]', `page:${sourcePageNumber}`, 'failed:', error)
+      }
+    },
+    async loadPageImageUnshared(
+      url: string,
+      requestId: number | undefined,
+      retainCropSource: boolean,
+      sourcePageNumber: number,
+      sourceUrl: string,
+      sourceKey: string,
+      rotation: number,
+    ): Promise<HTMLImageElement> {
       const pageImage = await loadCachedPageImageWithStats(sourceUrl)
       const blob = pageImage.blob
       this.emitPageImageTransfer(pageImage, sourcePageNumber)
