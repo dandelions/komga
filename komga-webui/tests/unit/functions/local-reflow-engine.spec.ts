@@ -328,6 +328,74 @@ describe('local-reflow-engine', () => {
       expect(wordItems[0].src?.startsWith('data:image/bmp;base64,')).toBe(true)
     })
 
+    test('maps word slice rows to the matching high-resolution render rows', () => {
+      const width = 120
+      const height = 100
+      const analysisPixels = new Uint8ClampedArray(width * height * 4)
+      analysisPixels.fill(255)
+      for (let y = 30; y < 60; y++) {
+        for (let x = 20; x < 48; x++) {
+          const index = (y * width + x) * 4
+          analysisPixels[index] = 0
+          analysisPixels[index + 1] = 0
+          analysisPixels[index + 2] = 0
+        }
+      }
+
+      const renderWidth = width * 2
+      const renderHeight = height * 2
+      const renderPixels = new Uint8ClampedArray(renderWidth * renderHeight * 4)
+      for (let y = 0; y < renderHeight; y++) {
+        const value = y < 100 ? 40 : 180
+        for (let x = 0; x < renderWidth; x++) {
+          const index = (y * renderWidth + x) * 4
+          renderPixels[index] = value
+          renderPixels[index + 1] = value
+          renderPixels[index + 2] = value
+          renderPixels[index + 3] = 255
+        }
+      }
+
+      const result = reflowPageFromPixels(analysisPixels, width, height, {
+        targetWidth: 400,
+        autoCropBorder: false,
+        textScale: 100,
+        columnCount: 1,
+        skewCorrection: 0,
+        threshold: 185,
+        columnGap: 15,
+        wordGap: 3,
+        strokeStrength: 0,
+        contrastEnhancement: false,
+        matchBackground: false,
+        matchBackgroundMode: 'original',
+        blockSpacing: 6,
+        verticalText: false,
+        verticalDirection: 'rtl',
+        marginTop: 0,
+        marginRight: 0,
+        marginBottom: 0,
+        marginLeft: 0,
+        darkDisplay: false,
+        renderMode: 'slices',
+        sliceEncoding: 'raw',
+        renderPixels,
+        renderWidth,
+        renderHeight,
+      })
+
+      const word = result.items.find(item => item.type === 'word')
+      expect(word?.pixels).toBeDefined()
+      const pixels = word?.pixels as Uint8ClampedArray
+      const sliceWidth = Math.round((word?.w || 0) * 2)
+      const sliceHeight = Math.round((word?.h || 0) * 2)
+      expect(sliceHeight).toBeGreaterThan(4)
+      const upperIndex = ((Math.floor(sliceHeight * 0.25) * sliceWidth) * 4)
+      const lowerIndex = ((Math.floor(sliceHeight * 0.75) * sliceWidth) * 4)
+      expect(pixels[upperIndex]).toBe(40)
+      expect(pixels[lowerIndex]).toBe(180)
+    })
+
     test('extracts lightweight word geometry coordinates in sprite mode without per-word slice generation', () => {
       const width = 100
       const height = 100

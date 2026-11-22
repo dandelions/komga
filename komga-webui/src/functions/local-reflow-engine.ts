@@ -388,6 +388,8 @@ export function repairInvertedGlyphComponents(
   darkDisplay: boolean,
   offsetX: number = 0,
   offsetY: number = 0,
+  sourceScaleX: number = 1,
+  sourceScaleY: number = 1,
 ) {
   if (sliceWidth < 3 || sliceHeight < 3) return
   const fgThreshold = Math.min(245, clamp(threshold, 50, 230) + 18)
@@ -447,8 +449,8 @@ export function repairInvertedGlyphComponents(
       component[compCount++] = idx
       const y = (idx / sliceWidth) | 0
       const x = idx - y * sliceWidth
-      const sourceX = x - offsetX
-      const sourceY = y - offsetY
+      const sourceX = Math.floor((x - offsetX) / Math.max(0.001, sourceScaleX))
+      const sourceY = Math.floor((y - offsetY) / Math.max(0.001, sourceScaleY))
 
       if (sourceX >= 0 && sourceX < sourceRoi.w && sourceY >= 0 && sourceY < sourceRoi.h) {
         sourcePixelsCount++
@@ -2201,7 +2203,11 @@ export function reflowPageFromPixels(
 
   // 2. Downscale if excessively large (aligned with downscaleServerImage)
   const scale = localReflowScale(sourceW, sourceH)
-  const hasMappedRenderPixels = !!options.renderPixels && !!options.renderWidth && !!options.renderHeight
+  const requestedRenderPixels = !!options.renderPixels && !!options.renderWidth && !!options.renderHeight
+  const hasMappedRenderPixels = requestedRenderPixels &&
+    options.renderPixels!.length === options.renderWidth! * options.renderHeight! * 4
+  const renderSourceW = hasMappedRenderPixels ? options.renderWidth! : sourceW
+  const renderSourceH = hasMappedRenderPixels ? options.renderHeight! : sourceH
 
   let workPixels = sourcePixels
   let workW = sourceW
@@ -2232,11 +2238,7 @@ export function reflowPageFromPixels(
     removeDocumentBackground(workPixels, workW, workH, options.optimizeBackground, sourceDark)
   }
 
-  let renderSourcePixels = options.renderPixels && options.renderWidth && options.renderHeight
-    ? options.renderPixels
-    : undefined
-  const renderSourceW = options.renderWidth || 0
-  const renderSourceH = options.renderHeight || 0
+  let renderSourcePixels = hasMappedRenderPixels ? options.renderPixels : undefined
   if (renderSourcePixels && options.optimizeBackground && options.optimizeBackground !== 'none') {
     removeDocumentBackground(renderSourcePixels, renderSourceW, renderSourceH, options.optimizeBackground, sourceDark)
   }
@@ -2851,14 +2853,16 @@ export function reflowPageFromPixels(
         for (let y = 0; y < sliceH; y++) {
           const layoutY = Math.min(layoutSliceH - 1, Math.round(y / renderScaleY))
           const targetY = y
-          const sy = adjusted.y + layoutY
-          if (sy < 0 || sy >= workH) continue
+          const analysisY = adjusted.y + layoutY
+          if (analysisY < 0 || analysisY >= workH) continue
+          const renderY = Math.min(renderH - 1, Math.round(analysisY * renderScaleY))
           const dstRowStart = targetY * sliceW * 4
 
           for (let x = 0; x < sliceW; x++) {
             const layoutX = Math.min(layoutSliceW - 1, Math.round(x / renderScaleX))
             const analysisX = adjusted.x + layoutX
-            const srcIdx = (sy * renderW + Math.min(renderW - 1, Math.round(analysisX * renderScaleX))) * 4
+            const renderX = Math.min(renderW - 1, Math.round(analysisX * renderScaleX))
+            const srcIdx = (renderY * renderW + renderX) * 4
             const dstIdx = dstRowStart + x * 4
             const r = renderPixels[srcIdx]
             const g = renderPixels[srcIdx + 1]
@@ -2951,7 +2955,9 @@ export function reflowPageFromPixels(
           threshold,
           options.darkDisplay,
           0,
-          offsetY,
+          Math.round((outputTop - adjusted.y) * renderScaleY),
+          renderScaleX,
+          renderScaleY,
         )
 
         items.push({
