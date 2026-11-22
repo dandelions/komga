@@ -76,6 +76,8 @@ export type LocalReflowResult = {
   pageTextureUrl?: string,
   detectedAutoSkew: number,
   processingTimeMs: number,
+  encodingTimeMs?: number,
+  workerTotalTimeMs?: number,
   items: LocalReflowItem[],
 }
 

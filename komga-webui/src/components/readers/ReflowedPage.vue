@@ -935,6 +935,25 @@ type ReflowTransferStats = {
   originalImageSource?: PageImageLoadSource,
   encodedImageBytes?: number,
   processingTimeMs?: number,
+  imageLoadMs?: number,
+  canvasPrepareMs?: number,
+  workerWaitMs?: number,
+  workerAlgorithmMs?: number,
+  workerEncodingMs?: number,
+  workerTotalMs?: number,
+  repaginateMs?: number,
+  totalTimeMs?: number,
+  timings?: {
+    cacheLookupMs?: number,
+    cacheHit?: boolean,
+    queueWaitMs?: number,
+    sourceLoadMs?: number,
+    decodeMs?: number,
+    transformMs?: number,
+    analysisRenderMs?: number,
+    responseBuildMs?: number,
+    processingMs?: number,
+  },
 }
 
 type ServerReflowResponse = {
@@ -947,6 +966,7 @@ type ServerReflowResponse = {
   transferBytes: number,
   encodedImageBytes?: number,
   processingTimeMs: number,
+  timings?: ReflowTransferStats['timings'],
   items: ReflowItem[],
 }
 
@@ -1149,6 +1169,7 @@ export default Vue.extend({
       serverRequestController: undefined as AbortController | undefined,
       localAnalysisWorker: undefined as Worker | undefined,
       requestId: 0,
+      reflowTraceId: '',
       reflowRunning: false,
       reflowPending: false,
       controlsCollapsed: true,
@@ -2054,6 +2075,8 @@ export default Vue.extend({
     async runReflow() {
       const requestId = this.requestId + 1
       this.requestId = requestId
+      this.reflowTraceId = `reflow-${Date.now().toString(36)}-${requestId}`
+      const reflowStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
       this.error = false
       this.errorMessage = ''
       const detectionKey = this.reflowDetectionKey()
@@ -2086,6 +2109,10 @@ export default Vue.extend({
         const entry = await getReflowResult<ReflowItem>(this.localReflowResultCacheKey())
         if (requestId !== this.requestId) return
         if (entry && Array.isArray(entry.items) && entry.items.length > 0) {
+          this.$debug?.('[reflow-local-cache]', `trace:${this.reflowTraceId}`, `page:${this.page.number}`, {
+            cacheReadMs: Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - reflowStartedAt),
+            items: entry.items.length,
+          })
           this.reflowItems = entry.items
           this.pageBackground = entry.pageBackground || '#fff'
           this.localPageTextureUrl = entry.pageTextureUrl || ''
@@ -2110,10 +2137,13 @@ export default Vue.extend({
           return
         }
 
+        const imageLoadStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
         const image = await this.loadPageImage(this.page.url, requestId)
+        const imageLoadMs = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - imageLoadStartedAt)
         if (requestId !== this.requestId) return
         await this.yieldLocalReflowFrame(requestId)
         if (requestId !== this.requestId) return
+        const canvasPrepareStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
         this.imageSize = {w: image.naturalWidth, h: image.naturalHeight}
         const rotation = this.normalizedRotation(this.rotation)
         const canvas = rotation !== 0
@@ -2126,6 +2156,7 @@ export default Vue.extend({
               ctx?.drawImage(image, 0, 0)
               return c
             })()
+        const canvasPrepareMs = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - canvasPrepareStartedAt)
         const cropRois = this.reflowCropRois()
 
         if (this.supportsLocalAnalysisWorker()) {
@@ -2180,6 +2211,7 @@ export default Vue.extend({
           const renderImageData = canMapHighResolutionSlices
             ? this.canvasContext(renderCanvas, true)?.getImageData(0, 0, renderCanvas.width, renderCanvas.height)
             : undefined
+          const workerStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
           const workerResult = await this.runLocalWorkerReflow(
             imageData,
             workerOptions,
@@ -2200,10 +2232,22 @@ export default Vue.extend({
             this.localTextureWidth = workerResult.workWidth || imageData.width
             this.localTextureHeight = workerResult.workHeight || imageData.height
             this.reflowItems = workerResult.items as ReflowItem[]
+            const repaginateStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
             if (!this.preload) {
               void this.persistLocalReflowResult()
               this.repaginate()
             }
+            this.$debug?.('[reflow-local]', `trace:${this.reflowTraceId}`, `page:${this.page.number}`, {
+              imageLoadMs,
+              canvasPrepareMs,
+              workerWaitMs: Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - workerStartedAt),
+              workerAlgorithmMs: Math.round(workerResult.processingTimeMs || 0),
+              workerEncodingMs: Math.round((workerResult as any).encodingTimeMs || 0),
+              workerTotalMs: Math.round((workerResult as any).workerTotalTimeMs || 0),
+              repaginateMs: Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - repaginateStartedAt),
+              totalMs: Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - reflowStartedAt),
+              items: this.reflowItems.length,
+            })
             this.lastDetectionKey = detectionKey
             this.emitReflowed()
             return
@@ -2381,6 +2425,8 @@ export default Vue.extend({
                 pageTextureUrl: response.pageTextureUrl,
                 detectedAutoSkew: response.detectedAutoSkew || 0,
                 processingTimeMs: response.processingTimeMs || 0,
+                encodingTimeMs: response.encodingTimeMs || 0,
+                workerTotalTimeMs: response.workerTotalTimeMs || 0,
                 items: response.items,
               })
             } else {
@@ -2483,7 +2529,10 @@ export default Vue.extend({
       const requestStartedAt = typeof performance !== 'undefined' ? performance.now() : 0
       const controller = typeof AbortController !== 'undefined' ? new AbortController() : undefined
       if (controller) this.serverRequestController = controller
-      const headers = {Accept: 'application/json'} as Record<string, string>
+      const headers = {
+        Accept: 'application/json',
+        'X-Komga-Reflow-Trace': this.reflowTraceId,
+      } as Record<string, string>
       if (forceReflow) headers['X-Komga-Reflow-Refresh'] = 'true'
 
       try {
@@ -2509,7 +2558,14 @@ export default Vue.extend({
           transferBytes: responseBytes,
           encodedImageBytes: Number(payload.encodedImageBytes) || 0,
           processingTimeMs: Number(payload.processingTimeMs) || 0,
+          timings: payload.timings,
         }
+        this.$debug?.('[reflow-server]', `trace:${this.reflowTraceId}`, `page:${this.page.number}`, {
+          requestMs: Math.round(performance.now() - requestStartedAt),
+          responseBytes,
+          processingMs: Number(payload.processingTimeMs) || 0,
+          timings: payload.timings,
+        })
         this.repaginate()
         this.lastDetectionKey = detectionKey
         this.emitReflowed(responseBytes)

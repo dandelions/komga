@@ -2,6 +2,7 @@ package org.gotson.komga.domain.service
 
 import com.fasterxml.jackson.annotation.JsonInclude
 import com.github.benmanes.caffeine.cache.Caffeine
+import org.slf4j.LoggerFactory
 import jakarta.annotation.PreDestroy
 import org.gotson.komga.domain.model.Book
 import org.springframework.stereotype.Service
@@ -46,6 +47,8 @@ private const val MAX_EDGE_TRIM = 6
 private const val MAX_EDGE_EXPANSION = 10
 private const val REFLOW_ALGORITHM_VERSION = 19
 
+private val logger = LoggerFactory.getLogger(PdfPageReflowService::class.java)
+
 data class PdfPageReflowOptions(
   val targetWidth: Int,
   val autoCropBorder: Boolean,
@@ -83,6 +86,17 @@ data class PdfPageReflowRegion(
   val h: Int,
 )
 
+data class PdfPageReflowTimings(
+  val cacheLookupMs: Long = 0,
+  val cacheHit: Boolean = false,
+  val queueWaitMs: Long = 0,
+  val sourceLoadMs: Long = 0,
+  val decodeMs: Long = 0,
+  val transformMs: Long = 0,
+  val analysisRenderMs: Long = 0,
+  val processingMs: Long = 0,
+)
+
 data class PdfPageReflowDto(
   val pageNumber: Int,
   val pageBackground: String,
@@ -94,6 +108,7 @@ data class PdfPageReflowDto(
   val encodedImageBytes: Long,
   val processingTimeMs: Long,
   val items: List<PdfPageReflowItemDto>,
+  val timings: PdfPageReflowTimings? = null,
 )
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -204,8 +219,11 @@ class PdfPageReflowService(
     manualImageRegions: List<PdfPageReflowRegion> = emptyList(),
     pageCount: Int? = null,
     forceRefresh: Boolean = false,
+    traceId: String = "",
   ): PdfPageReflowDto {
-    pageCount?.let { pageImageCacheService.prefetchAround(book, pageNumber, it) }
+    val safeTraceId = traceId.filter { it.isLetterOrDigit() || it == '-' || it == '_' }.take(80)
+    val requestStarted = System.nanoTime()
+    val cacheLookupStarted = System.nanoTime()
     val key =
       PdfPageReflowCacheKey(
         algorithmVersion = REFLOW_ALGORITHM_VERSION,
@@ -220,19 +238,38 @@ class PdfPageReflowService(
     if (forceRefresh) {
       reflowPageCache.invalidate(key)
     } else {
-      reflowPageCache.getIfPresent(key)?.let { return it }
+      reflowPageCache.getIfPresent(key)?.let {
+        val lookupMs = elapsedMs(cacheLookupStarted)
+        val response = it.copy(timings = (it.timings ?: PdfPageReflowTimings()).copy(cacheLookupMs = lookupMs, cacheHit = true))
+        logger.info("reflow trace={} book={} page={} cache=hit cacheLookupMs={} totalMs={}", safeTraceId, book.id, pageNumber, lookupMs, elapsedMs(requestStarted))
+        return response
+      }
     }
+    val cacheLookupMs = elapsedMs(cacheLookupStarted)
+    pageCount?.let { pageImageCacheService.prefetchAround(book, pageNumber, it) }
 
     val currentFuture = CompletableFuture<PdfPageReflowDto>()
     val existingFuture = inFlightReflows.putIfAbsent(key, currentFuture)
-    if (existingFuture != null) return existingFuture.awaitReflow()
+    if (existingFuture != null) {
+      logger.info("reflow trace={} book={} page={} cache=in-flight cacheLookupMs={} waitMs={}", safeTraceId, book.id, pageNumber, cacheLookupMs, elapsedMs(requestStarted))
+      return existingFuture.awaitReflow()
+    }
 
+    val queuedAt = System.nanoTime()
     try {
       reflowExecutor.execute {
+        val workerStartedAt = System.nanoTime()
+        val queueWaitMs = (workerStartedAt - queuedAt) / 1_000_000
         try {
-          val response = reflowPage(book, pageNumber, options, cropRegions, manualImageRegions)
-          reflowPageCache.put(key, response)
-          currentFuture.complete(response)
+          val response = reflowPage(book, pageNumber, options, cropRegions, manualImageRegions, safeTraceId)
+          val timings = (response.timings ?: PdfPageReflowTimings()).copy(
+            cacheLookupMs = cacheLookupMs,
+            queueWaitMs = queueWaitMs,
+          )
+          val completed = response.copy(timings = timings)
+          reflowPageCache.put(key, completed)
+          currentFuture.complete(completed)
+          logger.info("reflow trace={} book={} page={} cache=miss queueWaitMs={} processingMs={} totalMs={}", safeTraceId, book.id, pageNumber, timings.queueWaitMs, timings.processingMs, elapsedMs(requestStarted))
         } catch (e: Exception) {
           currentFuture.completeExceptionally(e)
         } finally {
@@ -245,6 +282,8 @@ class PdfPageReflowService(
     }
     return currentFuture.awaitReflow()
   }
+
+  private fun elapsedMs(startedAt: Long): Long = (System.nanoTime() - startedAt) / 1_000_000
 
   private fun CompletableFuture<PdfPageReflowDto>.awaitReflow(): PdfPageReflowDto =
     try {
@@ -270,16 +309,26 @@ class PdfPageReflowService(
     options: PdfPageReflowOptions,
     cropRegions: List<PdfPageReflowRegion> = emptyList(),
     manualImageRegions: List<PdfPageReflowRegion> = emptyList(),
+    traceId: String = "",
   ): PdfPageReflowDto {
     var processingTimeMs = 0L
+    var sourceLoadMs = 0L
+    var decodeMs = 0L
+    var transformMs = 0L
+    var analysisRenderMs = 0L
     lateinit var response: PdfPageReflowDto
 
     processingTimeMs =
       measureTimeMillis {
+        val sourceLoadStarted = System.nanoTime()
         val pageContent = pageImageCacheService.getOriginalPage(book, pageNumber)
+        sourceLoadMs = elapsedMs(sourceLoadStarted)
+        val decodeStarted = System.nanoTime()
         val image =
           ImageIO.read(ByteArrayInputStream(pageContent.bytes))
             ?: error("Unable to decode rendered PDF page")
+        decodeMs = elapsedMs(decodeStarted)
+        val transformStarted = System.nanoTime()
         val rotatedImage = rotatedImage(image, options.rotation)
         val rawBackground = detectPageBackground(rotatedImage)
         val sourceDark = isDarkColor(rawBackground)
@@ -306,7 +355,9 @@ class PdfPageReflowService(
         val effectiveSkewCorrection = (detectedSkewCorrection + options.skewCorrection).coerceIn(-10.0, 10.0)
         val pageBackgroundColor = parsePageBackgroundColor(pageBackground, defaultDark = sourceDark)
         val preparedPage = skewCorrectedImage(optimizedImage, effectiveSkewCorrection, pageBackgroundColor)
+        transformMs = elapsedMs(transformStarted)
         val pageManualImageRegions = manualImageRegions.mapNotNull { it.toRoi(preparedPage.width, preparedPage.height) }
+        val analysisStarted = System.nanoTime()
         val regionImages =
           cropRegions
             .mapNotNull { it.toRoi(preparedPage.width, preparedPage.height) }
@@ -318,6 +369,7 @@ class PdfPageReflowService(
               Triple(downscaled, false, scaleRegions(sourceManualRegions, source.width, source.height, downscaled.width, downscaled.height))
             }
         val results = regionImages.map { (source, useWholeImage, sourceManualRegions) -> reflowImage(source, options, useWholeImage, sourceManualRegions) }
+        analysisRenderMs = elapsedMs(analysisStarted)
         val items =
           results
             .map { it.items }
@@ -343,7 +395,15 @@ class PdfPageReflowService(
           )
       }
 
-    return response.copy(processingTimeMs = processingTimeMs)
+    val timings = PdfPageReflowTimings(
+      sourceLoadMs = sourceLoadMs,
+      decodeMs = decodeMs,
+      transformMs = transformMs,
+      analysisRenderMs = analysisRenderMs,
+      processingMs = processingTimeMs,
+    )
+    logger.info("reflow trace={} book={} page={} sourceLoadMs={} decodeMs={} transformMs={} analysisRenderMs={} processingMs={}", traceId.filter { it.isLetterOrDigit() || it == '-' || it == '_' }.take(80), book.id, pageNumber, sourceLoadMs, decodeMs, transformMs, analysisRenderMs, processingTimeMs)
+    return response.copy(processingTimeMs = processingTimeMs, timings = timings)
   }
 
   fun reflowPreparedImages(

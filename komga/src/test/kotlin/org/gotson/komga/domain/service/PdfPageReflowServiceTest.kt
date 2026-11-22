@@ -200,10 +200,13 @@ class PdfPageReflowServiceTest {
         pageNumber = 1,
         options = defaultOptions(),
         cropRegions = listOf(PdfPageReflowRegion(x = 40, y = 30, w = 120, h = 70)),
+        pageCount = 11,
       )
 
     assertThat(second.items).isEqualTo(first.items)
+    assertThat(second.timings?.cacheHit).isTrue()
     verify(exactly = 1) { bookLifecycle.getBookPage(book, 1) }
+    verify(exactly = 0) { bookLifecycle.getBookPage(book, 2) }
   }
 
   @Test

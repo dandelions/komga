@@ -568,6 +568,8 @@ class BookController(
     zeroBasedIndex: Boolean,
     @RequestHeader(value = "X-Komga-Reflow-Refresh", defaultValue = "false")
     refresh: Boolean,
+    @RequestHeader(value = "X-Komga-Reflow-Trace", required = false)
+    reflowTraceId: String?,
     @RequestParam(value = "targetWidth", defaultValue = "0")
     targetWidth: Int,
     @RequestParam(value = "rotation", defaultValue = "0")
@@ -672,6 +674,7 @@ class BookController(
             rotation = normalizePdfReflowRotation(rotation),
           )
         val parsedCropRegions = parsePdfReflowRegions(cropRegions)
+        val safeReflowTraceId = reflowTraceId.orEmpty().filter { it.isLetterOrDigit() || it == '-' || it == '_' }.take(80)
         val parsedManualImageRegions = parsePdfReflowRegions(manualImageRegions)
         val response =
           pdfPageReflowService.reflowPageCached(
@@ -682,8 +685,12 @@ class BookController(
             manualImageRegions = parsedManualImageRegions,
             pageCount = media.pageCount,
             forceRefresh = refresh,
+            traceId = safeReflowTraceId,
           )
+        val responseBuildStarted = System.nanoTime()
         val body = serverReflowResponseBytes(response)
+        val responseBuildMs = (System.nanoTime() - responseBuildStarted) / 1_000_000
+        logger.info { "reflow trace=$safeReflowTraceId book=${book.id} page=$page responseBuildMs=$responseBuildMs responseBytes=${body.size}" }
 
         ResponseEntity
           .ok()

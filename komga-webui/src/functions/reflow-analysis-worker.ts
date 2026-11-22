@@ -48,6 +48,8 @@ export type ReflowAnalysisWorkerResponse = {
   pageBackground?: string,
   detectedAutoSkew?: number,
   processingTimeMs?: number,
+  encodingTimeMs?: number,
+  workerTotalTimeMs?: number,
   workWidth?: number,
   workHeight?: number,
   pageTextureUrl?: string,
@@ -81,6 +83,7 @@ async function handleRequest(request: ReflowAnalysisWorkerRequest): Promise<void
 
   if (request.type === 'reflow') {
     try {
+      const workerStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
       const canEncodeJpeg = typeof (self as any).OffscreenCanvas !== 'undefined'
         && typeof (self as any).FileReaderSync !== 'undefined'
       const result = reflowPageFromPixels(
@@ -97,7 +100,12 @@ async function handleRequest(request: ReflowAnalysisWorkerRequest): Promise<void
         request.cropRois || [],
         request.manualImageRegions || [],
       )
+      const encodingStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
       if (canEncodeJpeg) await encodeSlicesToDataUrls(result.items, request.options.imageQuality)
+      const encodingTimeMs = canEncodeJpeg
+        ? Math.max(0, Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - encodingStartedAt))
+        : 0
+      const workerTotalTimeMs = Math.max(0, Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - workerStartedAt))
       postMessage({
         type: 'reflowed',
         requestId: request.requestId,
@@ -105,6 +113,8 @@ async function handleRequest(request: ReflowAnalysisWorkerRequest): Promise<void
         pageBackground: result.pageBackground,
         detectedAutoSkew: result.detectedAutoSkew,
         processingTimeMs: result.processingTimeMs,
+        encodingTimeMs,
+        workerTotalTimeMs,
         workWidth: result.workWidth,
         workHeight: result.workHeight,
         pageTextureUrl: result.pageTextureUrl,
