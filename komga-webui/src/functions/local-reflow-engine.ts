@@ -1063,13 +1063,11 @@ export function detectHorizontalColumns(
   imageRegions?: Roi[],
 ): Array<{start: number, end: number}> {
   const colInk = new Int32Array(roi.w)
-  for (let x = 0; x < roi.w; x++) {
-    const gx = roi.x + x
-    let count = 0
-    for (let y = roi.y; y < roi.y + roi.h; y++) {
-      if (ink[y * width + gx] === 1) count++
+  for (let y = roi.y; y < roi.y + roi.h; y++) {
+    const rowOffset = y * width + roi.x
+    for (let x = 0; x < roi.w; x++) {
+      if (ink[rowOffset + x] === 1) colInk[x]++
     }
-    colInk[x] = count
   }
 
   if (imageRegions && imageRegions.length > 0) {
@@ -1855,12 +1853,14 @@ export function detectWords(
   const lineBounds = tightHorizontalLineBounds(width, effectiveHeight, ink, column, line)
   if (!lineBounds) return []
 
-  const wordBands = detectBands(column.start, column.end, (x: number) => {
-    for (let y = line.start; y < line.end; y++) {
-      if (ink[y * width + x] !== 0) return true
+  const hasInkByColumn = new Uint8Array(column.end - column.start)
+  for (let y = line.start; y < line.end; y++) {
+    const rowOffset = y * width + column.start
+    for (let x = 0; x < hasInkByColumn.length; x++) {
+      if (ink[rowOffset + x] !== 0) hasInkByColumn[x] = 1
     }
-    return false
-  })
+  }
+  const wordBands = detectBands(column.start, column.end, x => hasInkByColumn[x - column.start] !== 0)
 
   const mergedBands = mergeCloseBands(wordBands, Math.max(1, wordGapOption))
   const blocks: WordBlock[] = []
