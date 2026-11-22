@@ -28,9 +28,6 @@ export type ReflowAnalysisWorkerReflowRequest = {
   pixels: Uint8ClampedArray,
   width: number,
   height: number,
-  renderPixels?: Uint8ClampedArray,
-  renderWidth?: number,
-  renderHeight?: number,
   options: LocalReflowOptions,
   cropRois?: Roi[],
   manualImageRegions?: Roi[],
@@ -93,9 +90,6 @@ async function handleRequest(request: ReflowAnalysisWorkerRequest): Promise<void
         canEncodeJpeg ? {
           ...request.options,
           sliceEncoding: 'raw',
-          renderPixels: request.renderPixels,
-          renderWidth: request.renderWidth,
-          renderHeight: request.renderHeight,
         } : request.options,
         request.cropRois || [],
         request.manualImageRegions || [],
@@ -135,18 +129,11 @@ async function encodeSlicesToDataUrls(items: LocalReflowItem[], imageQuality: nu
   for (const item of items) {
     if (!item.pixels) continue
     const pixels = item.pixels
-    const width = Math.max(1, Math.round(item.w || 0))
-    const height = Math.max(1, Math.round(item.h || item.height || 0))
+    const width = Math.max(1, Math.round(item.pixelWidth || item.w || 0))
+    const height = Math.max(1, Math.round(item.pixelHeight || item.h || item.height || 0))
     try {
-      // slice bounds are not always integral, so the declared size and the buffer
-      // length can disagree; ImageData would throw and fail the whole page
-      let data = pixels
       const expected = width * height * 4
-      if (data.length !== expected) {
-        const resized = new Uint8ClampedArray(expected)
-        resized.set(data.subarray(0, Math.min(data.length, expected)))
-        data = resized
-      }
+      if (pixels.length !== expected) throw new Error('Reflow slice pixel dimensions do not match its buffer')
       const canvas = new OffscreenCanvasCtor(width, height)
       const context = canvas.getContext('2d')
       if (!context) throw new Error('OffscreenCanvas context is unavailable')

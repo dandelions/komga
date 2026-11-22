@@ -43,9 +43,6 @@ export type LocalReflowOptions = {
   deskewAnalysisRoi?: Roi | null,
   renderMode?: 'sprite' | 'slices',
   sliceEncoding?: 'bmp' | 'raw',
-  renderPixels?: Uint8ClampedArray,
-  renderWidth?: number,
-  renderHeight?: number,
 }
 
 export type LocalReflowItem = {
@@ -85,8 +82,7 @@ const EDGE_INK_THRESHOLD = 238
 const MAX_EDGE_TRIM = 6
 const MAX_EDGE_EXPANSION = 10
 const LOCAL_REFLOW_MAX_SIDE = 3600
-const LOCAL_REFLOW_MAX_PIXELS = 2_000_000
-const LOCAL_REFLOW_RENDER_MAX_PIXELS = 8_000_000
+const LOCAL_REFLOW_MAX_PIXELS = 8_000_000
 const LOCAL_REFLOW_STRIP_ASPECT_RATIO = 2.0
 const LOCAL_REFLOW_STRIP_MAX_SHORT_SIDE = 1800
 const LOCAL_REFLOW_STRIP_MAX_LONG_SIDE = 65000
@@ -109,10 +105,6 @@ function reflowScaleForPixels(sourceW: number, sourceH: number, maxPixels: numbe
 
 export function localReflowScale(sourceW: number, sourceH: number): number {
   return reflowScaleForPixels(sourceW, sourceH, LOCAL_REFLOW_MAX_PIXELS)
-}
-
-export function localReflowRenderScale(sourceW: number, sourceH: number): number {
-  return reflowScaleForPixels(sourceW, sourceH, LOCAL_REFLOW_RENDER_MAX_PIXELS)
 }
 
 export function clamp(v: number, min: number, max: number): number {
@@ -2203,11 +2195,6 @@ export function reflowPageFromPixels(
 
   // 2. Downscale if excessively large (aligned with downscaleServerImage)
   const scale = localReflowScale(sourceW, sourceH)
-  const requestedRenderPixels = !!options.renderPixels && !!options.renderWidth && !!options.renderHeight
-  const hasMappedRenderPixels = requestedRenderPixels &&
-    options.renderPixels!.length === options.renderWidth! * options.renderHeight! * 4
-  const renderSourceW = hasMappedRenderPixels ? options.renderWidth! : sourceW
-  const renderSourceH = hasMappedRenderPixels ? options.renderHeight! : sourceH
 
   let workPixels = sourcePixels
   let workW = sourceW
@@ -2238,10 +2225,6 @@ export function reflowPageFromPixels(
     removeDocumentBackground(workPixels, workW, workH, options.optimizeBackground, sourceDark)
   }
 
-  let renderSourcePixels = hasMappedRenderPixels ? options.renderPixels : undefined
-  if (renderSourcePixels && options.optimizeBackground && options.optimizeBackground !== 'none') {
-    removeDocumentBackground(renderSourcePixels, renderSourceW, renderSourceH, options.optimizeBackground, sourceDark)
-  }
 
   // 3. Auto deskew if requested
   let detectedAutoSkew = 0
@@ -2262,9 +2245,6 @@ export function reflowPageFromPixels(
   const effectiveSkew = Math.round(clamp(manualSkew + detectedAutoSkew, -10, 10) * 10) / 10
   if (Math.abs(effectiveSkew) >= 0.1) {
     workPixels = rotatePixels(workPixels, workW, workH, effectiveSkew, pageBackground)
-    if (renderSourcePixels) {
-      renderSourcePixels = rotatePixels(renderSourcePixels, renderSourceW, renderSourceH, effectiveSkew, pageBackground)
-    }
   }
 
   // 5. Build ink map
@@ -2316,7 +2296,6 @@ export function reflowPageFromPixels(
   const pageNormalizationApplies =
     options.matchBackgroundMode !== 'original' &&
     !isSpriteMode &&
-    !hasMappedRenderPixels &&
     workW * workH <= 12_000_000 &&
     (options.darkDisplay === true ||
       options.contrastEnhancement === true ||
@@ -2327,15 +2306,12 @@ export function reflowPageFromPixels(
     : workPixels
 
   const usedImageIndices = new Set<number>()
-  const renderPixels = renderSourcePixels || normalizedRenderPixels
-  const renderW = renderSourcePixels ? renderSourceW : workW
-  const renderH = renderSourcePixels ? renderSourceH : workH
-  const renderScaleX = renderW / Math.max(1, workW)
-  const renderScaleY = renderH / Math.max(1, workH)
 
   const sliceEncoding = options.sliceEncoding === 'raw' ? 'raw' : 'bmp'
-  const encodeSlice = (data: Uint8ClampedArray, w: number, h: number): {src?: string, pixels?: Uint8ClampedArray} => (
-    sliceEncoding === 'raw' ? {pixels: data} : {src: rgbaToBmpDataUrl(data, w, h, w, 0, 0)}
+  const encodeSlice = (data: Uint8ClampedArray, w: number, h: number): {src?: string, pixels?: Uint8ClampedArray, pixelWidth?: number, pixelHeight?: number} => (
+    sliceEncoding === 'raw'
+      ? {pixels: data, pixelWidth: w, pixelHeight: h}
+      : {src: rgbaToBmpDataUrl(data, w, h, w, 0, 0)}
   )
 
   const renderImageSlice = (reg: Roi, isInline: boolean): LocalReflowItem => {
@@ -2343,26 +2319,24 @@ export function reflowPageFromPixels(
     const startY = clamp(Math.floor(reg.y), 0, Math.max(0, workH - 1))
     const layoutSliceW = clamp(Math.ceil(reg.w), 1, Math.max(1, workW - startX))
     const layoutSliceH = clamp(Math.ceil(reg.h), 1, Math.max(1, workH - startY))
-    const sliceW = Math.max(1, Math.round(layoutSliceW * renderScaleX))
-    const sliceH = Math.max(1, Math.round(layoutSliceH * renderScaleY))
+    const sliceW = layoutSliceW
+    const sliceH = layoutSliceH
     const sliceData = new Uint8ClampedArray(sliceW * sliceH * 4)
-    const imageRenderPixels = hasMappedRenderPixels ? renderPixels : workPixels
-
     for (let y = 0; y < sliceH; y++) {
-      const sy = Math.min(renderH - 1, Math.round((startY + y / renderScaleY) * renderScaleY))
+      const sy = startY + y
       const dstRow = y * sliceW * 4
       for (let x = 0; x < sliceW; x++) {
-        const sx = Math.min(renderW - 1, Math.round((startX + x / renderScaleX) * renderScaleX))
-        const srcIdx = (sy * renderW + sx) * 4
+        const sx = startX + x
+        const srcIdx = (sy * workW + sx) * 4
         const dstIdx = dstRow + x * 4
-        sliceData[dstIdx] = imageRenderPixels[srcIdx]
-        sliceData[dstIdx + 1] = imageRenderPixels[srcIdx + 1]
-        sliceData[dstIdx + 2] = imageRenderPixels[srcIdx + 2]
-        sliceData[dstIdx + 3] = imageRenderPixels[srcIdx + 3]
+        sliceData[dstIdx] = workPixels[srcIdx]
+        sliceData[dstIdx + 1] = workPixels[srcIdx + 1]
+        sliceData[dstIdx + 2] = workPixels[srcIdx + 2]
+        sliceData[dstIdx + 3] = workPixels[srcIdx + 3]
       }
     }
 
-    if (options.darkDisplay && !hasMappedRenderPixels) {
+    if (options.darkDisplay) {
       normalizeImageSliceForDarkDisplay(sliceData, sliceW, sliceH, threshold)
     } else if (isHighContrast && options.matchBackgroundMode !== 'original') {
       const bgVal = 255
@@ -2808,9 +2782,9 @@ export function reflowPageFromPixels(
         // render dimensions are mapped back to the higher-resolution source.
         const layoutSliceW = adjusted.w
         const layoutSliceH = outputHeight
-        const sliceW = Math.max(1, Math.round(layoutSliceW * renderScaleX))
-        const sliceH = Math.max(1, Math.round(layoutSliceH * renderScaleY))
-        const offsetY = Math.max(0, Math.round((adjusted.y - outputTop) * renderScaleY))
+        const sliceW = layoutSliceW
+        const sliceH = layoutSliceH
+        const offsetY = adjusted.y - outputTop
 
         if (isSpriteMode) {
           items.push({
@@ -2851,22 +2825,17 @@ export function reflowPageFromPixels(
         const fgVal = options.darkDisplay ? 255 : 0
 
         for (let y = 0; y < sliceH; y++) {
-          const layoutY = Math.min(layoutSliceH - 1, Math.round(y / renderScaleY))
-          const targetY = y
-          const analysisY = adjusted.y + layoutY
+          const analysisY = adjusted.y + y
           if (analysisY < 0 || analysisY >= workH) continue
-          const renderY = Math.min(renderH - 1, Math.round(analysisY * renderScaleY))
-          const dstRowStart = targetY * sliceW * 4
+          const dstRowStart = y * sliceW * 4
 
           for (let x = 0; x < sliceW; x++) {
-            const layoutX = Math.min(layoutSliceW - 1, Math.round(x / renderScaleX))
-            const analysisX = adjusted.x + layoutX
-            const renderX = Math.min(renderW - 1, Math.round(analysisX * renderScaleX))
-            const srcIdx = (renderY * renderW + renderX) * 4
+            const analysisX = adjusted.x + x
+            const srcIdx = (analysisY * workW + analysisX) * 4
             const dstIdx = dstRowStart + x * 4
-            const r = renderPixels[srcIdx]
-            const g = renderPixels[srcIdx + 1]
-            const b = renderPixels[srcIdx + 2]
+            const r = normalizedRenderPixels[srcIdx]
+            const g = normalizedRenderPixels[srcIdx + 1]
+            const b = normalizedRenderPixels[srcIdx + 2]
 
             if (!normalizeColors) {
               sliceData[dstIdx] = r
@@ -2955,9 +2924,7 @@ export function reflowPageFromPixels(
           threshold,
           options.darkDisplay,
           0,
-          Math.round((outputTop - adjusted.y) * renderScaleY),
-          renderScaleX,
-          renderScaleY,
+          offsetY,
         )
 
         items.push({

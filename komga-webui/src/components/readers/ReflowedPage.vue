@@ -763,7 +763,7 @@ import type {ReflowAnalysisWorkerResponse, ReflowWorkerRoi} from '@/functions/re
 import {createReflowAnalysisWorker} from '@/functions/reflow-analysis-worker-factory'
 import {FilterWorkerPool} from '@/functions/worker-pool'
 import {getReflowResult, putReflowResult} from '@/functions/reflow-result-cache'
-import {localReflowRenderScale, localReflowScale, repairInvertedGlyphComponents} from '@/functions/local-reflow-engine'
+import {localReflowScale, repairInvertedGlyphComponents} from '@/functions/local-reflow-engine'
 import type {LocalReflowOptions, LocalReflowResult} from '@/functions/local-reflow-engine'
 import {
   contiguousReflowPageCount,
@@ -2160,15 +2160,16 @@ export default Vue.extend({
         const cropRois = this.reflowCropRois()
 
         if (this.supportsLocalAnalysisWorker()) {
-          const analysisSource = this.localReflowAnalysisCanvas(canvas)
-          const context = this.canvasContext(analysisSource.canvas, true)
+          const reflowCanvas = this.localReflowCanvas(canvas)
+          const context = this.canvasContext(reflowCanvas, true)
           if (!context) throw new Error('Canvas is unavailable')
-          const imageData = context.getImageData(0, 0, analysisSource.canvas.width, analysisSource.canvas.height)
+          const imageData = context.getImageData(0, 0, reflowCanvas.width, reflowCanvas.height)
+          const reflowScale = reflowCanvas.width / Math.max(1, canvas.width)
           const analysisCropRois = cropRois
             .filter((r): r is Roi => !!r)
-            .map(roi => this.scaleRoi(roi, analysisSource.scale, imageData.width, imageData.height))
+            .map(roi => this.scaleRoi(roi, reflowScale, imageData.width, imageData.height))
           const analysisManualRegions = this.currentManualImageRois()
-            .map(region => this.scaleRoi(region, analysisSource.scale, imageData.width, imageData.height))
+            .map(region => this.scaleRoi(region, reflowScale, imageData.width, imageData.height))
           const workerOptions: LocalReflowOptions = {
             targetWidth: this.targetWidth,
             autoCropBorder: this.controlAutoCropBorder,
@@ -2198,19 +2199,10 @@ export default Vue.extend({
             rotation: 0,
             formulaProtection: this.options?.formulaProtection === true,
             deskewAnalysisRoi: this.currentDeskewAnalysisRoi()
-              ? this.scaleRoi(this.currentDeskewAnalysisRoi() as Roi, analysisSource.scale, imageData.width, imageData.height)
+              ? this.scaleRoi(this.currentDeskewAnalysisRoi() as Roi, reflowScale, imageData.width, imageData.height)
               : undefined,
             renderMode: 'slices',
           }
-          const canMapHighResolutionSlices = !this.controlVerticalText &&
-            this.normalizedRotation(this.rotation) === 0
-          const renderScale = localReflowRenderScale(canvas.width, canvas.height)
-          const renderCanvas = canMapHighResolutionSlices && renderScale < 0.995
-            ? this.localReflowScaledCanvas(canvas, renderScale)
-            : canvas
-          const renderImageData = canMapHighResolutionSlices
-            ? this.canvasContext(renderCanvas, true)?.getImageData(0, 0, renderCanvas.width, renderCanvas.height)
-            : undefined
           const workerStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
           const workerResult = await this.runLocalWorkerReflow(
             imageData,
@@ -2218,7 +2210,6 @@ export default Vue.extend({
             analysisCropRois,
             analysisManualRegions,
             requestId,
-            renderImageData,
           )
           if (requestId !== this.requestId) return
           if (workerResult && workerResult.items && workerResult.items.length > 0) {
@@ -2360,8 +2351,10 @@ export default Vue.extend({
     supportsLocalAnalysisWorker(): boolean {
       return typeof Worker !== 'undefined' && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function'
     },
-    localReflowScaledCanvas(sourceCanvas: HTMLCanvasElement, scale: number): HTMLCanvasElement {
+    localReflowCanvas(sourceCanvas: HTMLCanvasElement): HTMLCanvasElement {
+      const scale = localReflowScale(sourceCanvas.width, sourceCanvas.height)
       if (scale >= 0.995) return sourceCanvas
+
       const canvas = document.createElement('canvas')
       canvas.width = Math.max(1, Math.round(sourceCanvas.width * scale))
       canvas.height = Math.max(1, Math.round(sourceCanvas.height * scale))
@@ -2372,27 +2365,12 @@ export default Vue.extend({
       context.drawImage(sourceCanvas, 0, 0, sourceCanvas.width, sourceCanvas.height, 0, 0, canvas.width, canvas.height)
       return canvas
     },
-    localReflowAnalysisCanvas(sourceCanvas: HTMLCanvasElement): {canvas: HTMLCanvasElement, scale: number} {
-      const scale = localReflowScale(sourceCanvas.width, sourceCanvas.height)
-      if (scale >= 0.995) return {canvas: sourceCanvas, scale: 1}
-
-      const canvas = document.createElement('canvas')
-      canvas.width = Math.max(1, Math.round(sourceCanvas.width * scale))
-      canvas.height = Math.max(1, Math.round(sourceCanvas.height * scale))
-      const context = this.canvasContext(canvas, true)
-      if (!context) return {canvas: sourceCanvas, scale: 1}
-      context.imageSmoothingEnabled = true
-      context.imageSmoothingQuality = 'high'
-      context.drawImage(sourceCanvas, 0, 0, sourceCanvas.width, sourceCanvas.height, 0, 0, canvas.width, canvas.height)
-      return {canvas, scale}
-    },
     async runLocalWorkerReflow(
       imageData: ImageData,
       options: LocalReflowOptions,
       cropRois: Roi[],
       manualImageRegions: Roi[],
       requestId: number,
-      renderImageData?: ImageData,
     ): Promise<LocalReflowResult | undefined> {
       if (!this.supportsLocalAnalysisWorker()) return undefined
       this.terminateLocalAnalysisWorker()
@@ -2452,10 +2430,7 @@ export default Vue.extend({
               options,
               cropRois,
               manualImageRegions,
-              renderPixels: renderImageData?.data,
-              renderWidth: renderImageData?.width,
-              renderHeight: renderImageData?.height,
-            }, renderImageData ? [pixels.buffer, renderImageData.data.buffer] : [pixels.buffer])
+            }, [pixels.buffer])
           } catch (_) {
             // the buffer may already be detached: release instead of leaking the slot
             finish()
@@ -3147,7 +3122,7 @@ export default Vue.extend({
     },
     localReflowResultCacheKey(): string {
       return JSON.stringify({
-        version: 2,
+        version: 3,
         bookId: this.bookId,
         page: this.page.number,
         pageUrl: canonicalPageImageUrl(this.page.url),
