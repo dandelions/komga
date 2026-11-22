@@ -2993,21 +2993,6 @@ export function reflowPageFromPixels(
           options.matchBackgroundMode,
         )
 
-        // Apply server-identical inverted glyph repair AFTER color normalization
-        repairInvertedGlyphComponents(
-          sliceData,
-          sliceW,
-          sliceH,
-          workPixels,
-          workW,
-          adjusted,
-          pageBgLuma,
-          threshold,
-          options.darkDisplay,
-          0,
-          offsetY,
-        )
-
         items.push({
           type: 'word',
           ...encodeSlice(sliceData, sliceW, sliceH),
