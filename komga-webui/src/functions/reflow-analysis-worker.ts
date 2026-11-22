@@ -88,7 +88,7 @@ async function handleRequest(request: ReflowAnalysisWorkerRequest): Promise<void
         request.cropRois || [],
         request.manualImageRegions || [],
       )
-      if (canEncodeJpeg) await encodeSlicesToDataUrls(result.items)
+      if (canEncodeJpeg) await encodeSlicesToDataUrls(result.items, request.options.imageQuality)
       postMessage({
         type: 'reflowed',
         requestId: request.requestId,
@@ -110,7 +110,7 @@ async function handleRequest(request: ReflowAnalysisWorkerRequest): Promise<void
   }
 }
 
-async function encodeSlicesToDataUrls(items: LocalReflowItem[]) {
+async function encodeSlicesToDataUrls(items: LocalReflowItem[], imageQuality: number = 80) {
   const OffscreenCanvasCtor = (self as any).OffscreenCanvas
   const reader = new (self as any).FileReaderSync()
   for (const item of items) {
@@ -132,7 +132,15 @@ async function encodeSlicesToDataUrls(items: LocalReflowItem[]) {
       const context = canvas.getContext('2d')
       if (!context) throw new Error('OffscreenCanvas context is unavailable')
       context.putImageData(new ImageData(data, width, height), 0, 0)
-      const blob = await canvas.convertToBlob({type: 'image/jpeg', quality: 0.92})
+      const quality = Math.max(0.4, Math.min(0.9, Number(imageQuality || 80) / 100))
+      // Match the server path: keep small text slices lossless, and use JPEG only
+      // when the PNG would be too large. This avoids ringing around glyph edges.
+      let blob = item.type === 'word'
+        ? await canvas.convertToBlob({type: 'image/png'})
+        : undefined
+      if (!blob || blob.size > 64 * 1024) {
+        blob = await canvas.convertToBlob({type: 'image/jpeg', quality})
+      }
       item.src = reader.readAsDataURL(blob)
     } catch (_) {
       // never fail the page because one slice could not be encoded
