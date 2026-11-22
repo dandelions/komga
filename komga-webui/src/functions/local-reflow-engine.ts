@@ -2230,6 +2230,15 @@ export function reflowPageFromPixels(
     removeDocumentBackground(workPixels, workW, workH, options.optimizeBackground, sourceDark)
   }
 
+  let renderSourcePixels = options.renderPixels && options.renderWidth && options.renderHeight
+    ? options.renderPixels
+    : undefined
+  const renderSourceW = options.renderWidth || 0
+  const renderSourceH = options.renderHeight || 0
+  if (renderSourcePixels && options.optimizeBackground && options.optimizeBackground !== 'none') {
+    removeDocumentBackground(renderSourcePixels, renderSourceW, renderSourceH, options.optimizeBackground, sourceDark)
+  }
+
   // 3. Auto deskew if requested
   let detectedAutoSkew = 0
   if (options.autoSkewCorrection) {
@@ -2249,6 +2258,9 @@ export function reflowPageFromPixels(
   const effectiveSkew = Math.round(clamp(manualSkew + detectedAutoSkew, -10, 10) * 10) / 10
   if (Math.abs(effectiveSkew) >= 0.1) {
     workPixels = rotatePixels(workPixels, workW, workH, effectiveSkew, pageBackground)
+    if (renderSourcePixels) {
+      renderSourcePixels = rotatePixels(renderSourcePixels, renderSourceW, renderSourceH, effectiveSkew, pageBackground)
+    }
   }
 
   // 5. Build ink map
@@ -2311,11 +2323,9 @@ export function reflowPageFromPixels(
     : workPixels
 
   const usedImageIndices = new Set<number>()
-  const renderPixels = options.renderPixels && options.renderWidth && options.renderHeight
-    ? options.renderPixels
-    : normalizedRenderPixels
-  const renderW = options.renderWidth || workW
-  const renderH = options.renderHeight || workH
+  const renderPixels = renderSourcePixels || normalizedRenderPixels
+  const renderW = renderSourcePixels ? renderSourceW : workW
+  const renderH = renderSourcePixels ? renderSourceH : workH
   const renderScaleX = renderW / Math.max(1, workW)
   const renderScaleY = renderH / Math.max(1, workH)
 

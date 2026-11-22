@@ -2152,13 +2152,7 @@ export default Vue.extend({
               : undefined,
             renderMode: 'slices',
           }
-          const canMapHighResolutionSlices = !this.controlAutoSkewCorrection &&
-            !this.currentDeskewAnalysisRoi() &&
-            !this.controlOptimizeBackground &&
-            !this.controlRemoveBackground &&
-            !this.controlRemoveWatermark &&
-            !this.darkDisplay &&
-            !this.controlVerticalText &&
+          const canMapHighResolutionSlices = !this.controlVerticalText &&
             this.normalizedRotation(this.rotation) === 0
           const renderScale = localReflowRenderScale(canvas.width, canvas.height)
           const renderCanvas = canMapHighResolutionSlices && renderScale < 0.995
