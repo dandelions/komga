@@ -1284,7 +1284,7 @@ export default Vue.extend({
         flexWrap: 'wrap',
         alignItems: 'flex-end',
         alignContent: 'flex-start',
-        columnGap: `${this.reflowInlineGap()}px`,
+        columnGap: `${this.reflowInlineGap}px`,
         rowGap: `${Math.round(this.blockSpacing * 1.5)}px`,
         boxSizing: 'border-box',
         overflow: 'hidden',
@@ -1435,7 +1435,7 @@ export default Vue.extend({
     },
     reflowWrapperStyle(): object {
       const style = {
-        columnGap: `${this.reflowInlineGap()}px`,
+        columnGap: `${this.reflowInlineGap}px`,
         rowGap: `${Math.round(this.blockSpacing * 1.5)}px`,
         height: `${this.pageContentHeight()}px`,
         minHeight: '100vh',
@@ -1472,7 +1472,7 @@ export default Vue.extend({
         : this.pageContentWidth()
       const style = {
         width: `${measureWidth}px`,
-        columnGap: `${this.reflowInlineGap()}px`,
+        columnGap: `${this.reflowInlineGap}px`,
         rowGap: `${Math.round(this.blockSpacing * 1.5)}px`,
       }
       if (!this.verticalText) return style
@@ -2797,7 +2797,7 @@ export default Vue.extend({
         : Math.max(120, targetWidth - (typeof this.horizontalContentPadding === 'function' ? this.horizontalContentPadding() * 2 : 32))
       const pageHeight = Math.max(120, this.pageContentHeight() - 32)
       const rowGap = Math.max(0, Math.round(this.blockSpacing * 1.5))
-      const columnGap = typeof this.reflowInlineGap === 'function' ? this.reflowInlineGap() : 0
+      const columnGap = typeof this.reflowInlineGap === 'number' ? this.reflowInlineGap : 0
       const pages = [] as ReflowItem[][]
       let currentPage = [] as ReflowItem[]
       let currentPageHeight = 0
