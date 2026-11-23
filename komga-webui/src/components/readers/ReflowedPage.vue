@@ -3185,7 +3185,7 @@ export default Vue.extend({
         deskewDetectionVersion: 10,
         imageExclusionVersion: 4,
         detectionScaleVersion: 5,
-        darkWordRenderVersion: 8,
+        darkWordRenderVersion: 9,
         wordSegmentationVersion: 11,
       })
     },
