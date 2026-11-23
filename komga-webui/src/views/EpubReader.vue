@@ -118,6 +118,7 @@
       v-model="showToc"
       fixed
       temporary
+      hide-overlay
 
       :width="$vuetify.breakpoint.smAndUp ? 500 : $vuetify.breakpoint.width - 50"
       style="z-index: 1100; pointer-events: auto"
@@ -149,6 +150,7 @@
       v-model="showEpubSearch"
       fixed
       temporary
+      hide-overlay
       right
       :width="$vuetify.breakpoint.width < 420 ? $vuetify.breakpoint.width : 420"
       style="z-index: 1110; pointer-events: auto"
@@ -1417,8 +1419,10 @@ export default Vue.extend({
       }
     },
     tableOfContents(): TocEntry[] {
-      if (this.tocs.toc) return flattenToc(this.tocs.toc, 1, 0, this.currentLocation?.href)
-      return []
+      if (this.tocs.toc && this.tocs.toc.length > 0) {
+        return flattenToc(this.tocs.toc, 1, 0, this.currentLocation?.href).map(this.normalizeTocEntry)
+      }
+      return this.fallbackTocFromReadingOrder()
     },
     landmarks(): TocEntry[] {
       if (this.tocs.landmarks) return flattenToc(this.tocs.landmarks, 1, 0, this.currentLocation?.href)
@@ -1429,7 +1433,7 @@ export default Vue.extend({
       return []
     },
     hasToc(): boolean {
-      return this.tocs.toc?.length > 0
+      return this.tableOfContents.length > 0
     },
     hasLandmarks(): boolean {
       return this.tocs.landmarks?.length > 0
@@ -2970,6 +2974,26 @@ export default Vue.extend({
       const normalizedA = normalize(a)
       const normalizedB = normalize(b)
       return normalizedA === normalizedB || normalizedA.endsWith(`/${normalizedB}`) || normalizedB.endsWith(`/${normalizedA}`)
+    },
+    normalizeTocEntry(entry: TocEntry): TocEntry {
+      const href = (entry.href || (entry as any).Href) as string | undefined
+      return {
+        ...entry,
+        href,
+        title: entry.title || (entry as any).Title || href || '',
+      }
+    },
+    fallbackTocFromReadingOrder(): TocEntry[] {
+      const readingOrder = (this.d2Reader as any)?.readingOrder as EpubReadingOrderItem[] | undefined
+      if (!Array.isArray(readingOrder) || readingOrder.length === 0) return []
+
+      return readingOrder
+        .map((item, index) => ({
+          title: item?.title || item?.Title || `#${index + 1}`,
+          href: this.getEpubReadingOrderHref(item),
+          level: 0,
+        }))
+        .filter(entry => !!entry.href) as TocEntry[]
     },
     isMobileEpubViewport(): boolean {
       return typeof window !== 'undefined' && typeof window.matchMedia === 'function'

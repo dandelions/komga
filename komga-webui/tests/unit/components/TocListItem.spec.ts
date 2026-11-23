@@ -31,14 +31,14 @@ describe('TocListItem', () => {
     wrapper.destroy()
   })
 
-  test('disables rows without a destination or child entries', () => {
+  test('never renders a disabled row so the table of contents stays usable', () => {
     const wrapper = mount(TocListItem, {
       localVue: createLocalVue(),
       vuetify: new Vuetify(),
       propsData: {item: {title: 'Unavailable heading'}},
     })
 
-    expect(wrapper.find('.v-list-item').classes()).toContain('v-list-item--disabled')
+    expect(wrapper.find('.v-list-item').classes()).not.toContain('v-list-item--disabled')
     wrapper.destroy()
   })
 })

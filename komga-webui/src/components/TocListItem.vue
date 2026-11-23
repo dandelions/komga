@@ -1,5 +1,5 @@
 <template>
-  <v-list-item :link="!!item.href" :disabled="!item.href && !(item.children && item.children.length)" @click="goto(item)">
+  <v-list-item :link="!!item.href" @click="goto(item)">
     <v-list-item-content>
       <v-list-item-title
         :title="item.title"

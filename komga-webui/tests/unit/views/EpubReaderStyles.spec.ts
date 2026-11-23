@@ -30,6 +30,14 @@ describe('EpubReader mobile address bar collapse and root scrolling structure', 
     expect(content).not.toContain('recenterEpubRootScroll')
   })
 
+  test('does not let a Vuetify drawer scrim cover the EPUB table of contents or search panel', () => {
+    const drawerBlocks = content.match(/<v-navigation-drawer[\s\S]*?>/g) || []
+    expect(drawerBlocks.length).toBeGreaterThanOrEqual(2)
+    for (const block of drawerBlocks) {
+      expect(block).toContain('hide-overlay')
+    }
+  })
+
   test('keeps EPUB controls above the mobile reader shell and hides empty D2 overlays', () => {
     expect(content).toContain('z-index: 1000; pointer-events: auto')
     expect(content).toContain('z-index: 1100; pointer-events: auto')
@@ -38,6 +46,11 @@ describe('EpubReader mobile address bar collapse and root scrolling structure', 
     expect(content).toContain('#reader-error:empty')
     expect(content).toContain('display: none !important')
     expect(content).not.toContain(':disabled="!hasToc && !hasLandmarks && !hasPageList"')
+  })
+
+  test('falls back to the reading order so the EPUB table of contents is never empty', () => {
+    expect(content).toContain('fallbackTocFromReadingOrder()')
+    expect(content).toMatch(/hasToc\(\): boolean \{\s*return this\.tableOfContents\.length > 0/)
   })
 
   test('handles mobile swipes, taps, links, and long-press selection mode via passive top-level wrapper listeners', () => {
