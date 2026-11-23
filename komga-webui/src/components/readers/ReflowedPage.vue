@@ -941,6 +941,10 @@ type ReflowTransferStats = {
   workerAlgorithmMs?: number,
   workerEncodingMs?: number,
   workerTotalMs?: number,
+  encodedSliceCount?: number,
+  encodedSourceBytes?: number,
+  encodedBlobBytes?: number,
+  encodedDataUrlChars?: number,
   repaginateMs?: number,
   totalTimeMs?: number,
   timings?: {
@@ -1006,6 +1010,7 @@ type ReflowOptionsSnapshot = {
 }
 
 let reflowWorkerPool: FilterWorkerPool | undefined
+let reflowWorkerWarmupRequestId = 0
 
 function reflowPool(): FilterWorkerPool {
   if (!reflowWorkerPool) reflowWorkerPool = new FilterWorkerPool(createReflowAnalysisWorker)
@@ -1798,6 +1803,7 @@ export default Vue.extend({
       this.initializeControlsPosition()
       this.updateViewportMetrics()
       this.repaginate(false)
+      if (!this.deferReflow && !this.serverReflow) void this.prewarmReflowWorker()
     })
   },
   destroyed() {
@@ -2240,6 +2246,10 @@ export default Vue.extend({
               workerAlgorithmMs: Math.round(workerResult.processingTimeMs || 0),
               workerEncodingMs: Math.round((workerResult as any).encodingTimeMs || 0),
               workerTotalMs: Math.round((workerResult as any).workerTotalTimeMs || 0),
+              encodedSliceCount: (workerResult as any).encodedSliceCount || 0,
+              encodedSourceBytes: (workerResult as any).encodedSourceBytes || 0,
+              encodedBlobBytes: (workerResult as any).encodedBlobBytes || 0,
+              encodedDataUrlChars: (workerResult as any).encodedDataUrlChars || 0,
               algorithmStages: workerResult.timings,
               repaginateMs: Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - repaginateStartedAt),
               totalMs: Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - reflowStartedAt),
@@ -2371,6 +2381,32 @@ export default Vue.extend({
       context.drawImage(sourceCanvas, 0, 0, sourceCanvas.width, sourceCanvas.height, 0, 0, canvas.width, canvas.height)
       return canvas
     },
+    async prewarmReflowWorker(): Promise<void> {
+      if (!this.supportsLocalAnalysisWorker()) return
+      const worker = await reflowPool().acquireAsync('low', 1000)
+      if (!worker) return
+      const requestId = ++reflowWorkerWarmupRequestId
+      try {
+        await new Promise<void>(resolve => {
+          let settled = false
+          const finish = () => {
+            if (settled) return
+            settled = true
+            worker.onmessage = null
+            worker.onerror = null
+            resolve()
+          }
+          worker.onmessage = (event: MessageEvent<ReflowAnalysisWorkerResponse>) => {
+            if (event.data?.requestId === requestId) finish()
+          }
+          worker.onerror = finish
+          worker.postMessage({type: 'warmup', requestId})
+          window.setTimeout(finish, 2000)
+        })
+      } finally {
+        reflowPool().release(worker)
+      }
+    },
     async runLocalWorkerReflow(
       imageData: ImageData,
       options: LocalReflowOptions,
@@ -2411,6 +2447,11 @@ export default Vue.extend({
                 processingTimeMs: response.processingTimeMs || 0,
                 encodingTimeMs: response.encodingTimeMs || 0,
                 workerTotalTimeMs: response.workerTotalTimeMs || 0,
+                encodedSliceCount: response.encodedSliceCount,
+                encodedSourceBytes: response.encodedSourceBytes,
+                encodedBlobBytes: response.encodedBlobBytes,
+                encodedDataUrlChars: response.encodedDataUrlChars,
+                timings: response.timings,
                 items: response.items,
               })
             } else {

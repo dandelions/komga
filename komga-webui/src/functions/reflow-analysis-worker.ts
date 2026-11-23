@@ -13,6 +13,11 @@ export type ReflowWorkerRoi = {
   h: number,
 }
 
+export type ReflowAnalysisWorkerWarmupRequest = {
+  type: 'warmup',
+  requestId: number,
+}
+
 export type ReflowAnalysisWorkerAnalyzeRequest = {
   type: 'analyze',
   requestId: number,
@@ -34,11 +39,12 @@ export type ReflowAnalysisWorkerReflowRequest = {
 }
 
 export type ReflowAnalysisWorkerRequest =
+  | ReflowAnalysisWorkerWarmupRequest
   | ReflowAnalysisWorkerAnalyzeRequest
   | ReflowAnalysisWorkerReflowRequest
 
 export type ReflowAnalysisWorkerResponse = {
-  type: 'analyzed' | 'reflowed' | 'error',
+  type: 'warmed' | 'analyzed' | 'reflowed' | 'error',
   requestId: number,
   roi?: ReflowWorkerRoi,
   items?: LocalReflowItem[],
@@ -47,6 +53,10 @@ export type ReflowAnalysisWorkerResponse = {
   processingTimeMs?: number,
   encodingTimeMs?: number,
   workerTotalTimeMs?: number,
+  encodedSliceCount?: number,
+  encodedSourceBytes?: number,
+  encodedBlobBytes?: number,
+  encodedDataUrlChars?: number,
   timings?: LocalReflowResult['timings'],
   workWidth?: number,
   workHeight?: number,
@@ -64,6 +74,10 @@ self.onmessage = (event: MessageEvent<ReflowAnalysisWorkerRequest>) => {
 }
 
 async function handleRequest(request: ReflowAnalysisWorkerRequest): Promise<void> {
+  if (request.type === 'warmup') {
+    postMessage({type: 'warmed', requestId: request.requestId} as ReflowAnalysisWorkerResponse)
+    return
+  }
 
   if (request.type === 'analyze') {
     try {
@@ -96,7 +110,9 @@ async function handleRequest(request: ReflowAnalysisWorkerRequest): Promise<void
         request.manualImageRegions || [],
       )
       const encodingStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
-      if (canEncodeJpeg) await encodeSlicesToDataUrls(result.items, request.options.imageQuality)
+      const encodingStats = canEncodeJpeg
+        ? await encodeSlicesToDataUrls(result.items, request.options.imageQuality)
+        : {sliceCount: 0, sourceBytes: 0, blobBytes: 0, dataUrlChars: 0}
       const encodingTimeMs = canEncodeJpeg
         ? Math.max(0, Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - encodingStartedAt))
         : 0
@@ -110,6 +126,10 @@ async function handleRequest(request: ReflowAnalysisWorkerRequest): Promise<void
         processingTimeMs: result.processingTimeMs,
         encodingTimeMs,
         workerTotalTimeMs,
+        encodedSliceCount: encodingStats.sliceCount,
+        encodedSourceBytes: encodingStats.sourceBytes,
+        encodedBlobBytes: encodingStats.blobBytes,
+        encodedDataUrlChars: encodingStats.dataUrlChars,
         timings: result.timings,
         workWidth: result.workWidth,
         workHeight: result.workHeight,
@@ -125,9 +145,17 @@ async function handleRequest(request: ReflowAnalysisWorkerRequest): Promise<void
   }
 }
 
-async function encodeSlicesToDataUrls(items: LocalReflowItem[], imageQuality: number = 80) {
+async function encodeSlicesToDataUrls(
+  items: LocalReflowItem[],
+  imageQuality: number = 80,
+): Promise<{sliceCount: number, sourceBytes: number, blobBytes: number, dataUrlChars: number}> {
   const OffscreenCanvasCtor = (self as any).OffscreenCanvas
   const reader = new (self as any).FileReaderSync()
+  let canvas: OffscreenCanvas | undefined
+  let context: OffscreenCanvasRenderingContext2D | null = null
+  let canvasWidth = 0
+  let canvasHeight = 0
+  const stats = {sliceCount: 0, sourceBytes: 0, blobBytes: 0, dataUrlChars: 0}
   for (const item of items) {
     if (!item.pixels) continue
     const pixels = item.pixels
@@ -136,9 +164,16 @@ async function encodeSlicesToDataUrls(items: LocalReflowItem[], imageQuality: nu
     try {
       const expected = width * height * 4
       if (pixels.length !== expected) throw new Error('Reflow slice pixel dimensions do not match its buffer')
-      const canvas = new OffscreenCanvasCtor(width, height)
-      const context = canvas.getContext('2d')
-      if (!context) throw new Error('OffscreenCanvas context is unavailable')
+      if (!canvas) {
+        canvas = new OffscreenCanvasCtor(width, height)
+        context = canvas.getContext('2d')
+      } else if (canvasWidth !== width || canvasHeight !== height) {
+        canvas.width = width
+        canvas.height = height
+      }
+      if (!context || !canvas) throw new Error('OffscreenCanvas context is unavailable')
+      canvasWidth = width
+      canvasHeight = height
       context.putImageData(new ImageData(pixels, width, height), 0, 0)
       const quality = Math.max(0.4, Math.min(0.9, Number(imageQuality || 80) / 100))
       // Match the server path: keep small text slices lossless, and use JPEG only
@@ -150,12 +185,17 @@ async function encodeSlicesToDataUrls(items: LocalReflowItem[], imageQuality: nu
         blob = await canvas.convertToBlob({type: 'image/jpeg', quality})
       }
       item.src = reader.readAsDataURL(blob)
+      stats.sliceCount++
+      stats.sourceBytes += pixels.byteLength
+      stats.blobBytes += blob.size
+      stats.dataUrlChars += item.src.length
     } catch (_) {
       // never fail the page because one slice could not be encoded
       item.src = rgbaToBmpDataUrl(pixels, width, height, width, 0, 0)
     }
     delete item.pixels
   }
+  return stats
 }
 
 function detectInkRoi(pixels: Uint8ClampedArray, width: number, height: number, threshold: number): ReflowWorkerRoi {

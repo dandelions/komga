@@ -534,6 +534,37 @@ export function applyStrokeStrengthToPixels(
 
   if (indexes.length === 0) return
 
+  if (darkDisplay && !isOriginalMode && strength < 1) {
+    const setDarkForeground = (index: number, influence: number) => {
+      const pixelIndex = index * 4
+      if (isColoredPixel(pixels[pixelIndex], pixels[pixelIndex + 1], pixels[pixelIndex + 2])) return
+      const currentLuma = pixelLuma(pixels[pixelIndex], pixels[pixelIndex + 1], pixels[pixelIndex + 2])
+      if (currentLuma > 0 && currentLuma < darkInkLimit) return
+      const amount = clamp(influence, 0, 1)
+      pixels[pixelIndex] = Math.round(pixels[pixelIndex] + (255 - pixels[pixelIndex]) * amount)
+      pixels[pixelIndex + 1] = Math.round(pixels[pixelIndex + 1] + (255 - pixels[pixelIndex + 1]) * amount)
+      pixels[pixelIndex + 2] = Math.round(pixels[pixelIndex + 2] + (255 - pixels[pixelIndex + 2]) * amount)
+    }
+    const orthoAmount = strength * 0.7
+    const diagAmount = strength * 0.45
+    for (const index of indexes) {
+      const y = (index / width) | 0
+      const x = index - y * width
+      setDarkForeground(index, strength)
+      for (let dy = -1; dy <= 1; dy++) {
+        const nextY = y + dy
+        if (nextY < 0 || nextY >= height) continue
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dx === 0 && dy === 0) continue
+          const nextX = x + dx
+          if (nextX < 0 || nextX >= width) continue
+          setDarkForeground(nextY * width + nextX, dx === 0 || dy === 0 ? orthoAmount : diagAmount)
+        }
+      }
+    }
+    return
+  }
+
   const exterior = exteriorPaperMask(mask, width, height)
   const fullPasses = Math.floor(strength)
   let activeIndexes = indexes
@@ -811,19 +842,18 @@ export function detectImageRegions(
         if (cy < minTy) minTy = cy
         if (cy > maxTy) maxTy = cy
 
-        const neighbors = [
-          [cx - 1, cy], [cx + 1, cy], [cx, cy - 1], [cx, cy + 1],
-        ]
-        for (let n = 0; n < 4; n++) {
-          const nx = neighbors[n][0]
-          const ny = neighbors[n][1]
-          if (nx < 0 || nx >= tilesX || ny < 0 || ny >= tilesY) continue
+        const visit = (nx: number, ny: number) => {
+          if (nx < 0 || nx >= tilesX || ny < 0 || ny >= tilesY) return
           const nIdx = ny * tilesX + nx
           if (isImageTile[nIdx] === 1 && visited[nIdx] === 0) {
             visited[nIdx] = 1
             q.push(nIdx)
           }
         }
+        visit(cx - 1, cy)
+        visit(cx + 1, cy)
+        visit(cx, cy - 1)
+        visit(cx, cy + 1)
       }
 
       if (count >= 4) {
@@ -2335,13 +2365,11 @@ export function reflowPageFromPixels(
   // Use the detected text bounds for automatic border cropping. Using the full page
   // here makes line-end whitespace dominate trailing-blank and paragraph decisions,
   // causing a few otherwise fitting words to wrap onto the next line.
-  const defaultPageRoi: Roi = hasManualMargin
-    ? detectRoi(ink, workW, workH, {...options, autoCropBorder: false})
-    : detectRoi(ink, workW, workH, options)
-
   const effectiveRois = scaledCropRois.length > 0
     ? scaledCropRois
-    : [defaultPageRoi]
+    : [hasManualMargin
+      ? detectRoi(ink, workW, workH, {...options, autoCropBorder: false})
+      : detectRoi(ink, workW, workH, options)]
   timings.roiMs = now() - roiStartedAt
 
   const items: LocalReflowItem[] = []
@@ -2405,16 +2433,8 @@ export function reflowPageFromPixels(
     const sliceData = new Uint8ClampedArray(sliceW * sliceH * 4)
     for (let y = 0; y < sliceH; y++) {
       const sy = startY + y
-      const dstRow = y * sliceW * 4
-      for (let x = 0; x < sliceW; x++) {
-        const sx = startX + x
-        const srcIdx = (sy * workW + sx) * 4
-        const dstIdx = dstRow + x * 4
-        sliceData[dstIdx] = workPixels[srcIdx]
-        sliceData[dstIdx + 1] = workPixels[srcIdx + 1]
-        sliceData[dstIdx + 2] = workPixels[srcIdx + 2]
-        sliceData[dstIdx + 3] = workPixels[srcIdx + 3]
-      }
+      const srcIdx = (sy * workW + startX) * 4
+      sliceData.set(workPixels.subarray(srcIdx, srcIdx + sliceW * 4), y * sliceW * 4)
     }
 
     if (options.darkDisplay) {
@@ -2903,6 +2923,14 @@ export function reflowPageFromPixels(
           options.matchBackgroundMode !== 'original' ||
           (options.optimizeBackground && options.optimizeBackground !== 'none')
         )
+        if (!normalizeColors) {
+          for (let y = 0; y < sliceH; y++) {
+            const analysisY = outputTop + y
+            if (analysisY < 0 || analysisY >= workH) continue
+            const srcIdx = (analysisY * workW + adjusted.x) * 4
+            sliceData.set(normalizedRenderPixels.subarray(srcIdx, srcIdx + sliceW * 4), y * sliceW * 4)
+          }
+        }
 
         const matchedForeground = normalizeColors && (options.matchBackground || options.matchBackgroundMode === 'original')
           ? matchBackgroundMask(workPixels, workW, workH, adjusted, pageBgLuma)
@@ -2911,71 +2939,65 @@ export function reflowPageFromPixels(
         const inkThresh = adaptiveInkThreshold(threshold, pageBgLuma)
         const fgVal = options.darkDisplay ? 255 : 0
 
-        for (let y = 0; y < sliceH; y++) {
-          const analysisY = outputTop + y
-          if (analysisY < 0 || analysisY >= workH) continue
-          const sourceMaskY = analysisY - adjusted.y
-          const dstRowStart = y * sliceW * 4
+        if (normalizeColors) {
+          for (let y = 0; y < sliceH; y++) {
+            const analysisY = outputTop + y
+            if (analysisY < 0 || analysisY >= workH) continue
+            const sourceMaskY = analysisY - adjusted.y
+            const dstRowStart = y * sliceW * 4
 
-          for (let x = 0; x < sliceW; x++) {
-            const analysisX = adjusted.x + x
-            const srcIdx = (analysisY * workW + analysisX) * 4
-            const dstIdx = dstRowStart + x * 4
-            const r = normalizedRenderPixels[srcIdx]
-            const g = normalizedRenderPixels[srcIdx + 1]
-            const b = normalizedRenderPixels[srcIdx + 2]
+            for (let x = 0; x < sliceW; x++) {
+              const analysisX = adjusted.x + x
+              const srcIdx = (analysisY * workW + analysisX) * 4
+              const dstIdx = dstRowStart + x * 4
+              const r = normalizedRenderPixels[srcIdx]
+              const g = normalizedRenderPixels[srcIdx + 1]
+              const b = normalizedRenderPixels[srcIdx + 2]
 
-            if (!normalizeColors) {
-              sliceData[dstIdx] = r
-              sliceData[dstIdx + 1] = g
-              sliceData[dstIdx + 2] = b
-              sliceData[dstIdx + 3] = 255
-              continue
-            }
+              const matched = matchedForeground && sourceMaskY >= 0 && sourceMaskY < adjusted.h
+                ? matchedForeground[sourceMaskY * adjusted.w + x] !== 0
+                : !matchedForeground
+              if (!matched) {
+                sliceData[dstIdx] = bgVal
+                sliceData[dstIdx + 1] = bgVal
+                sliceData[dstIdx + 2] = bgVal
+                sliceData[dstIdx + 3] = 255
+                continue
+              }
 
-            const matched = matchedForeground && sourceMaskY >= 0 && sourceMaskY < adjusted.h
-              ? matchedForeground[sourceMaskY * adjusted.w + x] !== 0
-              : !matchedForeground
-            if (!matched) {
-              sliceData[dstIdx] = bgVal
-              sliceData[dstIdx + 1] = bgVal
-              sliceData[dstIdx + 2] = bgVal
-              sliceData[dstIdx + 3] = 255
-              continue
-            }
-
-            if (options.matchBackgroundMode === 'original') {
-              const orig = originalTextColor(r, g, b, pageBgLuma, options)
-              sliceData[dstIdx] = orig.r
-              sliceData[dstIdx + 1] = orig.g
-              sliceData[dstIdx + 2] = orig.b
-              sliceData[dstIdx + 3] = 255
-            } else if (options.matchBackgroundMode === 'monochrome') {
-              const luma = pixelLuma(r, g, b)
-              const isWordInk = sourceDark ? luma > inkThresh : luma < inkThresh
-              const val = isWordInk ? fgVal : bgVal
-              sliceData[dstIdx] = val
-              sliceData[dstIdx + 1] = val
-              sliceData[dstIdx + 2] = val
-              sliceData[dstIdx + 3] = 255
-            } else if (options.contrastEnhancement) {
-              const c = contrastEnhancedTextColor(r, g, b, pageBgLuma, options.darkDisplay)
-              sliceData[dstIdx] = c.r
-              sliceData[dstIdx + 1] = c.g
-              sliceData[dstIdx + 2] = c.b
-              sliceData[dstIdx + 3] = 255
-            } else if (options.darkDisplay) {
-              const c = grayscaleTextColor(r, g, b, pageBgLuma, options.darkDisplay)
-              sliceData[dstIdx] = c.r
-              sliceData[dstIdx + 1] = c.g
-              sliceData[dstIdx + 2] = c.b
-              sliceData[dstIdx + 3] = 255
-            } else {
-              const c = grayscaleTextColor(r, g, b, pageBgLuma, options.darkDisplay)
-              sliceData[dstIdx] = c.r
-              sliceData[dstIdx + 1] = c.g
-              sliceData[dstIdx + 2] = c.b
-              sliceData[dstIdx + 3] = 255
+              if (options.matchBackgroundMode === 'original') {
+                const orig = originalTextColor(r, g, b, pageBgLuma, options)
+                sliceData[dstIdx] = orig.r
+                sliceData[dstIdx + 1] = orig.g
+                sliceData[dstIdx + 2] = orig.b
+                sliceData[dstIdx + 3] = 255
+              } else if (options.matchBackgroundMode === 'monochrome') {
+                const luma = pixelLuma(r, g, b)
+                const isWordInk = sourceDark ? luma > inkThresh : luma < inkThresh
+                const val = isWordInk ? fgVal : bgVal
+                sliceData[dstIdx] = val
+                sliceData[dstIdx + 1] = val
+                sliceData[dstIdx + 2] = val
+                sliceData[dstIdx + 3] = 255
+              } else if (options.contrastEnhancement) {
+                const c = contrastEnhancedTextColor(r, g, b, pageBgLuma, options.darkDisplay)
+                sliceData[dstIdx] = c.r
+                sliceData[dstIdx + 1] = c.g
+                sliceData[dstIdx + 2] = c.b
+                sliceData[dstIdx + 3] = 255
+              } else if (options.darkDisplay) {
+                const c = grayscaleTextColor(r, g, b, pageBgLuma, options.darkDisplay)
+                sliceData[dstIdx] = c.r
+                sliceData[dstIdx + 1] = c.g
+                sliceData[dstIdx + 2] = c.b
+                sliceData[dstIdx + 3] = 255
+              } else {
+                const c = grayscaleTextColor(r, g, b, pageBgLuma, options.darkDisplay)
+                sliceData[dstIdx] = c.r
+                sliceData[dstIdx + 1] = c.g
+                sliceData[dstIdx + 2] = c.b
+                sliceData[dstIdx + 3] = 255
+              }
             }
           }
         }
