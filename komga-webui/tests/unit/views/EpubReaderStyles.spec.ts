@@ -30,6 +30,16 @@ describe('EpubReader mobile address bar collapse and root scrolling structure', 
     expect(content).not.toContain('recenterEpubRootScroll')
   })
 
+  test('keeps EPUB controls above the mobile reader shell and hides empty D2 overlays', () => {
+    expect(content).toContain('z-index: 1000; pointer-events: auto')
+    expect(content).toContain('z-index: 1100; pointer-events: auto')
+    expect(content).toContain('z-index: 1110; pointer-events: auto')
+    expect(content).toContain('#reader-loading:empty')
+    expect(content).toContain('#reader-error:empty')
+    expect(content).toContain('display: none !important')
+    expect(content).not.toContain(':disabled="!hasToc && !hasLandmarks && !hasPageList"')
+  })
+
   test('handles mobile swipes, taps, links, and long-press selection mode via passive top-level wrapper listeners', () => {
     expect(content).toContain('@touchstart.passive="handleEpubWrapperTouchStart"')
     expect(content).toContain('@touchmove.passive="handleEpubWrapperTouchMove"')

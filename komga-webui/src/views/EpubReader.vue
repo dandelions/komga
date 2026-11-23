@@ -13,7 +13,7 @@
         v-if="showToolbars"
         dense elevation="1"
         class="settings full-width"
-        style="position: fixed; top: 0;z-index: 14"
+        style="position: fixed; top: 0; z-index: 1000; pointer-events: auto"
       >
         <v-btn
           icon
@@ -31,7 +31,6 @@
         </v-btn>
 
         <v-btn
-          :disabled="!hasToc && !hasLandmarks && !hasPageList"
           icon
           @click="showToc = !showToc">
           <v-icon>mdi-table-of-contents</v-icon>
@@ -77,7 +76,7 @@
         dense
         elevation="1"
         class="settings full-width"
-        style="position: fixed; bottom: 0;z-index: 14"
+        style="position: fixed; bottom: 0; z-index: 1000; pointer-events: auto"
         horizontal
         v-if="showToolbars"
       >
@@ -121,7 +120,7 @@
       temporary
 
       :width="$vuetify.breakpoint.smAndUp ? 500 : $vuetify.breakpoint.width - 50"
-      style="z-index: 15"
+      style="z-index: 1100; pointer-events: auto"
     >
       <v-tabs grow>
         <v-tab v-if="hasToc">
@@ -152,7 +151,7 @@
       temporary
       right
       :width="$vuetify.breakpoint.width < 420 ? $vuetify.breakpoint.width : 420"
-      style="z-index: 16"
+      style="z-index: 1110; pointer-events: auto"
       @input="onEpubSearchVisibilityChange"
     >
       <div class="epub-search-panel">
@@ -5107,6 +5106,22 @@ export default Vue.extend({
   min-height: 100vh;
   min-height: 100dvh;
   position: relative;
+}
+
+#reader-loading:empty,
+#reader-error:empty {
+  display: none !important;
+  pointer-events: none !important;
+}
+
+#reader-loading:not(:empty),
+#reader-error:not(:empty) {
+  z-index: 20;
+}
+
+.v-navigation-drawer,
+.v-navigation-drawer__scrim {
+  pointer-events: auto !important;
 }
 </style>
 <style>
