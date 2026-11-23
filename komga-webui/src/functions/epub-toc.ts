@@ -5,12 +5,25 @@ export type EpubTocLocator = {
   locations: {progression: number} | {fragment: string},
 }
 
-export function createEpubTocLocator(tocEntry: TocEntry, baseHref: string): EpubTocLocator | undefined {
-  if (!tocEntry.href) return undefined
+/**
+ * Build a locator for the D2 reader.
+ *
+ * The reader resolves hrefs against the publication manifest itself
+ * (`publication.getAbsoluteHref`), so the href must be passed through unchanged:
+ * converting it to an absolute URL beforehand breaks the spine lookup and the
+ * navigation silently does nothing.
+ */
+export function createEpubTocLocator(tocEntry: TocEntry): EpubTocLocator | undefined {
+  const href = (tocEntry.href || (tocEntry as any).Href) as string | undefined
+  if (!href) return undefined
 
-  const url = new URL(tocEntry.href, baseHref)
-  return {
-    href: url.hash ? url.href.slice(0, url.href.indexOf('#')) : url.href,
-    locations: url.hash ? {fragment: url.hash.slice(1)} : {progression: 0},
+  const hashIndex = href.indexOf('#')
+  if (hashIndex >= 0) {
+    return {
+      href: href.slice(0, hashIndex),
+      locations: {fragment: href.slice(hashIndex + 1)},
+    }
   }
+
+  return {href, locations: {progression: 0}}
 }

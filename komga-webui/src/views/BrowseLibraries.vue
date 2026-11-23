@@ -197,6 +197,7 @@ import SeriesActionsMenu from '@/components/menus/SeriesActionsMenu.vue'
 import PageJump from '@/components/PageJump.vue'
 import PageSizeSelect from '@/components/PageSizeSelect.vue'
 import {parseQuerySort} from '@/functions/query-params'
+import {seriesSortRequest} from '@/functions/series-sort'
 import {seriesThumbnailUrl} from '@/functions/urls'
 import {ReadStatus} from '@/types/enum-books'
 import {SeriesStatus} from '@/types/enum-series'
@@ -456,7 +457,7 @@ export default Vue.extend({
         {name: this.$t('sort.date_updated').toString(), key: 'lastModifiedDate'},
         {name: this.$t('sort.date_read').toString(), key: 'readDate'},
         {name: this.$t('sort.release_date').toString(), key: 'booksMetadata.releaseDate'},
-        {name: this.$t('sort.folder_name').toString(), key: 'name'},
+        {name: this.$t('sort.folder_name').toString(), key: 'folderName'},
         {name: this.$t('sort.books_count').toString(), key: 'booksCount'},
         {name: this.$t('sort.random').toString(), key: 'random'},
       ] as SortOption[]
@@ -859,9 +860,7 @@ export default Vue.extend({
         size: this.pageSize,
       } as PageRequest
 
-      if (sort) {
-        pageRequest.sort = [`${sort.key},${sort.order}`]
-      }
+      pageRequest.sort = seriesSortRequest(sort)
 
       const conditions = [] as SearchConditionSeries[]
       const requestLibraryIds = this.getRequestLibraryIds(libraryId)

@@ -814,6 +814,7 @@ import {Context, ContextOrigin} from '@/types/context'
 import SettingsSwitch from '@/components/SettingsSwitch.vue'
 import {TocEntry} from '@/types/epub'
 import {createEpubTocLocator} from '@/functions/epub-toc'
+import {relayoutEpubReader} from '@/functions/epub-reader-layout'
 import {nextVisibleSearchCount} from '@/functions/epub-search'
 import TocList from '@/components/TocList.vue'
 import EpubTtsPlayer from '@/components/readers/EpubTtsPlayer.vue'
@@ -1181,6 +1182,8 @@ export default Vue.extend({
       epubMobileLastImageTap: undefined as { src: string, time: number } | undefined,
       epubMobileLongPressTimer: undefined as number | undefined,
       epubMobileLastViewportHeight: 0,
+      epubMobileRelayoutTimer: undefined as number | undefined,
+      epubRelayoutTimer: undefined as number | undefined,
       epubTouchSelectionTimer: undefined as number | undefined,
       epubTouchSelectionActive: false,
       epubImageZoomVisible: false,
@@ -1244,6 +1247,7 @@ export default Vue.extend({
     this.ttsStop()
     this.clearEpubTouchSelectionState()
     this.clearEpubMobileTouchState()
+    this.clearEpubReaderRelayoutTimer()
     this.disableEpubMobileSelectionMode()
     window.removeEventListener('resize', this.handleEpubMobileViewportResize)
     window.visualViewport?.removeEventListener('resize', this.handleEpubMobileViewportResize)
@@ -3044,7 +3048,18 @@ export default Vue.extend({
     handleEpubMobileViewportResize() {
       const currentHeight = window.visualViewport?.height || window.innerHeight
       const prevHeight = this.epubMobileLastViewportHeight
-      this.epubMobileLastViewportHeight = currentHeight
+      if (prevHeight === 0) {
+        this.epubMobileLastViewportHeight = currentHeight
+      } else if (Math.abs(currentHeight - prevHeight) >= 16) {
+        this.scheduleEpubReaderRelayout()
+      }
+
+      if (this.epubMobileRelayoutTimer !== undefined) window.clearTimeout(this.epubMobileRelayoutTimer)
+      this.epubMobileRelayoutTimer = window.setTimeout(() => {
+        this.epubMobileLastViewportHeight = window.visualViewport?.height || window.innerHeight
+        this.epubMobileRelayoutTimer = undefined
+      }, 300)
+
       if (this.verticalScroll || !this.isMobileEpubViewport() || prevHeight <= 0) return
       // Only reset scroll position when the browser UI re-expanded (viewport shrank) while stuck near the bottom.
       if (currentHeight < prevHeight - 20) {
@@ -3055,6 +3070,23 @@ export default Vue.extend({
           window.scrollTo({top: 0, left: 0, behavior: 'auto'})
         }
       }
+    },
+    scheduleEpubReaderRelayout() {
+      if (this.epubRelayoutTimer !== undefined) window.clearTimeout(this.epubRelayoutTimer)
+      this.epubRelayoutTimer = window.setTimeout(() => {
+        this.epubRelayoutTimer = undefined
+        try {
+          relayoutEpubReader(this.d2Reader as any)
+        } catch (error) {
+          this.$debug?.('[epub-viewport-relayout]', error)
+        }
+      }, 220)
+    },
+    clearEpubReaderRelayoutTimer() {
+      if (this.epubRelayoutTimer !== undefined) window.clearTimeout(this.epubRelayoutTimer)
+      if (this.epubMobileRelayoutTimer !== undefined) window.clearTimeout(this.epubMobileRelayoutTimer)
+      this.epubRelayoutTimer = undefined
+      this.epubMobileRelayoutTimer = undefined
     },
     resolveEpubIframeTargetAtPoint(clientX: number, clientY: number): Element | null {
       try {
@@ -3622,13 +3654,14 @@ export default Vue.extend({
       this.closeEpubSearch()
     },
     goToEntry(tocEntry: TocEntry) {
-      if (this.d2Reader) {
-        const manifestUrl = (this.d2Reader as any)?.navigator?.publication?.manifestUrl
-        const baseHref = manifestUrl instanceof URL ? manifestUrl.href : this.currentLocation?.href || window.location.href
-        const locator = createEpubTocLocator(tocEntry, baseHref)
-        if (!locator) return
+      const locator = createEpubTocLocator(tocEntry)
+      if (!locator || !this.d2Reader?.goTo) return
+
+      try {
         this.d2Reader.goTo(locator as Locations)
         this.showToc = false
+      } catch (error) {
+        this.sendNotification(error instanceof Error ? error.message : String(error))
       }
     },
     closeDialog() {

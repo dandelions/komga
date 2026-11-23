@@ -742,7 +742,7 @@ export default Vue.extend({
         {name: this.$t('sort.release_date').toString(), key: 'metadata.releaseDate'},
         {name: this.$t('sort.date_read').toString(), key: 'readProgress.readDate'},
         {name: this.$t('sort.file_size').toString(), key: 'fileSize'},
-        {name: this.$t('sort.file_name').toString(), key: 'name'},
+        {name: this.$t('sort.file_name').toString(), key: 'fileName'},
         {name: this.$t('sort.page_count').toString(), key: 'media.pagesCount'},
       ] as SortOption[]
     },
