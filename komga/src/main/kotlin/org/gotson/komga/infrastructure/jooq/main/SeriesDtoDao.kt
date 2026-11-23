@@ -95,6 +95,8 @@ class SeriesDtoDao(
       "readDate" to rs.MOST_RECENT_READ_DATE,
       "collection.number" to cs.NUMBER,
       "name" to s.NAME.unicode3(),
+      "folderName" to s.NAME.unicode3(),
+      "fileName" to s.NAME.unicode3(),
       "booksCount" to s.BOOK_COUNT,
       "random" to DSL.rand(),
     )

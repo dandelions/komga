@@ -547,6 +547,29 @@ class BookDtoDaoTest(
     }
 
     @Test
+    fun `given books when sorting by file name then results are ordered by file-system name`() {
+      // given
+      seriesLifecycle.addBooks(
+        series,
+        listOf(
+          makeBook("Book 10", seriesId = series.id, libraryId = library.id),
+          makeBook("Book 2", seriesId = series.id, libraryId = library.id),
+          makeBook("Book 1", seriesId = series.id, libraryId = library.id),
+        ),
+      )
+
+      // when
+      val found = bookDtoDao.findAll(
+        BookSearch(),
+        SearchContext(user),
+        UnpagedSorted(Sort.by("fileName")),
+      ).content
+
+      // then
+      assertThat(found.map { it.name }).containsExactly("Book 1", "Book 10", "Book 2")
+    }
+
+    @Test
     fun `given books when searching by term and sort order then results are ordered by sort order`() {
       // given
       seriesLifecycle.addBooks(

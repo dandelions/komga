@@ -150,6 +150,24 @@ class SeriesDtoDaoTest(
       // then
       assertThat(found.map { it.metadata.title }).containsExactly("Ea", "Éb", "Ec")
     }
+
+    @Test
+    fun `given series when sorting by folder name then results are ordered by file-system name`() {
+      // given
+      seriesLifecycle.createSeries(makeSeries("Series 10", library.id).copy(name = "Series 10"))
+      seriesLifecycle.createSeries(makeSeries("Series 2", library.id).copy(name = "Series 2"))
+      seriesLifecycle.createSeries(makeSeries("Series 1", library.id).copy(name = "Series 1"))
+
+      // when
+      val found = seriesDtoDao.findAll(
+        SeriesSearch(),
+        SearchContext(user),
+        UnpagedSorted(Sort.by("folderName")),
+      ).content
+
+      // then
+      assertThat(found.map { it.name }).containsExactly("Series 1", "Series 10", "Series 2")
+    }
   }
 
   @Nested

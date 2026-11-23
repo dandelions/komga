@@ -60,5 +60,7 @@ describe('EpubReader mobile address bar collapse and root scrolling structure', 
     expect(content).toContain('resolveEpubIframeTargetAtPoint(clientX: number, clientY: number)')
     expect(content).toContain('enableEpubMobileSelectionMode()')
     expect(content).toContain('handleEpubMobileViewportResize()')
+    expect(content).toContain('relayoutEpubReader(this.d2Reader as any)')
+    expect(content).toContain('this.epubMobileRelayoutTimer')
   })
 })
