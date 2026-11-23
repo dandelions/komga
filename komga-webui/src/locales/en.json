@@ -819,6 +819,15 @@
     }
   },
   "epubreader": {
+    "search": {
+      "title": "Find in book",
+      "keyword": "Search keyword",
+      "submit": "Search",
+      "close": "Close search",
+      "no_results": "No matches found",
+      "scanning": "Searching the rest of the book…",
+      "scroll_for_more": "Scroll for more results"
+    },
     "tts": {
       "tooltip": "Read Aloud (TTS)",
       "title": "Text-to-Speech (TTS)",

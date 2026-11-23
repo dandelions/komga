@@ -10,6 +10,13 @@ type InkPoint = {
   y: number,
 }
 
+export type AutoDeskewTimings = {
+  backgroundSampleMs: number,
+  inkPointCollectionMs: number,
+  regionAnalysisMs: number,
+  angleScoringMs: number,
+}
+
 const MAX_DETECTION_SIDE = 900
 const TILE_SIZE = 18
 const MAX_ANGLE = 6
@@ -21,6 +28,7 @@ export function detectAutoDeskewAngle(
   threshold: number,
   verticalText: boolean,
   analysisRegion?: DeskewRegion,
+  timings?: AutoDeskewTimings,
 ): number {
   if (width < 32 || height < 32 || pixels.length < width * height * 4) return 0
   const sampleStep = Math.max(1, Math.ceil(Math.max(width, height) / MAX_DETECTION_SIDE))
@@ -35,14 +43,27 @@ export function detectAutoDeskewAngle(
     }, sampledWidth, sampledHeight)
     : undefined
   const inkThreshold = Math.max(40, Math.min(235, Number(threshold) || 185))
-  const points = limitPoints(collectInkPoints(pixels, width, height, sampleStep, inkThreshold, sampledRegion))
+  const collectionTimings: AutoDeskewTimings = {
+    backgroundSampleMs: 0,
+    inkPointCollectionMs: 0,
+    regionAnalysisMs: 0,
+    angleScoringMs: 0,
+  }
+  const points = limitPoints(collectInkPoints(pixels, width, height, sampleStep, inkThreshold, sampledRegion, collectionTimings))
+  if (timings) {
+    timings.backgroundSampleMs = collectionTimings.backgroundSampleMs
+    timings.inkPointCollectionMs = collectionTimings.inkPointCollectionMs
+  }
   if (points.length < 160) return 0
+  const regionStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
   const detectedRegion = sampledRegion || largestTextRegion(points, sampledWidth, sampledHeight)
   const regionPoints = detectedRegion
     ? points.filter(point => point.x >= detectedRegion.x && point.x < detectedRegion.x + detectedRegion.w && point.y >= detectedRegion.y && point.y < detectedRegion.y + detectedRegion.h)
     : points
+  if (timings) timings.regionAnalysisMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - regionStartedAt
   if (regionPoints.length < 160) return 0
 
+  const angleStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
   const score = (angle: number) => projectionScore(regionPoints, angle, verticalText)
   const zeroScore = score(0)
   let bestAngle = 0
@@ -64,6 +85,7 @@ export function detectAutoDeskewAngle(
     }
   }
 
+  if (timings) timings.angleScoringMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - angleStartedAt
   if (bestScore <= zeroScore * 1.004 || Math.abs(bestAngle) < 0.08) return 0
   return Math.round(bestAngle * 10) / 10
 }
@@ -81,12 +103,16 @@ function collectInkPoints(
   step: number,
   threshold: number,
   region?: DeskewRegion,
+  timings?: AutoDeskewTimings,
 ): InkPoint[] {
   const left = Math.max(1, Math.floor((region?.x || 0) * step))
   const top = Math.max(1, Math.floor((region?.y || 0) * step))
   const right = Math.min(width - 1, Math.ceil((region ? region.x + region.w : Math.ceil(width / step)) * step))
   const bottom = Math.min(height - 1, Math.ceil((region ? region.y + region.h : Math.ceil(height / step)) * step))
+  const backgroundStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
   const darkBackground = isDarkBackground(pixels, width, height, left, top, right, bottom)
+  if (timings) timings.backgroundSampleMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - backgroundStartedAt
+  const collectionStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
   const points = [] as InkPoint[]
   for (let y = top; y < bottom; y += step) {
     for (let x = left; x < right; x += step) {
@@ -97,6 +123,7 @@ function collectInkPoints(
       if (effectiveLuma <= threshold) points.push({x: x / step, y: y / step})
     }
   }
+  if (timings) timings.inkPointCollectionMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - collectionStartedAt
   return points
 }
 

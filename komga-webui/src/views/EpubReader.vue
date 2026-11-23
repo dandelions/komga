@@ -23,6 +23,14 @@
         </v-btn>
 
         <v-btn
+          icon
+          :title="$t('epubreader.search.title')"
+          @click="openEpubSearch"
+        >
+          <v-icon>mdi-magnify</v-icon>
+        </v-btn>
+
+        <v-btn
           :disabled="!hasToc && !hasLandmarks && !hasPageList"
           icon
           @click="showToc = !showToc">
@@ -136,6 +144,74 @@
           <toc-list :toc="pageList" @goto="goToEntry" class="scrolltab-content"/>
         </v-tab-item>
       </v-tabs>
+    </v-navigation-drawer>
+
+    <v-navigation-drawer
+      v-model="showEpubSearch"
+      fixed
+      temporary
+      right
+      :width="$vuetify.breakpoint.width < 420 ? $vuetify.breakpoint.width : 420"
+      style="z-index: 16"
+      @input="onEpubSearchVisibilityChange"
+    >
+      <div class="epub-search-panel">
+        <v-toolbar dense flat>
+          <v-toolbar-title>{{ $t('epubreader.search.title') }}</v-toolbar-title>
+          <v-spacer/>
+          <v-btn icon :title="$t('epubreader.search.close')" @click="closeEpubSearch">
+            <v-icon>mdi-close</v-icon>
+          </v-btn>
+        </v-toolbar>
+        <div class="px-4 pb-2">
+          <v-text-field
+            ref="epubSearchInput"
+            v-model="epubSearchQuery"
+            :label="$t('epubreader.search.keyword')"
+            :placeholder="$t('epubreader.search.keyword')"
+            prepend-inner-icon="mdi-magnify"
+            clearable
+            dense
+            outlined
+            hide-details
+            :disabled="epubSearchLoading"
+            @keyup.enter="searchEpub"
+            @click:clear="clearEpubSearch"
+          >
+            <template v-slot:append>
+              <v-btn icon small :loading="epubSearchLoading" :disabled="!epubSearchQuery.trim() || epubSearchLoading" :title="$t('epubreader.search.submit')" @click="searchEpub">
+                <v-icon>mdi-arrow-right</v-icon>
+              </v-btn>
+            </template>
+          </v-text-field>
+        </div>
+        <div class="epub-search-results" aria-live="polite" @scroll.passive="onEpubSearchResultsScroll">
+          <v-progress-linear v-if="epubSearchLoading" indeterminate/>
+          <div v-if="!epubSearchLoading && epubSearchQuery && epubSearchResults.length === 0" class="pa-4 text--secondary">
+            {{ $t('epubreader.search.no_results') }}
+          </div>
+          <v-list v-if="epubSearchResults.length" dense>
+            <v-list-item
+              v-for="(result, index) in visibleEpubSearchResults"
+              :key="`${result.href}-${result.uuid || index}`"
+              @click="goToEpubSearchResult(result)"
+            >
+              <v-list-item-content>
+                <v-list-item-title class="epub-search-chapter">{{ result.title || result.href }}</v-list-item-title>
+                <v-list-item-subtitle class="epub-search-context">
+                  {{ result.textBefore }}<strong>{{ result.textMatch }}</strong>{{ result.textAfter }}
+                </v-list-item-subtitle>
+              </v-list-item-content>
+            </v-list-item>
+          </v-list>
+          <div v-if="epubSearchLoading && epubSearchResults.length" class="pa-3 text-center text--secondary">
+            {{ $t('epubreader.search.scanning') }}
+          </div>
+          <div v-else-if="epubSearchResults.length > epubSearchVisibleCount" class="pa-3 text-center text--secondary">
+            {{ $t('epubreader.search.scroll_for_more') }}
+          </div>
+        </div>
+      </div>
     </v-navigation-drawer>
 
     <header id="headerMenu"/>
@@ -736,6 +812,8 @@ import {SeriesDto} from '@/types/komga-series'
 import {Context, ContextOrigin} from '@/types/context'
 import SettingsSwitch from '@/components/SettingsSwitch.vue'
 import {TocEntry} from '@/types/epub'
+import {createEpubTocLocator} from '@/functions/epub-toc'
+import {nextVisibleSearchCount} from '@/functions/epub-search'
 import TocList from '@/components/TocList.vue'
 import EpubTtsPlayer from '@/components/readers/EpubTtsPlayer.vue'
 import {
@@ -913,6 +991,14 @@ type EpubTouchStart = {
 
 type EpubPageAction = 'next' | 'previous'
 type EpubBackgroundImageMode = 'light' | 'dark'
+type EpubSearchResult = {
+  href: string,
+  title?: string,
+  textBefore: string,
+  textMatch: string,
+  textAfter: string,
+  uuid?: string,
+}
 
 type EpubReadingOrderItem = {
   href?: string,
@@ -955,6 +1041,13 @@ export default Vue.extend({
       showBackgroundImageSelector: false,
       showToolbars: false,
       showToc: false,
+      showEpubSearch: false,
+      epubSearchQuery: '',
+      epubSearchLoading: false,
+      epubSearchResults: [] as EpubSearchResult[],
+      epubSearchVisibleCount: 30,
+      epubSearchBatchSize: 30,
+      epubSearchRequestId: 0,
       showHelp: false,
       showFontManager: false,
       installedFonts: {} as Record<string, InstalledFontSummary>,
@@ -1204,6 +1297,9 @@ export default Vue.extend({
     next()
   },
   computed: {
+    visibleEpubSearchResults(): EpubSearchResult[] {
+      return this.epubSearchResults.slice(0, this.epubSearchVisibleCount)
+    },
     isRtl(): boolean {
       return this.effectiveDirection === 'rtl'
     },
@@ -1836,7 +1932,7 @@ export default Vue.extend({
           enableBookmarks: false,
           enableAnnotations: false,
           enableTTS: false,
-          enableSearch: false,
+          enableSearch: true,
           enableTimeline: false,
           enableDefinitions: false,
           enableContentProtection: false,
@@ -3415,24 +3511,100 @@ export default Vue.extend({
       if (suffix) c += `-${suffix}`
       return c
     },
+    openEpubSearch() {
+      this.showEpubSearch = true
+      this.$nextTick(() => (this.$refs.epubSearchInput as any)?.focus?.())
+    },
+    closeEpubSearch() {
+      this.showEpubSearch = false
+      this.epubSearchRequestId++
+      this.epubSearchLoading = false
+    },
+    onEpubSearchVisibilityChange(visible: boolean) {
+      if (!visible) {
+        this.epubSearchRequestId++
+        this.epubSearchLoading = false
+      }
+    },
+    clearEpubSearch() {
+      this.epubSearchQuery = ''
+      this.epubSearchResults = []
+      this.epubSearchVisibleCount = this.epubSearchBatchSize
+      this.d2Reader?.clearSearch?.()
+    },
+    onEpubSearchResultsScroll(event: Event) {
+      const element = event.target as HTMLElement
+      this.epubSearchVisibleCount = nextVisibleSearchCount(
+        this.epubSearchVisibleCount,
+        this.epubSearchBatchSize,
+        element.scrollTop,
+        element.clientHeight,
+        element.scrollHeight,
+      )
+    },
+    async searchEpub() {
+      const query = this.epubSearchQuery.trim()
+      if (!query || !this.d2Reader || this.epubSearchLoading) return
+
+      const requestId = ++this.epubSearchRequestId
+      this.epubSearchLoading = true
+      this.epubSearchResults = []
+      this.epubSearchVisibleCount = this.epubSearchBatchSize
+      try {
+        const searchPromise = this.d2Reader.search(query, false) as Promise<EpubSearchResult[]>
+        let searchComplete = false
+        let searchError: unknown
+        let finalResults: EpubSearchResult[] = []
+        void searchPromise.then(results => {
+          finalResults = Array.isArray(results) ? results : []
+        }).catch(error => {
+          searchError = error
+        }).finally(() => {
+          searchComplete = true
+        })
+
+        while (!searchComplete && requestId === this.epubSearchRequestId) {
+          this.updateEpubSearchResults(requestId, finalResults)
+          await this.waitForEpubSearchBatch()
+        }
+        if (requestId !== this.epubSearchRequestId) return
+        if (searchError) throw searchError
+
+        await this.waitForEpubSearchBatch()
+        this.updateEpubSearchResults(requestId, finalResults)
+      } catch (error) {
+        if (requestId === this.epubSearchRequestId) {
+          this.sendNotification(error instanceof Error ? error.message : String(error))
+        }
+      } finally {
+        if (requestId === this.epubSearchRequestId) this.epubSearchLoading = false
+      }
+    },
+    updateEpubSearchResults(requestId: number, fallbackResults: EpubSearchResult[]) {
+      if (requestId !== this.epubSearchRequestId) return
+      const internalResults = (this.d2Reader as any).searchModule?.bookSearchResult
+      const results = Array.isArray(internalResults) ? internalResults : fallbackResults
+      if (Array.isArray(results)) this.epubSearchResults = results.slice()
+    },
+    async waitForEpubSearchBatch() {
+      await new Promise(resolve => window.setTimeout(resolve, 100))
+    },
+    async goToEpubSearchResult(result: EpubSearchResult) {
+      const index = this.epubSearchResults
+        .filter(item => item.href === result.href)
+        .findIndex(item => item === result)
+      if (index < 0) return
+
+      await this.d2Reader.goToSearchIndex(result.href, index, false)
+      this.closeEpubSearch()
+    },
     goToEntry(tocEntry: TocEntry) {
-      if (tocEntry.href !== undefined) {
-        const url = new URL(tocEntry.href)
-        let locations = {
-          progression: 0,
-        } as Locations
-        let href = tocEntry.href
-        if (url.hash) {
-          locations = {
-            fragment: url.hash.slice(1),
-          }
-          href = tocEntry.href.substring(0, tocEntry.href.indexOf('#'))
-        }
-        let locator = {
-          href: href,
-          locations: locations,
-        }
-        this.d2Reader.goTo(locator)
+      if (this.d2Reader) {
+        const manifestUrl = (this.d2Reader as any)?.navigator?.publication?.manifestUrl
+        const baseHref = manifestUrl instanceof URL ? manifestUrl.href : this.currentLocation?.href || window.location.href
+        const locator = createEpubTocLocator(tocEntry, baseHref)
+        if (!locator) return
+        this.d2Reader.goTo(locator as Locations)
         this.showToc = false
       }
     },
@@ -4902,6 +5074,29 @@ export default Vue.extend({
 
 .scrolltab-content {
   max-height: calc(100vh - 48px);
+}
+
+.epub-search-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.epub-search-results {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.epub-search-chapter,
+.epub-search-context {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.epub-search-context strong {
+  color: var(--v-primary-base);
+  font-weight: 700;
 }
 
 .hidden {

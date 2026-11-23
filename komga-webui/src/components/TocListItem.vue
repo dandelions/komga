@@ -1,12 +1,10 @@
 <template>
-  <v-list-item link>
+  <v-list-item :link="!!item.href" :disabled="!item.href && !(item.children && item.children.length)" @click="goto(item)">
     <v-list-item-content>
       <v-list-item-title
-        @click.stop="goto(item)"
         :title="item.title"
         style="width: 100px"
         :class="item.current ? 'primary--text' : ''"
-        :style="item.href ? 'cursor: pointer' : undefined"
       >
         <v-badge
           :value="!!item.current"

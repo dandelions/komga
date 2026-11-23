@@ -81,6 +81,22 @@ export type LocalReflowResult = {
 
 export type LocalReflowTimings = {
   prepareMs: number,
+  backgroundDetectMs: number,
+  edgeBackgroundSampleMs: number,
+  pageLumaSampleMs: number,
+  resizeMs: number,
+  resizeAllocateMs: number,
+  resizeCopyMs: number,
+  backgroundOptimizeMs: number,
+  backgroundCopyMs: number,
+  backgroundProcessMs: number,
+  deskewDetectMs: number,
+  deskewBackgroundSampleMs: number,
+  deskewInkPointCollectionMs: number,
+  deskewRegionAnalysisMs: number,
+  deskewAngleScoringMs: number,
+  rotationMs: number,
+  prepareOtherMs: number,
   pageColorMs: number,
   inkMapMs: number,
   roiMs: number,
@@ -2256,6 +2272,22 @@ export function reflowPageFromPixels(
   const now = () => typeof performance !== 'undefined' ? performance.now() : Date.now()
   const timings: LocalReflowTimings = {
     prepareMs: 0,
+    backgroundDetectMs: 0,
+    edgeBackgroundSampleMs: 0,
+    pageLumaSampleMs: 0,
+    resizeMs: 0,
+    resizeAllocateMs: 0,
+    resizeCopyMs: 0,
+    backgroundOptimizeMs: 0,
+    backgroundCopyMs: 0,
+    backgroundProcessMs: 0,
+    deskewDetectMs: 0,
+    deskewBackgroundSampleMs: 0,
+    deskewInkPointCollectionMs: 0,
+    deskewRegionAnalysisMs: 0,
+    deskewAngleScoringMs: 0,
+    rotationMs: 0,
+    prepareOtherMs: 0,
     pageColorMs: 0,
     inkMapMs: 0,
     roiMs: 0,
@@ -2271,8 +2303,13 @@ export function reflowPageFromPixels(
   const prepareStartedAt = now()
 
   // 1. Detect background
+  const backgroundDetectStartedAt = now()
+  const edgeBackgroundSampleStartedAt = now()
   let pageBackground = detectPageBackgroundFromPixels(sourcePixels, sourceW, sourceH)
+  timings.edgeBackgroundSampleMs = now() - edgeBackgroundSampleStartedAt
+  const pageLumaSampleStartedAt = now()
   const pageBgLuma = estimatePageBackgroundLuma(sourcePixels, sourceW, sourceH)
+  timings.pageLumaSampleMs = now() - pageLumaSampleStartedAt
   const sourceDark = isDarkColor(pageBackground)
 
   const isHighContrast = options.contrastEnhancement ||
@@ -2285,8 +2322,10 @@ export function reflowPageFromPixels(
   } else if (isHighContrast) {
     pageBackground = '#ffffff'
   }
+  timings.backgroundDetectMs = now() - backgroundDetectStartedAt
 
   // 2. Downscale if excessively large (aligned with downscaleServerImage)
+  const resizeStartedAt = now()
   const scale = localReflowScale(sourceW, sourceH)
 
   let workPixels = sourcePixels
@@ -2296,8 +2335,11 @@ export function reflowPageFromPixels(
   if (scale < 0.99) {
     workW = Math.max(1, Math.round(sourceW * scale))
     workH = Math.max(1, Math.round(sourceH * scale))
+    const resizeAllocateStartedAt = now()
     workPixels = new Uint8ClampedArray(workW * workH * 4)
+    timings.resizeAllocateMs = now() - resizeAllocateStartedAt
 
+    const resizeCopyStartedAt = now()
     for (let y = 0; y < workH; y++) {
       const srcY = Math.min(sourceH - 1, Math.floor(y / scale))
       for (let x = 0; x < workW; x++) {
@@ -2310,19 +2352,36 @@ export function reflowPageFromPixels(
         workPixels[dIdx + 3] = sourcePixels[sIdx + 3]
       }
     }
-  } else if (options.optimizeBackground && options.optimizeBackground !== 'none') {
+    timings.resizeCopyMs = now() - resizeCopyStartedAt
+  }
+  timings.resizeMs = now() - resizeStartedAt
+
+  const backgroundOptimizeStartedAt = now()
+  if (scale >= 0.99 && options.optimizeBackground && options.optimizeBackground !== 'none') {
+    const backgroundCopyStartedAt = now()
     workPixels = new Uint8ClampedArray(sourcePixels)
+    timings.backgroundCopyMs = now() - backgroundCopyStartedAt
   }
 
   if (options.optimizeBackground && options.optimizeBackground !== 'none') {
+    const backgroundProcessStartedAt = now()
     removeDocumentBackground(workPixels, workW, workH, options.optimizeBackground, sourceDark)
+    timings.backgroundProcessMs = now() - backgroundProcessStartedAt
   }
+  timings.backgroundOptimizeMs = now() - backgroundOptimizeStartedAt
 
 
   // 3. Auto deskew if requested
   let detectedAutoSkew = 0
+  const deskewDetectStartedAt = now()
   if (options.autoSkewCorrection) {
     const thresh = clamp(options.threshold || 185, 50, 230)
+    const deskewTimings = {
+      backgroundSampleMs: 0,
+      inkPointCollectionMs: 0,
+      regionAnalysisMs: 0,
+      angleScoringMs: 0,
+    }
     detectedAutoSkew = detectAutoDeskewAngle(
       workPixels,
       workW,
@@ -2330,16 +2389,25 @@ export function reflowPageFromPixels(
       thresh,
       options.verticalText,
       (options.deskewAnalysisRoi || options.deskewAnalysisRegion) || undefined,
+      deskewTimings,
     )
+    timings.deskewBackgroundSampleMs = deskewTimings.backgroundSampleMs
+    timings.deskewInkPointCollectionMs = deskewTimings.inkPointCollectionMs
+    timings.deskewRegionAnalysisMs = deskewTimings.regionAnalysisMs
+    timings.deskewAngleScoringMs = deskewTimings.angleScoringMs
   }
+  timings.deskewDetectMs = now() - deskewDetectStartedAt
 
   // 4. Deskew rotation
   const manualSkew = options.skewCorrection || 0
   const effectiveSkew = Math.round(clamp(manualSkew + detectedAutoSkew, -10, 10) * 10) / 10
+  const rotationStartedAt = now()
   if (Math.abs(effectiveSkew) >= 0.1) {
     workPixels = rotatePixels(workPixels, workW, workH, effectiveSkew, pageBackground)
   }
+  timings.rotationMs = now() - rotationStartedAt
   timings.prepareMs = now() - prepareStartedAt
+  timings.prepareOtherMs = Math.max(0, timings.prepareMs - timings.edgeBackgroundSampleMs - timings.pageLumaSampleMs - timings.resizeAllocateMs - timings.resizeCopyMs - timings.backgroundCopyMs - timings.backgroundProcessMs - timings.deskewDetectMs - timings.rotationMs)
   timings.processedWidth = workW
   timings.processedHeight = workH
 

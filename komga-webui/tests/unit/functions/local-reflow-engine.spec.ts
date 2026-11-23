@@ -400,6 +400,33 @@ describe('local-reflow-engine', () => {
       }
 
       const result = reflowPageFromPixels(pixels, width, height, options)
+      expect(result.timings).toBeDefined()
+      expect(result.timings?.backgroundDetectMs).toBeGreaterThanOrEqual(0)
+      expect(result.timings?.edgeBackgroundSampleMs).toBeGreaterThanOrEqual(0)
+      expect(result.timings?.pageLumaSampleMs).toBeGreaterThanOrEqual(0)
+      expect(result.timings?.resizeMs).toBeGreaterThanOrEqual(0)
+      expect(result.timings?.resizeAllocateMs).toBeGreaterThanOrEqual(0)
+      expect(result.timings?.resizeCopyMs).toBeGreaterThanOrEqual(0)
+      expect(result.timings?.backgroundOptimizeMs).toBeGreaterThanOrEqual(0)
+      expect(result.timings?.backgroundCopyMs).toBeGreaterThanOrEqual(0)
+      expect(result.timings?.backgroundProcessMs).toBeGreaterThanOrEqual(0)
+      expect(result.timings?.deskewDetectMs).toBeGreaterThanOrEqual(0)
+      expect(result.timings?.deskewBackgroundSampleMs).toBeGreaterThanOrEqual(0)
+      expect(result.timings?.deskewInkPointCollectionMs).toBeGreaterThanOrEqual(0)
+      expect(result.timings?.deskewRegionAnalysisMs).toBeGreaterThanOrEqual(0)
+      expect(result.timings?.deskewAngleScoringMs).toBeGreaterThanOrEqual(0)
+      expect(result.timings?.rotationMs).toBeGreaterThanOrEqual(0)
+      expect(result.timings?.prepareOtherMs).toBeGreaterThanOrEqual(0)
+      const prepareStageTotal = (result.timings?.edgeBackgroundSampleMs || 0) +
+        (result.timings?.pageLumaSampleMs || 0) +
+        (result.timings?.resizeAllocateMs || 0) +
+        (result.timings?.resizeCopyMs || 0) +
+        (result.timings?.backgroundCopyMs || 0) +
+        (result.timings?.backgroundProcessMs || 0) +
+        (result.timings?.deskewDetectMs || 0) +
+        (result.timings?.rotationMs || 0) +
+        (result.timings?.prepareOtherMs || 0)
+      expect(prepareStageTotal).toBeCloseTo(result.timings?.prepareMs || 0, 3)
       expect(result.pageBackground).toBeDefined()
       expect(result.sourceWidth).toBe(width)
       expect(result.sourceHeight).toBe(height)

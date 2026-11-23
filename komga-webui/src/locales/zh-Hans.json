@@ -819,6 +819,15 @@
     }
   },
   "epubreader": {
+    "search": {
+      "title": "查找本书",
+      "keyword": "搜索关键词",
+      "submit": "搜索",
+      "close": "关闭搜索",
+      "no_results": "没有找到匹配内容",
+      "scanning": "正在搜索本书其余内容…",
+      "scroll_for_more": "下滑加载更多结果"
+    },
     "tts": {
       "tooltip": "语音阅读 (TTS)",
       "title": "语音阅读 (TTS)",
