@@ -1154,6 +1154,8 @@ export default Vue.extend({
       virtualPageIndex: 0,
       viewportWidth: 0,
       viewportHeight: 0,
+      viewportResizeFrame: undefined as number | undefined,
+      viewportResizeUsesAnimationFrame: false,
       pageBackground: '#fff',
       lastDetectionKey: '',
       localPageTextureUrl: '',
@@ -1809,6 +1811,7 @@ export default Vue.extend({
     this.updateViewportMetrics()
     window.addEventListener('resize', this.handleResize)
     window.visualViewport?.addEventListener('resize', this.handleResize)
+    window.visualViewport?.addEventListener('scroll', this.handleResize)
     this.$nextTick(() => {
       this.initializeControlsPosition()
       this.updateViewportMetrics()
@@ -1819,7 +1822,12 @@ export default Vue.extend({
   destroyed() {
     window.removeEventListener('resize', this.handleResize)
     window.visualViewport?.removeEventListener('resize', this.handleResize)
+    window.visualViewport?.removeEventListener('scroll', this.handleResize)
     this.removeControlsDragListeners()
+    if (this.viewportResizeFrame !== undefined) {
+      window.cancelAnimationFrame(this.viewportResizeFrame)
+      this.viewportResizeFrame = undefined
+    }
     this.requestId += 1
     this.cancelServerReflowRequest()
     this.terminateLocalAnalysisWorker()
@@ -2748,14 +2756,27 @@ export default Vue.extend({
       return '网络'
     },
     handleResize() {
-      this.updateViewportMetrics()
-      this.$nextTick(this.constrainControlsPosition)
-      if (this.reflowItems.length > 0) {
+      if (this.viewportResizeFrame !== undefined) return
+      const flushResize = () => {
+        this.viewportResizeFrame = undefined
+        this.viewportResizeUsesAnimationFrame = false
+        const changed = this.updateViewportMetrics()
+        this.$nextTick(this.constrainControlsPosition)
+        if (!changed || this.reflowItems.length === 0) return
         this.rescaleReflowItems()
+        this.repaginate(false)
       }
-      this.repaginate(false)
+      if (typeof window.requestAnimationFrame === 'function') {
+        this.viewportResizeUsesAnimationFrame = true
+        this.viewportResizeFrame = window.requestAnimationFrame(flushResize)
+      } else {
+        this.viewportResizeUsesAnimationFrame = false
+        this.viewportResizeFrame = window.setTimeout(flushResize, 16) as unknown as number
+      }
     },
-    updateViewportMetrics() {
+    updateViewportMetrics(): boolean {
+      const previousWidth = this.viewportWidth
+      const previousHeight = this.viewportHeight
       const vv = typeof window !== 'undefined' ? window.visualViewport : undefined
       const vvScale = vv?.scale && vv.scale > 1.01 ? vv.scale : 1
       const clientWidth = (vv?.width ? vv.width * vvScale : 0)
@@ -2773,6 +2794,7 @@ export default Vue.extend({
         this.viewportWidth = Math.floor(clientWidth)
         this.viewportHeight = Math.floor(clientHeight)
       }
+      return previousWidth !== this.viewportWidth || previousHeight !== this.viewportHeight
     },
     pageContentWidth(): number {
       if (this.viewportWidth) return Math.max(120, this.viewportWidth)

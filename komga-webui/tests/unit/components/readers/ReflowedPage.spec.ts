@@ -463,6 +463,49 @@ describe.each([
     expect(toolbarMethods.pageContentHeight.call({viewportHeight: 700})).toBe(700)
   })
 
+  test('coalesces viewport events and repaginates only after dimensions change', () => {
+    if (toolbarMethods !== methods) return
+    const originalRequestAnimationFrame = window.requestAnimationFrame
+    const originalCancelAnimationFrame = window.cancelAnimationFrame
+    let queued: FrameRequestCallback | undefined
+    window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+      queued = callback
+      return 1
+    }) as typeof window.requestAnimationFrame
+    window.cancelAnimationFrame = jest.fn()
+
+    try {
+      const context: any = {
+        viewportResizeFrame: undefined,
+        viewportResizeUsesAnimationFrame: false,
+        viewportWidth: 360,
+        viewportHeight: 716,
+        reflowItems: [{type: 'word'}],
+        updateViewportMetrics: jest.fn(() => false),
+        constrainControlsPosition: jest.fn(),
+        $nextTick: (callback: Function) => callback(),
+        rescaleReflowItems: jest.fn(),
+        repaginate: jest.fn(),
+      }
+
+      toolbarMethods.handleResize.call(context)
+      toolbarMethods.handleResize.call(context)
+      expect(context.repaginate).not.toHaveBeenCalled()
+      expect(queued).toBeDefined()
+      queued?.(0)
+      expect(context.repaginate).not.toHaveBeenCalled()
+
+      context.updateViewportMetrics.mockReturnValue(true)
+      toolbarMethods.handleResize.call(context)
+      queued?.(0)
+      expect(context.rescaleReflowItems).toHaveBeenCalledTimes(1)
+      expect(context.repaginate).toHaveBeenCalledWith(false)
+    } finally {
+      window.requestAnimationFrame = originalRequestAnimationFrame
+      window.cancelAnimationFrame = originalCancelAnimationFrame
+    }
+  })
+
   test('tracks visualViewport size changes when the browser address bar hides', () => {
     const originalVisualViewport = (window as any).visualViewport
     const clientWidthSpy = jest.spyOn(document.documentElement, 'clientWidth', 'get').mockReturnValue(360)
