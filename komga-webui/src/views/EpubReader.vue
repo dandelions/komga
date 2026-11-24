@@ -1180,6 +1180,7 @@ export default Vue.extend({
       epubMobileTouchStart: undefined as (EpubTouchStart & { time: number }) | undefined,
       epubMobileLastSwipeAt: 0,
       epubMobileLastImageTap: undefined as { src: string, time: number } | undefined,
+      epubMobileSuppressClickUntil: 0,
       epubMobileLongPressTimer: undefined as number | undefined,
       epubMobileLastViewportHeight: 0,
       epubMobileRelayoutTimer: undefined as number | undefined,
@@ -1745,6 +1746,9 @@ export default Vue.extend({
       this.shortcuts[e.key]?.execute(this)
     },
     clickThrough(e: MouseEvent) {
+      if (Date.now() < this.epubMobileSuppressClickUntil) {
+        return
+      }
       if (Date.now() - this.epubMobileLastSwipeAt < 350) {
         return
       }
@@ -3135,12 +3139,46 @@ export default Vue.extend({
     handleEpubWrapperTouchEnd(event: TouchEvent) {
       const start = this.epubMobileTouchStart
       this.clearEpubMobileTouchState()
-      if (!start || this.verticalScroll || this.epubMobileSelectionMode || !this.isMobileEpubViewport()) return
+      if (!start || this.epubMobileSelectionMode || !this.isMobileEpubViewport()) return
       if (event.changedTouches.length === 0) return
 
       const touch = event.changedTouches[0]
       const dt = Date.now() - start.time
       if (dt > 650) return
+
+      const isTap = Math.abs(touch.clientX - start.x) <= 10 && Math.abs(touch.clientY - start.y) <= 10
+      if (isTap) {
+        const target = this.resolveEpubIframeTargetAtPoint(touch.clientX, touch.clientY)
+        if (target?.tagName.toLowerCase() === 'img') {
+          const image = target as HTMLImageElement
+          const src = image.currentSrc || image.src
+          const now = Date.now()
+          if (src && this.epubMobileLastImageTap?.src === src && now - this.epubMobileLastImageTap.time < 400) {
+            clearTimeout(this.clickTimer)
+            this.epubMobileLastImageTap = undefined
+            this.epubMobileSuppressClickUntil = now + 450
+            this.openEpubImageZoom(image)
+            return
+          }
+          if (src) {
+            this.epubMobileLastImageTap = {src, time: now}
+            this.epubMobileSuppressClickUntil = now + 450
+            clearTimeout(this.clickTimer)
+            this.clickTimer = window.setTimeout(() => {
+              this.clickTimer = undefined
+              this.singleClick(touch.clientX, touch.clientY)
+            }, 200)
+          }
+        } else {
+          this.epubMobileLastImageTap = undefined
+          this.epubMobileSuppressClickUntil = 0
+        }
+      } else {
+        this.epubMobileLastImageTap = undefined
+        this.epubMobileSuppressClickUntil = 0
+      }
+
+      if (this.verticalScroll) return
 
       const swipeDirection = this.getEpubHorizontalSwipeDirection(start, touch.clientX, touch.clientY)
       if (swipeDirection === 0) return
