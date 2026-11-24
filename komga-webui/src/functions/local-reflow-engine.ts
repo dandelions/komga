@@ -1091,6 +1091,26 @@ export function maskInkRegions(
   return masked
 }
 
+export function applyImageRegionsToPageTexture(
+  texturePixels: Uint8ClampedArray,
+  sourcePixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  imageRegions: ImageRegion[],
+): void {
+  imageRegions.forEach(region => {
+    const left = clamp(Math.floor(region.x), 0, Math.max(0, width - 1))
+    const top = clamp(Math.floor(region.y), 0, Math.max(0, height - 1))
+    const right = clamp(Math.ceil(region.x + region.w), left + 1, width)
+    const bottom = clamp(Math.ceil(region.y + region.h), top + 1, height)
+    for (let y = top; y < bottom; y++) {
+      const start = (y * width + left) * 4
+      const end = (y * width + right) * 4
+      texturePixels.set(sourcePixels.subarray(start, end), start)
+    }
+  })
+}
+
 export function trimHorizontalColumn(
   ink: Uint8Array,
   width: number,
@@ -2590,6 +2610,9 @@ export function reflowPageFromPixels(
     const allImageRegions = mergeManualImageRegions(detectedImages, roiManualImages, workW, workH)
     timings.imageRegionCount += allImageRegions.length
     const textInk = maskInkRegions(ink, workW, workH, allImageRegions)
+    if (isSpriteMode && pageTexturePixels) {
+      applyImageRegionsToPageTexture(pageTexturePixels, workPixels, workW, workH, allImageRegions)
+    }
     timings.imageDetectionMs += now() - imageDetectionStartedAt
 
     const textLayoutStartedAt = now()

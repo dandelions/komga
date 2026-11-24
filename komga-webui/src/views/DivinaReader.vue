@@ -297,6 +297,7 @@
           :cached-items="cachedReflowItems(reflowRootPageDto)"
           :cached-page-background="cachedReflowBackground(reflowRootPageDto)"
           :cached-page-texture-url="cachedReflowTextureUrl(reflowRootPageDto)"
+          :cached-page-texture-blob="cachedReflowTextureBlob(reflowRootPageDto)"
           :cached-work-width="cachedReflowWorkWidth(reflowRootPageDto)"
           :cached-work-height="cachedReflowWorkHeight(reflowRootPageDto)"
           :cached-transfer-stats="cachedReflowTransferStats(reflowRootPageDto)"
@@ -366,6 +367,7 @@
           :cached-items="cachedReflowItems(prefetchPage)"
           :cached-page-background="cachedReflowBackground(prefetchPage)"
           :cached-page-texture-url="cachedReflowTextureUrl(prefetchPage)"
+          :cached-page-texture-blob="cachedReflowTextureBlob(prefetchPage)"
           :cached-work-width="cachedReflowWorkWidth(prefetchPage)"
           :cached-work-height="cachedReflowWorkHeight(prefetchPage)"
           :cached-transfer-stats="cachedReflowTransferStats(prefetchPage)"
@@ -1866,6 +1868,7 @@ export default Vue.extend({
       pageUrl: string,
       items: any[],
       pageTextureUrl?: string,
+      pageTextureBlob?: Blob,
       workWidth?: number,
       workHeight?: number,
     }> {
@@ -1874,6 +1877,7 @@ export default Vue.extend({
         pageUrl: string,
         items: any[],
         pageTextureUrl?: string,
+        pageTextureBlob?: Blob,
         workWidth?: number,
         workHeight?: number,
       }>
@@ -1887,7 +1891,7 @@ export default Vue.extend({
           pageNumber,
           pageUrl: page.url,
           items,
-          pageTextureUrl: entry?.pageTextureUrl,
+          pageTextureBlob: entry?.pageTextureBlob,
           workWidth: entry?.workWidth,
           workHeight: entry?.workHeight,
         })
@@ -2016,7 +2020,7 @@ export default Vue.extend({
     },
     reflowCacheKey(): string {
       return JSON.stringify({
-        renderVersion: 24,
+        renderVersion: 25,
         bookId: this.bookId,
         processingMode: this.reflowSettings.processingMode,
         rotation: this.readerRotation,
@@ -4130,6 +4134,10 @@ export default Vue.extend({
       const entry = this.cachedReflowEntry(page)
       return Array.isArray(entry) ? '' : entry?.pageTextureUrl || ''
     },
+    cachedReflowTextureBlob(page: PageDtoWithUrl | undefined): Blob | undefined {
+      const entry = this.cachedReflowEntry(page)
+      return Array.isArray(entry) ? undefined : entry?.pageTextureBlob
+    },
     cachedReflowWorkWidth(page: PageDtoWithUrl | undefined): number | undefined {
       const entry = this.cachedReflowEntry(page)
       return Array.isArray(entry) ? undefined : entry?.workWidth
@@ -4148,6 +4156,7 @@ export default Vue.extend({
       items: any[],
       pageBackground?: string,
       pageTextureUrl?: string,
+      pageTextureBlob?: Blob,
       workWidth?: number,
       workHeight?: number,
       transferStats?: any,
@@ -4160,7 +4169,8 @@ export default Vue.extend({
       this.$set(this.reflowCache, this.reflowCacheEntryKey(payload.pageNumber, payload.cacheKey), {
         items: payload.items,
         pageBackground: payload.pageBackground || '',
-        pageTextureUrl: payload.pageTextureUrl,
+        pageTextureBlob: payload.pageTextureBlob,
+        pageTextureUrl: undefined,
         workWidth: payload.workWidth,
         workHeight: payload.workHeight,
         transferStats: payload.transferStats,

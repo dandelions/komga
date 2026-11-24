@@ -1114,9 +1114,13 @@ describe('ReflowedPage display columns layout', () => {
   test('wordBlockStyle generates correct background positioning for sprite word blocks', () => {
     const pageInstance: any = {
       localPageTextureUrl: 'blob:texture',
+      localPageTextureDimensions: {},
+      page: {number: 1},
+      options: {textScale: 100},
       localTextureWidth: 1000,
       localTextureHeight: 2000,
       isSpriteWordItem: methods.isSpriteWordItem,
+      sourcePageTextureUrl: () => 'blob:texture',
       wordBlockDisplayDimensions: methods.wordBlockDisplayDimensions,
       wordBlockStyle: methods.wordBlockStyle,
       wordBlockMeasureStyle: methods.wordBlockMeasureStyle,
@@ -1162,9 +1166,13 @@ describe('ReflowedPage display columns layout', () => {
   test('sprite word blocks use a shared fractional scale without per-item rounding', () => {
     const pageInstance: any = {
       localPageTextureUrl: 'blob:texture',
+      localPageTextureDimensions: {},
+      page: {number: 1},
+      options: {textScale: 73},
       localTextureWidth: 1000,
       localTextureHeight: 2000,
       isSpriteWordItem: methods.isSpriteWordItem,
+      sourcePageTextureUrl: () => 'blob:texture',
       wordBlockStyle: methods.wordBlockStyle,
       textScale: () => 0.73,
     }
@@ -1187,6 +1195,7 @@ describe('ReflowedPage display columns layout', () => {
     try {
       const pageInstance: any = {
         localPageTextureUrl: 'blob:http://localhost/123-abc',
+        localPageTextureUrls: {'5': 'blob:http://localhost/123-abc'},
         localTextureWidth: 800,
         localTextureHeight: 1200,
         revokeLocalPageTextureUrl: methods.revokeLocalPageTextureUrl,
@@ -1215,11 +1224,16 @@ describe('ReflowedPage display columns layout', () => {
       cachedWorkWidth: 1080,
       cachedWorkHeight: 1920,
       localPageTextureUrl: '',
+      localPageTextureBlob: undefined,
+      localPageTextureUrls: {},
+      localPageTextureBlobs: {},
+      localPageTextureDimensions: {},
       localTextureWidth: 0,
       localTextureHeight: 0,
       reflowItems: [],
       pageBackground: '',
       transferStats: undefined,
+      page: {number: 5},
       loading: true,
       lastDetectionKey: '',
       reflowDetectionKey: () => 'key-1',
@@ -1236,7 +1250,7 @@ describe('ReflowedPage display columns layout', () => {
     expect(pageInstance.loading).toBe(false)
   })
 
-  test('emitReflowed and currentCachePayload include pageTextureUrl, workWidth and workHeight', () => {
+  test('emitReflowed and currentCachePayload include page texture blob dimensions', () => {
     let emittedPayload: any = null
     const pageInstance: any = {
       page: {number: 5},
@@ -1244,6 +1258,7 @@ describe('ReflowedPage display columns layout', () => {
       reflowItems: [{type: 'word', w: 20, h: 20}],
       pageBackground: '#ffffff',
       localPageTextureUrl: 'data:image/bmp;base64,test-texture',
+      localPageTextureBlob: new Blob(['texture'], {type: 'image/png'}),
       localTextureWidth: 1200,
       localTextureHeight: 1800,
       transferStats: {transferred: 200},
@@ -1256,14 +1271,16 @@ describe('ReflowedPage display columns layout', () => {
 
     pageInstance.emitReflowed(500)
     expect(emittedPayload).toBeDefined()
-    expect(emittedPayload.pageTextureUrl).toBe('data:image/bmp;base64,test-texture')
+    expect(emittedPayload.pageTextureBlob).toBeInstanceOf(Blob)
+    expect(emittedPayload.pageTextureUrl).toBeUndefined()
     expect(emittedPayload.workWidth).toBe(1200)
     expect(emittedPayload.workHeight).toBe(1800)
     expect(emittedPayload.networkTransferBytes).toBe(500)
 
     const cachePayload = pageInstance.currentCachePayload()
     expect(cachePayload).toBeDefined()
-    expect(cachePayload.pageTextureUrl).toBe('data:image/bmp;base64,test-texture')
+    expect(cachePayload.pageTextureBlob).toBeInstanceOf(Blob)
+    expect(cachePayload.pageTextureUrl).toBeUndefined()
     expect(cachePayload.workWidth).toBe(1200)
     expect(cachePayload.workHeight).toBe(1800)
   })

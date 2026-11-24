@@ -870,6 +870,7 @@ type RenderedWordBlock = WordBlock & {
   type: 'word',
   src?: string,
   pageTextureUrl?: string,
+  pageTextureBlob?: Blob,
   workWidth?: number,
   workHeight?: number,
   height: number,
@@ -1070,6 +1071,10 @@ export default Vue.extend({
       type: String,
       default: '',
     },
+    cachedPageTextureBlob: {
+      type: Object as () => Blob | undefined,
+      default: undefined,
+    },
     cachedWorkWidth: {
       type: Number,
       default: undefined,
@@ -1153,6 +1158,9 @@ export default Vue.extend({
       lastDetectionKey: '',
       localPageTextureUrl: '',
       localPageTextureBlob: undefined as Blob | undefined,
+      localPageTextureUrls: {} as Record<number, string>,
+      localPageTextureBlobs: {} as Record<number, Blob>,
+      localPageTextureDimensions: {} as Record<number, {width: number, height: number}>,
       localTextureWidth: 0,
       localTextureHeight: 0,
       objectUrl: '',
@@ -2099,7 +2107,18 @@ export default Vue.extend({
         this.reflowItems = this.cachedItems
         this.pageBackground = this.cachedPageBackground || '#fff'
         this.transferStats = this.cachedTransferStats
-        this.localPageTextureUrl = this.cachedPageTextureUrl || ''
+        this.localPageTextureBlob = this.cachedPageTextureBlob
+        this.localPageTextureUrl = this.cachedPageTextureBlob && typeof URL !== 'undefined'
+          ? URL.createObjectURL(this.cachedPageTextureBlob)
+          : this.cachedPageTextureUrl || ''
+        if (this.localPageTextureUrl) {
+          this.localPageTextureUrls[this.page.number] = this.localPageTextureUrl
+          this.localPageTextureBlobs[this.page.number] = this.cachedPageTextureBlob
+          this.localPageTextureDimensions[this.page.number] = {
+            width: this.cachedWorkWidth || 0,
+            height: this.cachedWorkHeight || 0,
+          }
+        }
         this.localTextureWidth = this.cachedWorkWidth || 0
         this.localTextureHeight = this.cachedWorkHeight || 0
         this.repaginate()
@@ -2131,7 +2150,15 @@ export default Vue.extend({
           this.localPageTextureBlob = entry.pageTextureBlob
           this.localPageTextureUrl = entry.pageTextureBlob && typeof URL !== 'undefined'
             ? URL.createObjectURL(entry.pageTextureBlob)
-            : ''
+            : entry.pageTextureUrl || ''
+          if (this.localPageTextureUrl) {
+            this.localPageTextureUrls[this.page.number] = this.localPageTextureUrl
+            if (entry.pageTextureBlob) this.localPageTextureBlobs[this.page.number] = entry.pageTextureBlob
+            this.localPageTextureDimensions[this.page.number] = {
+              width: entry.workWidth || 0,
+              height: entry.workHeight || 0,
+            }
+          }
           this.localTextureWidth = entry.workWidth || 0
           this.localTextureHeight = entry.workHeight || 0
           this.transferStats = entry.transferStats as ReflowTransferStats | undefined
@@ -2238,6 +2265,14 @@ export default Vue.extend({
             this.localPageTextureUrl = workerResult.pageTextureBlob && typeof URL !== 'undefined'
               ? URL.createObjectURL(workerResult.pageTextureBlob)
               : workerResult.pageTextureUrl || ''
+            if (this.localPageTextureUrl) {
+              this.localPageTextureUrls[this.page.number] = this.localPageTextureUrl
+              if (workerResult.pageTextureBlob) this.localPageTextureBlobs[this.page.number] = workerResult.pageTextureBlob
+              this.localPageTextureDimensions[this.page.number] = {
+                width: workerResult.workWidth || imageData.width,
+                height: workerResult.workHeight || imageData.height,
+              }
+            }
             this.localTextureWidth = workerResult.workWidth || imageData.width
             this.localTextureHeight = workerResult.workHeight || imageData.height
             this.reflowItems = workerResult.items as ReflowItem[]
@@ -3065,10 +3100,28 @@ export default Vue.extend({
     scrollToTop() {
       this.$nextTick(() => window.scrollTo({top: 0, left: 0, behavior: 'auto'}))
     },
+    sourcePageTextureUrl(item: ReflowItem): string {
+      const sourcePageNumber = Number((item as any).sourcePageNumber) || this.page.number
+      if (this.localPageTextureUrls[sourcePageNumber]) return this.localPageTextureUrls[sourcePageNumber]
+      const blob = this.localPageTextureBlobs[sourcePageNumber] || (item as any).pageTextureBlob as Blob | undefined
+      if (blob && typeof URL !== 'undefined') {
+        const url = URL.createObjectURL(blob)
+        this.localPageTextureUrls[sourcePageNumber] = url
+        this.localPageTextureBlobs[sourcePageNumber] = blob
+        this.localPageTextureDimensions[sourcePageNumber] = {
+          width: Number((item as any).workWidth) || this.localPageTextureDimensions[sourcePageNumber]?.width || 0,
+          height: Number((item as any).workHeight) || this.localPageTextureDimensions[sourcePageNumber]?.height || 0,
+        }
+        return url
+      }
+      return this.localPageTextureUrl
+    },
     isSpriteWordItem(item: ReflowItem): boolean {
       if (item.type !== 'word') return false
       if ((item as any).src) return false
-      return !!this.localPageTextureUrl && (item as any).w !== undefined && (item as any).h !== undefined
+      if (typeof this.sourcePageTextureUrl !== 'function') return !!this.localPageTextureUrl &&
+        (item as any).w !== undefined && (item as any).h !== undefined
+      return !!this.sourcePageTextureUrl(item) && (item as any).w !== undefined && (item as any).h !== undefined
     },
     wordBlockMeasureStyle(item: RenderedWordBlock): object {
       const dimensions = this.wordBlockDisplayDimensions(item)
@@ -3081,9 +3134,13 @@ export default Vue.extend({
     wordBlockStyle(item: RenderedWordBlock): object {
       if (this.isSpriteWordItem(item)) {
         const textureScale = this.textScale()
-        const textureUrl = this.localPageTextureUrl
-        const textureW = this.localTextureWidth || 1
-        const textureH = this.localTextureHeight || 1
+        const sourcePageNumber = Number(item.sourcePageNumber) || this.page.number
+        const textureUrl = typeof this.sourcePageTextureUrl === 'function'
+          ? this.sourcePageTextureUrl(item)
+          : this.localPageTextureUrl
+        const dimensions = this.localPageTextureDimensions?.[sourcePageNumber]
+        const textureW = dimensions?.width || this.localTextureWidth || 1
+        const textureH = dimensions?.height || this.localTextureHeight || 1
         const width = Math.max(1, item.w * textureScale)
         const height = Math.max(1, item.h * textureScale)
         return {
@@ -3248,7 +3305,7 @@ export default Vue.extend({
         items: this.reflowItems,
         pageBackground: this.pageBackground,
         transferStats: this.transferStats,
-        pageTextureUrl: this.localPageTextureUrl,
+        pageTextureBlob: this.localPageTextureBlob,
         workWidth: this.localTextureWidth,
         workHeight: this.localTextureHeight,
       } as ReflowCachePayload
@@ -3264,7 +3321,7 @@ export default Vue.extend({
         items: this.reflowItems,
         pageBackground: this.pageBackground,
         transferStats: this.transferStats,
-        pageTextureUrl: this.localPageTextureUrl,
+        pageTextureBlob: this.localPageTextureBlob,
         workWidth: this.localTextureWidth,
         workHeight: this.localTextureHeight,
       }
@@ -3942,11 +3999,16 @@ export default Vue.extend({
       return 0
     },
     revokeLocalPageTextureUrl() {
-      if (this.localPageTextureUrl && this.localPageTextureUrl.startsWith('blob:')) {
-        URL.revokeObjectURL(this.localPageTextureUrl)
-      }
+      const urls = new Set(Object.values(this.localPageTextureUrls || {}))
+      if (this.localPageTextureUrl) urls.add(this.localPageTextureUrl)
+      urls.forEach(url => {
+        if (url.startsWith('blob:')) URL.revokeObjectURL(url)
+      })
       this.localPageTextureUrl = ''
       this.localPageTextureBlob = undefined
+      this.localPageTextureUrls = {}
+      this.localPageTextureBlobs = {}
+      this.localPageTextureDimensions = {}
       this.localTextureWidth = 0
       this.localTextureHeight = 0
     },

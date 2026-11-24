@@ -8,6 +8,7 @@ export type ReflowContinuationPage<T extends ReflowStreamItem> = {
   pageUrl?: string,
   items: T[],
   pageTextureUrl?: string,
+  pageTextureBlob?: Blob,
   workWidth?: number,
   workHeight?: number,
 }
@@ -27,6 +28,7 @@ export function mergeReflowContinuationItems<T extends ReflowStreamItem>(
       ...item,
       sourcePageNumber: continuation.pageNumber,
       pageTextureUrl: (item as any).pageTextureUrl || continuation.pageTextureUrl,
+      pageTextureBlob: (item as any).pageTextureBlob || continuation.pageTextureBlob,
       workWidth: (item as any).workWidth || continuation.workWidth,
       workHeight: (item as any).workHeight || continuation.workHeight,
     } as T))

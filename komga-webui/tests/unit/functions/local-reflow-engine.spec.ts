@@ -25,6 +25,7 @@ import {
   normalizeImageSliceForDarkDisplay,
   LocalReflowOptions,
   mergeManualImageRegions,
+  applyImageRegionsToPageTexture,
   buildNormalizedPagePixels,
   grayscaleTextColor,
   contrastEnhancedTextColor,
@@ -32,6 +33,20 @@ import {
 } from '@/functions/local-reflow-engine'
 
 describe('local-reflow-engine', () => {
+  test('keeps manual image regions from using normalized text pixels in sprite textures', () => {
+    const source = new Uint8ClampedArray([
+      10, 20, 30, 255, 40, 50, 60, 255,
+      70, 80, 90, 255, 100, 110, 120, 255,
+    ])
+    const texture = new Uint8ClampedArray(source.length)
+    texture.fill(255)
+    applyImageRegionsToPageTexture(texture, source, 2, 2, [{x: 0, y: 0, w: 1, h: 2}])
+    expect(Array.from(texture.slice(0, 4))).toEqual(Array.from(source.slice(0, 4)))
+    expect(Array.from(texture.slice(4, 8))).toEqual([255, 255, 255, 255])
+    expect(Array.from(texture.slice(8, 12))).toEqual(Array.from(source.slice(8, 12)))
+    expect(Array.from(texture.slice(12))).toEqual([255, 255, 255, 255])
+  })
+
   describe('localReflowScale', () => {
     test('uses the same 3600px and 8MP local processing limit', () => {
       expect(localReflowScale(3000, 3000)).toBeCloseTo(Math.sqrt(8000000 / (3000 * 3000)))

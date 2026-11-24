@@ -105,14 +105,14 @@ describe('reflow stream', () => {
     expect(fitReflowImageDimensions(1800, 600, 900, 500, 1)).toEqual({width: 900, height: 300})
   })
 
-  test('propagates pageTextureUrl, workWidth and workHeight to continuation items', () => {
-    type TextureItem = Item & {pageTextureUrl?: string, workWidth?: number, workHeight?: number}
+  test('propagates page texture blobs and dimensions to continuation items', () => {
+    type TextureItem = Item & {pageTextureBlob?: Blob, workWidth?: number, workHeight?: number}
     const merged = mergeReflowContinuationItems<TextureItem>(
       [{type: 'word', value: 'page-1'}],
       1,
       [{
         pageNumber: 2,
-        pageTextureUrl: 'blob:texture-2',
+        pageTextureBlob: new Blob(['texture-2'], {type: 'image/png'}),
         workWidth: 1000,
         workHeight: 2000,
         items: [{type: 'word', value: 'page-2'}],
@@ -120,7 +120,7 @@ describe('reflow stream', () => {
     )
 
     expect(merged.length).toBe(2)
-    expect(merged[1].pageTextureUrl).toBe('blob:texture-2')
+    expect(merged[1].pageTextureBlob).toBeInstanceOf(Blob)
     expect(merged[1].workWidth).toBe(1000)
     expect(merged[1].workHeight).toBe(2000)
   })
