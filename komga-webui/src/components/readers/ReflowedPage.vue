@@ -1481,7 +1481,8 @@ export default Vue.extend({
         columnGap: `${this.reflowInlineGap}px`,
         rowGap: `${Math.round(this.blockSpacing * 1.5)}px`,
         height: `${this.pageContentHeight()}px`,
-        minHeight: '100vh',
+        minHeight: `${this.pageContentHeight()}px`,
+        maxHeight: `${this.pageContentHeight()}px`,
         backgroundColor: this.wordOutputBackground(),
       }
       if (this.isTwoColumns) {
@@ -1505,8 +1506,13 @@ export default Vue.extend({
         flexWrap: this.verticalDirection === 'rtl' ? 'wrap-reverse' : 'wrap',
         alignItems: 'center',
         alignContent: 'flex-start',
+        columnGap: `${Math.max(8, Math.round(this.blockSpacing * 1.5))}px`,
+        rowGap: `${this.reflowInlineGap}px`,
+        paddingTop: '16px',
+        paddingBottom: '24px',
         paddingLeft: `${this.horizontalContentPadding()}px`,
         paddingRight: `${this.horizontalContentPadding()}px`,
+        boxSizing: 'border-box',
       }
     },
     measureWrapperStyle(): object {
@@ -1522,12 +1528,19 @@ export default Vue.extend({
       return {
         ...style,
         height: `${this.pageContentHeight()}px`,
+        maxHeight: `${this.pageContentHeight()}px`,
+        minHeight: `${this.pageContentHeight()}px`,
         flexDirection: 'column',
         flexWrap: this.verticalDirection === 'rtl' ? 'wrap-reverse' : 'wrap',
         alignItems: 'center',
         alignContent: 'flex-start',
+        columnGap: `${Math.max(8, Math.round(this.blockSpacing * 1.5))}px`,
+        rowGap: `${this.reflowInlineGap}px`,
+        paddingTop: '16px',
+        paddingBottom: '24px',
         paddingLeft: `${this.horizontalContentPadding()}px`,
         paddingRight: `${this.horizontalContentPadding()}px`,
+        boxSizing: 'border-box',
       }
     },
     pageParity(): PageParity {
@@ -1810,6 +1823,7 @@ export default Vue.extend({
     if (this.deferReflow) this.controlsCollapsed = false
     this.updateViewportMetrics()
     window.addEventListener('resize', this.handleResize)
+    window.addEventListener('scroll', this.handleResize)
     window.visualViewport?.addEventListener('resize', this.handleResize)
     window.visualViewport?.addEventListener('scroll', this.handleResize)
     this.$nextTick(() => {
@@ -1821,6 +1835,7 @@ export default Vue.extend({
   },
   destroyed() {
     window.removeEventListener('resize', this.handleResize)
+    window.removeEventListener('scroll', this.handleResize)
     window.visualViewport?.removeEventListener('resize', this.handleResize)
     window.visualViewport?.removeEventListener('scroll', this.handleResize)
     this.removeControlsDragListeners()
@@ -3043,9 +3058,9 @@ export default Vue.extend({
 
       const targetWidth = (typeof this.pageContentWidth === 'function' ? this.pageContentWidth() : 0) || this.targetWidth
       const contentWidth = Math.max(120, targetWidth - this.horizontalContentPadding() * 2)
-      const contentHeight = Math.max(120, this.pageContentHeight() - 32)
-      const columnGap = Math.max(0, this.blockSpacing)
-      const rowGap = Math.max(0, Math.round(this.blockSpacing * 1.5))
+      const contentHeight = Math.max(120, this.pageContentHeight() - 40)
+      const columnGap = Math.max(8, Math.round(this.blockSpacing * 1.5))
+      const rowGap = typeof this.reflowInlineGap === 'number' ? this.reflowInlineGap : 0
       const pages = [] as ReflowItem[][]
       let currentPage = [] as ReflowItem[]
       let currentPageWidth = 0
@@ -3259,7 +3274,7 @@ export default Vue.extend({
     },
     localReflowResultCacheKey(): string {
       return JSON.stringify({
-        version: 7,
+        version: 8,
         bookId: this.bookId,
         page: this.page.number,
         pageUrl: canonicalPageImageUrl(this.page.url),
@@ -8785,7 +8800,7 @@ export default Vue.extend({
 
 .reflow-wrapper {
   width: 100%;
-  min-height: 100vh;
+  min-height: 100%;
   padding: 16px;
   box-sizing: border-box;
   display: flex;

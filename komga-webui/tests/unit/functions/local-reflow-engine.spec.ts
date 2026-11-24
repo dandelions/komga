@@ -360,7 +360,7 @@ describe('local-reflow-engine', () => {
     })
 
     test('removes weak high-contrast edge pixels instead of leaving gray burrs', () => {
-      expect(contrastEnhancedTextColor(204, 204, 204, 220, false)).toEqual({r: 255, g: 255, b: 255})
+      expect(contrastEnhancedTextColor(214, 214, 214, 220, false)).toEqual({r: 255, g: 255, b: 255})
       expect(contrastEnhancedTextColor(180, 180, 180, 220, false).r).toBeLessThan(255)
       expect(contrastEnhancedTextColor(20, 20, 20, 0, true).r).toBeGreaterThan(0)
     })

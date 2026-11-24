@@ -1007,9 +1007,11 @@ function buildTextureNormalizationLut(
   const bgVal = options.darkDisplay ? 0 : 255
   const fgVal = options.darkDisplay ? 255 : 0
   const inkThresh = adaptiveInkThreshold(threshold, pageBgLuma)
-  const baseMinDelta = 16
+  const baseMinDelta = 8.0
   const maxDelta = sourceDark ? 255 - pageBgLuma : pageBgLuma
   const monochrome = options.matchBackgroundMode === 'monochrome'
+  const stroke = options.strokeStrength && options.strokeStrength > 0 ? clamp(options.strokeStrength, 0, 3) : 0
+  const strokeBoost = stroke > 0 ? Math.min(0.65, stroke * 0.45) : 0
   for (let luma = 0; luma < 256; luma++) {
     if (monochrome) {
       const isWordInk = sourceDark ? luma > inkThresh : luma < inkThresh
@@ -1019,17 +1021,24 @@ function buildTextureNormalizationLut(
       if (delta <= baseMinDelta) {
         lut[luma] = bgVal
       } else {
-        const foreground = calculateEnhancedForeground(delta, maxDelta, baseMinDelta)
+        let foreground = calculateEnhancedForeground(delta, maxDelta, baseMinDelta)
+        if (strokeBoost > 0 && foreground > 0) {
+          foreground = clamp(foreground + (1 - foreground) * strokeBoost, 0, 1)
+        }
         lut[luma] = options.darkDisplay
           ? Math.round(255 * foreground)
           : Math.round(255 * (1 - foreground))
       }
     } else if (options.darkDisplay) {
       const isWordInk = sourceDark ? luma > inkThresh : luma < inkThresh
-      lut[luma] = isWordInk ? (sourceDark ? luma : 255 - luma) : bgVal
+      let val = sourceDark ? luma : 255 - luma
+      if (isWordInk && strokeBoost > 0) val = Math.min(255, Math.round(val + (255 - val) * strokeBoost))
+      lut[luma] = isWordInk ? val : bgVal
     } else {
       const isWordInk = sourceDark ? luma > inkThresh : luma < inkThresh
-      lut[luma] = isWordInk ? (sourceDark ? 255 - luma : KEEP_ORIGINAL_VALUE) : bgVal
+      let val = sourceDark ? 255 - luma : KEEP_ORIGINAL_VALUE
+      if (isWordInk && strokeBoost > 0) val = Math.max(0, Math.round((val === KEEP_ORIGINAL_VALUE ? luma : val) * (1 - strokeBoost)))
+      lut[luma] = isWordInk ? val : bgVal
     }
   }
   return lut
@@ -1631,7 +1640,7 @@ export function contrastEnhancedTextColor(
   const sourceDark = backgroundLuma < 128
   const sourceLuma = Math.min(255, Math.max(0, pixelLuma(r, g, b)))
   const delta = sourceDark ? sourceLuma - backgroundLuma : backgroundLuma - sourceLuma
-  const baseMinDelta = 16.0
+  const baseMinDelta = 8.0
   if (delta <= baseMinDelta) {
     const bg = darkDisplay ? 0 : 255
     return {r: bg, g: bg, b: bg}
@@ -2555,7 +2564,7 @@ export function reflowPageFromPixels(
     } else if (isHighContrast && options.matchBackgroundMode !== 'original') {
       const bgVal = 255
       const inkThresh = adaptiveInkThreshold(threshold, pageBgLuma)
-      const baseMinDelta = 16
+      const baseMinDelta = 8.0
       const maxDelta = sourceDark ? 255 - pageBgLuma : pageBgLuma
       for (let i = 0; i < sliceW * sliceH; i++) {
         const pIdx = i * 4

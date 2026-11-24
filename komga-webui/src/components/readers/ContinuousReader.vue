@@ -3,22 +3,26 @@
     <div :class="`d-flex flex-column px-0 mx-0` "
          v-scroll="onScroll"
     >
-      <img v-for="(page, i) in pages"
-           :key="`page${i}`"
-           :alt="`Page ${page.number}`"
-           :src="shouldLoad(i) ? pageDisplayUrl(page) : undefined"
-           :loading="imageLoading(i)"
-           :fetchpriority="imageFetchPriority(i)"
-           :decoding="imageDecoding(i)"
-           :height="calcHeight(page)"
-           :width="calcWidth(page)"
-           :id="`page${page.number}`"
-           :data-page-number="page.number"
-           data-reader-magnifiable="true"
-           :style="pageStyle(page, i)"
-           @load="ensureDeskewedPageUrl(page, $event)"
-           v-intersect="onIntersect"
-      />
+      <div :style="spacerStyle(renderWindowTopHeight)" />
+      <template v-for="entry in renderWindowEntries">
+        <img
+          :key="`page${entry.index}`"
+          :alt="`Page ${entry.page.number}`"
+          :src="shouldLoad(entry.index) ? pageDisplayUrl(entry.page) : undefined"
+          :loading="imageLoading(entry.index)"
+          :fetchpriority="imageFetchPriority(entry.index)"
+          :decoding="imageDecoding(entry.index)"
+          :height="calcHeight(entry.page)"
+          :width="calcWidth(entry.page)"
+          :id="`page${entry.page.number}`"
+          :data-page-number="entry.page.number"
+          data-reader-magnifiable="true"
+          :style="pageStyle(entry.page, entry.index)"
+          @load="ensureDeskewedPageUrl(entry.page, $event)"
+          v-intersect="onIntersect"
+        />
+      </template>
+      <div :style="spacerStyle(renderWindowBottomHeight)" />
     </div>
 
     <!--  clickable zone: top  -->
@@ -75,6 +79,9 @@ export default Vue.extend({
       seen: [] as boolean[],
       deskewedPageUrls: {} as Record<number, string>,
       deskewedPagePending: {} as Record<number, boolean>,
+      renderWindowStart: 0,
+      renderWindowEnd: 0,
+      pageOffsets: [] as number[],
     }
   },
   props: {
@@ -136,6 +143,8 @@ export default Vue.extend({
       handler(val) {
         this.seen = new Array(val.length).fill(false)
         this.revokeDeskewedPageUrls()
+        this.rebuildPageOffsets()
+        this.updateRenderWindow(this.currentPage - 1)
         if (this.page === 1) window.scrollTo(0, 0)
       },
       immediate: true,
@@ -144,8 +153,22 @@ export default Vue.extend({
       this.revokeDeskewedPageUrls()
       this.$nextTick(this.ensureLoadedDeskewedPageUrls)
     },
+    scale() {
+      if (typeof this.rebuildPageOffsets === 'function') this.rebuildPageOffsets()
+      if (typeof this.updateRenderWindow === 'function') this.updateRenderWindow(this.currentPage - 1)
+    },
+    sidePadding() {
+      if (typeof this.rebuildPageOffsets === 'function') this.rebuildPageOffsets()
+      if (typeof this.updateRenderWindow === 'function') this.updateRenderWindow(this.currentPage - 1)
+    },
+    pageMargin() {
+      if (typeof this.rebuildPageOffsets === 'function') this.rebuildPageOffsets()
+      if (typeof this.updateRenderWindow === 'function') this.updateRenderWindow(this.currentPage - 1)
+    },
     rotation: {
       handler() {
+        if (typeof this.rebuildPageOffsets === 'function') this.rebuildPageOffsets()
+        if (typeof this.updateRenderWindow === 'function') this.updateRenderWindow(this.currentPage - 1)
         this.revokeDeskewedPageUrls()
         this.$nextTick(this.ensureLoadedDeskewedPageUrls)
       },
@@ -164,10 +187,11 @@ export default Vue.extend({
     },
     page: {
       handler(val) {
+        this.updateRenderWindow(val - 1)
         if (val != this.currentPage) {
-          this.$vuetify.goTo(`#page${val}`, {
+          this.$nextTick(() => this.$vuetify.goTo(`#page${val}`, {
             duration: 0,
-          })
+          }))
         }
       },
       immediate: false,
@@ -181,6 +205,8 @@ export default Vue.extend({
     this.revokeDeskewedPageUrls()
   },
   mounted() {
+    this.rebuildPageOffsets()
+    this.updateRenderWindow(this.currentPage - 1)
     if (this.page != this.currentPage) {
       this.$vuetify.goTo(`#page${this.page}`, {
         duration: 0,
@@ -188,6 +214,20 @@ export default Vue.extend({
     }
   },
   computed: {
+    renderWindowEntries(): Array<{page: PageDtoWithUrl, index: number}> {
+      const entries = [] as Array<{page: PageDtoWithUrl, index: number}>
+      for (let index = this.renderWindowStart; index < this.renderWindowEnd; index++) {
+        const page = this.pages[index]
+        if (page) entries.push({page, index})
+      }
+      return entries
+    },
+    renderWindowTopHeight(): number {
+      return this.pageOffsetAt(this.renderWindowStart)
+    },
+    renderWindowBottomHeight(): number {
+      return Math.max(0, this.pageOffsetAt(this.pages.length) - this.pageOffsetAt(this.renderWindowEnd))
+    },
     canPrev(): boolean {
       return this.offsetTop > 0
     },
@@ -219,6 +259,7 @@ export default Vue.extend({
     onScroll(e: any) {
       this.offsetTop = e.target.scrollingElement.scrollTop
       this.totalHeight = e.target.scrollingElement.scrollHeight
+      this.updateRenderWindow(this.pageIndexAtOffset(this.offsetTop))
     },
     onIntersect(entries: any) {
       if (entries[0].isIntersecting) {
@@ -229,8 +270,55 @@ export default Vue.extend({
         this.$nextTick(this.ensureLoadedDeskewedPageUrls)
       }
     },
+    rebuildPageOffsets() {
+      const offsets = new Array(this.pages.length + 1)
+      offsets[0] = 0
+      for (let index = 0; index < this.pages.length; index++) {
+        const height = this.calcHeight(this.pages[index]) || this.$vuetify.breakpoint.height
+        offsets[index + 1] = offsets[index] + height + (index === 0 ? 0 : this.pageMargin * 2)
+      }
+      this.pageOffsets = offsets
+    },
+    pageOffsetAt(index: number): number {
+      return this.pageOffsets[index] || 0
+    },
+    pageIndexAtOffset(offset: number): number {
+      let low = 0
+      let high = this.pages.length
+      while (low < high) {
+        const middle = Math.floor((low + high) / 2)
+        if (this.pageOffsetAt(middle + 1) <= offset) low = middle + 1
+        else high = middle
+      }
+      return Math.min(Math.max(0, low), Math.max(0, this.pages.length - 1))
+    },
+    updateRenderWindow(center: number) {
+      if (this.pages.length === 0) {
+        this.renderWindowStart = 0
+        this.renderWindowEnd = 0
+        return
+      }
+      const start = Math.max(0, Math.min(this.pages.length - 1, center) - 3)
+      const end = Math.min(this.pages.length, start + 7)
+      this.renderWindowStart = start
+      this.renderWindowEnd = end
+    },
+    isInRenderWindow(page: number): boolean {
+      return page >= this.renderWindowStart && page < this.renderWindowEnd
+    },
+    spacerStyle(height: number): object {
+      return {height: `${Math.max(0, height)}px`, flex: '0 0 auto'}
+    },
     shouldLoad(page: number): boolean {
       return page == 0 || this.seen[page] || Math.abs((this.currentPage - 1) - page) <= 1
+    },
+    placeholderStyle(page: PageDtoWithUrl, index: number): object {
+      return {
+        ...this.pageStyle(page, index),
+        width: `${this.calcWidth(page) || 1}px`,
+        height: `${this.calcHeight(page) || 1}px`,
+        margin: `${index === 0 ? 0 : this.pageMargin}px auto`,
+      }
     },
     calcHeight(page: PageDtoWithUrl): number | undefined {
       const width = this.displayPageWidth(page)

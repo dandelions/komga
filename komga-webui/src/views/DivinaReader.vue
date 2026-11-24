@@ -3070,7 +3070,9 @@ export default Vue.extend({
 
       const pageDtos = (await this.$komgaBooks.getBookPages(bookId))
       pageDtos.forEach((p: any) => p['url'] = this.getPageUrl(p))
-      this.pages = pageDtos as PageDtoWithUrl[]
+      // Page metadata is immutable after setup. Freezing the array prevents Vue 2 from
+      // recursively observing every page object in very large books.
+      this.pages = Object.freeze(pageDtos as PageDtoWithUrl[]) as unknown as PageDtoWithUrl[]
 
       this.$debug('[setup]', `pages count:${this.pagesCount}`, 'read progress:', this.book.readProgress)
       if (page && page >= 1 && page <= this.pagesCount) {
