@@ -26,6 +26,7 @@ import {
   LocalReflowOptions,
   mergeManualImageRegions,
   applyImageRegionsToPageTexture,
+  applyGlobalPageTextureProcessing,
   buildNormalizedPagePixels,
   grayscaleTextColor,
   contrastEnhancedTextColor,
@@ -33,6 +34,43 @@ import {
 } from '@/functions/local-reflow-engine'
 
 describe('local-reflow-engine', () => {
+  test('shares color-normalization classification with the sprite ink map', () => {
+    const source = new Uint8ClampedArray([
+      255, 255, 255, 255,
+      200, 200, 200, 255,
+      180, 180, 180, 255,
+      0, 0, 0, 0,
+      220, 220, 220, 255,
+      120, 120, 120, 255,
+    ])
+    const options: LocalReflowOptions = {
+      targetWidth: 3,
+      autoCropBorder: false,
+      textScale: 100,
+      columnCount: 1,
+      skewCorrection: 0,
+      threshold: 185,
+      columnGap: 15,
+      wordGap: 3,
+      strokeStrength: 0.1,
+      contrastEnhancement: true,
+      matchBackground: false,
+      matchBackgroundMode: 'grayscale',
+      blockSpacing: 6,
+      verticalText: false,
+      verticalDirection: 'rtl',
+      marginTop: 0,
+      marginRight: 0,
+      marginBottom: 0,
+      marginLeft: 0,
+      darkDisplay: false,
+    }
+    const expected = buildInkMap(source, 3, 2, 185, 0.1, 255)
+    const actual = new Uint8Array(6)
+    applyGlobalPageTextureProcessing(source, 3, 2, options, 255, false, 185, actual)
+    expect(Array.from(actual)).toEqual(Array.from(expected))
+  })
+
   test('keeps manual image regions from using normalized text pixels in sprite textures', () => {
     const source = new Uint8ClampedArray([
       10, 20, 30, 255, 40, 50, 60, 255,
@@ -574,6 +612,7 @@ describe('local-reflow-engine', () => {
       expect(wordItems[0].y).toBeDefined()
       expect(wordItems[0].w).toBeDefined()
       expect(wordItems[0].h).toBeDefined()
+      expect(result.timings?.wordCount).toBe(wordItems.length)
     })
 
     test('applies high contrast bleaching and ink boost when contrastEnhancement is enabled', () => {

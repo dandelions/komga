@@ -682,18 +682,22 @@ export function buildInkMap(
   threshold: number,
   strokeStrength: number,
   backgroundLuma: number,
+  precomputedInk?: Uint8Array,
 ): Uint8Array {
   const inkThresh = adaptiveInkThreshold(threshold, backgroundLuma)
   const isDark = backgroundLuma < 128
-  const ink = new Uint8Array(width * height)
+  const ink = precomputedInk || new Uint8Array(width * height)
 
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const idx = (y * width + x) * 4
-      if (pixels[idx + 3] === 0) continue
-      const luma = pixelLuma(pixels[idx], pixels[idx + 1], pixels[idx + 2])
-      if (isDark ? luma > inkThresh : luma < inkThresh) {
-        ink[y * width + x] = 1
+  if (!precomputedInk) {
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const index = y * width + x
+        const idx = index * 4
+        if (pixels[idx + 3] === 0) continue
+        const luma = pixelLuma(pixels[idx], pixels[idx + 1], pixels[idx + 2])
+        if (isDark ? luma > inkThresh : luma < inkThresh) {
+          ink[index] = 1
+        }
       }
     }
   }
@@ -2255,6 +2259,7 @@ export function applyGlobalPageTextureProcessing(
   pageBgLuma: number,
   sourceDark: boolean,
   threshold: number,
+  precomputedInk?: Uint8Array,
 ): Uint8ClampedArray {
   const normalizeColors =
     options.darkDisplay ||
@@ -2264,17 +2269,32 @@ export function applyGlobalPageTextureProcessing(
     (options.optimizeBackground && options.optimizeBackground !== 'none')
 
   if (!normalizeColors) {
+    if (precomputedInk) {
+      const inkThreshold = adaptiveInkThreshold(threshold, pageBgLuma)
+      const inkIsDark = pageBgLuma < 128
+      for (let i = 0; i < width * height; i++) {
+        const p = i * 4
+        if (pixels[p + 3] !== 0) {
+          const luma = pixelLuma(pixels[p], pixels[p + 1], pixels[p + 2])
+          if (inkIsDark ? luma > inkThreshold : luma < inkThreshold) precomputedInk[i] = 1
+        }
+      }
+    }
     return pixels
   }
 
   const output = new Uint8ClampedArray(pixels)
   const lut = buildTextureNormalizationLut(options, pageBgLuma, threshold, sourceDark)
+  const inkThreshold = adaptiveInkThreshold(threshold, pageBgLuma)
+  const inkIsDark = pageBgLuma < 128
 
   const total = width * height
   for (let i = 0; i < total; i++) {
     const pIdx = i * 4
+    const luma = pixelLuma(output[pIdx], output[pIdx + 1], output[pIdx + 2])
+    if (precomputedInk && output[pIdx + 3] !== 0 && (inkIsDark ? luma > inkThreshold : luma < inkThreshold)) precomputedInk[i] = 1
     if (output[pIdx + 3] === 0) continue
-    const value = lut[lutLuma(output[pIdx], output[pIdx + 1], output[pIdx + 2])]
+    const value = lut[luma]
     if (value === KEEP_ORIGINAL_VALUE) continue
     output[pIdx] = value
     output[pIdx + 1] = value
@@ -2435,14 +2455,10 @@ export function reflowPageFromPixels(
   timings.processedWidth = workW
   timings.processedHeight = workH
 
-  // 5. Build ink map
   const threshold = clamp(options.threshold || 185, 50, 230)
   const strokeStrength = options.strokeStrength || 0
-  const inkMapStartedAt = now()
-  const ink = buildInkMap(workPixels, workW, workH, threshold, strokeStrength, pageBgLuma)
-  timings.inkMapMs = now() - inkMapStartedAt
-
-  // 5. Detect ROI
+  const isSpriteMode = options.renderMode === 'sprite'
+  const pageInk = isSpriteMode ? new Uint8Array(workW * workH) : undefined
   const scaledCropRois = cropRois
     .map(r => ({
       x: clamp(Math.round(r.x * scale), 0, workW - 1),
@@ -2452,23 +2468,10 @@ export function reflowPageFromPixels(
     }))
     .filter(r => r.w >= 8 && r.h >= 8)
 
-  const roiStartedAt = now()
-  const hasManualMargin = (options.marginTop || 0) > 0 || (options.marginBottom || 0) > 0 || (options.marginLeft || 0) > 0 || (options.marginRight || 0) > 0
-  // Use the detected text bounds for automatic border cropping. Using the full page
-  // here makes line-end whitespace dominate trailing-blank and paragraph decisions,
-  // causing a few otherwise fitting words to wrap onto the next line.
-  const effectiveRois = scaledCropRois.length > 0
-    ? scaledCropRois
-    : [hasManualMargin
-      ? detectRoi(ink, workW, workH, {...options, autoCropBorder: false})
-      : detectRoi(ink, workW, workH, options)]
-  timings.roiMs = now() - roiStartedAt
-
   const items: LocalReflowItem[] = []
   const textScale = clamp((options.textScale || 100) / 100, 0.2, 2)
 
   const pageColorStartedAt = now()
-  const isSpriteMode = options.renderMode === 'sprite'
   let pageTextureUrl = ''
   let pageTexturePixels: Uint8ClampedArray | undefined
   if (isSpriteMode) {
@@ -2480,6 +2483,7 @@ export function reflowPageFromPixels(
       pageBgLuma,
       sourceDark,
       threshold,
+      pageInk,
     )
     if (options.deferTextureEncoding) pageTexturePixels = texturePixels
     else pageTextureUrl = rgbaToBmpDataUrl(texturePixels, workW, workH, workW, 0, 0)
@@ -2507,6 +2511,21 @@ export function reflowPageFromPixels(
       ? buildNormalizedPagePixels(workPixels, options, pageBgLuma, threshold, sourceDark)
       : workPixels
   timings.pageColorMs = now() - pageColorStartedAt
+
+  // 5. Build ink map. Sprite mode reuses the classification gathered while
+  // normalizing the shared page texture; other modes keep the original scan.
+  const inkMapStartedAt = now()
+  const ink = buildInkMap(workPixels, workW, workH, threshold, strokeStrength, pageBgLuma, pageInk)
+  timings.inkMapMs = now() - inkMapStartedAt
+
+  const roiStartedAt = now()
+  const hasManualMargin = (options.marginTop || 0) > 0 || (options.marginBottom || 0) > 0 || (options.marginLeft || 0) > 0 || (options.marginRight || 0) > 0
+  const effectiveRois = scaledCropRois.length > 0
+    ? scaledCropRois
+    : [hasManualMargin
+      ? detectRoi(ink, workW, workH, {...options, autoCropBorder: false})
+      : detectRoi(ink, workW, workH, options)]
+  timings.roiMs = now() - roiStartedAt
 
   const usedImageIndices = new Set<number>()
 
@@ -3000,6 +3019,7 @@ export function reflowPageFromPixels(
             width: sliceW * textScale,
             height: sliceH * textScale,
           })
+          timings.wordCount++
           return
         }
 
