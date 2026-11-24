@@ -2,6 +2,7 @@ export type ReflowResultCacheEntry<T = unknown> = {
   items: T[],
   pageBackground: string,
   pageTextureUrl?: string,
+  pageTextureBlob?: Blob,
   workWidth?: number,
   workHeight?: number,
   transferStats?: unknown,
@@ -15,6 +16,8 @@ const CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000
 const MAX_ENTRIES = 48
 const MAX_ENTRY_CHARS = 8 * 1024 * 1024
 const MAX_TOTAL_CHARS = 96 * 1024 * 1024
+const MAX_ENTRY_BLOB_BYTES = 12 * 1024 * 1024
+const MAX_TOTAL_BLOB_BYTES = 48 * 1024 * 1024
 
 type StoredEntry<T = unknown> = ReflowResultCacheEntry<T> & {key: string}
 
@@ -50,6 +53,10 @@ function estimateChars(value: unknown): number {
   }
 }
 
+function blobBytes(value: ReflowResultCacheEntry): number {
+  return value.pageTextureBlob instanceof Blob ? value.pageTextureBlob.size : 0
+}
+
 export async function getReflowResult<T>(key: string): Promise<ReflowResultCacheEntry<T> | undefined> {
   const db = await database()
   if (!db) return undefined
@@ -78,7 +85,8 @@ export async function getReflowResult<T>(key: string): Promise<ReflowResultCache
 
 export async function putReflowResult<T>(key: string, entry: ReflowResultCacheEntry<T>): Promise<void> {
   const entryChars = estimateChars(entry)
-  if (entryChars > MAX_ENTRY_CHARS) return
+  const entryBlobBytes = blobBytes(entry)
+  if (entryChars > MAX_ENTRY_CHARS || entryBlobBytes > MAX_ENTRY_BLOB_BYTES) return
   const db = await database()
   if (!db) return
   try {
@@ -95,10 +103,12 @@ export async function putReflowResult<T>(key: string, entry: ReflowResultCacheEn
       entries.push({...entry, key} as StoredEntry)
       entries.sort((a, b) => a.savedAt - b.savedAt)
       let totalChars = entries.reduce((sum, value) => sum + estimateChars(value), 0)
-      while (entries.length > MAX_ENTRIES || totalChars > MAX_TOTAL_CHARS) {
+      let totalBlobBytes = entries.reduce((sum, value) => sum + blobBytes(value), 0)
+      while (entries.length > MAX_ENTRIES || totalChars > MAX_TOTAL_CHARS || totalBlobBytes > MAX_TOTAL_BLOB_BYTES) {
         const removed = entries.shift()
         if (!removed) break
         totalChars -= estimateChars(removed)
+        totalBlobBytes -= blobBytes(removed)
         store.delete(removed.key)
       }
       store.put({...entry, key})

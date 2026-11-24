@@ -719,7 +719,7 @@
           v-else-if="item.type === 'word' && isSpriteWordItem(item)"
           :key="`measure-word-${i}`"
           class="word-block word-block-sprite"
-          :style="wordBlockStyle(item)"
+          :style="wordBlockMeasureStyle(item)"
         />
         <img
           v-else-if="item.type === 'word' && item.src"
@@ -923,6 +923,7 @@ type ReflowCachePayload = {
   items: ReflowItem[],
   pageBackground: string,
   pageTextureUrl?: string,
+  pageTextureBlob?: Blob,
   workWidth?: number,
   workHeight?: number,
   transferStats?: ReflowTransferStats,
@@ -1151,6 +1152,7 @@ export default Vue.extend({
       pageBackground: '#fff',
       lastDetectionKey: '',
       localPageTextureUrl: '',
+      localPageTextureBlob: undefined as Blob | undefined,
       localTextureWidth: 0,
       localTextureHeight: 0,
       objectUrl: '',
@@ -2125,7 +2127,11 @@ export default Vue.extend({
           })
           this.reflowItems = entry.items
           this.pageBackground = entry.pageBackground || '#fff'
-          this.localPageTextureUrl = entry.pageTextureUrl || ''
+          this.revokeLocalPageTextureUrl()
+          this.localPageTextureBlob = entry.pageTextureBlob
+          this.localPageTextureUrl = entry.pageTextureBlob && typeof URL !== 'undefined'
+            ? URL.createObjectURL(entry.pageTextureBlob)
+            : ''
           this.localTextureWidth = entry.workWidth || 0
           this.localTextureHeight = entry.workHeight || 0
           this.transferStats = entry.transferStats as ReflowTransferStats | undefined
@@ -2212,7 +2218,7 @@ export default Vue.extend({
             deskewAnalysisRoi: this.currentDeskewAnalysisRoi()
               ? this.scaleRoi(this.currentDeskewAnalysisRoi() as Roi, reflowScale, imageData.width, imageData.height)
               : undefined,
-            renderMode: 'slices',
+            renderMode: 'sprite',
           }
           const workerStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
           const workerResult = await this.runLocalWorkerReflow(
@@ -2227,10 +2233,11 @@ export default Vue.extend({
             this.pageBackground = workerResult.pageBackground || this.pageBackground
             this.detectedAutoSkewCorrection = workerResult.detectedAutoSkew || 0
             this.transferStats = this.localTransferStats()
-            if (this.localPageTextureUrl && this.localPageTextureUrl !== workerResult.pageTextureUrl && this.localPageTextureUrl.startsWith('blob:')) {
-              URL.revokeObjectURL(this.localPageTextureUrl)
-            }
-            this.localPageTextureUrl = workerResult.pageTextureUrl || ''
+            this.revokeLocalPageTextureUrl()
+            this.localPageTextureBlob = workerResult.pageTextureBlob
+            this.localPageTextureUrl = workerResult.pageTextureBlob && typeof URL !== 'undefined'
+              ? URL.createObjectURL(workerResult.pageTextureBlob)
+              : workerResult.pageTextureUrl || ''
             this.localTextureWidth = workerResult.workWidth || imageData.width
             this.localTextureHeight = workerResult.workHeight || imageData.height
             this.reflowItems = workerResult.items as ReflowItem[]
@@ -2443,6 +2450,7 @@ export default Vue.extend({
                 workWidth: response.workWidth,
                 workHeight: response.workHeight,
                 pageTextureUrl: response.pageTextureUrl,
+                pageTextureBlob: response.pageTextureBlob,
                 detectedAutoSkew: response.detectedAutoSkew || 0,
                 processingTimeMs: response.processingTimeMs || 0,
                 encodingTimeMs: response.encodingTimeMs || 0,
@@ -3060,14 +3068,22 @@ export default Vue.extend({
     isSpriteWordItem(item: ReflowItem): boolean {
       if (item.type !== 'word') return false
       if ((item as any).src) return false
-      return !!((item as any).pageTextureUrl || this.localPageTextureUrl) && (item as any).w !== undefined && (item as any).h !== undefined
+      return !!this.localPageTextureUrl && (item as any).w !== undefined && (item as any).h !== undefined
+    },
+    wordBlockMeasureStyle(item: RenderedWordBlock): object {
+      const dimensions = this.wordBlockDisplayDimensions(item)
+      return {
+        display: 'inline-block',
+        width: `${dimensions.width}px`,
+        height: `${dimensions.height}px`,
+      }
     },
     wordBlockStyle(item: RenderedWordBlock): object {
       const dimensions = this.wordBlockDisplayDimensions(item)
       if (this.isSpriteWordItem(item)) {
-        const textureUrl = item.pageTextureUrl || this.localPageTextureUrl
-        const textureW = item.workWidth || this.localTextureWidth || 1
-        const textureH = item.workHeight || this.localTextureHeight || 1
+        const textureUrl = this.localPageTextureUrl
+        const textureW = this.localTextureWidth || 1
+        const textureH = this.localTextureHeight || 1
         const sliceW = Math.max(1, item.w)
         const sliceH = Math.max(1, item.h)
         const scaleX = dimensions.width / sliceW
@@ -3169,7 +3185,7 @@ export default Vue.extend({
     },
     localReflowResultCacheKey(): string {
       return JSON.stringify({
-        version: 6,
+        version: 7,
         bookId: this.bookId,
         page: this.page.number,
         pageUrl: canonicalPageImageUrl(this.page.url),
@@ -3181,7 +3197,7 @@ export default Vue.extend({
       await putReflowResult(this.localReflowResultCacheKey(), {
         items: this.reflowItems,
         pageBackground: this.pageBackground,
-        pageTextureUrl: this.localPageTextureUrl || undefined,
+        pageTextureBlob: this.localPageTextureBlob,
         workWidth: this.localTextureWidth || undefined,
         workHeight: this.localTextureHeight || undefined,
         transferStats: this.transferStats,
@@ -3935,6 +3951,7 @@ export default Vue.extend({
         URL.revokeObjectURL(this.localPageTextureUrl)
       }
       this.localPageTextureUrl = ''
+      this.localPageTextureBlob = undefined
       this.localTextureWidth = 0
       this.localTextureHeight = 0
     },

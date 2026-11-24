@@ -79,6 +79,23 @@ describe('local reflow persistent result cache', () => {
     }
   })
 
+  test('persists a shared texture blob', async () => {
+    const fake = installFakeIndexedDb()
+    try {
+      const texture = new Blob(['texture'], {type: 'image/png'})
+      await putReflowResult('texture', {
+        items: [{type: 'word', x: 1, y: 2, w: 3, h: 4}],
+        pageBackground: '#fff',
+        pageTextureBlob: texture,
+        savedAt: Date.now(),
+      })
+      const entry = await getReflowResult('texture')
+      expect(entry?.pageTextureBlob).toBe(texture)
+    } finally {
+      fake.restore()
+    }
+  })
+
   test('clears stored reflow results', async () => {
     const fake = installFakeIndexedDb()
     try {

@@ -537,6 +537,7 @@ test('restores a persistent local reflow result without loading the source page'
     reflowItems: [],
     pageBackground: '#fff',
     localPageTextureUrl: '',
+    localPageTextureBlob: undefined,
     localTextureWidth: 0,
     localTextureHeight: 0,
     transferStats: undefined,
@@ -550,10 +551,15 @@ test('restores a persistent local reflow result without loading the source page'
     $debug: jest.fn(),
     $emit: jest.fn(),
   })
+  const originalCreateObjectUrl = URL.createObjectURL
+  URL.createObjectURL = jest.fn(() => 'blob:test-texture')
   const cacheModule = require('@/functions/reflow-result-cache')
   const readSpy = jest.spyOn(cacheModule, 'getReflowResult').mockResolvedValue({
     items: cachedItems,
     pageBackground: '#fefefe',
+    pageTextureBlob: new Blob(['texture'], {type: 'image/png'}),
+    workWidth: 100,
+    workHeight: 200,
     savedAt: Date.now(),
   })
 
@@ -562,11 +568,14 @@ test('restores a persistent local reflow result without loading the source page'
     expect(readSpy).toHaveBeenCalledWith('persistent-key')
     expect(context.reflowItems).toEqual(cachedItems)
     expect(context.pageBackground).toBe('#fefefe')
+    expect(context.localPageTextureBlob).toBeInstanceOf(Blob)
+    expect(context.localPageTextureUrl).toContain('blob:')
     expect(context.loadPageImage).toHaveBeenCalledWith(context.page.url, context.requestId, true, context.page.number)
     expect(context.loading).toBe(false)
     expect(context.repaginate).toHaveBeenCalled()
   } finally {
     readSpy.mockRestore()
+    URL.createObjectURL = originalCreateObjectUrl
   }
 })
 
@@ -1080,20 +1089,37 @@ describe('ReflowedPage display columns layout', () => {
 
     expect(pageInstance.isSpriteWordItem({type: 'image', w: 10, h: 10})).toBe(false)
     expect(pageInstance.isSpriteWordItem({type: 'word', src: 'slice.bmp'})).toBe(false)
-    expect(pageInstance.isSpriteWordItem({type: 'word', pageTextureUrl: 'texture.bmp', w: 20, h: 10})).toBe(true)
+    expect(pageInstance.isSpriteWordItem({type: 'word', pageTextureUrl: 'texture.bmp', w: 20, h: 10})).toBe(false)
 
     pageInstance.localPageTextureUrl = 'local-texture.bmp'
     expect(pageInstance.isSpriteWordItem({type: 'word', w: 20, h: 10})).toBe(true)
   })
 
+  test('measurement sprite blocks reserve geometry without loading the shared texture', () => {
+    const pageInstance: any = {
+      localPageTextureUrl: 'blob:texture',
+      isSpriteWordItem: methods.isSpriteWordItem,
+      wordBlockDisplayDimensions: methods.wordBlockDisplayDimensions,
+      wordBlockMeasureStyle: methods.wordBlockMeasureStyle,
+      pageContentWidth: () => 800,
+      horizontalContentPadding: () => 16,
+      targetWidth: 800,
+      textScale: () => 1,
+    }
+    const style = pageInstance.wordBlockMeasureStyle({type: 'word', x: 10, y: 20, w: 40, h: 18})
+    expect(style).toEqual({display: 'inline-block', width: '40px', height: '18px'})
+    expect(style.backgroundImage).toBeUndefined()
+  })
+
   test('wordBlockStyle generates correct background positioning for sprite word blocks', () => {
     const pageInstance: any = {
-      localPageTextureUrl: 'data:image/bmp;base64,texture123',
+      localPageTextureUrl: 'blob:texture',
       localTextureWidth: 1000,
       localTextureHeight: 2000,
       isSpriteWordItem: methods.isSpriteWordItem,
       wordBlockDisplayDimensions: methods.wordBlockDisplayDimensions,
       wordBlockStyle: methods.wordBlockStyle,
+      wordBlockMeasureStyle: methods.wordBlockMeasureStyle,
       pageContentWidth: () => 800,
       horizontalContentPadding: () => 16,
       targetWidth: 800,
@@ -1102,7 +1128,6 @@ describe('ReflowedPage display columns layout', () => {
 
     const spriteWord: any = {
       type: 'word',
-      pageTextureUrl: 'data:image/bmp;base64,texture123',
       workWidth: 1000,
       workHeight: 2000,
       x: 100,
@@ -1115,7 +1140,7 @@ describe('ReflowedPage display columns layout', () => {
     expect(style.display).toBe('inline-block')
     expect(style.width).toBe('50px')
     expect(style.height).toBe('25px')
-    expect(style.backgroundImage).toBe('url(data:image/bmp;base64,texture123)')
+    expect(style.backgroundImage).toBe('url(blob:texture)')
     expect(style.backgroundPosition).toBe('-100px -200px')
     expect(style.backgroundSize).toBe('1000px 2000px')
     expect(style.backgroundRepeat).toBe('no-repeat')

@@ -61,6 +61,7 @@ export type ReflowAnalysisWorkerResponse = {
   workWidth?: number,
   workHeight?: number,
   pageTextureUrl?: string,
+  pageTextureBlob?: Blob,
   message?: string,
 }
 
@@ -96,38 +97,38 @@ async function handleRequest(request: ReflowAnalysisWorkerRequest): Promise<void
   if (request.type === 'reflow') {
     try {
       const workerStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
-      const canEncodeJpeg = typeof (self as any).OffscreenCanvas !== 'undefined'
-        && typeof (self as any).FileReaderSync !== 'undefined'
+      const canEncodeTexture = typeof (self as any).OffscreenCanvas !== 'undefined'
+      const canEncodeSlices = canEncodeTexture && typeof (self as any).FileReaderSync !== 'undefined'
       const result = reflowPageFromPixels(
         request.pixels,
         request.width,
         request.height,
-        canEncodeJpeg ? {
+        canEncodeSlices || canEncodeTexture ? {
           ...request.options,
-          sliceEncoding: 'raw',
-          deferTextureEncoding: request.options.renderMode === 'sprite',
-        } : request.options,
+          renderMode: canEncodeTexture ? request.options.renderMode : 'slices',
+          sliceEncoding: canEncodeSlices ? 'raw' : 'bmp',
+          deferTextureEncoding: request.options.renderMode === 'sprite' && canEncodeTexture,
+        } : {...request.options, renderMode: 'slices'},
         request.cropRois || [],
         request.manualImageRegions || [],
       )
       const encodingStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
-      const encodingStats = canEncodeJpeg
+      const encodingStats = canEncodeSlices
         ? await encodeSlicesToDataUrls(result.items, request.options.imageQuality)
         : {sliceCount: 0, sourceBytes: 0, blobBytes: 0, dataUrlChars: 0}
-      if (canEncodeJpeg && result.pageTexturePixels && result.workWidth && result.workHeight) {
-        const textureStats = await encodeTextureToDataUrl(
+      if (canEncodeTexture && result.pageTexturePixels && result.workWidth && result.workHeight) {
+        const textureStats = await encodeTextureBlob(
           result.pageTexturePixels,
           result.workWidth,
           result.workHeight,
         )
-        result.pageTextureUrl = textureStats.dataUrl
+        result.pageTextureBlob = textureStats.blob
         encodingStats.sliceCount++
         encodingStats.sourceBytes += textureStats.sourceBytes
         encodingStats.blobBytes += textureStats.blobBytes
-        encodingStats.dataUrlChars += textureStats.dataUrlChars
         delete result.pageTexturePixels
       }
-      const encodingTimeMs = canEncodeJpeg
+      const encodingTimeMs = canEncodeSlices || canEncodeTexture
         ? Math.max(0, Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - encodingStartedAt))
         : 0
       const workerTotalTimeMs = Math.max(0, Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - workerStartedAt))
@@ -148,6 +149,7 @@ async function handleRequest(request: ReflowAnalysisWorkerRequest): Promise<void
         workWidth: result.workWidth,
         workHeight: result.workHeight,
         pageTextureUrl: result.pageTextureUrl,
+        pageTextureBlob: result.pageTextureBlob,
       } as ReflowAnalysisWorkerResponse)
     } catch (error) {
       postMessage({
@@ -159,23 +161,21 @@ async function handleRequest(request: ReflowAnalysisWorkerRequest): Promise<void
   }
 }
 
-async function encodeTextureToDataUrl(
+async function encodeTextureBlob(
   pixels: Uint8ClampedArray,
   width: number,
   height: number,
-): Promise<{dataUrl: string, sourceBytes: number, blobBytes: number, dataUrlChars: number}> {
+): Promise<{blob: Blob, sourceBytes: number, blobBytes: number}> {
   const OffscreenCanvasCtor = (self as any).OffscreenCanvas
   const canvas = new OffscreenCanvasCtor(width, height)
   const context = canvas.getContext('2d')
   if (!context) throw new Error('OffscreenCanvas context is unavailable')
   context.putImageData(new ImageData(pixels, width, height), 0, 0)
   const blob = await canvas.convertToBlob({type: 'image/png'})
-  const dataUrl = new (self as any).FileReaderSync().readAsDataURL(blob) as string
   return {
-    dataUrl,
+    blob,
     sourceBytes: pixels.byteLength,
     blobBytes: blob.size,
-    dataUrlChars: dataUrl.length,
   }
 }
 

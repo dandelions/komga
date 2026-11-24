@@ -72,6 +72,7 @@ export type LocalReflowResult = {
   workWidth?: number,
   workHeight?: number,
   pageTextureUrl?: string,
+  pageTextureBlob?: Blob,
   pageTexturePixels?: Uint8ClampedArray,
   detectedAutoSkew: number,
   processingTimeMs: number,
@@ -2969,9 +2970,6 @@ export function reflowPageFromPixels(
         if (isSpriteMode) {
           items.push({
             type: 'word',
-            pageTextureUrl,
-            workWidth: workW,
-            workHeight: workH,
             x: adjusted.x,
             y: outputTop,
             w: sliceW,
