@@ -105,6 +105,7 @@ async function handleRequest(request: ReflowAnalysisWorkerRequest): Promise<void
         canEncodeJpeg ? {
           ...request.options,
           sliceEncoding: 'raw',
+          deferTextureEncoding: request.options.renderMode === 'sprite',
         } : request.options,
         request.cropRois || [],
         request.manualImageRegions || [],
@@ -113,6 +114,19 @@ async function handleRequest(request: ReflowAnalysisWorkerRequest): Promise<void
       const encodingStats = canEncodeJpeg
         ? await encodeSlicesToDataUrls(result.items, request.options.imageQuality)
         : {sliceCount: 0, sourceBytes: 0, blobBytes: 0, dataUrlChars: 0}
+      if (canEncodeJpeg && result.pageTexturePixels && result.workWidth && result.workHeight) {
+        const textureStats = await encodeTextureToDataUrl(
+          result.pageTexturePixels,
+          result.workWidth,
+          result.workHeight,
+        )
+        result.pageTextureUrl = textureStats.dataUrl
+        encodingStats.sliceCount++
+        encodingStats.sourceBytes += textureStats.sourceBytes
+        encodingStats.blobBytes += textureStats.blobBytes
+        encodingStats.dataUrlChars += textureStats.dataUrlChars
+        delete result.pageTexturePixels
+      }
       const encodingTimeMs = canEncodeJpeg
         ? Math.max(0, Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - encodingStartedAt))
         : 0
@@ -142,6 +156,26 @@ async function handleRequest(request: ReflowAnalysisWorkerRequest): Promise<void
         message: error instanceof Error ? error.message : String(error),
       } as ReflowAnalysisWorkerResponse)
     }
+  }
+}
+
+async function encodeTextureToDataUrl(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+): Promise<{dataUrl: string, sourceBytes: number, blobBytes: number, dataUrlChars: number}> {
+  const OffscreenCanvasCtor = (self as any).OffscreenCanvas
+  const canvas = new OffscreenCanvasCtor(width, height)
+  const context = canvas.getContext('2d')
+  if (!context) throw new Error('OffscreenCanvas context is unavailable')
+  context.putImageData(new ImageData(pixels, width, height), 0, 0)
+  const blob = await canvas.convertToBlob({type: 'image/png'})
+  const dataUrl = new (self as any).FileReaderSync().readAsDataURL(blob) as string
+  return {
+    dataUrl,
+    sourceBytes: pixels.byteLength,
+    blobBytes: blob.size,
+    dataUrlChars: dataUrl.length,
   }
 }
 

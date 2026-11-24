@@ -306,6 +306,12 @@ describe('local-reflow-engine', () => {
       expect(Array.from(output.filter((_, index) => index % 4 !== 3))).toEqual(expected.flatMap(value => [value, value, value]))
     })
 
+    test('removes weak high-contrast edge pixels instead of leaving gray burrs', () => {
+      expect(contrastEnhancedTextColor(204, 204, 204, 220, false)).toEqual({r: 255, g: 255, b: 255})
+      expect(contrastEnhancedTextColor(180, 180, 180, 220, false).r).toBeLessThan(255)
+      expect(contrastEnhancedTextColor(20, 20, 20, 0, true).r).toBeGreaterThan(0)
+    })
+
     test('inverts light-page foreground pixels for dark display before slice rendering', () => {
       const pixels = new Uint8ClampedArray([
         255, 255, 255, 255,

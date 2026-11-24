@@ -43,6 +43,7 @@ export type LocalReflowOptions = {
   deskewAnalysisRoi?: Roi | null,
   renderMode?: 'sprite' | 'slices',
   sliceEncoding?: 'bmp' | 'raw',
+  deferTextureEncoding?: boolean,
 }
 
 export type LocalReflowItem = {
@@ -71,6 +72,7 @@ export type LocalReflowResult = {
   workWidth?: number,
   workHeight?: number,
   pageTextureUrl?: string,
+  pageTexturePixels?: Uint8ClampedArray,
   detectedAutoSkew: number,
   processingTimeMs: number,
   encodingTimeMs?: number,
@@ -788,6 +790,7 @@ export function detectImageRegions(
   const isImageTile = new Uint8Array(tilesX * tilesY)
   const isDark = backgroundLuma < 128
   const inkThreshold = adaptiveInkThreshold(threshold, backgroundLuma)
+  const sampleStep = width * height > 3_000_000 ? 2 : 1
 
   for (let ty = 0; ty < tilesY; ty++) {
     for (let tx = 0; tx < tilesX; tx++) {
@@ -802,8 +805,8 @@ export function detectImageRegions(
       let sumLuma = 0
       let sumLumaSq = 0
 
-      for (let y = y0; y < y0 + th; y++) {
-        for (let x = x0; x < x0 + tw; x++) {
+      for (let y = y0; y < y0 + th; y += sampleStep) {
+        for (let x = x0; x < x0 + tw; x += sampleStep) {
           const idx = (y * width + x) * 4
           const r = pixels[idx]
           const g = pixels[idx + 1]
@@ -999,7 +1002,7 @@ function buildTextureNormalizationLut(
   const bgVal = options.darkDisplay ? 0 : 255
   const fgVal = options.darkDisplay ? 255 : 0
   const inkThresh = adaptiveInkThreshold(threshold, pageBgLuma)
-  const baseMinDelta = 8
+  const baseMinDelta = 16
   const maxDelta = sourceDark ? 255 - pageBgLuma : pageBgLuma
   const monochrome = options.matchBackgroundMode === 'monochrome'
   for (let luma = 0; luma < 256; luma++) {
@@ -1603,7 +1606,7 @@ export function contrastEnhancedTextColor(
   const sourceDark = backgroundLuma < 128
   const sourceLuma = Math.min(255, Math.max(0, pixelLuma(r, g, b)))
   const delta = sourceDark ? sourceLuma - backgroundLuma : backgroundLuma - sourceLuma
-  const baseMinDelta = 8.0
+  const baseMinDelta = 16.0
   if (delta <= baseMinDelta) {
     const bg = darkDisplay ? 0 : 255
     return {r: bg, g: bg, b: bg}
@@ -2446,6 +2449,7 @@ export function reflowPageFromPixels(
   const pageColorStartedAt = now()
   const isSpriteMode = options.renderMode === 'sprite'
   let pageTextureUrl = ''
+  let pageTexturePixels: Uint8ClampedArray | undefined
   if (isSpriteMode) {
     const texturePixels = applyGlobalPageTextureProcessing(
       workPixels,
@@ -2456,7 +2460,8 @@ export function reflowPageFromPixels(
       sourceDark,
       threshold,
     )
-    pageTextureUrl = rgbaToBmpDataUrl(texturePixels, workW, workH, workW, 0, 0)
+    if (options.deferTextureEncoding) pageTexturePixels = texturePixels
+    else pageTextureUrl = rgbaToBmpDataUrl(texturePixels, workW, workH, workW, 0, 0)
   }
 
   // Normalize text colors once for the whole page; detection still uses workPixels.
@@ -2510,7 +2515,7 @@ export function reflowPageFromPixels(
     } else if (isHighContrast && options.matchBackgroundMode !== 'original') {
       const bgVal = 255
       const inkThresh = adaptiveInkThreshold(threshold, pageBgLuma)
-      const baseMinDelta = 8
+      const baseMinDelta = 16
       const maxDelta = sourceDark ? 255 - pageBgLuma : pageBgLuma
       for (let i = 0; i < sliceW * sliceH; i++) {
         const pIdx = i * 4
@@ -3155,6 +3160,7 @@ export function reflowPageFromPixels(
     workWidth: workW,
     workHeight: workH,
     pageTextureUrl: isSpriteMode ? pageTextureUrl : undefined,
+    pageTexturePixels: isSpriteMode ? pageTexturePixels : undefined,
     detectedAutoSkew,
     processingTimeMs: Date.now() - startedAt,
     items,

@@ -2212,7 +2212,7 @@ export default Vue.extend({
             deskewAnalysisRoi: this.currentDeskewAnalysisRoi()
               ? this.scaleRoi(this.currentDeskewAnalysisRoi() as Roi, reflowScale, imageData.width, imageData.height)
               : undefined,
-            renderMode: 'slices',
+            renderMode: 'sprite',
           }
           const workerStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
           const workerResult = await this.runLocalWorkerReflow(
@@ -3169,7 +3169,7 @@ export default Vue.extend({
     },
     localReflowResultCacheKey(): string {
       return JSON.stringify({
-        version: 4,
+        version: 5,
         bookId: this.bookId,
         page: this.page.number,
         pageUrl: canonicalPageImageUrl(this.page.url),
