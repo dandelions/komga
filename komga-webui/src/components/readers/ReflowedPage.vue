@@ -3079,29 +3079,24 @@ export default Vue.extend({
       }
     },
     wordBlockStyle(item: RenderedWordBlock): object {
-      const dimensions = this.wordBlockDisplayDimensions(item)
       if (this.isSpriteWordItem(item)) {
+        const textureScale = this.textScale()
         const textureUrl = this.localPageTextureUrl
         const textureW = this.localTextureWidth || 1
         const textureH = this.localTextureHeight || 1
-        const sliceW = Math.max(1, item.w)
-        const sliceH = Math.max(1, item.h)
-        const scaleX = dimensions.width / sliceW
-        const scaleY = dimensions.height / sliceH
-        const bgWidth = Math.round(textureW * scaleX)
-        const bgHeight = Math.round(textureH * scaleY)
-        const bgPosX = Math.round((item.x || 0) * scaleX)
-        const bgPosY = Math.round((item.y || 0) * scaleY)
+        const width = Math.max(1, item.w * textureScale)
+        const height = Math.max(1, item.h * textureScale)
         return {
           display: 'inline-block',
-          width: `${dimensions.width}px`,
-          height: `${dimensions.height}px`,
+          width: `${width}px`,
+          height: `${height}px`,
           backgroundImage: `url(${textureUrl})`,
-          backgroundPosition: `-${bgPosX}px -${bgPosY}px`,
-          backgroundSize: `${bgWidth}px ${bgHeight}px`,
+          backgroundPosition: `${-(item.x || 0) * textureScale}px ${-(item.y || 0) * textureScale}px`,
+          backgroundSize: `${textureW * textureScale}px ${textureH * textureScale}px`,
           backgroundRepeat: 'no-repeat',
         }
       }
+      const dimensions = this.wordBlockDisplayDimensions(item)
       return {
         width: `${dimensions.width}px`,
         height: `${dimensions.height}px`,

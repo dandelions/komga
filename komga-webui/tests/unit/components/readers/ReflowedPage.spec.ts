@@ -1159,6 +1159,26 @@ describe('ReflowedPage display columns layout', () => {
     expect(serverStyle.height).toBe('25px')
   })
 
+  test('sprite word blocks use a shared fractional scale without per-item rounding', () => {
+    const pageInstance: any = {
+      localPageTextureUrl: 'blob:texture',
+      localTextureWidth: 1000,
+      localTextureHeight: 2000,
+      isSpriteWordItem: methods.isSpriteWordItem,
+      wordBlockStyle: methods.wordBlockStyle,
+      textScale: () => 0.73,
+    }
+    const first = pageInstance.wordBlockStyle({type: 'word', x: 100, y: 200, w: 50, h: 25})
+    const second = pageInstance.wordBlockStyle({type: 'word', x: 157, y: 200, w: 37, h: 25})
+
+    expect(first.width).toBe('36.5px')
+    expect(first.height).toBe('18.25px')
+    expect(first.backgroundSize).toBe('730px 1460px')
+    expect(first.backgroundPosition).toBe('-73px -146px')
+    expect(second.backgroundSize).toBe(first.backgroundSize)
+    expect(second.backgroundPosition).toBe('-114.61px -146px')
+  })
+
   test('revokeLocalPageTextureUrl properly revokes blob URLs and clears state', () => {
     const originalRevoke = URL.revokeObjectURL
     const revokedUrls: string[] = []
