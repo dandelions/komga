@@ -113,6 +113,64 @@ describe('image enhancement', () => {
     expect(calculateEnhancedForeground(200, 255, 8)).toBe(1)
   })
 
+  test('strokeStrength thickens thin strokes outward while keeping enclosed counters open', () => {
+    // 7x7 grid with a 3x3 hollow box at x=2..4, y=2..4 (center 3,3 is enclosed cavity)
+    const width = 7
+    const height = 7
+    const data = grayPixels(...Array(width * height).fill(255))
+    const setGray = (x: number, y: number, v: number) => {
+      const p = (y * width + x) * 4
+      data[p] = v
+      data[p + 1] = v
+      data[p + 2] = v
+    }
+    for (let y = 2; y <= 4; y++) {
+      for (let x = 2; x <= 4; x++) {
+        if (x === 3 && y === 3) continue
+        setGray(x, y, 20)
+      }
+    }
+
+    enhanceTextContrastData(data, width, height, {
+      enabled: false,
+      strokeStrength: 1,
+      backgroundLuma: 255,
+    })
+
+    // Exterior neighbor (1, 3) next to left edge is thickened
+    expect(data[(3 * width + 1) * 4]).toBe(0)
+    // Enclosed cavity (3, 3) stays open white
+    expect(data[(3 * width + 3) * 4]).toBe(255)
+    // Outer margin (0, 0) stays white
+    expect(data[0]).toBe(255)
+  })
+
+  test('strokeStrength applies fractional smoothing and preserves colored pixels', () => {
+    const data = new Uint8ClampedArray([
+      255, 255, 255, 255,
+      255, 255, 255, 255,
+      20, 20, 20, 255,
+      220, 40, 40, 255,
+      255, 255, 255, 255,
+    ])
+
+    enhanceTextContrastData(data, 5, 1, {
+      enabled: false,
+      strokeStrength: 0.5,
+      backgroundLuma: 255,
+    })
+
+    // Direct orthogonal neighbor of ink at x=2 is partially darkened
+    expect(data[4]).toBeLessThan(255)
+    expect(data[4]).toBeGreaterThan(100)
+    // Distant background pixel remains white
+    expect(data[0]).toBe(255)
+    // Chromatic red pixel is untouched
+    expect(data[12]).toBe(220)
+    expect(data[13]).toBe(40)
+    expect(data[14]).toBe(40)
+  })
+
   test('contrast enhancement enabled bleaches background while preserving smooth antialiasing without clipping thin strokes', () => {
     // 255 (paper), 249 (slight paper tint), 235 (faint thin stroke/antialiased edge), 180 (stroke edge), 40 (core ink)
     const data = grayPixels(255, 249, 235, 180, 40)

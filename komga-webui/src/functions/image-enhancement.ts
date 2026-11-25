@@ -20,7 +20,9 @@ export function enhanceTextContrast(
   height: number,
   options: TextContrastOptions = {},
 ) {
-  if (!options.enabled && !options.nightDisplay && !options.matchBackground && !options.matchBackgroundMode) return
+  const hasStroke = Number(options.strokeStrength) > 0
+  const hasContrastLevel = Number.isFinite(Number(options.contrastLevel)) && Number(options.contrastLevel) !== 100
+  if (!options.enabled && !options.nightDisplay && !options.matchBackground && !options.matchBackgroundMode && !hasStroke && !hasContrastLevel) return
   if (width <= 0 || height <= 0) return
 
   const imageData = context.getImageData(0, 0, width, height)
@@ -107,80 +109,274 @@ export function enhanceTextContrastData(
   const maxDelta = stats.sourceDark ? 255 - stats.background : stats.background
   const binaryMinDelta = Math.min(12, Math.max(3, maxDelta * 0.025))
   const stroke = Math.max(0, Math.min(3, Number(options.strokeStrength) || 0))
-  const strokeBoost = stroke > 0 ? Math.min(0.65, stroke * 0.45) : 0
   const contrastLevel = Math.max(50, Math.min(200, Number(options.contrastLevel) || 100)) / 100
   const applyContrast = (value: number): number => {
     const centered = (value - 128) * contrastLevel + 128
     return Math.max(0, Math.min(255, centered))
   }
   const invertForeground = targetDark !== stats.sourceDark
+  const runContrastPipeline = options.enabled || options.nightDisplay || options.matchBackground ||
+    outputMode === 'monochrome' || outputMode === 'original' || contrastLevel !== 1
 
-  for (let i = 0; i < width * height; i++) {
-    const offset = i * 4
-    if (data[offset + 3] === 0) {
-      setGrayPixel(data, offset, backgroundValue)
-      continue
-    }
+  if (runContrastPipeline) {
+    for (let i = 0; i < width * height; i++) {
+      const offset = i * 4
+      if (data[offset + 3] === 0) {
+        setGrayPixel(data, offset, backgroundValue)
+        continue
+      }
 
-    if (matchedForeground && !matchedForeground[i]) {
-      setGrayPixel(data, offset, backgroundValue)
-      continue
-    }
+      if (matchedForeground && !matchedForeground[i]) {
+        setGrayPixel(data, offset, backgroundValue)
+        continue
+      }
 
-    const luma = pixelLuma(data, offset)
-    const delta = stats.sourceDark ? luma - stats.background : stats.background - luma
+      const luma = pixelLuma(data, offset)
+      const delta = stats.sourceDark ? luma - stats.background : stats.background - luma
 
-    if (outputMode === 'original') {
-      // Background following replaces the block background. Preserve source
-      // RGB only when its polarity already matches the target display; dark
-      // source slices on a light display must invert the detected glyph.
-      if (options.matchBackground && !options.enabled) {
-        const outputLuma = invertForeground ? 255 - luma : luma
+      if (outputMode === 'original') {
+        if (options.matchBackground && !options.enabled) {
+          const outputLuma = invertForeground ? 255 - luma : luma
+          setColorPixelWithLuma(data, offset, outputLuma)
+          continue
+        }
+
+        let outputLuma = luma
+        if (options.enabled) {
+          if (delta <= baseMinDelta) {
+            if (matchedForeground?.[i]) setOpaquePixel(data, offset)
+            else setGrayPixel(data, offset, backgroundValue)
+            continue
+          }
+          const foreground = calculateEnhancedForeground(delta, maxDelta, baseMinDelta)
+          outputLuma = targetDark
+            ? 255 * foreground
+            : 255 * (1 - foreground)
+          outputLuma = applyContrast(outputLuma)
+        } else {
+          if (targetDark !== stats.sourceDark) outputLuma = 255 - outputLuma
+          if (contrastLevel !== 1) outputLuma = applyContrast(outputLuma)
+        }
         setColorPixelWithLuma(data, offset, outputLuma)
         continue
       }
 
-      let outputLuma = luma
-      if (options.enabled) {
-        if (delta <= baseMinDelta) {
-          if (matchedForeground?.[i]) setOpaquePixel(data, offset)
-          else setGrayPixel(data, offset, backgroundValue)
-          continue
-        }
-        let foreground = calculateEnhancedForeground(delta, maxDelta, baseMinDelta)
-        if (strokeBoost > 0 && foreground > 0) foreground = Math.min(1, foreground + (1 - foreground) * strokeBoost)
-        outputLuma = targetDark
-          ? 255 * foreground
-          : 255 * (1 - foreground)
-        outputLuma = applyContrast(outputLuma)
-      } else if (targetDark !== stats.sourceDark) {
-        outputLuma = 255 - luma
-      }
-      setColorPixelWithLuma(data, offset, outputLuma)
-      continue
-    }
-
-    if (outputMode === 'monochrome') {
-      const foreground = matchedForeground ? true : delta > binaryMinDelta
-      setGrayPixel(data, offset, foreground ? foregroundValue : backgroundValue)
-      continue
-    }
-
-    if (options.enabled) {
-      if (delta <= baseMinDelta) {
-        setGrayPixel(data, offset, backgroundValue)
+      if (outputMode === 'monochrome') {
+        const foreground = matchedForeground ? true : delta > binaryMinDelta
+        setGrayPixel(data, offset, foreground ? foregroundValue : backgroundValue)
         continue
       }
-      let foreground = calculateEnhancedForeground(delta, maxDelta, baseMinDelta)
-      if (strokeBoost > 0 && foreground > 0) foreground = Math.min(1, foreground + (1 - foreground) * strokeBoost)
-      const output = applyContrast(targetDark
-        ? Math.round(255 * foreground)
-        : Math.round(255 * (1 - foreground)))
-      setGrayPixel(data, offset, output)
-      continue
-    }
 
-    setGrayPixel(data, offset, invertForeground ? 255 - luma : luma)
+      if (options.enabled) {
+        if (delta <= baseMinDelta) {
+          setGrayPixel(data, offset, backgroundValue)
+          continue
+        }
+        const foreground = calculateEnhancedForeground(delta, maxDelta, baseMinDelta)
+        const output = applyContrast(targetDark
+          ? Math.round(255 * foreground)
+          : Math.round(255 * (1 - foreground)))
+        setGrayPixel(data, offset, output)
+        continue
+      }
+
+      const baseLuma = invertForeground ? 255 - luma : luma
+      if (contrastLevel !== 1) {
+        const adjusted = Math.round(applyContrast(baseLuma))
+        if (Math.abs(data[offset] - data[offset + 1]) <= 12 && Math.abs(data[offset + 1] - data[offset + 2]) <= 12) {
+          setGrayPixel(data, offset, adjusted)
+        } else {
+          setColorPixelWithLuma(data, offset, adjusted)
+        }
+      } else if (invertForeground) {
+        setGrayPixel(data, offset, baseLuma)
+      }
+    }
+  }
+
+  if (stroke > 0) {
+    const outputIsDark = options.enabled || options.nightDisplay || options.matchBackground || outputMode === 'monochrome'
+      ? targetDark
+      : stats.sourceDark
+    applyStrokeStrengthToData(data, width, height, stroke, outputIsDark)
+  }
+}
+
+function isChromaticInkPixel(r: number, g: number, b: number): boolean {
+  const maxChannel = Math.max(r, g, b)
+  const minChannel = Math.min(r, g, b)
+  return maxChannel - minChannel >= 20 && maxChannel > 30
+}
+
+function exteriorBackgroundMask(mask: Uint8Array, width: number, height: number): Uint8Array {
+  const size = width * height
+  const exterior = new Uint8Array(size)
+  const queue = new Int32Array(size)
+  let head = 0
+  let tail = 0
+
+  const seed = (idx: number) => {
+    if (mask[idx] !== 0 || exterior[idx] !== 0) return
+    exterior[idx] = 1
+    queue[tail++] = idx
+  }
+
+  for (let x = 0; x < width; x++) {
+    seed(x)
+    seed(size - width + x)
+  }
+  for (let y = 1; y < height - 1; y++) {
+    const rowStart = y * width
+    seed(rowStart)
+    seed(rowStart + width - 1)
+  }
+
+  while (head < tail) {
+    const idx = queue[head++]
+    const x = idx % width
+    if (x > 0) {
+      const left = idx - 1
+      if (mask[left] === 0 && exterior[left] === 0) {
+        exterior[left] = 1
+        queue[tail++] = left
+      }
+    }
+    if (x < width - 1) {
+      const right = idx + 1
+      if (mask[right] === 0 && exterior[right] === 0) {
+        exterior[right] = 1
+        queue[tail++] = right
+      }
+    }
+    if (idx >= width) {
+      const up = idx - width
+      if (mask[up] === 0 && exterior[up] === 0) {
+        exterior[up] = 1
+        queue[tail++] = up
+      }
+    }
+    if (idx + width < size) {
+      const down = idx + width
+      if (mask[down] === 0 && exterior[down] === 0) {
+        exterior[down] = 1
+        queue[tail++] = down
+      }
+    }
+  }
+  return exterior
+}
+
+export function applyStrokeStrengthToData(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+  strokeStrength: number,
+  darkBackground: boolean = false,
+) {
+  const strength = clamp(Number(strokeStrength) || 0, 0, 3)
+  if (strength <= 0 || width <= 0 || height <= 0) return
+
+  const total = width * height
+  const strokeThreshold = 203
+  const darkInkLimit = 255 - strokeThreshold
+  const mask = new Uint8Array(total)
+  const indexes: number[] = []
+
+  for (let i = 0; i < total; i++) {
+    const p = i * 4
+    if (data[p + 3] === 0) continue
+    const r = data[p]
+    const g = data[p + 1]
+    const b = data[p + 2]
+    if (isChromaticInkPixel(r, g, b)) continue
+    const luma = (0.299 * r + 0.587 * g + 0.114 * b) | 0
+    const isInk = darkBackground ? luma > darkInkLimit : luma < strokeThreshold
+    if (isInk) {
+      mask[i] = 1
+      indexes.push(i)
+    }
+  }
+  if (indexes.length === 0) return
+
+  const exterior = exteriorBackgroundMask(mask, width, height)
+  const fullPasses = Math.floor(strength)
+  let activeIndexes = indexes
+
+  for (let pass = 0; pass < fullPasses; pass++) {
+    const expanded = new Uint8Array(mask)
+    const nextIndexes: number[] = []
+    for (let i = 0; i < activeIndexes.length; i++) {
+      const index = activeIndexes[i]
+      nextIndexes.push(index)
+      const y = (index / width) | 0
+      const x = index - y * width
+      for (let dy = -1; dy <= 1; dy++) {
+        const ny = y + dy
+        if (ny < 0 || ny >= height) continue
+        const nRow = ny * width
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = x + dx
+          if (nx < 0 || nx >= width) continue
+          const nIdx = nRow + nx
+          if (expanded[nIdx] !== 0 || !exterior[nIdx]) continue
+          const p = nIdx * 4
+          if (isChromaticInkPixel(data[p], data[p + 1], data[p + 2])) continue
+          expanded[nIdx] = 1
+          nextIndexes.push(nIdx)
+        }
+      }
+    }
+    mask.set(expanded)
+    activeIndexes = nextIndexes
+  }
+
+  const fg = darkBackground ? 255 : 0
+  const setForeground = (index: number, influence: number) => {
+    const p = index * 4
+    if (isChromaticInkPixel(data[p], data[p + 1], data[p + 2])) return
+    const amount = clamp(influence, 0, 1)
+    data[p] = Math.round(data[p] + (fg - data[p]) * amount)
+    data[p + 1] = Math.round(data[p + 1] + (fg - data[p + 1]) * amount)
+    data[p + 2] = Math.round(data[p + 2] + (fg - data[p + 2]) * amount)
+  }
+
+  if (fullPasses > 0) {
+    for (let i = 0; i < indexes.length; i++) setForeground(indexes[i], 1)
+    for (let i = 0; i < activeIndexes.length; i++) setForeground(activeIndexes[i], 1)
+  }
+
+  const fractional = strength - fullPasses
+  if (fractional <= 0) return
+
+  const orthoAmount = fractional * 0.7
+  const diagAmount = fractional * 0.45
+
+  for (let i = 0; i < activeIndexes.length; i++) {
+    const index = activeIndexes[i]
+    if (mask[index] !== 0) setForeground(index, fractional)
+  }
+
+  for (let y = 0; y < height; y++) {
+    const rowStart = y * width
+    for (let x = 0; x < width; x++) {
+      const index = rowStart + x
+      if (exterior[index] === 0 || mask[index] !== 0) continue
+      const leftInk = x > 0 && mask[index - 1] !== 0
+      const rightInk = x < width - 1 && mask[index + 1] !== 0
+      const upInk = y > 0 && mask[index - width] !== 0
+      const downInk = y < height - 1 && mask[index + width] !== 0
+      if (leftInk || rightInk || upInk || downInk) {
+        setForeground(index, orthoAmount)
+        continue
+      }
+      const upLeftInk = x > 0 && y > 0 && mask[index - width - 1] !== 0
+      const upRightInk = x < width - 1 && y > 0 && mask[index - width + 1] !== 0
+      const downLeftInk = x > 0 && y < height - 1 && mask[index + width - 1] !== 0
+      const downRightInk = x < width - 1 && y < height - 1 && mask[index + width + 1] !== 0
+      if (upLeftInk || upRightInk || downLeftInk || downRightInk) {
+        setForeground(index, diagAmount)
+      }
+    }
   }
 }
 

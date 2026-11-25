@@ -784,7 +784,7 @@
             <v-list-item v-if="!activeReflowMode">
               <v-slider
                 v-model="readerStrokeStrength"
-                label="Stroke"
+                label="笔画加粗"
                 min="0"
                 max="3"
                 step="0.1"

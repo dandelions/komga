@@ -500,11 +500,11 @@ export default Vue.extend({
       const enhance = this.contrastEnhancement || this.bleachText || this.strokeStrength > 0 || this.contrastLevel !== 100
       if (context && enhance) {
         enhanceTextContrast(context, canvas.width, canvas.height, {
-          enabled: enhance,
+          enabled: this.contrastEnhancement || this.bleachText,
           strokeStrength: this.strokeStrength,
           contrastLevel: this.contrastLevel,
           matchBackgroundMode: 'grayscale',
-          connectedForegroundOnly: true,
+          connectedForegroundOnly: this.contrastEnhancement || this.bleachText,
         })
       }
       return canvas
