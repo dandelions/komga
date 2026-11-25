@@ -2193,3 +2193,68 @@ describe('local reflow list marker layout', () => {
     expect(indent.sourceWidth).toBeGreaterThan(10)
   })
 })
+
+describe('local reflow vertical text layout', () => {
+  test('splits vertical columns into individual reflowable glyphs in RTL/LTR reading order', () => {
+    const width = 400
+    const height = 600
+    const pixels = new Uint8ClampedArray(width * height * 4)
+    pixels.fill(255)
+    for (let i = 3; i < pixels.length; i += 4) pixels[i] = 255
+
+    const drawGlyph = (x: number, y: number, w: number, h: number) => {
+      for (let yy = y; yy < y + h; yy++) {
+        for (let xx = x; xx < x + w; xx++) {
+          const offset = (yy * width + xx) * 4
+          pixels[offset] = 15
+          pixels[offset + 1] = 15
+          pixels[offset + 2] = 15
+        }
+      }
+    }
+
+    // Two vertical columns: right column (x=280) and left column (x=140)
+    for (let row = 0; row < 6; row++) {
+      drawGlyph(280, 60 + row * 48, 32, 32)
+      drawGlyph(140, 60 + row * 48, 32, 32)
+    }
+
+    const baseOptions: LocalReflowOptions = {
+      targetWidth: 400,
+      autoCropBorder: true,
+      textScale: 100,
+      columnCount: 1,
+      skewCorrection: 0,
+      threshold: 185,
+      columnGap: 15,
+      wordGap: 3,
+      strokeStrength: 0.1,
+      contrastEnhancement: true,
+      matchBackground: false,
+      matchBackgroundMode: 'grayscale',
+      blockSpacing: 6,
+      verticalText: true,
+      verticalDirection: 'rtl',
+      marginTop: 0,
+      marginRight: 0,
+      marginBottom: 0,
+      marginLeft: 0,
+      darkDisplay: false,
+      renderMode: 'sprite',
+    }
+
+    const rtl = reflowPageFromPixels(pixels, width, height, baseOptions)
+    const rtlWords = rtl.items.filter(item => item.type === 'word') as any[]
+    expect(rtlWords).toHaveLength(12)
+    expect(Math.max(...rtlWords.map(w => w.h))).toBeLessThan(60)
+    expect(rtlWords[0].x).toBeGreaterThan(240)
+    expect(rtlWords[6].x).toBeLessThan(180)
+    expect(rtlWords[0].y).toBeLessThan(rtlWords[1].y)
+
+    const ltr = reflowPageFromPixels(pixels, width, height, {...baseOptions, verticalDirection: 'ltr'})
+    const ltrWords = ltr.items.filter(item => item.type === 'word') as any[]
+    expect(ltrWords).toHaveLength(12)
+    expect(ltrWords[0].x).toBeLessThan(180)
+    expect(ltrWords[6].x).toBeGreaterThan(240)
+  })
+})

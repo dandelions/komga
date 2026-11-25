@@ -1,5 +1,7 @@
 import {detectAutoDeskewAngle} from './auto-deskew'
 import {calculateEnhancedForeground, removeDocumentBackground} from './image-enhancement'
+import {mergeVerticalColumnBands} from './vertical-reflow'
+import {hasVerticalParagraphBlankTail, verticalReflowLineIndent} from './reflow-stream'
 
 export type Roi = {
   x: number,
@@ -1658,6 +1660,294 @@ export function horizontalCharacterSourceHeight(blocks: WordBlock[]): number {
   return Math.max(8.0, medianNumber(heights))
 }
 
+function isVerticalRuleLikeBlock(block: Roi): boolean {
+  return (block.h <= 3 && block.w >= 48) || (block.w <= 3 && block.h >= 48)
+}
+
+function verticalCharacterSourceHeight(blocks: WordBlock[]): number {
+  const heights = blocks
+    .filter(b => b.w >= 2 && b.h >= 2 && !isVerticalRuleLikeBlock(b))
+    .map(b => Math.min(b.h, Math.max(b.w * 1.8, b.w + 4.0)))
+  if (heights.length === 0) return Math.max(8.0, blocks[0]?.w || 8.0)
+  return Math.max(8.0, medianNumber(heights))
+}
+
+function trimVerticalInkBlock(
+  ink: Uint8Array,
+  width: number,
+  height: number,
+  block: Roi,
+): Roi | null {
+  const roi = clampRoi(block, width, height)
+  let minX = width
+  let minY = height
+  let maxX = -1
+  let maxY = -1
+
+  for (let y = roi.y; y < roi.y + roi.h; y++) {
+    const row = y * width
+    for (let x = roi.x; x < roi.x + roi.w; x++) {
+      if (ink[row + x] === 0) continue
+      if (x < minX) minX = x
+      if (y < minY) minY = y
+      if (x > maxX) maxX = x
+      if (y > maxY) maxY = y
+    }
+  }
+  if (maxX < minX || maxY < minY) return null
+  return clampRoi({x: minX - 1, y: minY - 1, w: maxX - minX + 3, h: maxY - minY + 3}, width, height)
+}
+
+function unionRoi(a: Roi, b: Roi): Roi {
+  const left = Math.min(a.x, b.x)
+  const top = Math.min(a.y, b.y)
+  const right = Math.max(a.x + a.w, b.x + b.w)
+  const bottom = Math.max(a.y + a.h, b.y + b.h)
+  return {x: left, y: top, w: right - left, h: bottom - top}
+}
+
+function countInkInRect(
+  ink: Uint8Array,
+  width: number,
+  height: number,
+  xStart: number,
+  xEnd: number,
+  yStart: number,
+  yEnd: number,
+): number {
+  let count = 0
+  const y0 = Math.max(0, yStart)
+  const y1 = Math.min(height, yEnd)
+  const x0 = Math.max(0, xStart)
+  const x1 = Math.min(width, xEnd)
+  for (let y = y0; y < y1; y++) {
+    const row = y * width
+    for (let x = x0; x < x1; x++) {
+      if (ink[row + x] !== 0) count++
+    }
+  }
+  return count
+}
+
+function shouldMergeVerticalGlyphFragments(
+  top: Roi,
+  bottom: Roi,
+  charHeight: number,
+  medianWidth: number,
+  ink: Uint8Array,
+  width: number,
+  height: number,
+  wordGapOption: number,
+): boolean {
+  const rawGap = bottom.y - (top.y + top.h)
+  const gap = Math.max(0, rawGap)
+  const wordGap = clamp(wordGapOption || 3, 1, 30)
+  const baseInternalGap = Math.max(3.0, Math.min(charHeight * 0.5, wordGap * 4.0))
+  const highResGap = charHeight >= 36
+    ? Math.max(baseInternalGap, Math.min(charHeight * 0.4, Math.max(30.0, wordGap * 8.0)))
+    : baseInternalGap
+  const maxInternalGap = Math.min(charHeight * 0.5, highResGap)
+  if (rawGap > maxInternalGap) return false
+
+  const union = unionRoi(top, bottom)
+  const hasSmallFragment = top.h < charHeight * 0.58 || bottom.h < charHeight * 0.58 || top.w < medianWidth * 0.72 || bottom.w < medianWidth * 0.72
+  if (union.h > charHeight * (hasSmallFragment ? 2.05 : 1.42)) return false
+
+  const overlap = Math.max(0, Math.min(top.x + top.w, bottom.x + bottom.w) - Math.max(top.x, bottom.x))
+  const minWidth = Math.max(1, Math.min(top.w, bottom.w))
+  const centerGap = Math.abs((top.x + top.w / 2.0) - (bottom.x + bottom.w / 2.0))
+  const aligned = overlap >= minWidth * 0.2 || centerGap <= medianWidth * 0.68 || hasSmallFragment
+  if (!aligned) return false
+
+  const strictGapLimit = Math.max(3.0, Math.min(charHeight * 0.28, wordGap * 2.6))
+  if (gap <= strictGapLimit) return true
+  if (!(hasSmallFragment && union.h <= charHeight * 1.35)) return false
+
+  const search = Math.max(3, Math.min(10, Math.round(charHeight * 0.25)))
+  const xStart = Math.min(top.x, bottom.x)
+  const xEnd = Math.max(top.x + top.w, bottom.x + bottom.w)
+  if (countInkInRect(ink, width, height, xStart, xEnd, Math.max(top.y, top.y + top.h - search), top.y + top.h) <= 0) {
+    return false
+  }
+  return countInkInRect(ink, width, height, xStart, xEnd, bottom.y, Math.min(bottom.y + bottom.h, bottom.y + search)) > 0
+}
+
+function mergeVerticalGlyphFragments(
+  blocks: Roi[],
+  ink: Uint8Array,
+  width: number,
+  height: number,
+  wordGapOption: number,
+): Roi[] {
+  if (blocks.length <= 1) return blocks
+  const medianWidth = Math.max(1.0, medianNumber(blocks.map(b => b.w)))
+  const detectedCharHeight = verticalCharacterSourceHeight(blocks)
+  const charHeight = Math.max(detectedCharHeight, Math.min(medianWidth * 1.2, medianWidth + 6))
+  const sorted = [...blocks].sort((a, b) => a.y - b.y || a.x - b.x)
+  const merged: Roi[] = []
+  let current = sorted[0]
+
+  for (let i = 1; i < sorted.length; i++) {
+    const next = sorted[i]
+    if (shouldMergeVerticalGlyphFragments(current, next, charHeight, medianWidth, ink, width, height, wordGapOption)) {
+      current = unionRoi(current, next)
+    } else {
+      merged.push(current)
+      current = next
+    }
+  }
+  merged.push(current)
+  return merged
+}
+
+function mergeVerticalAdornmentBlocks(blocks: Roi[], columnGapOption: number): Roi[] {
+  if (blocks.length <= 1) return blocks
+  const charHeight = verticalCharacterSourceHeight(blocks)
+  const medianWidth = medianNumber(blocks.map(b => b.w))
+  const maxAdornmentWidth = Math.max(4.0, medianWidth * 0.45)
+  const maxAdornmentHeight = Math.max(charHeight * 4.8, charHeight + 24)
+  const maxGap = Math.max(6.0, clamp(columnGapOption || 15, 5, 80) * 0.7)
+  const consumed = new Set<number>()
+  const merged = blocks.map(b => ({...b}))
+
+  blocks.forEach((block, index) => {
+    if (consumed.has(index)) return
+    const isVertAdorn = block.w <= maxAdornmentWidth && block.h <= maxAdornmentHeight && block.h > block.w * 1.8
+    const isHorizAdorn = block.h <= Math.max(3.0, charHeight * 0.36) && block.w <= Math.max(charHeight * 1.45, medianWidth * 2.2)
+    if (!isVertAdorn && !isHorizAdorn) return
+
+    let bestIndex = -1
+    let bestScore = Infinity
+    for (let i = 0; i < merged.length; i++) {
+      if (i === index || consumed.has(i)) continue
+      const candidate = merged[i]
+      const narrowStroke = block.w <= Math.max(4, candidate.w / 3) && block.h > block.w * 2.2
+      if (!narrowStroke && candidate.w <= block.w && candidate.h <= block.h) continue
+      const hGap = block.x + block.w < candidate.x ? candidate.x - (block.x + block.w) : (candidate.x + candidate.w < block.x ? block.x - (candidate.x + candidate.w) : 0)
+      const vGap = block.y + block.h < candidate.y ? candidate.y - (block.y + block.h) : (candidate.y + candidate.h < block.y ? block.y - (candidate.y + candidate.h) : 0)
+      const overlapY = Math.max(0, Math.min(block.y + block.h, candidate.y + candidate.h) - Math.max(block.y, candidate.y))
+      const overlapX = Math.max(0, Math.min(block.x + block.w, candidate.x + candidate.w) - Math.max(block.x, candidate.x))
+      const minH = Math.max(1, Math.min(block.h, candidate.h))
+      const minW = Math.max(1, Math.min(block.w, candidate.w))
+      const cyGap = Math.abs((block.y + block.h / 2) - (candidate.y + candidate.h / 2))
+      const cxGap = Math.abs((block.x + block.w / 2) - (candidate.x + candidate.w / 2))
+      const sideAttached = hGap <= maxGap && (overlapY >= minH * 0.25 || cyGap <= minH * 0.7)
+      const stackedAttached = vGap <= maxGap && (overlapX >= minW * 0.25 || cxGap <= Math.max(block.w, candidate.w) * 0.7)
+      if (!sideAttached && !stackedAttached) continue
+      const score = Math.min(hGap, vGap) + cyGap * 0.2 + cxGap * 0.2
+      if (score < bestScore) {
+        bestScore = score
+        bestIndex = i
+      }
+    }
+    if (bestIndex < 0) return
+    consumed.add(index)
+    merged[bestIndex] = unionRoi(merged[bestIndex], block)
+  })
+
+  return merged
+    .filter((_, index) => !consumed.has(index))
+    .sort((a, b) => a.y - b.y || a.x - b.x)
+}
+
+function detectVerticalWordBlocks(
+  ink: Uint8Array,
+  width: number,
+  height: number,
+  column: {start: number, end: number},
+  roi: Roi,
+  options: LocalReflowOptions,
+): Roi[] {
+  const wordBands = detectBands(roi.y, roi.y + roi.h, y => {
+    const row = y * width
+    for (let x = column.start; x < column.end; x++) {
+      if (ink[row + x] !== 0) return true
+    }
+    return false
+  })
+  const blocks = mergeCloseBands(wordBands, Math.max(1, options.wordGap || 3))
+    .map(band => trimVerticalInkBlock(ink, width, height, {
+      x: column.start,
+      y: band.start,
+      w: column.end - column.start,
+      h: band.end - band.start,
+    }))
+    .filter((block): block is Roi => !!block && block.w >= 2 && block.h >= 2)
+
+  return mergeVerticalAdornmentBlocks(
+    mergeVerticalGlyphFragments(blocks, ink, width, height, options.wordGap || 3),
+    options.columnGap || 15,
+  )
+}
+
+function filterVerticalNoiseBlocks(
+  blocks: Roi[],
+  glyphSize: number,
+  ink: Uint8Array,
+  width: number,
+  height: number,
+  wordGapOption: number,
+): Roi[] {
+  if (blocks.length === 0) return blocks
+  const normGlyph = Math.max(8.0, glyphSize)
+  const smallSide = Math.max(5.0, normGlyph * 0.3)
+  const sparseInk = Math.max(8.0, Math.round(normGlyph * 0.45))
+  const metrics = blocks.map(block => {
+    const roi = clampRoi(block, width, height)
+    let minX = roi.x + roi.w
+    let minY = roi.y + roi.h
+    let maxX = roi.x - 1
+    let maxY = roi.y - 1
+    let inkCount = 0
+    for (let y = roi.y; y < roi.y + roi.h; y++) {
+      const row = y * width
+      for (let x = roi.x; x < roi.x + roi.w; x++) {
+        if (ink[row + x] === 0) continue
+        if (x < minX) minX = x
+        if (y < minY) minY = y
+        if (x > maxX) maxX = x
+        if (y > maxY) maxY = y
+        inkCount++
+      }
+    }
+    if (inkCount === 0) return null
+    const bounds = {x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1}
+    const isTiny = (bounds.w <= 3 && bounds.h <= 3 && inkCount <= 5) ||
+      (bounds.w <= smallSide && bounds.h <= smallSide && inkCount <= sparseInk) ||
+      (Math.min(bounds.w, bounds.h) <= 2 && Math.max(bounds.w, bounds.h) <= Math.max(6.0, normGlyph * 0.45) && inkCount <= sparseInk)
+    return {bounds, isTiny}
+  })
+
+  const maxGap = Math.max(6.0, Math.max(normGlyph * 0.95, clamp(wordGapOption || 3, 1, 30) * 2.5))
+  const punctGap = Math.max(4.0, normGlyph * 0.35)
+  return blocks.filter((_, index) => {
+    const current = metrics[index]
+    if (!current) return false
+    if (!current.isTiny) return true
+    for (let i = 0; i < metrics.length; i++) {
+      if (i === index) continue
+      const other = metrics[i]
+      if (!other) continue
+      const vGap = current.bounds.y + current.bounds.h < other.bounds.y
+        ? other.bounds.y - (current.bounds.y + current.bounds.h)
+        : (other.bounds.y + other.bounds.h < current.bounds.y ? current.bounds.y - (other.bounds.y + other.bounds.h) : 0)
+      const overlapX = Math.max(0, Math.min(current.bounds.x + current.bounds.w, other.bounds.x + other.bounds.w) - Math.max(current.bounds.x, other.bounds.x))
+      const centerGap = Math.abs((current.bounds.x + current.bounds.w / 2) - (other.bounds.x + other.bounds.w / 2))
+      if ((overlapX > 0 || centerGap <= normGlyph * 0.72) && vGap <= maxGap && (!other.isTiny || vGap <= punctGap)) {
+        return true
+      }
+    }
+    return false
+  })
+}
+
+function manualImageContainsWordBlock(region: Roi, block: Roi): boolean {
+  const overlapW = Math.max(0, Math.min(region.x + region.w, block.x + block.w) - Math.max(region.x, block.x))
+  const overlapH = Math.max(0, Math.min(region.y + region.h, block.y + block.h) - Math.max(region.y, block.y))
+  if (overlapW <= 0 || overlapH <= 0) return false
+  return (overlapW * overlapH) / Math.max(1, block.w * block.h) >= 0.82
+}
+
 export function contrastEnhancedTextColor(
   r: number,
   g: number,
@@ -2691,6 +2981,238 @@ export function reflowPageFromPixels(
 
     const textLayoutStartedAt = now()
     const sliceRenderBeforeRoi = timings.sliceRenderMs
+    if (options.verticalText) {
+      const verticalDirection = options.verticalDirection === 'ltr' ? 'ltr' : 'rtl'
+      const rawColumns = detectBands(effectiveRoi.x, effectiveRoi.x + effectiveRoi.w, x => {
+        for (let y = effectiveRoi.y; y < effectiveRoi.y + effectiveRoi.h; y++) {
+          if (textInk[y * workW + x] !== 0) return true
+        }
+        return false
+      }).filter(col => col.end - col.start >= 2)
+      const sourceScale = clamp(workW / Math.max(1, options.targetWidth), 1.0, 4.0)
+      const mergedColumns = mergeVerticalColumnBands(
+        rawColumns,
+        options.wordGap || 3,
+        options.columnGap || 15,
+        sourceScale,
+      ).sort((a, b) => (a.start + a.end) / 2 - (b.start + b.end) / 2)
+      if (verticalDirection !== 'ltr') mergedColumns.reverse()
+
+      const detectedVerticalLines = mergedColumns.map(column => ({
+        column,
+        line: {start: effectiveRoi.y, end: effectiveRoi.y + effectiveRoi.h},
+        blocks: detectVerticalWordBlocks(textInk, workW, workH, column, effectiveRoi, options)
+          .filter(b => b.w >= 2 && b.h >= 2 && !isVerticalRuleLikeBlock(b))
+          .filter(b => !roiManualImages.some(reg => manualImageContainsWordBlock(reg, b))),
+      }))
+      const verticalGlyphHeight = verticalCharacterSourceHeight(detectedVerticalLines.flatMap(l => l.blocks))
+      const filteredVerticalLines = detectedVerticalLines
+        .map(line => ({
+          ...line,
+          blocks: filterVerticalNoiseBlocks(line.blocks, verticalGlyphHeight, textInk, workW, workH, options.wordGap || 3),
+        }))
+        .filter(line => line.blocks.length > 0)
+
+      let topBound = workH
+      let bottomBound = 0
+      filteredVerticalLines.forEach(line => {
+        line.blocks.forEach(b => {
+          if (isVerticalRuleLikeBlock(b)) return
+          if (b.y < topBound) topBound = b.y
+          if (b.y + b.h > bottomBound) bottomBound = b.y + b.h
+        })
+      })
+      const sharedLineBounds = bottomBound > topBound ? {start: topBound, end: bottomBound} : null
+      const verticalLines = sharedLineBounds
+        ? filteredVerticalLines.map(line => ({...line, line: sharedLineBounds}))
+        : filteredVerticalLines
+      timings.rowCount += verticalLines.length
+
+      const imageSlots: Roi[][] = Array.from({length: verticalLines.length + 1}, () => [])
+      allImageRegions.forEach(reg => {
+        if (verticalLines.length === 0) {
+          imageSlots[0].push(reg)
+          return
+        }
+        const centerX = reg.x + reg.w / 2
+        let slotIndex = verticalLines.length
+        for (let i = 0; i < verticalLines.length; i++) {
+          const lineCenterX = (verticalLines[i].column.start + verticalLines[i].column.end) / 2
+          if (verticalDirection === 'ltr' ? centerX <= lineCenterX : centerX >= lineCenterX) {
+            slotIndex = i
+            break
+          }
+        }
+        imageSlots[slotIndex].push(reg)
+      })
+      imageSlots.forEach(slot => slot.sort((a, b) => a.y - b.y || a.x - b.x))
+
+      const appendVerticalImages = (slot: Roi[]) => {
+        slot.forEach(reg => {
+          if (items.length > 0 && items[items.length - 1].type !== 'break') items.push({type: 'break'})
+          items.push(renderImageSlice(reg, false))
+          items.push({type: 'break'})
+        })
+      }
+
+      const sliceRenderStartedAt = now()
+      verticalLines.forEach((line, lineIdx) => {
+        appendVerticalImages(imageSlots[lineIdx])
+        const prevLine = lineIdx > 0 ? verticalLines[lineIdx - 1] : null
+        let startParagraph = false
+        if (prevLine) {
+          const prevNonRule = prevLine.blocks.filter(b => !isVerticalRuleLikeBlock(b))
+          const prevBottom = prevNonRule.length > 0 ? Math.max(...prevNonRule.map(b => b.y + b.h)) : null
+          if (prevBottom !== null) {
+            const blankTail = prevLine.line.end - prevBottom
+            const charHeight = Math.max(
+              verticalCharacterSourceHeight(line.blocks),
+              verticalCharacterSourceHeight(prevLine.blocks),
+            )
+            const lastBlock = prevNonRule.reduce((best, b) => (b.y + b.h > best.y + best.h ? b : best), prevNonRule[0])
+            const isPunct = lastBlock.w <= charHeight * 0.65 || lastBlock.h <= charHeight * 0.65
+            startParagraph = hasVerticalParagraphBlankTail(blankTail, charHeight, isPunct ? 0.8 : 1.3)
+          }
+        }
+        if (startParagraph && items.length > 0 && items[items.length - 1].type !== 'break') {
+          items.push({type: 'break'})
+        }
+        const firstBlock = line.blocks.reduce((best, b) => (b.y < best.y ? b : best), line.blocks[0])
+        const rawIndent = Math.max(0, firstBlock.y - line.line.start)
+        const lineIndent = rawIndent < Math.max(6, firstBlock.w * 0.3) ? 0 : rawIndent
+        const paragraphIndent = Math.round(verticalCharacterSourceHeight(line.blocks) * 2)
+        const indent = verticalReflowLineIndent(lineIndent, startParagraph, paragraphIndent)
+        if (indent > 0) {
+          items.push({
+            type: 'indent',
+            width: indent * textScale,
+            sourceWidth: indent,
+          })
+        }
+
+        line.blocks.forEach(block => {
+          const hPad = clamp(Math.round(block.w * 0.18), 2, 8)
+          const vPad = clamp(Math.round(block.w * 0.14), 2, 6)
+          const sx = Math.max(0, block.x - hPad)
+          const sy = Math.max(0, block.y - vPad)
+          const sRight = Math.min(workW, block.x + block.w + hPad)
+          const sBottom = Math.min(workH, block.y + block.h + vPad)
+          const originalSource = {x: sx, y: sy, w: Math.max(1, sRight - sx), h: Math.max(1, sBottom - sy)}
+          const edgeAdjusted = adjustWordBlockEdges(workPixels, workW, workH, originalSource, pageBgLuma, false, true)
+          const adjusted = edgeAdjusted.block
+
+          if (isSpriteMode) {
+            if (pageTexturePixels) {
+              const edgeBg = edgeBackgroundColor(options, pageBgLuma)
+              clearDirtyBlockEdges(pageTexturePixels, workW, workH, edgeAdjusted.dirtyEdges, adjusted, edgeBg.r, edgeBg.g, edgeBg.b)
+            }
+            items.push({
+              type: 'word',
+              x: adjusted.x,
+              y: adjusted.y,
+              w: adjusted.w,
+              h: adjusted.h,
+              width: adjusted.w * textScale,
+              height: adjusted.h * textScale,
+            })
+            timings.wordCount++
+            return
+          }
+
+          const outW = block.w + hPad * 2
+          const outH = block.h + vPad * 2
+          const offX = hPad - (block.x - originalSource.x) + adjusted.x - originalSource.x
+          const offY = vPad - (block.y - originalSource.y) + adjusted.y - originalSource.y
+          const bgVal = options.darkDisplay ? 0 : 255
+          const sliceData = new Uint8ClampedArray(outW * outH * 4)
+          sliceData.fill(bgVal)
+          for (let i = 3; i < sliceData.length; i += 4) sliceData[i] = 255
+
+          const normalizeColors = !pageNormalizationApplies && !simpleGrayscaleApplies && (
+            options.darkDisplay ||
+            options.contrastEnhancement ||
+            options.matchBackground ||
+            options.matchBackgroundMode !== 'original' ||
+            (options.optimizeBackground && options.optimizeBackground !== 'none')
+          )
+          const matchedForeground = normalizeColors && (options.matchBackground || options.matchBackgroundMode === 'original')
+            ? matchBackgroundMask(workPixels, workW, workH, adjusted, pageBgLuma)
+            : null
+          const inkThresh = adaptiveInkThreshold(threshold, pageBgLuma)
+          const fgVal = options.darkDisplay ? 255 : 0
+
+          for (let y = 0; y < adjusted.h; y++) {
+            const targetY = offY + y
+            if (targetY < 0 || targetY >= outH) continue
+            const analysisY = adjusted.y + y
+            if (analysisY < 0 || analysisY >= workH) continue
+            for (let x = 0; x < adjusted.w; x++) {
+              const targetX = offX + x
+              if (targetX < 0 || targetX >= outW) continue
+              const analysisX = adjusted.x + x
+              if (analysisX < 0 || analysisX >= workW) continue
+              const srcIdx = (analysisY * workW + analysisX) * 4
+              const dstIdx = (targetY * outW + targetX) * 4
+              if (!normalizeColors) {
+                sliceData[dstIdx] = normalizedRenderPixels[srcIdx]
+                sliceData[dstIdx + 1] = normalizedRenderPixels[srcIdx + 1]
+                sliceData[dstIdx + 2] = normalizedRenderPixels[srcIdx + 2]
+                sliceData[dstIdx + 3] = 255
+                continue
+              }
+              const r = normalizedRenderPixels[srcIdx]
+              const g = normalizedRenderPixels[srcIdx + 1]
+              const b = normalizedRenderPixels[srcIdx + 2]
+              if (matchedForeground && matchedForeground[y * adjusted.w + x] === 0) continue
+              if (options.matchBackgroundMode === 'original') {
+                const orig = originalTextColor(r, g, b, pageBgLuma, options)
+                sliceData[dstIdx] = orig.r
+                sliceData[dstIdx + 1] = orig.g
+                sliceData[dstIdx + 2] = orig.b
+              } else if (options.matchBackgroundMode === 'monochrome') {
+                const luma = pixelLuma(r, g, b)
+                const val = (sourceDark ? luma > inkThresh : luma < inkThresh) ? fgVal : bgVal
+                sliceData[dstIdx] = val
+                sliceData[dstIdx + 1] = val
+                sliceData[dstIdx + 2] = val
+              } else if (options.contrastEnhancement) {
+                const c = contrastEnhancedTextColor(r, g, b, pageBgLuma, options.darkDisplay)
+                sliceData[dstIdx] = c.r
+                sliceData[dstIdx + 1] = c.g
+                sliceData[dstIdx + 2] = c.b
+              } else {
+                const c = grayscaleTextColor(r, g, b, pageBgLuma, options.darkDisplay)
+                sliceData[dstIdx] = c.r
+                sliceData[dstIdx + 1] = c.g
+                sliceData[dstIdx + 2] = c.b
+              }
+              sliceData[dstIdx + 3] = 255
+            }
+          }
+
+          const edgeBg = edgeBackgroundColor(options, pageBgLuma)
+          clearDirtyBlockEdges(sliceData, outW, outH, edgeAdjusted.dirtyEdges, {x: offX, y: offY, w: adjusted.w, h: adjusted.h}, edgeBg.r, edgeBg.g, edgeBg.b)
+          applyStrokeStrengthToPixels(sliceData, outW, outH, threshold, options.strokeStrength || 0, options.darkDisplay, options.matchBackgroundMode)
+          items.push({
+            type: 'word',
+            ...encodeSlice(sliceData, outW, outH),
+            x: block.x,
+            y: block.y,
+            w: outW,
+            h: outH,
+            width: outW * textScale,
+            height: outH * textScale,
+          })
+          timings.wordCount++
+        })
+      })
+      appendVerticalImages(imageSlots[verticalLines.length])
+      timings.sliceRenderMs += now() - sliceRenderStartedAt
+      while (items.length > 0 && items[items.length - 1].type === 'break') items.pop()
+      timings.textLayoutMs += now() - textLayoutStartedAt - (timings.sliceRenderMs - sliceRenderBeforeRoi)
+      return
+    }
+
     // 7. Extract text columns, lines, and words
     const columns = detectHorizontalColumns(ink, workW, workH, effectiveRoi, options.columnCount || 1, allImageRegions)
 

@@ -1155,6 +1155,8 @@ export default Vue.extend({
       viewportWidth: 0,
       viewportHeight: 0,
       viewportResizeFrame: undefined as number | undefined,
+      viewportResizeSettleTimer: undefined as number | undefined,
+      viewportResizeObserver: undefined as ResizeObserver | undefined,
       viewportResizeUsesAnimationFrame: false,
       pageBackground: '#fff',
       lastDetectionKey: '',
@@ -1506,7 +1508,7 @@ export default Vue.extend({
         flexWrap: this.verticalDirection === 'rtl' ? 'wrap-reverse' : 'wrap',
         alignItems: 'center',
         alignContent: 'flex-start',
-        columnGap: `${Math.max(8, Math.round(this.blockSpacing * 1.5))}px`,
+        columnGap: `${Math.max(4, Math.round(this.blockSpacing * 0.75))}px`,
         rowGap: `${this.reflowInlineGap}px`,
         paddingTop: '16px',
         paddingBottom: '24px',
@@ -1534,7 +1536,7 @@ export default Vue.extend({
         flexWrap: this.verticalDirection === 'rtl' ? 'wrap-reverse' : 'wrap',
         alignItems: 'center',
         alignContent: 'flex-start',
-        columnGap: `${Math.max(8, Math.round(this.blockSpacing * 1.5))}px`,
+        columnGap: `${Math.max(4, Math.round(this.blockSpacing * 0.75))}px`,
         rowGap: `${this.reflowInlineGap}px`,
         paddingTop: '16px',
         paddingBottom: '24px',
@@ -1826,6 +1828,13 @@ export default Vue.extend({
     window.addEventListener('scroll', this.handleResize)
     window.visualViewport?.addEventListener('resize', this.handleResize)
     window.visualViewport?.addEventListener('scroll', this.handleResize)
+    if (typeof ResizeObserver !== 'undefined') {
+      const target = (this.$el as HTMLElement | undefined)?.closest?.('.reader-shell') || this.$el
+      if (target instanceof Element) {
+        this.viewportResizeObserver = new ResizeObserver(() => this.handleResize())
+        this.viewportResizeObserver.observe(target)
+      }
+    }
     this.$nextTick(() => {
       this.initializeControlsPosition()
       this.updateViewportMetrics()
@@ -1842,6 +1851,14 @@ export default Vue.extend({
     if (this.viewportResizeFrame !== undefined) {
       window.cancelAnimationFrame(this.viewportResizeFrame)
       this.viewportResizeFrame = undefined
+    }
+    if (this.viewportResizeSettleTimer !== undefined) {
+      window.clearTimeout(this.viewportResizeSettleTimer)
+      this.viewportResizeSettleTimer = undefined
+    }
+    if (this.viewportResizeObserver) {
+      this.viewportResizeObserver.disconnect()
+      this.viewportResizeObserver = undefined
     }
     this.requestId += 1
     this.cancelServerReflowRequest()
@@ -2771,15 +2788,25 @@ export default Vue.extend({
       return '网络'
     },
     handleResize() {
-      if (this.viewportResizeFrame !== undefined) return
-      const flushResize = () => {
-        this.viewportResizeFrame = undefined
-        this.viewportResizeUsesAnimationFrame = false
+      const applyMetrics = () => {
         const changed = this.updateViewportMetrics()
         this.$nextTick(this.constrainControlsPosition)
         if (!changed || this.reflowItems.length === 0) return
         this.rescaleReflowItems()
         this.repaginate(false)
+      }
+      if (this.viewportResizeFrame !== undefined) return
+      const flushResize = () => {
+        this.viewportResizeFrame = undefined
+        this.viewportResizeUsesAnimationFrame = false
+        applyMetrics()
+        if (this.$el && typeof window !== 'undefined' && typeof window.setTimeout === 'function') {
+          if (this.viewportResizeSettleTimer !== undefined) window.clearTimeout(this.viewportResizeSettleTimer)
+          this.viewportResizeSettleTimer = window.setTimeout(() => {
+            this.viewportResizeSettleTimer = undefined
+            applyMetrics()
+          }, 180)
+        }
       }
       if (typeof window.requestAnimationFrame === 'function') {
         this.viewportResizeUsesAnimationFrame = true
@@ -2798,10 +2825,15 @@ export default Vue.extend({
         || (typeof window !== 'undefined' ? window.innerWidth : 0)
         || (typeof document !== 'undefined' && document.documentElement?.clientWidth)
         || 0
-      const clientHeight = (vv?.height ? vv.height * vvScale : 0)
+      let clientHeight = (vv?.height ? vv.height * vvScale : 0)
         || (typeof window !== 'undefined' ? window.innerHeight : 0)
         || (typeof document !== 'undefined' && document.documentElement?.clientHeight)
         || 0
+      const shell = !this.isLandscapeFrame() ? (this.$el as HTMLElement | undefined)?.closest?.('.reader-shell') : null
+      const shellHeight = shell?.getBoundingClientRect?.().height || 0
+      if (shellHeight > 120 && (clientHeight === 0 || shellHeight < clientHeight)) {
+        clientHeight = shellHeight
+      }
       if (this.isLandscapeFrame()) {
         this.viewportWidth = Math.floor(clientHeight)
         this.viewportHeight = Math.floor(clientWidth)
@@ -3058,7 +3090,7 @@ export default Vue.extend({
 
       const targetWidth = (typeof this.pageContentWidth === 'function' ? this.pageContentWidth() : 0) || this.targetWidth
       const contentWidth = Math.max(120, targetWidth - this.horizontalContentPadding() * 2)
-      const contentHeight = Math.max(120, this.pageContentHeight() - 40)
+      const contentHeight = Math.max(120, this.pageContentHeight() - 44)
       const columnGap = Math.max(8, Math.round(this.blockSpacing * 1.5))
       const rowGap = typeof this.reflowInlineGap === 'number' ? this.reflowInlineGap : 0
       const pages = [] as ReflowItem[][]
@@ -3087,16 +3119,30 @@ export default Vue.extend({
         currentColumnHeight = 0
       }
 
+      const textureScale = typeof this.textScale === 'function' ? this.textScale() : 1
       items.forEach(item => {
         if (item.type === 'break') {
           pushColumn()
           return
         }
-        const itemHeight = Math.max(1, item.type === 'indent' ? item.width : this.reflowItemDisplayHeight(item))
+        const isSpriteWord = item.type === 'word' && typeof this.isSpriteWordItem === 'function' && this.isSpriteWordItem(item)
+        const itemHeight = Math.max(
+          1,
+          item.type === 'indent'
+            ? item.width
+            : isSpriteWord
+              ? Math.max(this.reflowItemDisplayHeight(item), Math.ceil(((item as any).h || 1) * textureScale))
+              : this.reflowItemDisplayHeight(item),
+        )
+        const itemWidth = item.type === 'indent'
+          ? 1
+          : isSpriteWord
+            ? Math.max(this.reflowItemDisplayWidth(item), Math.ceil(((item as any).w || 1) * textureScale))
+            : this.reflowItemDisplayWidth(item)
         const nextHeight = currentColumn.length > 0 ? currentColumnHeight + rowGap + itemHeight : itemHeight
         if (currentColumn.length > 0 && nextHeight > contentHeight) pushColumn()
         currentColumn.push(item)
-        currentColumnWidth = Math.max(currentColumnWidth, item.type === 'indent' ? 1 : this.reflowItemDisplayWidth(item))
+        currentColumnWidth = Math.max(currentColumnWidth, itemWidth)
         currentColumnHeight = currentColumnHeight > 0 ? currentColumnHeight + rowGap + itemHeight : itemHeight
       })
 
@@ -3274,7 +3320,7 @@ export default Vue.extend({
     },
     localReflowResultCacheKey(): string {
       return JSON.stringify({
-        version: 9,
+        version: 10,
         bookId: this.bookId,
         page: this.page.number,
         pageUrl: canonicalPageImageUrl(this.page.url),

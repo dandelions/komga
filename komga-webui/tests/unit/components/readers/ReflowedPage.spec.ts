@@ -564,6 +564,34 @@ test('horizontal reflow keeps inline word spacing separate from paragraph spacin
   expect(pages[0]).toHaveLength(3)
 })
 
+test('vertical reflow repaginates columns to fit shrinking viewport height when address bar appears', () => {
+  let viewportHeight = 400
+  const context: any = {
+    targetWidth: 360,
+    blockSpacing: 6,
+    reflowInlineGap: 1,
+    pageContentWidth: () => 360,
+    pageContentHeight: () => viewportHeight,
+    horizontalContentPadding: () => 24,
+    textScale: () => 1,
+    isSpriteWordItem: () => true,
+    reflowItemDisplayWidth: (item: any) => item.w,
+    reflowItemDisplayHeight: (item: any) => item.h,
+  }
+  const items = Array.from({length: 12}, () => ({type: 'word', w: 30, h: 40}))
+
+  const fullPages = methods.paginateVerticalItemsEstimated.call(context, items)
+  // Available height = 400 - 44 = 356px -> 8 glyphs per column (8*40 + 7*1 = 327 <= 356)
+  const firstBreakIndex = fullPages[0].findIndex((item: any) => item.type === 'break')
+  expect(firstBreakIndex).toBe(8)
+
+  viewportHeight = 260
+  const shrunkPages = methods.paginateVerticalItemsEstimated.call(context, items)
+  // Available height = 260 - 44 = 216px -> 5 glyphs per column (5*40 + 4*1 = 204 <= 216)
+  const shrunkBreakIndex = shrunkPages[0].findIndex((item: any) => item.type === 'break')
+  expect(shrunkBreakIndex).toBe(5)
+})
+
 test('restores a persistent local reflow result without loading the source page', async () => {
   const cachedItems = [{type: 'word', src: 'data:image/png;base64,cached', x: 0, y: 0, w: 24, h: 18, height: 18}]
   const context = Object.assign({}, methods, {
