@@ -598,7 +598,7 @@ test('vertical reflow uses compact horizontal margins so an extra column fits on
     pageContentWidth: () => 380,
     targetWidth: 380,
   })
-  expect(padding).toBe(13)
+  expect(padding).toBe(8)
 
   const context: any = {
     verticalText: true,
@@ -613,9 +613,9 @@ test('vertical reflow uses compact horizontal margins so an extra column fits on
     reflowItemDisplayWidth: (item: any) => item.w,
     reflowItemDisplayHeight: (item: any) => item.h,
   }
-  // 9 columns of width 28 separated by break items -> 9*28 + 8*7 = 308 <= 354 fits on 1 page
+  // 11 columns of width 28 separated by break items -> 11*28 + 10*5 = 358 <= 364 fits on 1 page
   const items: any[] = []
-  for (let col = 0; col < 9; col++) {
+  for (let col = 0; col < 11; col++) {
     items.push({type: 'word', w: 28, h: 40})
     items.push({type: 'break'})
   }

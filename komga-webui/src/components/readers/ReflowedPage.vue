@@ -1508,7 +1508,7 @@ export default Vue.extend({
         flexWrap: this.verticalDirection === 'rtl' ? 'wrap-reverse' : 'wrap',
         alignItems: 'center',
         alignContent: 'flex-start',
-        columnGap: `${Math.max(3, Math.round(this.blockSpacing * 0.58))}px`,
+        columnGap: `${Math.max(2, Math.round(this.blockSpacing * 0.42))}px`,
         rowGap: `${this.reflowInlineGap}px`,
         paddingTop: '16px',
         paddingBottom: '24px',
@@ -1536,7 +1536,7 @@ export default Vue.extend({
         flexWrap: this.verticalDirection === 'rtl' ? 'wrap-reverse' : 'wrap',
         alignItems: 'center',
         alignContent: 'flex-start',
-        columnGap: `${Math.max(3, Math.round(this.blockSpacing * 0.58))}px`,
+        columnGap: `${Math.max(2, Math.round(this.blockSpacing * 0.42))}px`,
         rowGap: `${this.reflowInlineGap}px`,
         paddingTop: '16px',
         paddingBottom: '24px',
@@ -2865,7 +2865,7 @@ export default Vue.extend({
     horizontalContentPadding(): number {
       if (!this.verticalText) return 16
       const targetWidth = (typeof this.pageContentWidth === 'function' ? this.pageContentWidth() : 0) || this.targetWidth
-      return Math.max(12, Math.min(18, Math.round(targetWidth * 0.035)))
+      return Math.max(8, Math.min(12, Math.round(targetWidth * 0.022)))
     },
     columnContentWidth(): number {
       const totalWidth = (typeof this.pageContentWidth === 'function' ? this.pageContentWidth() : 0) || this.targetWidth || 320
@@ -3091,7 +3091,7 @@ export default Vue.extend({
       const targetWidth = (typeof this.pageContentWidth === 'function' ? this.pageContentWidth() : 0) || this.targetWidth
       const contentWidth = Math.max(120, targetWidth - this.horizontalContentPadding() * 2)
       const contentHeight = Math.max(120, this.pageContentHeight() - 44)
-      const columnGap = Math.max(6, Math.round(this.blockSpacing * 1.15))
+      const columnGap = Math.max(4, Math.round(this.blockSpacing * 0.85))
       const rowGap = typeof this.reflowInlineGap === 'number' ? this.reflowInlineGap : 0
       const pages = [] as ReflowItem[][]
       let currentPage = [] as ReflowItem[]
@@ -3320,7 +3320,7 @@ export default Vue.extend({
     },
     localReflowResultCacheKey(): string {
       return JSON.stringify({
-        version: 10,
+        version: 11,
         bookId: this.bookId,
         page: this.page.number,
         pageUrl: canonicalPageImageUrl(this.page.url),

@@ -3091,7 +3091,7 @@ export function reflowPageFromPixels(
         }
 
         line.blocks.forEach(block => {
-          const hPad = clamp(Math.round(block.w * 0.18), 2, 8)
+          const hPad = isSpriteMode ? clamp(Math.round(block.w * 0.06), 1, 3) : clamp(Math.round(block.w * 0.18), 2, 8)
           const vPad = clamp(Math.round(block.w * 0.14), 2, 6)
           const sx = Math.max(0, block.x - hPad)
           const sy = Math.max(0, block.y - vPad)
