@@ -43,6 +43,8 @@ export function buildSpreads(pages: PageDtoWithUrl[], pageLayout: PagedReaderLay
   return spreads
 }
 
+const transparentDataUrlCache = new Map<string, string>()
+
 function createEmptyPage(page: PageDtoWithUrl): PageDtoWithUrl {
   return {
     url: createTransparentDataUrl(page?.width || 20, page?.height || 30),
@@ -51,6 +53,10 @@ function createEmptyPage(page: PageDtoWithUrl): PageDtoWithUrl {
 }
 
 function createTransparentDataUrl(w: number, h: number): string {
+  const key = `${w}x${h}`
+  const cached = transparentDataUrlCache.get(key)
+  if (cached) return cached
+
   const canvas = document.createElement('canvas')
   canvas.width = w
   canvas.height = h
@@ -61,5 +67,7 @@ function createTransparentDataUrl(w: number, h: number): string {
     ctx.fillRect(0, 0, w, h)
   }
 
-  return canvas.toDataURL()
+  const dataUrl = canvas.toDataURL()
+  transparentDataUrlCache.set(key, dataUrl)
+  return dataUrl
 }

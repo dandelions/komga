@@ -91,71 +91,68 @@ describe('PagedReader large book slide window', () => {
     expect(methods.toSpreadIndex.call(reader, 10000)).toBe(4999)
   })
 
-  test('limits rendered carousel items and moves the window across the full spread list', () => {
+  test('renders a 3-slide window centered on carouselPage for 10,000-page books', () => {
     const spreads = Array.from({length: 10000}, (_, index) => [{number: index + 1, width: 800, height: 1200}])
     const reader = Object.assign({}, methods, {
       spreads,
-      spreadWindowStart: 0,
-      carouselPage: 0,
-    })
-    const get = (key: string) => computed[key].call(reader)
-
-    expect(get('spreadWindowSize')).toBe(3)
-    expect(get('renderedSpreads')).toHaveLength(3)
-    expect(get('logicalCarouselPage')).toBe(0)
-
-    methods.setLogicalCarouselPage.call(reader, 9998)
-    expect(reader.spreadWindowStart).toBe(9997)
-    expect(reader.carouselPage).toBe(1)
-    expect(get('renderedSpreads')).toHaveLength(3)
-    expect(get('logicalCarouselPage')).toBe(9998)
-  })
-
-  test('keeps a swiped carousel item centered when the rendered window reaches its edge', () => {
-    const spreads = Array.from({length: 10000}, (_, index) => [{number: index + 1, width: 800, height: 1200}])
-    const reader = Object.assign({}, methods, {
-      spreads,
-      spreadWindowStart: 100,
-      carouselPage: 0,
-      $debug: jest.fn(),
-      $emit: jest.fn(),
-      scrollToPageEdge: jest.fn(),
-      pendingScrollPosition: 'top',
-      $nextTick: jest.fn(),
-      ensureLoadedDeskewedPageUrls: jest.fn(),
+      carouselPage: 7,
     })
 
-    ;(PagedReader as any).options.watch.carouselPage.call(reader, 0, 1)
+    expect(computed.isLargeBook.call(reader)).toBe(true)
+    expect(computed.largeBookSpreads.call(reader).map((entry: any) => entry.index)).toEqual([6, 7, 8])
 
-    expect(reader.spreadWindowStart).toBe(99)
-    expect(reader.carouselPage).toBe(1)
-    expect(methods.logicalSpreadIndex.call(reader)).toBe(100)
+    reader.carouselPage = 0
+    expect(computed.largeBookSpreads.call(reader).map((entry: any) => entry.index)).toEqual([0, 1])
+
+    reader.carouselPage = 9999
+    expect(computed.largeBookSpreads.call(reader).map((entry: any) => entry.index)).toEqual([9998, 9999])
   })
 
-  test('moves the large-book window when advancing from its last rendered item', () => {
+  test('advances page 8 to page 9 and emits update:page on 10,000-page books', () => {
     const spreads = Array.from({length: 10000}, (_, index) => [{number: index + 1, width: 800, height: 1200}])
     const reader = Object.assign({}, methods, {
       spreads,
-      spreadWindowStart: 100,
-      carouselPage: 2,
+      carouselPage: 7,
+      canNext: true,
       activeCropRegion: 0,
       activeCropSegment: 0,
       pendingScrollPosition: 'top',
       resetZoom: jest.fn(),
-      currentSpreadPageNumber: jest.fn(() => 103),
       nextCropSegmentIndex: jest.fn(() => undefined),
       nextCropRegionIndex: jest.fn(() => undefined),
       firstCropRegionIndex: jest.fn(() => 0),
       setActiveCropRegion: jest.fn(),
-      setLogicalCarouselPage: (index: number, keepWindow?: boolean) => methods.setLogicalCarouselPage.call(reader, index, keepWindow),
+      scrollToPageEdge: jest.fn(),
+      ensureLoadedDeskewedPageUrls: jest.fn(),
+      $debug: jest.fn(),
+      $nextTick: jest.fn(),
       $emit: jest.fn(),
     })
 
     methods.next.call(reader)
+    expect(reader.carouselPage).toBe(8)
+    ;(PagedReader as any).options.watch.carouselPage.call(reader, 8, 7)
 
-    expect(reader.spreadWindowStart).toBe(101)
-    expect(reader.carouselPage).toBe(2)
-    expect(reader.$emit).not.toHaveBeenCalled()
+    expect(reader.$emit).toHaveBeenCalledWith('update:page', 9)
+    expect(computed.largeBookSpreads.call(reader).map((entry: any) => entry.index)).toEqual([7, 8, 9])
+  })
+
+  test('resolves pageByNumber and heightPageNavigationEnabled without scanning 10,000 pages on turn', () => {
+    const pages = Array.from({length: 10000}, (_, index) => ({number: index + 1, width: 800, height: 1200}))
+    const reader: any = Object.assign({}, methods, {
+      pages,
+      scale: ScaleType.HEIGHT,
+      cropNavigationEnabled: false,
+      effectiveViewportRatio: 1.5,
+      maxMetadataPageRatio: computed.maxMetadataPageRatio.call({pages, isLandscapeRotated: false, rotation: 0}),
+      maxObservedRatio: 0,
+    })
+
+    expect(methods.pageByNumber.call(reader, 9999)).toBe(pages[9998])
+    expect(computed.heightPageNavigationEnabled.call(reader)).toBe(false)
+
+    reader.maxObservedRatio = 2.0
+    expect(computed.heightPageNavigationEnabled.call(reader)).toBe(true)
   })
 })
 

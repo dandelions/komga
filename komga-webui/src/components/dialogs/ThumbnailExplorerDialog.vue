@@ -7,7 +7,7 @@
         <v-pagination
           v-model="page"
           :total-visible="perPage"
-          :length="Math.ceil(thumbnails.length/perPage)"
+          :length="Math.ceil((pagesCount || 0) / perPage)"
         ></v-pagination>
 
         <page-size-select
@@ -86,17 +86,15 @@ export default Vue.extend({
     this.perPage = this.$store.state.persistedState.thumbnailsPageSize || this.perPage
   },
   computed: {
-    thumbnails(): string[] {
-      let thumbnails = []
-      for (let p = 1; p <= this.pagesCount; p++) {
+    visibleThumbnails(): string[] {
+      const total = Math.max(0, Number(this.pagesCount) || 0)
+      const start = Math.max(0, (this.page - 1) * this.perPage)
+      const end = Math.min(total, this.page * this.perPage)
+      const thumbnails = [] as string[]
+      for (let p = start + 1; p <= end; p++) {
         thumbnails.push(this.getThumbnailUrl(p))
       }
       return thumbnails
-    },
-    visibleThumbnails(): String[] {
-      let a: number = (this.page - 1) * this.perPage
-      let b: number = this.page * this.perPage
-      return this.thumbnails.slice(a, b)
     },
   },
   methods: {

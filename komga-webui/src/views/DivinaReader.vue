@@ -1696,6 +1696,8 @@ export default Vue.extend({
     this.clearReaderCropImagePreparationTimer()
     this.revokeReaderCropImageUrl()
     this.revokeReaderDeskewedPageUrls()
+    ;(this.updateRoute as any)?.cancel?.()
+    ;(this.markProgress as any)?.flush?.()
 
     this.$vuetify.rtl = (this.$t('common.locale_rtl') === 'true')
     window.removeEventListener('keydown', this.keyPressed)
@@ -3166,18 +3168,21 @@ export default Vue.extend({
     goToLast() {
       this.goTo(this.pagesCount)
     },
-    updateRoute(page: number = this.page) {
+    updateRoute: debounce(function (this: any, page: number = this.page) {
+      if (!this.$router || !this.$route) return
+      const pageStr = page.toString()
+      if (this.$route.query?.page === pageStr) return
       this.$router.replace({
         name: this.$route.name,
         params: {bookId: this.$route.params.bookId},
         query: {
-          page: page.toString(),
+          page: pageStr,
           context: this.context.origin,
           contextId: this.context.id,
           incognito: this.incognito.toString(),
         },
-      } as Location)
-    },
+      } as Location).catch?.(() => {})
+    }, 120),
     closeBook() {
       this.$router.push(
         {

@@ -3,7 +3,44 @@
     class="paged-reader full-height"
     :class="{'paged-reader-landscape': isLandscapeRotated}"
   >
-    <v-carousel v-model="carouselPage"
+    <div
+      v-if="isLargeBook"
+      class="v-window v-carousel full-height"
+    >
+      <div class="v-window__container">
+        <div
+          v-for="entry in largeBookSpreads"
+          :key="`spread${entry.index}`"
+          v-show="entry.index === carouselPage"
+          class="v-window-item full-height"
+          :class="entry.index === carouselPage ? 'v-window-item--active' : 'pre-render'"
+        >
+          <div :class="`full-height d-flex flex-column ${pageContainerClass}`">
+            <div
+              :class="`d-flex flex-row${flipDirection ? '-reverse' : ''} justify-center align-center full-height px-0 mx-0`"
+              :style="entry.index === carouselPage ? pageZoomStyle : undefined"
+            >
+              <img v-for="(page, j) in entry.spread"
+                   :alt="`Page ${page.number}`"
+                   :key="`spread${entry.index}-${j}`"
+                   :src="pageDisplayUrl(page)"
+                   :loading="imageLoading(entry.index)"
+                   :fetchpriority="imageFetchPriority(entry.index)"
+                   :decoding="imageDecoding(entry.index)"
+                   :data-page-number="page.number"
+                   data-reader-magnifiable="true"
+                   :class="imgClass(entry.spread)"
+                   class="img-fit-all"
+                   :style="imageStyle(page)"
+                   @load="pageImageLoaded(page, $event)"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <v-carousel v-else
+                v-model="carouselPage"
                 :show-arrows="false"
                 :continuous="false"
                 :reverse="carouselReverse"
@@ -13,18 +50,18 @@
                 height="100%"
     >
       <!--  Carousel: pages  -->
-      <v-carousel-item v-for="(spread, i) in renderedSpreads"
-                       :key="`spread${spreadWindowStart + i}`"
-                       :eager="eagerLoad(spreadWindowStart + i)"
+      <v-carousel-item v-for="(spread, i) in spreads"
+                       :key="`spread${i}`"
+                       :eager="eagerLoad(i)"
                        class="full-height"
-                       :class="preRender(spreadWindowStart + i) ? 'pre-render' : ''"
+                       :class="preRender(i) ? 'pre-render' : ''"
                        :transition="animations ? undefined : false"
                        :reverse-transition="animations ? undefined : false"
       >
         <div :class="`full-height d-flex flex-column ${pageContainerClass}`">
           <div
             :class="`d-flex flex-row${flipDirection ? '-reverse' : ''} justify-center align-center full-height px-0 mx-0`"
-            :style="spreadWindowStart + i === logicalCarouselPage ? pageZoomStyle : undefined"
+            :style="i === carouselPage ? pageZoomStyle : undefined"
           >
             <img v-for="(page, j) in spread"
                  :alt="`Page ${page.number}`"
@@ -157,12 +194,13 @@ export default Vue.extend({
     return {
       logger: 'PagedReader',
       carouselPage: 0,
-      spreadWindowStart: 0,
       spreads: [] as PageDtoWithUrl[][],
       spreadIndexByPage: {} as Record<number, number>,
       pendingScrollPosition: 'top' as 'top' | 'bottom',
       activeCropSegment: 0,
       pageAspectRatios: {} as Record<number, number>,
+      maxObservedRatio: 0,
+      scrollToPageEdgeTimers: [] as number[],
       deskewedPageUrls: {} as Record<number, string>,
       deskewedPagePending: {} as Record<number, boolean>,
       zoomLevel: 1,
@@ -265,6 +303,8 @@ export default Vue.extend({
   watch: {
     pages: {
       handler() {
+        this.pageAspectRatios = {}
+        this.maxObservedRatio = 0
         this.rebuildSpreads(this.page)
         this.revokeDeskewedPageUrls()
       },
@@ -277,6 +317,7 @@ export default Vue.extend({
     rotation: {
       handler() {
         this.pageAspectRatios = {}
+        this.maxObservedRatio = 0
         this.rebuildSpreads(this.page)
         this.revokeDeskewedPageUrls()
         this.$nextTick(this.ensureLoadedDeskewedPageUrls)
@@ -309,12 +350,10 @@ export default Vue.extend({
     carouselPage(val, old) {
       this.resetZoom()
       this.$debug('[watch:carouselPage', `old:${old}`, `new:${val}`)
-      const spreadIndex = this.logicalSpreadIndex()
-      if (spreadIndex >= 0 && spreadIndex < this.spreads.length && this.spreads.length > 0) {
-        const currentSpread = this.spreads[spreadIndex]
+      if (this.carouselPage >= 0 && this.carouselPage < this.spreads.length && this.spreads.length > 0) {
+        const currentSpread = this.spreads[this.carouselPage]
         const currentPage = currentSpread.length === 2 && currentSpread[1].mediaType ? currentSpread[1] : currentSpread[0]
         this.$emit('update:page', currentPage.number)
-        this.updateSpreadWindow(spreadIndex)
       } else {
         this.$emit('update:page', 1)
       }
@@ -323,16 +362,21 @@ export default Vue.extend({
       this.$nextTick(this.ensureLoadedDeskewedPageUrls)
     },
     page(val, old) {
-      this.resetZoom()
       this.$debug('[watch:page]', `old:${old}`, `new:${val}`)
       const spreadIndex = this.toSpreadIndex(val)
       this.$debug('[watch:page]', `toSpreadIndex:${spreadIndex}`)
-      this.setLogicalCarouselPage(spreadIndex)
+      const changedSpread = spreadIndex !== this.carouselPage
+      if (changedSpread) {
+        this.resetZoom()
+        this.carouselPage = spreadIndex
+      }
       this.ensureActiveCropRegionForPage(val)
       this.ensureActiveCropSegmentForPage(val)
-      this.scrollToPageEdge(this.pendingScrollPosition)
-      this.pendingScrollPosition = 'top'
-      this.$nextTick(this.ensureLoadedDeskewedPageUrls)
+      if (changedSpread || this.pendingScrollPosition !== 'top') {
+        this.scrollToPageEdge(this.pendingScrollPosition)
+        this.pendingScrollPosition = 'top'
+        this.$nextTick(this.ensureLoadedDeskewedPageUrls)
+      }
     },
     landscapeDisplay() {
       this.resetZoom()
@@ -362,6 +406,7 @@ export default Vue.extend({
   },
   destroyed() {
     window.removeEventListener('keydown', this.keyPressed)
+    this.clearScrollToPageEdgeTimers()
     this.revokeDeskewedPageUrls()
   },
   computed: {
@@ -440,20 +485,24 @@ export default Vue.extend({
       return this.readingDirection === ReadingDirection.VERTICAL
     },
     currentSlide(): number {
-      return this.logicalCarouselPage + 1
+      return this.carouselPage + 1
     },
     slidesCount(): number {
       return this.spreads.length
     },
-    logicalCarouselPage(): number {
-      return this.logicalSpreadIndex()
+    isLargeBook(): boolean {
+      return this.spreads.length > 100
     },
-    renderedSpreads(): PageDtoWithUrl[][] {
-      const size = this.spreads.length > 100 ? 3 : this.spreads.length
-      return this.spreads.slice(this.spreadWindowStart, this.spreadWindowStart + size)
-    },
-    spreadWindowSize(): number {
-      return this.spreads.length > 100 ? 3 : this.spreads.length
+    largeBookSpreads(): Array<{index: number, spread: PageDtoWithUrl[]}> {
+      if (this.spreads.length === 0) return []
+      const current = Math.max(0, Math.min(this.spreads.length - 1, Number(this.carouselPage) || 0))
+      const start = Math.max(0, current - 1)
+      const end = Math.min(this.spreads.length, current + 2)
+      const items = [] as Array<{index: number, spread: PageDtoWithUrl[]}>
+      for (let index = start; index < end; index++) {
+        items.push({index, spread: this.spreads[index]})
+      }
+      return items
     },
     canPrev(): boolean {
       return this.currentSlide > 1
@@ -470,13 +519,24 @@ export default Vue.extend({
         ),
       )
     },
+    maxMetadataPageRatio(): number {
+      const quarterTurn = getIsQuarterTurn(this)
+      let maxRatio = 0
+      for (let index = 0; index < this.pages.length; index++) {
+        const page = this.pages[index]
+        const width = Number(page.width)
+        const height = Number(page.height)
+        if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) continue
+        const sourceRatio = width / height
+        const ratio = quarterTurn ? 1 / sourceRatio : sourceRatio
+        if (ratio > maxRatio) maxRatio = ratio
+      }
+      return maxRatio
+    },
     heightPageNavigationEnabled(): boolean {
       if (this.scale !== ScaleType.HEIGHT || this.cropNavigationEnabled) return false
       const viewportRatio = this.effectiveViewportRatio
-      return this.pages.some(page => {
-        const ratio = this.pageRatio(page)
-        return ratio !== undefined && ratio > viewportRatio + 0.001
-      })
+      return Math.max(this.maxMetadataPageRatio, this.maxObservedRatio) > viewportRatio + 0.001
     },
     effectivePageLayout(): PagedReaderLayout {
       return this.cropNavigationEnabled || this.heightPageNavigationEnabled ? PagedReaderLayout.SINGLE_PAGE : this.pageLayout
@@ -556,33 +616,7 @@ export default Vue.extend({
       } else {
         this.spreadIndexByPage = {}
       }
-      this.setLogicalCarouselPage(currentPage ? this.toSpreadIndex(currentPage) : 0)
-    },
-    logicalSpreadIndex(): number {
-      return (Number(this.spreadWindowStart) || 0) + (Number(this.carouselPage) || 0)
-    },
-    setLogicalCarouselPage(spreadIndex: number, keepWindow: boolean = false) {
-      const windowSize = this.spreads.length > 100 ? 3 : this.spreads.length
-      if (windowSize >= this.spreads.length) {
-        this.spreadWindowStart = 0
-        this.carouselPage = spreadIndex
-        return
-      }
-      const nextStart = keepWindow
-        ? Math.max(0, Math.min(this.spreads.length - windowSize, (Number(this.spreadWindowStart) || 0) + (spreadIndex > this.logicalSpreadIndex() ? 1 : -1)))
-        : Math.max(0, Math.min(this.spreads.length - windowSize, spreadIndex - 1))
-      this.spreadWindowStart = nextStart
-      this.carouselPage = spreadIndex - nextStart
-    },
-    updateSpreadWindow(spreadIndex: number) {
-      const windowSize = this.spreads.length > 100 ? 3 : this.spreads.length
-      if (windowSize >= this.spreads.length) return
-      const lastWindowIndex = windowSize - 1
-      if ((this.carouselPage === 0 && spreadIndex > 0) ||
-        (this.carouselPage === lastWindowIndex && spreadIndex < this.spreads.length - 1)) {
-        this.spreadWindowStart = Math.max(0, Math.min(this.spreads.length - windowSize, spreadIndex - 1))
-        this.carouselPage = spreadIndex - this.spreadWindowStart
-      }
+      this.carouselPage = currentPage ? this.toSpreadIndex(currentPage) : 0
     },
     refreshCropNavigation(currentPage: number | undefined = this.page) {
       this.rebuildSpreads(currentPage)
@@ -644,6 +678,8 @@ export default Vue.extend({
       return this.cropRegionIndexesForSettings().filter(index => !!this.effectiveCropRegion(pageNumber, index))
     },
     pageByNumber(pageNumber: number): PageDtoWithUrl | undefined {
+      const direct = this.pages[pageNumber - 1]
+      if (direct && direct.number === pageNumber) return direct
       return this.pages.find(x => x.number === pageNumber)
     },
     effectiveCropSegment(page: PageDtoWithUrl, regionIndex: number = this.activeCropRegion): CropSegment | undefined {
@@ -830,7 +866,7 @@ export default Vue.extend({
       return currentPage?.number
     },
     currentSpreadPageNumber(): number | undefined {
-      return this.spreadPageNumber(this.spreads[this.logicalSpreadIndex()])
+      return this.spreadPageNumber(this.spreads[this.carouselPage])
     },
     firstCropRegionIndex(pageNumber: number | undefined): number {
       if (!pageNumber) return 0
@@ -894,6 +930,7 @@ export default Vue.extend({
       if (image?.naturalWidth > 0 && image.naturalHeight > 0) {
         const ratio = image.naturalWidth / image.naturalHeight
         if (this.pageAspectRatios[page.number] !== ratio) this.$set(this.pageAspectRatios, page.number, ratio)
+        if (ratio > this.maxObservedRatio) this.maxObservedRatio = ratio
       }
       this.ensureDeskewedPageUrl(page, event)
     },
@@ -949,6 +986,7 @@ export default Vue.extend({
           this.$set(this.deskewedPageUrls, page.number, url)
           const ratio = canvas.width / canvas.height
           if (this.pageAspectRatios[page.number] !== ratio) this.$set(this.pageAspectRatios, page.number, ratio)
+          if (ratio > this.maxObservedRatio) this.maxObservedRatio = ratio
         } else {
           URL.revokeObjectURL(url)
         }
@@ -1045,7 +1083,7 @@ export default Vue.extend({
       const images = Array.from(this.$el?.querySelectorAll?.('img[data-page-number]') || []) as HTMLImageElement[]
       images.forEach(image => {
         const pageNumber = Number(image.dataset.pageNumber)
-        const page = this.pages.find(x => x.number === pageNumber)
+        const page = typeof this.pageByNumber === 'function' ? this.pageByNumber(pageNumber) : this.pages.find(x => x.number === pageNumber)
         if (page && image.complete && image.naturalWidth > 0) this.ensureDeskewedPageUrl(page, {target: image} as unknown as Event)
       })
       currentPages.forEach(page => {
@@ -1452,15 +1490,13 @@ export default Vue.extend({
         this.scrollToPageEdge('top')
         return
       }
-      const logicalIndex = this.logicalSpreadIndex()
-      if (logicalIndex > 0) {
-        const previousSpreadIndex = logicalIndex - 1
+      if (this.canPrev) {
+        const previousSpreadIndex = this.carouselPage - 1
         const previousPageNumber = this.spreadPageNumber(this.spreads[previousSpreadIndex])
         const previousPageRegion = this.lastCropRegionIndex(previousPageNumber)
         this.pendingScrollPosition = previousPageRegion !== undefined ? 'bottom' : 'top'
         this.setActiveCropRegion(previousPageRegion, this.lastCropSegmentIndex(previousPageNumber, previousPageRegion))
-        if (typeof this.setLogicalCarouselPage === 'function') this.setLogicalCarouselPage(previousSpreadIndex, true)
-        else this.carouselPage = previousSpreadIndex
+        this.carouselPage--
       } else {
         this.$emit('jump-previous')
       }
@@ -1483,20 +1519,24 @@ export default Vue.extend({
         this.scrollToPageEdge('top')
         return
       }
-      const logicalIndex = this.logicalSpreadIndex()
-      if (logicalIndex < this.spreads.length - 1) {
-        const nextSpreadIndex = logicalIndex + 1
+      if (this.canNext) {
+        const nextSpreadIndex = this.carouselPage + 1
         const nextPageNumber = this.spreadPageNumber(this.spreads[nextSpreadIndex])
         const nextPageRegion = this.firstCropRegionIndex(nextPageNumber)
         this.pendingScrollPosition = 'top'
         this.setActiveCropRegion(nextPageRegion, 0)
-        if (typeof this.setLogicalCarouselPage === 'function') this.setLogicalCarouselPage(nextSpreadIndex, true)
-        else this.carouselPage = nextSpreadIndex
+        this.carouselPage++
       } else {
         this.$emit('jump-next')
       }
     },
+    clearScrollToPageEdgeTimers() {
+      if (typeof window === 'undefined' || !Array.isArray(this.scrollToPageEdgeTimers)) return
+      this.scrollToPageEdgeTimers.forEach(timerId => window.clearTimeout(timerId))
+      this.scrollToPageEdgeTimers = []
+    },
     scrollToPageEdge(position: 'top' | 'bottom') {
+      if (typeof this.clearScrollToPageEdgeTimers === 'function') this.clearScrollToPageEdgeTimers()
       const isLandscapeRotated = Boolean(
         (this as any).isLandscapeRotated ?? (
           (this.$el as HTMLElement | undefined)?.closest?.('.reader-frame-landscape') ||
@@ -1555,8 +1595,9 @@ export default Vue.extend({
           scrollToEdge()
           if (typeof window !== 'undefined') {
             if (window.requestAnimationFrame) window.requestAnimationFrame(scrollToEdge)
-            window.setTimeout(scrollToEdge, 50)
-            window.setTimeout(scrollToEdge, 150)
+            const timers = Array.isArray(this.scrollToPageEdgeTimers) ? this.scrollToPageEdgeTimers : (this.scrollToPageEdgeTimers = [])
+            timers.push(window.setTimeout(scrollToEdge, 50))
+            timers.push(window.setTimeout(scrollToEdge, 150))
           }
         })
       }
