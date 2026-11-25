@@ -698,13 +698,16 @@
       v-model="epubImageZoomVisible"
       fullscreen
       hide-overlay
+      persistent
+      no-click-animation
       content-class="epub-image-zoom-dialog"
+      @keydown.esc="closeEpubImageZoom(true)"
     >
       <v-card
         class="epub-image-zoom-card"
         color="black"
         tile
-        @click="epubImageZoomVisible = false"
+        @click="closeEpubImageZoom()"
       >
         <v-btn
           absolute
@@ -713,7 +716,7 @@
           icon
           dark
           aria-label="Close image preview"
-          @click.stop="epubImageZoomVisible = false"
+          @click.stop="closeEpubImageZoom()"
         >
           <v-icon>mdi-close</v-icon>
         </v-btn>
@@ -1188,6 +1191,7 @@ export default Vue.extend({
       epubTouchSelectionTimer: undefined as number | undefined,
       epubTouchSelectionActive: false,
       epubImageZoomVisible: false,
+      epubImageZoomOpenedAt: 0,
       epubImageZoomSrc: '',
       epubImageZoomAlt: '',
       pendingVerticalEpubResourceEdge: undefined as 'start' | 'end' | undefined,
@@ -1766,6 +1770,17 @@ export default Vue.extend({
       let target = rawTarget
       if (rawTarget?.ownerDocument === document && this.isMobileEpubViewport() && !this.epubMobileSelectionMode) {
         const innerTarget = this.resolveEpubIframeTargetAtPoint(e.clientX, e.clientY)
+        const imageHit = this.resolveEpubImagePayloadAtPoint(e.clientX, e.clientY)
+        if (imageHit) {
+          const now = Date.now()
+          if (e.detail === 2 || (this.epubMobileLastImageTap?.src === imageHit.src && now - this.epubMobileLastImageTap.time < 400)) {
+            clearTimeout(this.clickTimer)
+            this.epubMobileLastImageTap = undefined
+            this.openEpubImageZoom(imageHit.element)
+            return
+          }
+          this.epubMobileLastImageTap = {src: imageHit.src, time: now}
+        }
         if (innerTarget) {
           target = innerTarget
           const anchor = innerTarget.closest?.('a[href]') as HTMLElement | null
@@ -1779,20 +1794,6 @@ export default Vue.extend({
             clearTimeout(this.clickTimer)
             interactive.click()
             return
-          }
-          if (innerTarget.tagName.toLowerCase() === 'img') {
-            const img = innerTarget as HTMLImageElement
-            const src = img.currentSrc || img.src
-            const now = Date.now()
-            if (e.detail === 2 || (src && this.epubMobileLastImageTap?.src === src && now - this.epubMobileLastImageTap.time < 320)) {
-              clearTimeout(this.clickTimer)
-              this.epubMobileLastImageTap = undefined
-              this.openEpubImageZoom(img)
-              return
-            }
-            if (src) {
-              this.epubMobileLastImageTap = {src, time: now}
-            }
           }
         }
       }
@@ -1813,9 +1814,9 @@ export default Vue.extend({
           return
         }
       }
-      if (e.detail === 2 && target?.tagName.toLowerCase() === 'img') {
+      if (e.detail === 2 && this.getEpubImageZoomPayload(target)) {
         clearTimeout(this.clickTimer)
-        this.openEpubImageZoom(target as HTMLImageElement)
+        this.openEpubImageZoom(target as Element)
         return
       }
       if (this.hasEpubIframeSelection(target)) {
@@ -1843,13 +1844,50 @@ export default Vue.extend({
         clearTimeout(this.clickTimer)
       }
     },
-    openEpubImageZoom(image: HTMLImageElement) {
-      const source = image.currentSrc || image.src
-      if (!source) return
+    getEpubImageZoomPayload(element: Element | null): { src: string, alt: string } | null {
+      if (!element) return null
+      const tag = element.tagName.toLowerCase()
+      if (tag === 'img') {
+        const image = element as HTMLImageElement
+        const src = image.currentSrc || image.src || image.getAttribute('src') || ''
+        return src ? {src, alt: image.alt || ''} : null
+      }
+      if (tag === 'image') {
+        const rawHref =
+          element.getAttribute('href') ||
+          element.getAttributeNS('http://www.w3.org/1999/xlink', 'href') ||
+          element.getAttribute('xlink:href') ||
+          (element as any).href?.baseVal ||
+          ''
+        if (!rawHref) return null
+        try {
+          const base = element.ownerDocument?.baseURI || window.location.href
+          return {src: new URL(rawHref, base).href, alt: element.getAttribute('alt') || ''}
+        } catch (e) {
+          return {src: rawHref, alt: element.getAttribute('alt') || ''}
+        }
+      }
+      return null
+    },
+    openEpubImageZoom(image: Element) {
+      const payload = this.getEpubImageZoomPayload(image)
+      if (!payload?.src) return
 
-      this.epubImageZoomSrc = source
-      this.epubImageZoomAlt = image.alt || ''
+      clearTimeout(this.clickTimer)
+      this.clickTimer = undefined
+      if (this.showToolbars) {
+        this.showToolbars = false
+      }
+      this.epubImageZoomOpenedAt = Date.now()
+      this.epubImageZoomSrc = payload.src
+      this.epubImageZoomAlt = payload.alt
       this.epubImageZoomVisible = true
+    },
+    closeEpubImageZoom(force: boolean = false) {
+      if (!force && Date.now() - this.epubImageZoomOpenedAt < 500) {
+        return
+      }
+      this.epubImageZoomVisible = false
     },
     singleClick(x: number, y: number) {
       if (this.showToolbars) {
@@ -3092,22 +3130,52 @@ export default Vue.extend({
       this.epubRelayoutTimer = undefined
       this.epubMobileRelayoutTimer = undefined
     },
-    resolveEpubIframeTargetAtPoint(clientX: number, clientY: number): Element | null {
+    resolveEpubIframeHitElementsAtPoint(clientX: number, clientY: number): Element[] {
       try {
-        const iframe = document.querySelector<HTMLIFrameElement>('#iframe-wrapper iframe')
-        const doc = iframe?.contentDocument
-        if (!iframe || !doc) return null
-        const rect = iframe.getBoundingClientRect()
-        const cs = window.getComputedStyle(iframe)
-        const paddingLeft = parseFloat(cs.paddingLeft || '0') || 0
-        const paddingTop = parseFloat(cs.paddingTop || '0') || 0
-        const iframeX = clientX - rect.left - paddingLeft
-        const iframeY = clientY - rect.top - paddingTop
-        if (iframeX < 0 || iframeY < 0 || iframeX > rect.width || iframeY > rect.height) return null
-        return doc.elementFromPoint(iframeX, iframeY)
+        const iframes = Array.from(document.querySelectorAll<HTMLIFrameElement>('#iframe-wrapper iframe'))
+        for (const iframe of iframes) {
+          const doc = iframe.contentDocument
+          if (!doc) continue
+          const cs = window.getComputedStyle(iframe)
+          if (cs.display === 'none' || cs.visibility === 'hidden') continue
+          const rect = iframe.getBoundingClientRect()
+          if (rect.width <= 0 || rect.height <= 0) continue
+          if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) continue
+          const scaleX = iframe.offsetWidth > 0 ? rect.width / iframe.offsetWidth : 1
+          const scaleY = iframe.offsetHeight > 0 ? rect.height / iframe.offsetHeight : 1
+          const paddingLeft = parseFloat(cs.paddingLeft || '0') || 0
+          const paddingTop = parseFloat(cs.paddingTop || '0') || 0
+          const iframeX = (clientX - rect.left) / (scaleX || 1) - paddingLeft
+          const iframeY = (clientY - rect.top) / (scaleY || 1) - paddingTop
+          if (iframeX < 0 || iframeY < 0) continue
+          if (typeof doc.elementsFromPoint === 'function') {
+            const list = doc.elementsFromPoint(iframeX, iframeY)
+            if (list.length > 0) return list
+          }
+          const single = doc.elementFromPoint(iframeX, iframeY)
+          if (single) return [single]
+        }
+        return []
       } catch (e) {
-        return null
+        return []
       }
+    },
+    resolveEpubIframeTargetAtPoint(clientX: number, clientY: number): Element | null {
+      const hits = this.resolveEpubIframeHitElementsAtPoint(clientX, clientY)
+      return hits[0] || null
+    },
+    resolveEpubImagePayloadAtPoint(clientX: number, clientY: number): { element: Element, src: string, alt: string } | null {
+      const hits = this.resolveEpubIframeHitElementsAtPoint(clientX, clientY)
+      const top = hits[0]
+      if (!top || top.closest?.('#d2-popover, #d2-popup')) return null
+      for (const el of hits) {
+        if (el !== top && !top.contains(el)) continue
+        const payload = this.getEpubImageZoomPayload(el)
+        if (payload) {
+          return {element: el, ...payload}
+        }
+      }
+      return null
     },
     handleEpubWrapperTouchStart(event: TouchEvent) {
       if (!this.isMobileEpubViewport() || this.epubMobileSelectionMode) return
@@ -3148,28 +3216,38 @@ export default Vue.extend({
 
       const isTap = Math.abs(touch.clientX - start.x) <= 10 && Math.abs(touch.clientY - start.y) <= 10
       if (isTap) {
-        const target = this.resolveEpubIframeTargetAtPoint(touch.clientX, touch.clientY)
-        if (target?.tagName.toLowerCase() === 'img') {
-          const image = target as HTMLImageElement
-          const src = image.currentSrc || image.src
+        const topTarget = this.resolveEpubIframeTargetAtPoint(touch.clientX, touch.clientY)
+        const imageHit = this.resolveEpubImagePayloadAtPoint(touch.clientX, touch.clientY)
+        if (imageHit) {
+          const image = imageHit.element
+          const src = imageHit.src
           const now = Date.now()
-          if (src && this.epubMobileLastImageTap?.src === src && now - this.epubMobileLastImageTap.time < 400) {
+          if (this.epubMobileLastImageTap?.src === src && now - this.epubMobileLastImageTap.time < 400) {
             clearTimeout(this.clickTimer)
+            this.clickTimer = undefined
             this.epubMobileLastImageTap = undefined
-            this.epubMobileSuppressClickUntil = now + 450
+            this.epubMobileSuppressClickUntil = now + 600
             this.openEpubImageZoom(image)
             return
           }
-          if (src) {
-            this.epubMobileLastImageTap = {src, time: now}
-            this.epubMobileSuppressClickUntil = now + 450
-            clearTimeout(this.clickTimer)
-            this.clickTimer = window.setTimeout(() => {
-              this.clickTimer = undefined
-              this.singleClick(touch.clientX, touch.clientY)
-            }, 200)
-          }
+          this.epubMobileLastImageTap = {src, time: now}
+          this.epubMobileSuppressClickUntil = now + 500
+          clearTimeout(this.clickTimer)
+          const anchor = topTarget?.closest?.('a[href]') as HTMLElement | null
+          const tapX = touch.clientX
+          const tapY = touch.clientY
+          this.clickTimer = window.setTimeout(() => {
+            this.clickTimer = undefined
+            if (anchor) {
+              anchor.click()
+            } else {
+              this.singleClick(tapX, tapY)
+            }
+          }, 380)
+          return
         } else {
+          clearTimeout(this.clickTimer)
+          this.clickTimer = undefined
           this.epubMobileLastImageTap = undefined
           this.epubMobileSuppressClickUntil = 0
         }
@@ -3704,7 +3782,7 @@ export default Vue.extend({
     },
     closeDialog() {
       if (this.epubImageZoomVisible) {
-        this.epubImageZoomVisible = false
+        this.closeEpubImageZoom(true)
         return
       }
       if (this.showToc) {
