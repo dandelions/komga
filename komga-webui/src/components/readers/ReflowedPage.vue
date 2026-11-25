@@ -1151,6 +1151,7 @@ export default Vue.extend({
       errorMessage: '',
       reflowItems: [] as ReflowItem[],
       pages: [] as ReflowItem[][],
+      verticalPageColumnGaps: [] as number[],
       virtualPageIndex: 0,
       viewportWidth: 0,
       viewportHeight: 0,
@@ -1502,13 +1503,16 @@ export default Vue.extend({
         }
       }
       if (!this.verticalText) return style
+      const baseGap = Math.max(4, Math.round(this.blockSpacing * 0.85))
+      const pageGap = this.verticalPageColumnGaps?.[this.virtualPageIndex] ?? baseGap
+      const cssColumnGap = Math.max(1, Math.round((pageGap / 2) * 10) / 10)
       return {
         ...style,
         flexDirection: 'column',
         flexWrap: this.verticalDirection === 'rtl' ? 'wrap-reverse' : 'wrap',
         alignItems: 'center',
         alignContent: 'flex-start',
-        columnGap: `${Math.max(2, Math.round(this.blockSpacing * 0.42))}px`,
+        columnGap: `${cssColumnGap}px`,
         rowGap: `${this.reflowInlineGap}px`,
         paddingTop: '16px',
         paddingBottom: '24px',
@@ -1527,6 +1531,8 @@ export default Vue.extend({
         rowGap: `${Math.round(this.blockSpacing * 1.5)}px`,
       }
       if (!this.verticalText) return style
+      const baseGap = Math.max(4, Math.round(this.blockSpacing * 0.85))
+      const cssColumnGap = Math.max(1, Math.round((baseGap / 2) * 10) / 10)
       return {
         ...style,
         height: `${this.pageContentHeight()}px`,
@@ -1536,7 +1542,7 @@ export default Vue.extend({
         flexWrap: this.verticalDirection === 'rtl' ? 'wrap-reverse' : 'wrap',
         alignItems: 'center',
         alignContent: 'flex-start',
-        columnGap: `${Math.max(2, Math.round(this.blockSpacing * 0.42))}px`,
+        columnGap: `${cssColumnGap}px`,
         rowGap: `${this.reflowInlineGap}px`,
         paddingTop: '16px',
         paddingBottom: '24px',
@@ -2881,6 +2887,7 @@ export default Vue.extend({
       this.updateViewportMetrics()
       if (this.paginationItems.length === 0) {
         this.pages = []
+        this.verticalPageColumnGaps = []
         this.virtualPageIndex = 0
         return
       }
@@ -2894,6 +2901,7 @@ export default Vue.extend({
         }
         return
       }
+      this.verticalPageColumnGaps = []
 
       const estimatedPages = this.paginateItemsEstimated(this.paginationItems)
       this.pages = estimatedPages
@@ -3086,16 +3094,23 @@ export default Vue.extend({
       return pages
     },
     paginateVerticalItemsEstimated(items: ReflowItem[]): ReflowItem[][] {
-      if (items.length === 0) return []
+      if (items.length === 0) {
+        this.verticalPageColumnGaps = []
+        return []
+      }
 
       const targetWidth = (typeof this.pageContentWidth === 'function' ? this.pageContentWidth() : 0) || this.targetWidth
       const contentWidth = Math.max(120, targetWidth - this.horizontalContentPadding() * 2)
       const contentHeight = Math.max(120, this.pageContentHeight() - 44)
       const columnGap = Math.max(4, Math.round(this.blockSpacing * 0.85))
+      const minColumnGap = Math.max(2, columnGap * 0.55)
       const rowGap = typeof this.reflowInlineGap === 'number' ? this.reflowInlineGap : 0
       const pages = [] as ReflowItem[][]
+      const pageGaps = [] as number[]
       let currentPage = [] as ReflowItem[]
-      let currentPageWidth = 0
+      let currentPageColumns = 0
+      let currentColumnsTotalWidth = 0
+      let currentPageGap = columnGap
       let currentColumn = [] as ReflowItem[]
       let currentColumnWidth = 0
       let currentColumnHeight = 0
@@ -3103,17 +3118,32 @@ export default Vue.extend({
       const pushPage = () => {
         if (currentPage.length === 0) return
         pages.push(currentPage)
+        pageGaps.push(currentPageGap)
         currentPage = []
-        currentPageWidth = 0
+        currentPageColumns = 0
+        currentColumnsTotalWidth = 0
+        currentPageGap = columnGap
       }
 
       const pushColumn = () => {
         if (currentColumn.length === 0) return
         const columnWidth = Math.max(1, currentColumnWidth)
-        const nextWidth = currentPage.length > 0 ? currentPageWidth + columnGap + columnWidth : columnWidth
-        if (currentPage.length > 0 && nextWidth > contentWidth) pushPage()
+        if (currentPageColumns > 0) {
+          const currentUsedWidth = currentColumnsTotalWidth + (currentPageColumns - 1) * currentPageGap
+          const nextWidth = currentUsedWidth + currentPageGap + columnWidth
+          if (nextWidth > contentWidth) {
+            const remaining = contentWidth - currentUsedWidth
+            const candidateGap = Math.floor(((contentWidth - currentColumnsTotalWidth - columnWidth) / currentPageColumns) * 2) / 2
+            if (currentPageColumns >= 5 && remaining >= columnWidth * 0.6 && candidateGap >= minColumnGap) {
+              currentPageGap = candidateGap
+            } else {
+              pushPage()
+            }
+          }
+        }
         currentPage.push(...currentColumn, {type: 'break'})
-        currentPageWidth = currentPageWidth > 0 ? currentPageWidth + columnGap + columnWidth : columnWidth
+        currentPageColumns += 1
+        currentColumnsTotalWidth += columnWidth
         currentColumn = []
         currentColumnWidth = 0
         currentColumnHeight = 0
@@ -3148,6 +3178,7 @@ export default Vue.extend({
 
       pushColumn()
       pushPage()
+      this.verticalPageColumnGaps = pageGaps
       return pages
     },
     nextPage() {

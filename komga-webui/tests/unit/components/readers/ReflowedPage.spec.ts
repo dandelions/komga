@@ -623,6 +623,45 @@ test('vertical reflow uses compact horizontal margins so an extra column fits on
   expect(pages).toHaveLength(1)
 })
 
+test('vertical reflow shrinks column gaps slightly to absorb an extra column only when remaining space is >= 60% of column width', () => {
+  const buildContext = (targetWidth: number) => ({
+    verticalText: true,
+    targetWidth,
+    blockSpacing: 8, // baseGap = 7, minGap = 3.85
+    reflowInlineGap: 1,
+    verticalPageColumnGaps: [] as number[],
+    pageContentWidth: () => targetWidth,
+    pageContentHeight: () => 400,
+    horizontalContentPadding: () => 10, // contentWidth = targetWidth - 20
+    textScale: () => 1,
+    isSpriteWordItem: () => true,
+    reflowItemDisplayWidth: (item: any) => item.w,
+    reflowItemDisplayHeight: (item: any) => item.h,
+  })
+  const makeColumns = (count: number, colWidth: number) => {
+    const items: any[] = []
+    for (let col = 0; col < count; col++) {
+      items.push({type: 'word', w: colWidth, h: 40})
+      items.push({type: 'break'})
+    }
+    return items
+  }
+
+  // 7 cols of 30px + 6 gaps of 7px = 252px.
+  // With contentWidth = 276px (remaining = 24px = 80% of 30px):
+  // 8 cols of 30px = 240px -> remaining for 7 gaps = 36px -> 5px per gap (>= 3.85px) -> fits on 1 page!
+  const absorbCtx = buildContext(296)
+  const absorbedPages = methods.paginateVerticalItemsEstimated.call(absorbCtx, makeColumns(8, 30))
+  expect(absorbedPages).toHaveLength(1)
+  expect(absorbCtx.verticalPageColumnGaps[0]).toBe(5)
+
+  // With contentWidth = 266px (remaining = 14px = 46.7% < 60% of 30px): wraps to 2 pages at normal gap 7
+  const wrapCtx = buildContext(286)
+  const wrappedPages = methods.paginateVerticalItemsEstimated.call(wrapCtx, makeColumns(8, 30))
+  expect(wrappedPages).toHaveLength(2)
+  expect(wrapCtx.verticalPageColumnGaps).toEqual([7, 7])
+})
+
 test('restores a persistent local reflow result without loading the source page', async () => {
   const cachedItems = [{type: 'word', src: 'data:image/png;base64,cached', x: 0, y: 0, w: 24, h: 18, height: 18}]
   const context = Object.assign({}, methods, {
