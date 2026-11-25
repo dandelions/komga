@@ -3274,7 +3274,7 @@ export default Vue.extend({
     },
     localReflowResultCacheKey(): string {
       return JSON.stringify({
-        version: 8,
+        version: 9,
         bookId: this.bookId,
         page: this.page.number,
         pageUrl: canonicalPageImageUrl(this.page.url),

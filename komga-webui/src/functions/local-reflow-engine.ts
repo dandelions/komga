@@ -961,7 +961,7 @@ export function mergeManualImageRegions(
 const KEEP_ORIGINAL_VALUE = -1
 
 function lutLuma(r: number, g: number, b: number): number {
-  const luma = (0.299 * r + 0.587 * g + 0.114 * b) | 0
+  const luma = (0.299 * r + 0.587 * g + 0.114 * b + 0.5) | 0
   return luma < 0 ? 0 : (luma > 255 ? 255 : luma)
 }
 
@@ -1023,7 +1023,8 @@ function buildTextureNormalizationLut(
       } else {
         let foreground = calculateEnhancedForeground(delta, maxDelta, baseMinDelta)
         if (strokeBoost > 0 && foreground > 0) {
-          foreground = clamp(foreground + (1 - foreground) * strokeBoost, 0, 1)
+          const edgeScale = stroke <= 0.3 ? clamp(foreground * 4, 0, 1) : clamp((foreground - 0.08) / 0.25, 0, 1)
+          foreground = clamp(foreground + (1 - foreground) * strokeBoost * edgeScale, 0, 1)
         }
         lut[luma] = options.darkDisplay
           ? Math.round(255 * foreground)
@@ -1031,14 +1032,41 @@ function buildTextureNormalizationLut(
       }
     } else if (options.darkDisplay) {
       const isWordInk = sourceDark ? luma > inkThresh : luma < inkThresh
-      let val = sourceDark ? luma : 255 - luma
-      if (isWordInk && strokeBoost > 0) val = Math.min(255, Math.round(val + (255 - val) * strokeBoost))
-      lut[luma] = isWordInk ? val : bgVal
+      const paperThresh = sourceDark ? Math.min(inkThresh, pageBgLuma + 16) : Math.max(inkThresh, pageBgLuma - 16)
+      if (isWordInk) {
+        let val = sourceDark ? luma : 255 - luma
+        if (strokeBoost > 0) {
+          const inkRatio = clamp(Math.abs(inkThresh - luma) / Math.max(1, sourceDark ? 255 - inkThresh : inkThresh), 0, 1)
+          const boost = Math.max(strokeBoost, Math.min(0.42, strokeBoost + 0.25 * inkRatio))
+          val = Math.min(255, Math.round(val + (255 - val) * boost))
+        }
+        lut[luma] = val
+      } else if ((!sourceDark && luma < paperThresh) || (sourceDark && luma > paperThresh)) {
+        const edgeVal = sourceDark ? luma : 255 - luma
+        const t = Math.abs(luma - inkThresh) / Math.max(1, Math.abs(paperThresh - inkThresh))
+        lut[luma] = Math.round(edgeVal * (1 - t))
+      } else {
+        lut[luma] = bgVal
+      }
     } else {
       const isWordInk = sourceDark ? luma > inkThresh : luma < inkThresh
-      let val = sourceDark ? 255 - luma : KEEP_ORIGINAL_VALUE
-      if (isWordInk && strokeBoost > 0) val = Math.max(0, Math.round((val === KEEP_ORIGINAL_VALUE ? luma : val) * (1 - strokeBoost)))
-      lut[luma] = isWordInk ? val : bgVal
+      const paperThresh = sourceDark ? Math.min(inkThresh, pageBgLuma + 16) : Math.max(inkThresh, pageBgLuma - 16)
+      if (isWordInk) {
+        let val = sourceDark ? 255 - luma : KEEP_ORIGINAL_VALUE
+        if (strokeBoost > 0) {
+          const base = val === KEEP_ORIGINAL_VALUE ? luma : val
+          const inkRatio = clamp(Math.abs(inkThresh - luma) / Math.max(1, sourceDark ? 255 - inkThresh : inkThresh), 0, 1)
+          const darken = Math.max(strokeBoost, Math.min(0.42, strokeBoost + 0.25 * inkRatio))
+          val = Math.max(0, Math.round(base * (1 - darken)))
+        }
+        lut[luma] = val
+      } else if ((!sourceDark && luma < paperThresh) || (sourceDark && luma > paperThresh)) {
+        const edgeVal = sourceDark ? 255 - luma : luma
+        const t = Math.abs(luma - inkThresh) / Math.max(1, Math.abs(paperThresh - inkThresh))
+        lut[luma] = Math.round(edgeVal + (bgVal - edgeVal) * t)
+      } else {
+        lut[luma] = bgVal
+      }
     }
   }
   return lut
@@ -2303,7 +2331,8 @@ export function applyGlobalPageTextureProcessing(
     const luma = pixelLuma(output[pIdx], output[pIdx + 1], output[pIdx + 2])
     if (precomputedInk && output[pIdx + 3] !== 0 && (inkIsDark ? luma > inkThreshold : luma < inkThreshold)) precomputedInk[i] = 1
     if (output[pIdx + 3] === 0) continue
-    const value = lut[luma]
+    const lumaIdx = Math.min(255, Math.max(0, (luma + 0.5) | 0))
+    const value = lut[lumaIdx]
     if (value === KEEP_ORIGINAL_VALUE) continue
     output[pIdx] = value
     output[pIdx + 1] = value
@@ -2394,15 +2423,33 @@ export function reflowPageFromPixels(
 
     const resizeCopyStartedAt = now()
     for (let y = 0; y < workH; y++) {
-      const srcY = Math.min(sourceH - 1, Math.floor(y / scale))
+      const sy = (y + 0.5) / scale - 0.5
+      const y0 = Math.max(0, Math.min(sourceH - 1, Math.floor(sy)))
+      const y1 = Math.min(sourceH - 1, y0 + 1)
+      const fy = Math.max(0, Math.min(1, sy - y0))
+      const fy0 = 1 - fy
+      const row0 = y0 * sourceW
+      const row1 = y1 * sourceW
+      const dstRow = y * workW
       for (let x = 0; x < workW; x++) {
-        const srcX = Math.min(sourceW - 1, Math.floor(x / scale))
-        const sIdx = (srcY * sourceW + srcX) * 4
-        const dIdx = (y * workW + x) * 4
-        workPixels[dIdx] = sourcePixels[sIdx]
-        workPixels[dIdx + 1] = sourcePixels[sIdx + 1]
-        workPixels[dIdx + 2] = sourcePixels[sIdx + 2]
-        workPixels[dIdx + 3] = sourcePixels[sIdx + 3]
+        const sx = (x + 0.5) / scale - 0.5
+        const x0 = Math.max(0, Math.min(sourceW - 1, Math.floor(sx)))
+        const x1 = Math.min(sourceW - 1, x0 + 1)
+        const fx = Math.max(0, Math.min(1, sx - x0))
+        const fx0 = 1 - fx
+        const w00 = fx0 * fy0
+        const w10 = fx * fy0
+        const w01 = fx0 * fy
+        const w11 = fx * fy
+        const i00 = (row0 + x0) * 4
+        const i10 = (row0 + x1) * 4
+        const i01 = (row1 + x0) * 4
+        const i11 = (row1 + x1) * 4
+        const dIdx = (dstRow + x) * 4
+        workPixels[dIdx] = Math.round(sourcePixels[i00] * w00 + sourcePixels[i10] * w10 + sourcePixels[i01] * w01 + sourcePixels[i11] * w11)
+        workPixels[dIdx + 1] = Math.round(sourcePixels[i00 + 1] * w00 + sourcePixels[i10 + 1] * w10 + sourcePixels[i01 + 1] * w01 + sourcePixels[i11 + 1] * w11)
+        workPixels[dIdx + 2] = Math.round(sourcePixels[i00 + 2] * w00 + sourcePixels[i10 + 2] * w10 + sourcePixels[i01 + 2] * w01 + sourcePixels[i11 + 2] * w11)
+        workPixels[dIdx + 3] = Math.round(sourcePixels[i00 + 3] * w00 + sourcePixels[i10 + 3] * w10 + sourcePixels[i01 + 3] * w01 + sourcePixels[i11 + 3] * w11)
       }
     }
     timings.resizeCopyMs = now() - resizeCopyStartedAt
@@ -2494,8 +2541,7 @@ export function reflowPageFromPixels(
       threshold,
       pageInk,
     )
-    if (options.deferTextureEncoding) pageTexturePixels = texturePixels
-    else pageTextureUrl = rgbaToBmpDataUrl(texturePixels, workW, workH, workW, 0, 0)
+    pageTexturePixels = texturePixels === workPixels ? new Uint8ClampedArray(texturePixels) : texturePixels
   }
 
   // Normalize text colors once for the whole page; detection still uses workPixels.
@@ -3019,6 +3065,19 @@ export function reflowPageFromPixels(
         const offsetY = adjusted.y - outputTop
 
         if (isSpriteMode) {
+          if (pageTexturePixels) {
+            const edgeBg = edgeBackgroundColor(options, pageBgLuma)
+            clearDirtyBlockEdges(
+              pageTexturePixels,
+              workW,
+              workH,
+              edgeAdjusted.dirtyEdges,
+              adjusted,
+              edgeBg.r,
+              edgeBg.g,
+              edgeBg.b,
+            )
+          }
           items.push({
             type: 'word',
             x: adjusted.x,
@@ -3203,6 +3262,10 @@ export function reflowPageFromPixels(
     items.push(fallbackItem)
   }
 
+  if (isSpriteMode && !options.deferTextureEncoding && pageTexturePixels) {
+    pageTextureUrl = rgbaToBmpDataUrl(pageTexturePixels, workW, workH, workW, 0, 0)
+  }
+
   return {
     pageBackground,
     sourceWidth: sourceW,
@@ -3210,7 +3273,7 @@ export function reflowPageFromPixels(
     workWidth: workW,
     workHeight: workH,
     pageTextureUrl: isSpriteMode ? pageTextureUrl : undefined,
-    pageTexturePixels: isSpriteMode ? pageTexturePixels : undefined,
+    pageTexturePixels: isSpriteMode && options.deferTextureEncoding ? pageTexturePixels : undefined,
     detectedAutoSkew,
     processingTimeMs: Date.now() - startedAt,
     items,

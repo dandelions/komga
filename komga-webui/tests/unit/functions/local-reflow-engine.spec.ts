@@ -34,6 +34,86 @@ import {
 } from '@/functions/local-reflow-engine'
 
 describe('local-reflow-engine', () => {
+  test('rounds floating-point luma before indexing texture LUT so light pixels never become black burrs', () => {
+    const source = new Uint8ClampedArray([
+      248, 249, 248, 255,
+      254, 255, 254, 255,
+      215, 214, 213, 255,
+      230, 230, 230, 255,
+      7, 7, 7, 255,
+      20, 20, 20, 255,
+    ])
+    const baseOptions: LocalReflowOptions = {
+      targetWidth: 3,
+      autoCropBorder: false,
+      textScale: 100,
+      columnCount: 1,
+      skewCorrection: 0,
+      threshold: 185,
+      columnGap: 15,
+      wordGap: 3,
+      strokeStrength: 0.1,
+      contrastEnhancement: true,
+      matchBackground: false,
+      matchBackgroundMode: 'grayscale',
+      blockSpacing: 6,
+      verticalText: false,
+      verticalDirection: 'rtl',
+      marginTop: 0,
+      marginRight: 0,
+      marginBottom: 0,
+      marginLeft: 0,
+      darkDisplay: false,
+    }
+
+    const enhanced = applyGlobalPageTextureProcessing(source, 3, 2, baseOptions, 255, false, 185)
+    expect(enhanced[0]).toBe(255)
+    expect(enhanced[4]).toBe(255)
+    expect(enhanced[8]).toBeGreaterThan(200)
+    expect(enhanced[12]).toBeGreaterThan(220)
+
+    const grayscale = applyGlobalPageTextureProcessing(source, 3, 2, {...baseOptions, contrastEnhancement: false}, 255, false, 185)
+    expect(grayscale[0]).toBe(255)
+    expect(grayscale[4]).toBe(255)
+    expect(grayscale[8]).toBeGreaterThan(200)
+    expect(grayscale[8]).toBeLessThan(255)
+    expect(grayscale[12]).toBeGreaterThan(220)
+    expect(grayscale[12]).toBeLessThan(255)
+  })
+
+  test('does not turn faint edge tints into dark specks when strokeStrength is raised', () => {
+    const source = new Uint8ClampedArray([
+      255, 255, 255, 255,
+      236, 236, 236, 255,
+      60, 60, 60, 255,
+    ])
+    const options: LocalReflowOptions = {
+      targetWidth: 3,
+      autoCropBorder: false,
+      textScale: 100,
+      columnCount: 1,
+      skewCorrection: 0,
+      threshold: 185,
+      columnGap: 15,
+      wordGap: 3,
+      strokeStrength: 1.5,
+      contrastEnhancement: true,
+      matchBackground: false,
+      matchBackgroundMode: 'grayscale',
+      blockSpacing: 6,
+      verticalText: false,
+      verticalDirection: 'rtl',
+      marginTop: 0,
+      marginRight: 0,
+      marginBottom: 0,
+      marginLeft: 0,
+      darkDisplay: false,
+    }
+    const output = applyGlobalPageTextureProcessing(source, 3, 1, options, 255, false, 185)
+    expect(output[4]).toBeGreaterThan(230)
+    expect(output[8]).toBeLessThan(10)
+  })
+
   test('shares color-normalization classification with the sprite ink map', () => {
     const source = new Uint8ClampedArray([
       255, 255, 255, 255,
