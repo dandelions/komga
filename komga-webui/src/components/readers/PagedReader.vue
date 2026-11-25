@@ -141,6 +141,7 @@ import {buildSpreads} from '@/functions/book-spreads'
 import {isPageLandscape} from '@/functions/page'
 import {loadCachedPageImage, markPageImageBrowserLoaded} from '@/functions/page-image-cache'
 import {enhanceTextContrast} from '@/functions/image-enhancement'
+import {isStickyMobileReaderActive} from '@/functions/mobile-reader'
 
 type CropRegion = {
   x: number,
@@ -1557,26 +1558,29 @@ export default Vue.extend({
           ...Array.from(reader.querySelectorAll('.v-carousel, .v-window, .v-window__container, .v-window-item, .v-window-item--active')),
         ].filter(Boolean) as HTMLElement[]
 
+        const stickyMobileReader = isStickyMobileReaderActive()
         const scrollingElementTop = position === 'bottom' ? scrollingElement.scrollHeight : 0
         const scrollableElementTop = (element: HTMLElement) => position === 'bottom' ? element.scrollHeight : 0
 
-        if (isLandscapeRotated) {
-          window.scrollTo({top: 0, left: 0, behavior: 'auto'})
-        } else {
-          window.scrollTo({top: scrollingElementTop, left: 0, behavior: 'auto'})
+        if (!stickyMobileReader) {
+          if (isLandscapeRotated) {
+            window.scrollTo({top: 0, left: 0, behavior: 'auto'})
+          } else {
+            window.scrollTo({top: scrollingElementTop, left: 0, behavior: 'auto'})
+          }
+          scrollingElement.scrollTop = scrollingElementTop
+          scrollingElement.scrollLeft = 0
+          document.documentElement.scrollTop = position === 'bottom' ? document.documentElement.scrollHeight : 0
+          document.documentElement.scrollLeft = 0
+          document.body.scrollTop = position === 'bottom' ? document.body.scrollHeight : 0
+          document.body.scrollLeft = 0
         }
-        scrollingElement.scrollTop = scrollingElementTop
-        scrollingElement.scrollLeft = 0
-        document.documentElement.scrollTop = position === 'bottom' ? document.documentElement.scrollHeight : 0
-        document.documentElement.scrollLeft = 0
-        document.body.scrollTop = position === 'bottom' ? document.body.scrollHeight : 0
-        document.body.scrollLeft = 0
         scrollableElements.forEach(x => {
           x.scrollTop = scrollableElementTop(x)
           x.scrollLeft = 0
         })
 
-        if (position === 'top' && !isLandscapeRotated) {
+        if (!stickyMobileReader && position === 'top' && !isLandscapeRotated) {
           try {
             const activeItem = (reader.querySelector('.v-window-item--active') || reader) as HTMLElement
             const target = (activeItem.querySelector('img') || activeItem) as HTMLElement

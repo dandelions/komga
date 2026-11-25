@@ -1215,6 +1215,7 @@ import {getBookTitleCompact} from '@/functions/book-title'
 import {checkImageSupport, ImageFeature} from '@/functions/check-image'
 import {bookPageReflowUrl, bookPageUrl} from '@/functions/urls'
 import {getFileFromUrl} from '@/functions/file'
+import {isMobileReaderViewport, isStickyMobileReaderActive} from '@/functions/mobile-reader'
 import {resizeImageFile} from '@/functions/resize-image'
 import {ReadingDirection} from '@/types/enum-books'
 import Vue from 'vue'
@@ -1477,6 +1478,7 @@ export default Vue.extend({
       landscapeDisplay: false,
       viewportWidth: 0,
       viewportHeight: 0,
+      lastMobileViewportHeight: 0,
       reflowSetupMode: false,
       reflowMode: false,
       k2ReflowMode: false,
@@ -4392,6 +4394,7 @@ export default Vue.extend({
       }
     },
     scrollToPageEdge(position: 'top' | 'bottom') {
+      if (isStickyMobileReaderActive()) return
       const scroll = () => {
         const scrollingElement = document.scrollingElement || document.documentElement
         const top = position === 'bottom' ? scrollingElement.scrollHeight : 0
@@ -4417,8 +4420,21 @@ export default Vue.extend({
         || (typeof window !== 'undefined' ? window.innerHeight : 0)
         || (typeof document !== 'undefined' && document.documentElement?.clientHeight)
         || 0
+      const flooredHeight = Math.floor(height)
+      const prevHeight = Number(this.lastMobileViewportHeight) || 0
       this.viewportWidth = Math.floor(width)
-      this.viewportHeight = Math.floor(height)
+      this.viewportHeight = flooredHeight
+      this.lastMobileViewportHeight = flooredHeight
+
+      if (!this.continuousReader && isMobileReaderViewport() && prevHeight > 0 && flooredHeight < prevHeight - 20) {
+        const scroller = (document.scrollingElement || document.documentElement) as HTMLElement | null
+        if (scroller) {
+          const maxScroll = scroller.scrollHeight - scroller.clientHeight
+          if (maxScroll >= 240 && scroller.scrollTop > maxScroll - 140) {
+            window.scrollTo({top: 0, left: 0, behavior: 'auto'})
+          }
+        }
+      }
     },
     async toggleLandscapeDisplay() {
       this.landscapeDisplay = !this.landscapeDisplay
@@ -4921,8 +4937,8 @@ body.html-reader::-webkit-scrollbar {
 
 @media (max-width: 959px), (hover: none) and (pointer: coarse) {
   body.html-reader {
-    min-height: calc(100vh + 150px) !important;
-    min-height: calc(100dvh + 150px) !important;
+    min-height: calc(100vh + 400px) !important;
+    min-height: calc(100dvh + 400px) !important;
   }
 
   .html-reader .v-application,
@@ -4938,6 +4954,15 @@ body.html-reader::-webkit-scrollbar {
     width: 100% !important;
     height: 100vh !important;
     height: 100dvh !important;
+    touch-action: pan-y pinch-zoom;
+  }
+
+  html.html-reader:not(.reader-magnifier-gesture-active) .reader-shell:not(.reader-continuous-shell) .reflow-reader,
+  html.html-reader:not(.reader-magnifier-gesture-active) .reader-shell:not(.reader-continuous-shell) .reflowed-page,
+  html.html-reader:not(.reader-magnifier-gesture-active) .reader-shell:not(.reader-continuous-shell) .reflow-wrapper,
+  html.html-reader:not(.reader-magnifier-gesture-active) .reader-shell:not(.reader-continuous-shell) .k2-reflowed-page,
+  html.html-reader:not(.reader-magnifier-gesture-active) .reader-shell:not(.reader-continuous-shell) .k2-output {
+    touch-action: pan-y pinch-zoom;
   }
 }
 

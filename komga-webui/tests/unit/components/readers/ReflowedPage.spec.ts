@@ -662,6 +662,30 @@ test('vertical reflow shrinks column gaps slightly to absorb an extra column onl
   expect(wrapCtx.verticalPageColumnGaps).toEqual([7, 7])
 })
 
+test('scrollToTop does not reset window scroll when sticky mobile reader is active', () => {
+  const originalMatchMedia = window.matchMedia
+  const originalScrollTo = window.scrollTo
+  window.matchMedia = jest.fn(() => ({matches: true} as any))
+  window.scrollTo = jest.fn()
+  document.documentElement.classList.add('html-reader')
+
+  try {
+    const context = {
+      $nextTick: (cb: () => void) => cb(),
+    }
+    methods.scrollToTop.call(context)
+    expect(window.scrollTo).not.toHaveBeenCalled()
+
+    document.documentElement.classList.remove('html-reader')
+    methods.scrollToTop.call(context)
+    expect(window.scrollTo).toHaveBeenCalledWith({top: 0, left: 0, behavior: 'auto'})
+  } finally {
+    document.documentElement.classList.remove('html-reader')
+    window.matchMedia = originalMatchMedia
+    window.scrollTo = originalScrollTo
+  }
+})
+
 test('restores a persistent local reflow result without loading the source page', async () => {
   const cachedItems = [{type: 'word', src: 'data:image/png;base64,cached', x: 0, y: 0, w: 24, h: 18, height: 18}]
   const context = Object.assign({}, methods, {

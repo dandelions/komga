@@ -318,6 +318,7 @@ import {
   preprocessDocumentCanvas,
 } from '@/functions/image-enhancement'
 import {canonicalPageImageUrl, loadCachedPageImageWithStats} from '@/functions/page-image-cache'
+import {isStickyMobileReaderActive} from '@/functions/mobile-reader'
 import {createK2SliceWorker} from '@/functions/reflow-analysis-worker-factory'
 import {FilterWorkerPool} from '@/functions/worker-pool'
 
@@ -2827,6 +2828,7 @@ export default Vue.extend({
       this.$emit('source-previous')
     },
     scrollToTop() {
+      if (isStickyMobileReaderActive()) return
       this.$nextTick(() => window.scrollTo({top: 0, left: 0, behavior: 'auto'}))
     },
     strengthenInk(context: CanvasRenderingContext2D, width: number, height: number) {

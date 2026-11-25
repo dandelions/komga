@@ -607,3 +607,82 @@ describe('DivinaReader reader image settings', () => {
     expect(normalize({contrastLevel: 137.6}).contrastLevel).toBe(138)
   })
 })
+
+describe('DivinaReader mobile address bar collapse', () => {
+  test('reserves generous root scroll height and vertical pan touch-action in mobile CSS', () => {
+    const fs = require('fs')
+    const path = require('path')
+    const vueFile = path.resolve(__dirname, '../../../src/views/DivinaReader.vue')
+    const content = fs.readFileSync(vueFile, 'utf8')
+
+    expect(content).toMatch(/body\.html-reader\s*\{[\s\S]*?min-height:\s*calc\(100vh\s*\+\s*400px\)\s*!important/i)
+    expect(content).toMatch(/body\.html-reader\s*\{[\s\S]*?min-height:\s*calc\(100dvh\s*\+\s*400px\)\s*!important/i)
+    expect(content).toMatch(/\.html-reader\s+\.reader-shell:not\(\.reader-continuous-shell\)\s*\{[\s\S]*?touch-action:\s*pan-y\s+pinch-zoom/i)
+  })
+
+  test('resets bottom-stuck root scroll only when the mobile browser UI re-expands', () => {
+    const originalVisualViewport = (window as any).visualViewport
+    const originalMatchMedia = window.matchMedia
+    const originalScrollTo = window.scrollTo
+    const scrollHeightSpy = jest.spyOn(document.documentElement, 'scrollHeight', 'get').mockReturnValue(1100)
+    const clientHeightSpy = jest.spyOn(document.documentElement, 'clientHeight', 'get').mockReturnValue(700)
+    let scrollTopValue = 360
+    const scrollTopSpy = jest.spyOn(document.documentElement, 'scrollTop', 'get').mockImplementation(() => scrollTopValue)
+
+    window.matchMedia = jest.fn(() => ({matches: true} as any))
+    window.scrollTo = jest.fn()
+
+    try {
+      const reader: any = {
+        continuousReader: false,
+        viewportWidth: 360,
+        viewportHeight: 740,
+        lastMobileViewportHeight: 740,
+      }
+
+      // Address bar hides -> viewport grows -> do not reset scrollTop
+      ;(window as any).visualViewport = {width: 360, height: 800, scale: 1}
+      methods.updateViewportMetrics.call(reader)
+      expect(window.scrollTo).not.toHaveBeenCalled()
+
+      // Address bar re-expands while scrollTop is stuck near maxScroll (400) -> reset to 0
+      ;(window as any).visualViewport = {width: 360, height: 700, scale: 1}
+      methods.updateViewportMetrics.call(reader)
+      expect(window.scrollTo).toHaveBeenCalledWith({top: 0, left: 0, behavior: 'auto'})
+
+      // When scrollTop already has plenty of room, do not reset
+      ;(window.scrollTo as jest.Mock).mockClear()
+      scrollTopValue = 40
+      ;(window as any).visualViewport = {width: 360, height: 650, scale: 1}
+      methods.updateViewportMetrics.call(reader)
+      expect(window.scrollTo).not.toHaveBeenCalled()
+    } finally {
+      ;(window as any).visualViewport = originalVisualViewport
+      window.matchMedia = originalMatchMedia
+      window.scrollTo = originalScrollTo
+      scrollHeightSpy.mockRestore()
+      clientHeightSpy.mockRestore()
+      scrollTopSpy.mockRestore()
+    }
+  })
+
+  test('does not reset root scroll position on scrollToPageEdge while sticky mobile reader is active', () => {
+    const originalMatchMedia = window.matchMedia
+    const originalScrollTo = window.scrollTo
+    window.matchMedia = jest.fn(() => ({matches: true} as any))
+    window.scrollTo = jest.fn()
+    document.documentElement.classList.add('html-reader')
+
+    try {
+      const reader: any = {
+        $nextTick: jest.fn((cb: any) => cb()),
+      }
+      methods.scrollToPageEdge.call(reader, 'top')
+      expect(window.scrollTo).not.toHaveBeenCalled()
+    } finally {
+      document.documentElement.classList.remove('html-reader')
+      window.matchMedia = originalMatchMedia
+      window.scrollTo = originalScrollTo
+    }
+  })
+})

@@ -806,4 +806,42 @@ describe('PagedReader previous-page scroll restoration', () => {
       expect(reader.navigateLeftSide).not.toHaveBeenCalled()
     })
   })
+
+  describe('scrollToPageEdge', () => {
+    test('preserves root scroll position in sticky mobile reader mode while resetting inner scrollers', () => {
+      const originalMatchMedia = window.matchMedia
+      const originalScrollTo = window.scrollTo
+      window.matchMedia = jest.fn(() => ({matches: true} as any))
+      window.scrollTo = jest.fn()
+      document.documentElement.classList.add('html-reader')
+
+      const innerItem = {scrollTop: 90, scrollLeft: 12}
+      const readerEl = {
+        scrollTop: 45,
+        scrollLeft: 5,
+        closest: jest.fn(() => null),
+        querySelectorAll: jest.fn(() => [innerItem]),
+        querySelector: jest.fn(() => null),
+      }
+
+      try {
+        const reader: any = {
+          $el: readerEl,
+          isLandscapeRotated: false,
+          scrollToPageEdgeTimers: [],
+          clearScrollToPageEdgeTimers: methods.clearScrollToPageEdgeTimers,
+        }
+
+        methods.scrollToPageEdge.call(reader, 'top')
+
+        expect(window.scrollTo).not.toHaveBeenCalled()
+        expect(readerEl.scrollTop).toBe(0)
+        expect(innerItem.scrollTop).toBe(0)
+      } finally {
+        document.documentElement.classList.remove('html-reader')
+        window.matchMedia = originalMatchMedia
+        window.scrollTo = originalScrollTo
+      }
+    })
+  })
 })

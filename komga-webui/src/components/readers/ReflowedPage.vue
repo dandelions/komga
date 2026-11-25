@@ -752,6 +752,7 @@ import {
   preprocessDocumentCanvas,
 } from '@/functions/image-enhancement'
 import {detectAutoDeskewAngle} from '@/functions/auto-deskew'
+import {isStickyMobileReaderActive} from '@/functions/mobile-reader'
 import {
   canonicalPageImageUrl,
   loadCachedPageImageWithStats,
@@ -3212,6 +3213,7 @@ export default Vue.extend({
       this.$emit('source-previous', this.streamPageCount)
     },
     scrollToTop() {
+      if (isStickyMobileReaderActive()) return
       this.$nextTick(() => window.scrollTo({top: 0, left: 0, behavior: 'auto'}))
     },
     sourcePageTextureUrl(item: ReflowItem): string {
