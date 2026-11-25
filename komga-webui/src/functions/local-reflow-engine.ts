@@ -1007,7 +1007,7 @@ function buildTextureNormalizationLut(
   const bgVal = options.darkDisplay ? 0 : 255
   const fgVal = options.darkDisplay ? 255 : 0
   const inkThresh = adaptiveInkThreshold(threshold, pageBgLuma)
-  const baseMinDelta = 8.0
+  const baseMinDelta = 16.0
   const maxDelta = sourceDark ? 255 - pageBgLuma : pageBgLuma
   const monochrome = options.matchBackgroundMode === 'monochrome'
   const stroke = options.strokeStrength && options.strokeStrength > 0 ? clamp(options.strokeStrength, 0, 3) : 0
@@ -1640,7 +1640,7 @@ export function contrastEnhancedTextColor(
   const sourceDark = backgroundLuma < 128
   const sourceLuma = Math.min(255, Math.max(0, pixelLuma(r, g, b)))
   const delta = sourceDark ? sourceLuma - backgroundLuma : backgroundLuma - sourceLuma
-  const baseMinDelta = 8.0
+  const baseMinDelta = 16.0
   if (delta <= baseMinDelta) {
     const bg = darkDisplay ? 0 : 255
     return {r: bg, g: bg, b: bg}
@@ -1864,7 +1864,7 @@ export function originalTextColor(
   let outputLuma: number
   if (options.contrastEnhancement) {
     const delta = sourceDark ? sourceLuma - backgroundLuma : backgroundLuma - sourceLuma
-    const baseMinDelta = 8.0
+    const baseMinDelta = 16.0
     if (delta <= baseMinDelta) return {r, g, b}
     const maxDelta = sourceDark ? 255.0 - backgroundLuma : backgroundLuma
     const contrastRange = Math.max(24.0, maxDelta * 0.55)
@@ -2564,7 +2564,7 @@ export function reflowPageFromPixels(
     } else if (isHighContrast && options.matchBackgroundMode !== 'original') {
       const bgVal = 255
       const inkThresh = adaptiveInkThreshold(threshold, pageBgLuma)
-      const baseMinDelta = 8.0
+      const baseMinDelta = 16.0
       const maxDelta = sourceDark ? 255 - pageBgLuma : pageBgLuma
       for (let i = 0; i < sliceW * sliceH; i++) {
         const pIdx = i * 4

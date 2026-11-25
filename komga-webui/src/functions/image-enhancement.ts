@@ -3,12 +3,15 @@ type LumaStats = {
   sourceDark: boolean,
 }
 
-type TextContrastOptions = {
+export type TextContrastOptions = {
   enabled?: boolean,
   nightDisplay?: boolean,
   matchBackground?: boolean,
   matchBackgroundMode?: 'original' | 'monochrome' | 'grayscale',
   backgroundLuma?: number,
+  strokeStrength?: number,
+  contrastLevel?: number,
+  connectedForegroundOnly?: boolean,
 }
 
 export function enhanceTextContrast(
@@ -97,10 +100,19 @@ export function enhanceTextContrastData(
     ? 'monochrome'
     : options.matchBackgroundMode === 'original' ? 'original' : 'grayscale'
   const needsForegroundMask = options.matchBackground || (outputMode === 'original' && (targetDark || options.enabled === true))
-  const matchedForeground = needsForegroundMask ? matchedForegroundMask(data, width, height, stats) : undefined
-  const baseMinDelta = options.enabled ? 8 : 0
+  const matchedForeground = needsForegroundMask || options.connectedForegroundOnly
+    ? matchedForegroundMask(data, width, height, stats, options.connectedForegroundOnly === true)
+    : undefined
+  const baseMinDelta = options.enabled ? 16 : 0
   const maxDelta = stats.sourceDark ? 255 - stats.background : stats.background
   const binaryMinDelta = Math.min(12, Math.max(3, maxDelta * 0.025))
+  const stroke = Math.max(0, Math.min(3, Number(options.strokeStrength) || 0))
+  const strokeBoost = stroke > 0 ? Math.min(0.65, stroke * 0.45) : 0
+  const contrastLevel = Math.max(50, Math.min(200, Number(options.contrastLevel) || 100)) / 100
+  const applyContrast = (value: number): number => {
+    const centered = (value - 128) * contrastLevel + 128
+    return Math.max(0, Math.min(255, centered))
+  }
   const invertForeground = targetDark !== stats.sourceDark
 
   for (let i = 0; i < width * height; i++) {
@@ -135,10 +147,12 @@ export function enhanceTextContrastData(
           else setGrayPixel(data, offset, backgroundValue)
           continue
         }
-        const foreground = calculateEnhancedForeground(delta, maxDelta, baseMinDelta)
+        let foreground = calculateEnhancedForeground(delta, maxDelta, baseMinDelta)
+        if (strokeBoost > 0 && foreground > 0) foreground = Math.min(1, foreground + (1 - foreground) * strokeBoost)
         outputLuma = targetDark
           ? 255 * foreground
           : 255 * (1 - foreground)
+        outputLuma = applyContrast(outputLuma)
       } else if (targetDark !== stats.sourceDark) {
         outputLuma = 255 - luma
       }
@@ -157,10 +171,11 @@ export function enhanceTextContrastData(
         setGrayPixel(data, offset, backgroundValue)
         continue
       }
-      const foreground = calculateEnhancedForeground(delta, maxDelta, baseMinDelta)
-      const output = targetDark
+      let foreground = calculateEnhancedForeground(delta, maxDelta, baseMinDelta)
+      if (strokeBoost > 0 && foreground > 0) foreground = Math.min(1, foreground + (1 - foreground) * strokeBoost)
+      const output = applyContrast(targetDark
         ? Math.round(255 * foreground)
-        : Math.round(255 * (1 - foreground))
+        : Math.round(255 * (1 - foreground)))
       setGrayPixel(data, offset, output)
       continue
     }
@@ -169,7 +184,13 @@ export function enhanceTextContrastData(
   }
 }
 
-function matchedForegroundMask(data: Uint8ClampedArray, width: number, height: number, stats: LumaStats): Uint8Array {
+function matchedForegroundMask(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+  stats: LumaStats,
+  requireConnectedStrongInk: boolean = false,
+): Uint8Array {
   const pixels = width * height
   const deltas = new Float32Array(pixels)
   const strong = new Uint8Array(pixels)
@@ -194,6 +215,20 @@ function matchedForegroundMask(data: Uint8ClampedArray, width: number, height: n
   const queue = [] as number[]
   for (let index = 0; index < pixels; index++) {
     if (!strong[index]) continue
+    if (requireConnectedStrongInk) {
+      const y = Math.floor(index / width)
+      const x = index - y * width
+      let hasStrongNeighbor = false
+      for (let yy = Math.max(0, y - 1); yy <= Math.min(height - 1, y + 1) && !hasStrongNeighbor; yy++) {
+        for (let xx = Math.max(0, x - 1); xx <= Math.min(width - 1, x + 1); xx++) {
+          if ((xx !== x || yy !== y) && strong[yy * width + xx]) {
+            hasStrongNeighbor = true
+            break
+          }
+        }
+      }
+      if (!hasStrongNeighbor) continue
+    }
     foreground[index] = 1
     queue.push(index)
   }

@@ -395,6 +395,9 @@
           :rotation="readerRotation"
           :skew-correction="readerSkewCorrection"
           :contrast-enhancement="readerContrastEnhancement"
+          :bleach-text="readerBleachText"
+          :stroke-strength="readerStrokeStrength"
+          :contrast-level="readerContrastLevel"
           :crop-regions-by-parity="readerCropRegionsByParity"
           :page-display-urls="readerDeskewedPageUrls"
           :active-crop-region="readerActiveCropRegion"
@@ -420,6 +423,9 @@
         :rotation="readerRotation"
         :skew-correction="readerSkewCorrection"
         :contrast-enhancement="readerContrastEnhancement"
+        :bleach-text="readerBleachText"
+        :stroke-strength="readerStrokeStrength"
+        :contrast-level="readerContrastLevel"
         :crop-regions-by-parity="readerCropRegionsByParity"
         :page-display-urls="readerDeskewedPageUrls"
         :active-crop-region="readerActiveCropRegion"
@@ -1958,19 +1964,7 @@ export default Vue.extend({
       return ['top', 'right', 'bottom', 'left']
     },
     normalReaderImageFilter(): string {
-      const filters = []
-      if (this.readerStrokeStrength > 0) {
-        filters.push(`contrast(${(1 + this.readerStrokeStrength * 0.35).toFixed(2)})`)
-        filters.push(`brightness(${(1 - this.readerStrokeStrength * 0.04).toFixed(2)})`)
-      }
-      if (this.readerBleachText) {
-        filters.push('contrast(1.35)')
-        filters.push('brightness(1.12)')
-      }
-      const contrastLevel = this.readerContrastLevel
-      if (contrastLevel !== 100) filters.push(`contrast(${(contrastLevel / 100).toFixed(2)})`)
-      if (this.nightDisplay) filters.push('invert(1) hue-rotate(180deg) brightness(0.92)')
-      return filters.join(' ') || 'none'
+      return this.nightDisplay ? 'invert(1) hue-rotate(180deg) brightness(0.92)' : 'none'
     },
     reflowTargetWidth(): number {
       const isLandscape = this.landscapeDisplay && !this.continuousReader

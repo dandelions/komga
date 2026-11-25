@@ -4,15 +4,43 @@ const methods = (ContinuousReader as any).options.methods
 const rotationWatcher = (ContinuousReader as any).options.watch.rotation.handler
 
 describe('ContinuousReader non-reflow image processing', () => {
-  test('does not apply contrast enhancement during ordinary page processing', () => {
+  test('applies pixel enhancement without a CSS contrast filter', () => {
+    const context = {
+      getImageData: jest.fn(() => ({data: new Uint8ClampedArray([255, 255, 255, 255])})),
+      putImageData: jest.fn(),
+    }
     const reader = Object.assign({}, methods, {
-      contrastEnhancement: true,
-      sourceImageCanvas: jest.fn(() => ({getContext: jest.fn(() => ({putImageData: jest.fn()}))})),
+      contrastEnhancement: false,
+      bleachText: false,
+      strokeStrength: 1,
+      contrastLevel: 100,
+      sourceImageCanvas: jest.fn(() => ({getContext: jest.fn(() => context)})),
       normalizedRotation: methods.normalizedRotation,
       skewCorrectedCanvas: jest.fn(canvas => canvas),
     })
     const processed = methods.processedPageCanvas.call(reader, {} as HTMLImageElement, 0, 0)
     expect(processed).toBeDefined()
+    expect(context.getImageData).toHaveBeenCalled()
+    expect(context.putImageData).toHaveBeenCalled()
+  })
+
+  test('keeps the original canvas path when all page enhancements are disabled', () => {
+    const context = {
+      getImageData: jest.fn(),
+      putImageData: jest.fn(),
+    }
+    const reader = Object.assign({}, methods, {
+      contrastEnhancement: false,
+      bleachText: false,
+      strokeStrength: 0,
+      contrastLevel: 100,
+      sourceImageCanvas: jest.fn(() => ({getContext: jest.fn(() => context)})),
+      normalizedRotation: methods.normalizedRotation,
+      skewCorrectedCanvas: jest.fn(canvas => canvas),
+    })
+    methods.processedPageCanvas.call(reader, {} as HTMLImageElement, 0, 0)
+    expect(context.getImageData).not.toHaveBeenCalled()
+    expect(context.putImageData).not.toHaveBeenCalled()
   })
 })
 

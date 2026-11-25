@@ -573,19 +573,13 @@ describe('DivinaReader normal mode image filters', () => {
     expect(filterFor()).toBe('none')
   })
 
-  test('bleach text adds high contrast and brightness', () => {
-    expect(filterFor({readerBleachText: true})).toBe('contrast(1.35) brightness(1.12)')
+  test('keeps the normal image filter free of contrast and brightness operations', () => {
+    expect(filterFor({readerBleachText: true, readerContrastLevel: 150, readerStrokeStrength: 2})).toBe('none')
   })
 
-  test('manual contrast is applied only when it differs from the neutral value', () => {
-    expect(filterFor({readerContrastLevel: 150})).toBe('contrast(1.50)')
-    expect(filterFor({readerContrastLevel: 80})).toBe('contrast(0.80)')
-    expect(filterFor({readerContrastLevel: 100})).toBe('none')
-  })
-
-  test('keeps the night mode inversion after the manual adjustments', () => {
+  test('keeps only night mode inversion as a CSS filter', () => {
     expect(filterFor({readerBleachText: true, readerContrastLevel: 120, nightDisplay: true}))
-      .toBe('contrast(1.35) brightness(1.12) contrast(1.20) invert(1) hue-rotate(180deg) brightness(0.92)')
+      .toBe('invert(1) hue-rotate(180deg) brightness(0.92)')
   })
 })
 

@@ -102,6 +102,7 @@ import {shortcutsLTR, shortcutsRTL, shortcutsVertical} from '@/functions/shortcu
 import {PageDtoWithUrl} from '@/types/komga-books'
 import {buildSpreads} from '@/functions/book-spreads'
 import {loadCachedPageImage, markPageImageBrowserLoaded} from '@/functions/page-image-cache'
+import {enhanceTextContrast} from '@/functions/image-enhancement'
 
 type CropRegion = {
   x: number,
@@ -221,6 +222,18 @@ export default Vue.extend({
       type: Boolean,
       default: false,
     },
+    bleachText: {
+      type: Boolean,
+      default: false,
+    },
+    strokeStrength: {
+      type: Number,
+      default: 0,
+    },
+    contrastLevel: {
+      type: Number,
+      default: 100,
+    },
     cropRegionsByParity: {
       type: Object as () => CropRegionsByParity,
       default: () => ({enabled: false}),
@@ -268,6 +281,18 @@ export default Vue.extend({
       immediate: true,
     },
     contrastEnhancement() {
+      this.revokeDeskewedPageUrls()
+      this.$nextTick(this.ensureLoadedDeskewedPageUrls)
+    },
+    bleachText() {
+      this.revokeDeskewedPageUrls()
+      this.$nextTick(this.ensureLoadedDeskewedPageUrls)
+    },
+    strokeStrength() {
+      this.revokeDeskewedPageUrls()
+      this.$nextTick(this.ensureLoadedDeskewedPageUrls)
+    },
+    contrastLevel() {
       this.revokeDeskewedPageUrls()
       this.$nextTick(this.ensureLoadedDeskewedPageUrls)
     },
@@ -849,12 +874,14 @@ export default Vue.extend({
     async ensureDeskewedPageUrl(page: PageDtoWithUrl, event?: Event) {
       const rotation = this.normalizedRotation(this.rotation)
       const angle = this.skewCorrection || 0
+      const processingKey = this.pageProcessingKey(rotation, angle)
+      const enhance = this.contrastEnhancement || this.bleachText || this.strokeStrength > 0 || this.contrastLevel !== 100
       // pageDisplayUrls are produced by DivinaReader's rotation/correction
       // pipeline (for example after finishing a crop). Processing them again
       // would rotate an already rotated page and make the crop coordinates no
       // longer match the displayed image.
       if (this.pageDisplayUrls[page.number]) return
-      if ((!rotation && !angle) || this.deskewedPageUrls[page.number] || this.deskewedPagePending[page.number]) return
+      if ((!rotation && !angle && !enhance) || this.deskewedPageUrls[page.number] || this.deskewedPagePending[page.number]) return
 
       const image = event?.target as HTMLImageElement | undefined
       if (image && (!image.complete || image.naturalWidth <= 0)) return
@@ -863,12 +890,12 @@ export default Vue.extend({
       try {
         const pageIsCurrent = this.isCurrentSpreadPage(page.number)
         if (!pageIsCurrent) await this.waitForReaderIdle()
-        if (this.normalizedRotation(this.rotation) !== rotation || this.skewCorrection !== angle || this.deskewedPageUrls[page.number]) return
+        if (this.pageProcessingKey(rotation, angle) !== processingKey || this.deskewedPageUrls[page.number]) return
         const sourceImage = await this.loadSourceImage(page, image)
-        if (this.normalizedRotation(this.rotation) !== rotation || this.skewCorrection !== angle || this.deskewedPageUrls[page.number]) return
+        if (this.pageProcessingKey(rotation, angle) !== processingKey || this.deskewedPageUrls[page.number]) return
         const canvas = this.processedPageCanvas(sourceImage, rotation, angle)
-        const url = await this.canvasObjectUrl(canvas)
-        if (this.normalizedRotation(this.rotation) === rotation && this.skewCorrection === angle) {
+        const url = await this.canvasObjectUrl(canvas, enhance)
+        if (this.pageProcessingKey(rotation, angle) === processingKey) {
           this.$set(this.deskewedPageUrls, page.number, url)
           const ratio = canvas.width / canvas.height
           if (this.pageAspectRatios[page.number] !== ratio) this.$set(this.pageAspectRatios, page.number, ratio)
@@ -880,9 +907,23 @@ export default Vue.extend({
         this.$delete(this.deskewedPagePending, page.number)
       }
     },
+    pageProcessingKey(rotation: number, skewCorrection: number): string {
+      return [rotation, skewCorrection, this.contrastEnhancement, this.bleachText, this.strokeStrength, this.contrastLevel].join('|')
+    },
     processedPageCanvas(image: HTMLImageElement, rotation: number, skewCorrection: number): HTMLCanvasElement {
       const rotatedCanvas = rotation ? this.rotatedImageCanvas(image, rotation) : this.sourceImageCanvas(image)
       const canvas = skewCorrection ? this.skewCorrectedCanvas(rotatedCanvas, skewCorrection) : rotatedCanvas
+      const context = canvas.getContext('2d')
+      const enhance = this.contrastEnhancement || this.bleachText || this.strokeStrength > 0 || this.contrastLevel !== 100
+      if (context && enhance) {
+        enhanceTextContrast(context, canvas.width, canvas.height, {
+          enabled: enhance,
+          strokeStrength: this.strokeStrength,
+          contrastLevel: this.contrastLevel,
+          matchBackgroundMode: 'grayscale',
+          connectedForegroundOnly: true,
+        })
+      }
       return canvas
     },
     sourceImageCanvas(image: HTMLImageElement): HTMLCanvasElement {
@@ -934,12 +975,12 @@ export default Vue.extend({
       if (normalized === 270) return -90
       return 0
     },
-    canvasObjectUrl(canvas: HTMLCanvasElement): Promise<string> {
+    canvasObjectUrl(canvas: HTMLCanvasElement, enhanced: boolean = false): Promise<string> {
       return new Promise((resolve, reject) => {
         canvas.toBlob(blob => {
           if (blob) resolve(URL.createObjectURL(blob))
           else reject(new Error('Unable to encode deskewed page'))
-        }, 'image/jpeg', 0.95)
+        }, enhanced ? 'image/png' : 'image/jpeg', enhanced ? undefined : 0.95)
       })
     },
     revokeDeskewedPageUrls() {
@@ -948,7 +989,8 @@ export default Vue.extend({
       this.deskewedPagePending = {}
     },
     ensureLoadedDeskewedPageUrls() {
-      if (!this.normalizedRotation(this.rotation) && !this.skewCorrection && !this.contrastEnhancement) return
+      const enhance = this.contrastEnhancement || this.bleachText || this.strokeStrength > 0 || this.contrastLevel !== 100
+      if (!this.normalizedRotation(this.rotation) && !this.skewCorrection && !enhance) return
       const currentPages = this.spreads[this.carouselPage] || []
       const images = Array.from(this.$el?.querySelectorAll?.('img[data-page-number]') || []) as HTMLImageElement[]
       images.forEach(image => {
