@@ -10,11 +10,27 @@ import {
   createPdfTocDraft,
   flattenPdfTocDraft,
   normalizePdfTocDraft,
+  normalizePdfTocOverrideStore,
+  pdfTocEntriesEqual,
   PdfTocDraftEntry,
 } from '@/functions/pdf-toc'
 import {TocEntry} from '@/types/epub'
 
 describe('PDF table of contents', () => {
+  test('normalizes legacy bookId entries and keeps bookId precedence data separate from hash entries', () => {
+    const legacy = normalizePdfTocOverrideStore({book1: [{title: 'Legacy'}]})
+    expect(legacy).toEqual({byBookId: {book1: [{title: 'Legacy'}]}, byFileHash: {}})
+
+    const current = normalizePdfTocOverrideStore({
+      byBookId: {book1: [{title: 'Book'}]},
+      byFileHash: {hash1: [{title: 'Hash'}]},
+    })
+    expect(current.byBookId.book1[0].title).toBe('Book')
+    expect(current.byFileHash.hash1[0].title).toBe('Hash')
+    expect(pdfTocEntriesEqual(current.byBookId.book1, [{title: 'Book'}])).toBe(true)
+    expect(pdfTocEntriesEqual(current.byBookId.book1, current.byFileHash.hash1)).toBe(false)
+  })
+
   test('calculates a buffered virtual window for large editor lists', () => {
     expect(getPdfTocVirtualWindow(1000, 4800, 240, 48)).toEqual({
       start: 94,

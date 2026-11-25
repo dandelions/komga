@@ -18,6 +18,7 @@ export interface BookDto {
   metadata: BookMetadataDto,
   readProgress?: ReadProgressDto,
   deleted: boolean,
+  fileHash: string,
   oneshot: boolean,
 
   // custom fields

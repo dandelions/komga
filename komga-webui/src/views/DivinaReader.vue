@@ -1261,7 +1261,10 @@ import {
   PDF_TOC_EDITOR_HEIGHT_STORAGE_KEY,
   PDF_TOC_EDITOR_ROW_HEIGHT,
   getPdfTocVirtualWindow,
+  normalizePdfTocOverrideStore,
+  pdfTocEntriesEqual,
   PdfTocDraftEntry,
+  PdfTocOverrideStore,
 } from '@/functions/pdf-toc'
 import {CLIENT_SETTING, ClientSettingUserUpdateDto} from '@/types/komga-clientsettings'
 import {enhanceTextContrast} from '@/functions/image-enhancement'
@@ -1460,7 +1463,7 @@ export default Vue.extend({
       pdfTocDraft: [] as PdfTocDraftEntry[],
       pdfTocActivePath: undefined as number[] | undefined,
       pdfTocSelectedPath: undefined as number[] | undefined,
-      pdfTocOverrides: {} as Record<string, PdfTocDraftEntry[]>,
+      pdfTocOverrides: {byBookId: {}, byFileHash: {}} as PdfTocOverrideStore,
       pdfTocRequestId: 0,
       showToolbars: false,
       showSettings: false,
@@ -3037,6 +3040,7 @@ export default Vue.extend({
       this.clearReflowPrefetch()
       this.revokeReaderDeskewedPageUrls()
       this.book = await this.$komgaBooks.getBook(bookId)
+      if (this.isPdf) await this.syncPdfTocOverridesForBook(bookId)
       this.pdfModeBookId = bookId
       this.restorePdfMode(bookId)
       if (!this.isPdf) this.exitAllReflowModes()
@@ -3265,11 +3269,19 @@ export default Vue.extend({
         await this.$store.dispatch('getClientSettingsUser')
         if (this.bookId !== bookId || this.pdfTocRequestId !== requestId) return
         const overrides = this.readServerPdfTocOverrides()
-        const override = overrides[bookId]
+        const bookOverride = overrides.byBookId[bookId]
+        const fileHash = String(this.book?.fileHash || '').trim()
+        const hashOverride = fileHash ? overrides.byFileHash[fileHash] : undefined
+        const override = bookOverride || hashOverride
         if (override) {
           this.pdfTocOverrides = overrides
           this.pdfToc = this.buildPdfToc(override, bookId)
           this.pdfTocLoaded = true
+          if (bookOverride && fileHash && !pdfTocEntriesEqual(overrides.byFileHash[fileHash], bookOverride)) {
+            await this.savePdfTocOverrides(bookOverride, bookId, fileHash)
+          } else if (!bookOverride && fileHash) {
+            await this.savePdfTocOverrides(override, bookId, fileHash)
+          }
           return
         }
         const manifest = await this.$komgaBooks.getBookWebPubManifestPdf(bookId)
@@ -3286,12 +3298,12 @@ export default Vue.extend({
     pdfTocStorageKey(): string {
       return CLIENT_SETTING.WEBUI_PDF_TOC_OVERRIDES
     },
-    readServerPdfTocOverrides(): Record<string, PdfTocDraftEntry[]> {
+    readServerPdfTocOverrides(): PdfTocOverrideStore {
       try {
         const value = this.$store.state.komgaSettings.clientSettingsUser[this.pdfTocStorageKey()]?.value
-        return value ? JSON.parse(value) : {}
+        return normalizePdfTocOverrideStore(value ? JSON.parse(value) : {})
       } catch (e) {
-        return {}
+        return {byBookId: {}, byFileHash: {}}
       }
     },
     buildPdfToc(entries: PdfTocDraftEntry[], bookId: string = this.bookId): TocEntry[] {
@@ -3331,10 +3343,13 @@ export default Vue.extend({
         const bookId = this.bookId
         await this.$store.dispatch('getClientSettingsUser')
         const overrides = this.readServerPdfTocOverrides()
-        let entries = overrides[bookId]
+        const fileHash = String(this.book?.fileHash || '').trim()
+        let entries = overrides.byBookId[bookId] || (fileHash ? overrides.byFileHash[fileHash] : undefined)
         if (!entries) {
           entries = createPdfTocDraft(this.pdfToc, entry => this.getPageFromPdfTocEntry(entry as TocEntry))
-          await this.savePdfTocOverrides(entries, bookId)
+          await this.savePdfTocOverrides(entries, bookId, fileHash)
+        } else if (fileHash) {
+          await this.savePdfTocOverrides(entries, bookId, fileHash)
         }
         if (this.bookId !== bookId) return
         this.pdfTocOverrides = this.readServerPdfTocOverrides()
@@ -3472,17 +3487,37 @@ export default Vue.extend({
         if (this.bookId === bookId) this.pdfTocSaving = false
       }
     },
-    async savePdfTocOverrides(entries: PdfTocDraftEntry[], bookId: string) {
+    async savePdfTocOverrides(entries: PdfTocDraftEntry[], bookId: string, fileHash: string = '') {
       await this.$store.dispatch('getClientSettingsUser')
       const all = this.readServerPdfTocOverrides()
-      all[bookId] = entries
+      all.byBookId[bookId] = entries
+      if (fileHash) all.byFileHash[fileHash] = entries
       const setting = {[this.pdfTocStorageKey()]: {value: JSON.stringify(all)}} as Record<string, ClientSettingUserUpdateDto>
       await this.$komgaSettings.updateClientSettingUser(setting)
       await this.$store.dispatch('getClientSettingsUser')
       this.pdfTocOverrides = this.readServerPdfTocOverrides()
     },
+    pdfTocEntriesForCurrentBook(): PdfTocDraftEntry[] | undefined {
+      const bookId = this.bookId
+      const fileHash = String(this.book?.fileHash || '').trim()
+      return this.pdfTocOverrides.byBookId[bookId] || (fileHash ? this.pdfTocOverrides.byFileHash[fileHash] : undefined)
+    },
+    async syncPdfTocOverridesForBook(bookId: string) {
+      const fileHash = String(this.book?.fileHash || '').trim()
+      if (!fileHash) return
+      await this.$store.dispatch('getClientSettingsUser')
+      if (this.bookId !== bookId) return
+      const overrides = this.readServerPdfTocOverrides()
+      const bookEntries = overrides.byBookId[bookId]
+      const hashEntries = overrides.byFileHash[fileHash]
+      if (bookEntries && !pdfTocEntriesEqual(hashEntries, bookEntries)) {
+        await this.savePdfTocOverrides(bookEntries, bookId, fileHash)
+      } else if (!bookEntries && hashEntries) {
+        await this.savePdfTocOverrides(hashEntries, bookId, fileHash)
+      }
+    },
     exportPdfToc() {
-      const entries = this.pdfTocOverrides[this.bookId]
+      const entries = this.pdfTocEntriesForCurrentBook()
         || createPdfTocDraft(this.pdfToc, entry => this.getPageFromPdfTocEntry(entry as TocEntry))
       const blob = new Blob([JSON.stringify({version: 1, bookId: this.bookId, toc: entries}, null, 2)], {type: 'application/json'})
       const url = URL.createObjectURL(blob)
