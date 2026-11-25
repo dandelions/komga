@@ -592,6 +592,37 @@ test('vertical reflow repaginates columns to fit shrinking viewport height when 
   expect(shrunkBreakIndex).toBe(5)
 })
 
+test('vertical reflow uses compact horizontal margins so an extra column fits on mobile widths', () => {
+  const padding = methods.horizontalContentPadding.call({
+    verticalText: true,
+    pageContentWidth: () => 380,
+    targetWidth: 380,
+  })
+  expect(padding).toBe(13)
+
+  const context: any = {
+    verticalText: true,
+    targetWidth: 380,
+    blockSpacing: 6,
+    reflowInlineGap: 1,
+    pageContentWidth: () => 380,
+    pageContentHeight: () => 400,
+    horizontalContentPadding: () => padding,
+    textScale: () => 1,
+    isSpriteWordItem: () => true,
+    reflowItemDisplayWidth: (item: any) => item.w,
+    reflowItemDisplayHeight: (item: any) => item.h,
+  }
+  // 9 columns of width 28 separated by break items -> 9*28 + 8*7 = 308 <= 354 fits on 1 page
+  const items: any[] = []
+  for (let col = 0; col < 9; col++) {
+    items.push({type: 'word', w: 28, h: 40})
+    items.push({type: 'break'})
+  }
+  const pages = methods.paginateVerticalItemsEstimated.call(context, items)
+  expect(pages).toHaveLength(1)
+})
+
 test('restores a persistent local reflow result without loading the source page', async () => {
   const cachedItems = [{type: 'word', src: 'data:image/png;base64,cached', x: 0, y: 0, w: 24, h: 18, height: 18}]
   const context = Object.assign({}, methods, {
