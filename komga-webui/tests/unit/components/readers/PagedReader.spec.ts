@@ -72,6 +72,93 @@ describe('PagedReader non-reflow image processing', () => {
   })
 })
 
+describe('PagedReader large book slide window', () => {
+  test('maps large-book page numbers to spread indexes in constant time', () => {
+    const reader = Object.assign({}, methods, {
+      pages: Array.from({length: 10000}, (_, index) => ({number: index + 1, width: 800, height: 1200})),
+      spreads: Array.from({length: 5000}, (_, index) => [
+        {number: index * 2 + 1, width: 800, height: 1200},
+        {number: index * 2 + 2, width: 800, height: 1200},
+      ]),
+      isDoublePages: true,
+      spreadIndexByPage: Object.fromEntries(Array.from({length: 10000}, (_, index) => [index + 1, Math.floor(index / 2)])),
+      effectivePageLayout: 'double-no-cover',
+    })
+
+    expect(methods.toSpreadIndex.call(reader, 1)).toBe(0)
+    expect(methods.toSpreadIndex.call(reader, 2)).toBe(0)
+    expect(methods.toSpreadIndex.call(reader, 9999)).toBe(4999)
+    expect(methods.toSpreadIndex.call(reader, 10000)).toBe(4999)
+  })
+
+  test('limits rendered carousel items and moves the window across the full spread list', () => {
+    const spreads = Array.from({length: 10000}, (_, index) => [{number: index + 1, width: 800, height: 1200}])
+    const reader = Object.assign({}, methods, {
+      spreads,
+      spreadWindowStart: 0,
+      carouselPage: 0,
+    })
+    const get = (key: string) => computed[key].call(reader)
+
+    expect(get('spreadWindowSize')).toBe(3)
+    expect(get('renderedSpreads')).toHaveLength(3)
+    expect(get('logicalCarouselPage')).toBe(0)
+
+    methods.setLogicalCarouselPage.call(reader, 9998)
+    expect(reader.spreadWindowStart).toBe(9997)
+    expect(reader.carouselPage).toBe(1)
+    expect(get('renderedSpreads')).toHaveLength(3)
+    expect(get('logicalCarouselPage')).toBe(9998)
+  })
+
+  test('keeps a swiped carousel item centered when the rendered window reaches its edge', () => {
+    const spreads = Array.from({length: 10000}, (_, index) => [{number: index + 1, width: 800, height: 1200}])
+    const reader = Object.assign({}, methods, {
+      spreads,
+      spreadWindowStart: 100,
+      carouselPage: 0,
+      $debug: jest.fn(),
+      $emit: jest.fn(),
+      scrollToPageEdge: jest.fn(),
+      pendingScrollPosition: 'top',
+      $nextTick: jest.fn(),
+      ensureLoadedDeskewedPageUrls: jest.fn(),
+    })
+
+    ;(PagedReader as any).options.watch.carouselPage.call(reader, 0, 1)
+
+    expect(reader.spreadWindowStart).toBe(99)
+    expect(reader.carouselPage).toBe(1)
+    expect(methods.logicalSpreadIndex.call(reader)).toBe(100)
+  })
+
+  test('moves the large-book window when advancing from its last rendered item', () => {
+    const spreads = Array.from({length: 10000}, (_, index) => [{number: index + 1, width: 800, height: 1200}])
+    const reader = Object.assign({}, methods, {
+      spreads,
+      spreadWindowStart: 100,
+      carouselPage: 2,
+      activeCropRegion: 0,
+      activeCropSegment: 0,
+      pendingScrollPosition: 'top',
+      resetZoom: jest.fn(),
+      currentSpreadPageNumber: jest.fn(() => 103),
+      nextCropSegmentIndex: jest.fn(() => undefined),
+      nextCropRegionIndex: jest.fn(() => undefined),
+      firstCropRegionIndex: jest.fn(() => 0),
+      setActiveCropRegion: jest.fn(),
+      setLogicalCarouselPage: (index: number, keepWindow?: boolean) => methods.setLogicalCarouselPage.call(reader, index, keepWindow),
+      $emit: jest.fn(),
+    })
+
+    methods.next.call(reader)
+
+    expect(reader.spreadWindowStart).toBe(101)
+    expect(reader.carouselPage).toBe(2)
+    expect(reader.$emit).not.toHaveBeenCalled()
+  })
+})
+
 describe('PagedReader previous-page scroll restoration', () => {
   test.each([
     ['RTL', ReadingDirection.RIGHT_TO_LEFT],
