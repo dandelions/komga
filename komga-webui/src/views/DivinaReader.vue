@@ -1269,6 +1269,7 @@ import {
 import {CLIENT_SETTING, ClientSettingUserUpdateDto} from '@/types/komga-clientsettings'
 import {enhanceTextContrast} from '@/functions/image-enhancement'
 import {canonicalPageImageUrl, loadCachedPageImageWithStats} from '@/functions/page-image-cache'
+import {BookFileSettingsStore, normalizeBookFileSettingsStore, syncBookFileSettings} from '@/functions/book-file-settings'
 import {reflowPrefetchPageNumbers} from '@/functions/reflow-stream'
 
 const REFLOW_SETTINGS_STORAGE_PREFIX = 'komga.pdfReflowSettings.'
@@ -1287,6 +1288,15 @@ const REFLOW_CONTINUATION_COUNT = 4
 const REFLOW_PREFETCH_AHEAD_COUNT = 3
 const REFLOW_PREFETCH_MAX_AHEAD = 10
 const REFLOW_PREFETCH_STORAGE_KEY = 'komga.reflowPrefetchAhead'
+
+type PdfReaderSettingsSnapshot = {
+  mode?: 'normal' | 'reflow' | 'k2',
+  reflow?: Record<string, any>,
+  readerImage?: Record<string, any>,
+  toc?: PdfTocDraftEntry[],
+}
+
+type PdfReaderSettingsStore = BookFileSettingsStore<PdfReaderSettingsSnapshot>
 
 function reflowPrefetchConcurrency(serverMode: boolean): number {
   // local reflow is CPU bound: prefetching several pages at once only steals time
@@ -1496,6 +1506,7 @@ export default Vue.extend({
       readerImageSettingsBookId: '',
       loadingReaderImageSettings: false,
       saveReaderImageSettingsServerDebounced: undefined as undefined | ((bookId?: string, settings?: Record<string, any>) => void),
+      pdfReaderSettingsSyncToken: 0,
       reflowCache: {} as Record<string, any>,
       reflowSessionTransferBytes: 0,
       reflowSessionResponseTransferBytes: 0,
@@ -2311,7 +2322,10 @@ export default Vue.extend({
       try {
         const defaults = defaultReaderImageSettings()
         let loaded = {} as Record<string, any>
-        const serverSettings = this.readServerReaderImageSettings()[bookId]
+        const serverSettingsStore = this.readServerReaderImageSettings()
+        const fileHash = String(this.book?.fileHash || '').trim()
+        const serverSettings = serverSettingsStore.byBookId[bookId]
+          || (fileHash ? serverSettingsStore.byFileHash[fileHash] : undefined)
         const localRaw = window.localStorage.getItem(this.readerImageSettingsStorageKey(bookId))
         const raw = serverSettings ? JSON.stringify(serverSettings) : localRaw
         if (raw) loaded = JSON.parse(raw)
@@ -2393,7 +2407,9 @@ export default Vue.extend({
       if (!bookId) return
       try {
         const all = this.readServerReaderImageSettings()
-        all[bookId] = this.normalizedReaderImageSettings(settings)
+        all.byBookId[bookId] = this.normalizedReaderImageSettings(settings)
+        const fileHash = String(this.book?.fileHash || '').trim()
+        if (fileHash) all.byFileHash[fileHash] = all.byBookId[bookId]
         const newSettings = {} as Record<string, ClientSettingUserUpdateDto>
         newSettings[CLIENT_SETTING.WEBUI_READER_IMAGE_SETTINGS] = {
           value: JSON.stringify(all),
@@ -2404,11 +2420,12 @@ export default Vue.extend({
         this.$debug('Unable to save reader image settings on server', e)
       }
     },
-    readServerReaderImageSettings(): Record<string, any> {
+    readServerReaderImageSettings(): BookFileSettingsStore<Record<string, any>> {
       try {
-        return JSON.parse(this.$store.state.komgaSettings.clientSettingsUser[CLIENT_SETTING.WEBUI_READER_IMAGE_SETTINGS]?.value) || {}
+        const value = this.$store.state.komgaSettings.clientSettingsUser[CLIENT_SETTING.WEBUI_READER_IMAGE_SETTINGS]?.value
+        return normalizeBookFileSettingsStore(value ? JSON.parse(value) : {})
       } catch (e) {
-        return {}
+        return {byBookId: {}, byFileHash: {}}
       }
     },
     adjustReaderSkewCorrection(delta: number) {
@@ -3040,7 +3057,14 @@ export default Vue.extend({
       this.clearReflowPrefetch()
       this.revokeReaderDeskewedPageUrls()
       this.book = await this.$komgaBooks.getBook(bookId)
-      if (this.isPdf) await this.syncPdfTocOverridesForBook(bookId)
+      if (this.isPdf) {
+        await this.syncPdfSettingsForBook(bookId)
+        this.readerImageSettingsBookId = bookId
+        this.loadReaderImageSettings(bookId)
+        this.reflowSettingsBookId = bookId
+        await this.loadReflowSettings(bookId)
+        await this.syncPdfTocOverridesForBook(bookId)
+      }
       this.pdfModeBookId = bookId
       this.restorePdfMode(bookId)
       if (!this.isPdf) this.exitAllReflowModes()
@@ -3475,7 +3499,7 @@ export default Vue.extend({
       this.pdfTocError = ''
       try {
         const normalized = normalizePdfTocDraft(this.pdfTocDraft, this.pagesCount, (key, values) => this.$t(key, values).toString())
-        await this.savePdfTocOverrides(normalized, bookId)
+        await this.savePdfTocOverrides(normalized, bookId, String(this.book?.fileHash || '').trim())
         if (this.bookId !== bookId) return
         this.pdfToc = this.buildPdfToc(normalized, bookId)
         this.pdfTocDraft = clonePdfTocDraft(normalized)
@@ -3575,7 +3599,12 @@ export default Vue.extend({
     },
     restorePdfMode(bookId: string) {
       if (!this.book?.media || this.book.media.mediaProfile !== 'PDF') return
-      const mode = window.localStorage.getItem(this.pdfModeStorageKey(bookId))
+      const localMode = window.localStorage.getItem(this.pdfModeStorageKey(bookId))
+      const store = this.readServerPdfReaderSettings()
+      const fileHash = String(this.book?.fileHash || '').trim()
+      const mode = localMode
+        || store.byBookId[bookId]?.mode
+        || (fileHash ? store.byFileHash[fileHash]?.mode : undefined)
       if (mode === 'reflow') this.startReflowMode()
       else if (mode === 'k2') this.toggleK2ReflowMode()
       else this.exitAllReflowModes()
@@ -3584,6 +3613,47 @@ export default Vue.extend({
       if (!this.pdfModeBookId || !this.isPdf) return
       const mode = this.k2ReflowMode ? 'k2' : (this.reflowMode || this.reflowSetupMode ? 'reflow' : 'normal')
       window.localStorage.setItem(this.pdfModeStorageKey(), mode)
+      void this.savePdfReaderSettingsServer(this.pdfModeBookId, {mode})
+    },
+    readServerPdfReaderSettings(): BookFileSettingsStore<{mode?: 'normal' | 'reflow' | 'k2'}> {
+      try {
+        const value = this.$store.state.komgaSettings.clientSettingsUser[CLIENT_SETTING.WEBUI_PDF_READER_SETTINGS]?.value
+        return normalizeBookFileSettingsStore(value ? JSON.parse(value) : {})
+      } catch (e) {
+        return {byBookId: {}, byFileHash: {}}
+      }
+    },
+    async savePdfReaderSettingsServer(bookId: string, settings: {mode?: 'normal' | 'reflow' | 'k2'}) {
+      if (!bookId) return
+      try {
+        await this.$store.dispatch('getClientSettingsUser')
+        const all = this.readServerPdfReaderSettings()
+        all.byBookId[bookId] = {...all.byBookId[bookId], ...settings}
+        const fileHash = String(this.book?.fileHash || '').trim()
+        if (fileHash) all.byFileHash[fileHash] = {...all.byFileHash[fileHash], ...all.byBookId[bookId]}
+        const update = {[CLIENT_SETTING.WEBUI_PDF_READER_SETTINGS]: {value: JSON.stringify(all)}} as Record<string, ClientSettingUserUpdateDto>
+        await this.$komgaSettings.updateClientSettingUser(update)
+        await this.$store.dispatch('getClientSettingsUser')
+      } catch (e) {
+        this.$debug('Unable to save PDF reader settings on server', e)
+      }
+    },
+    async syncPdfSettingsForBook(bookId: string) {
+      const fileHash = String(this.book?.fileHash || '').trim()
+      if (!fileHash) return
+      await this.$store.dispatch('getClientSettingsUser')
+      if (this.bookId !== bookId) return
+      const updates = {} as Record<string, ClientSettingUserUpdateDto>
+      const reflow = this.readServerReflowSettings()
+      if (syncBookFileSettings(reflow, bookId, fileHash)) updates[CLIENT_SETTING.WEBUI_PDF_REFLOW_SETTINGS] = {value: JSON.stringify(reflow)}
+      const image = this.readServerReaderImageSettings()
+      if (syncBookFileSettings(image, bookId, fileHash)) updates[CLIENT_SETTING.WEBUI_READER_IMAGE_SETTINGS] = {value: JSON.stringify(image)}
+      const mode = this.readServerPdfReaderSettings()
+      if (syncBookFileSettings(mode, bookId, fileHash)) updates[CLIENT_SETTING.WEBUI_PDF_READER_SETTINGS] = {value: JSON.stringify(mode)}
+      if (Object.keys(updates).length > 0) {
+        await this.$komgaSettings.updateClientSettingUser(updates)
+        await this.$store.dispatch('getClientSettingsUser')
+      }
     },
     async loadReflowSettings(bookId: string = this.bookId) {
       if (!bookId) return
@@ -3606,7 +3676,10 @@ export default Vue.extend({
         if (!loadedFromLocal) {
           await this.$store.dispatch('getClientSettingsUser')
           if (this.reflowSettingsBookId !== bookId) return
-          const serverSettings = this.readServerReflowSettings()[bookId]
+          const serverSettingsStore = this.readServerReflowSettings()
+          const fileHash = String(this.book?.fileHash || '').trim()
+          const serverSettings = serverSettingsStore.byBookId[bookId]
+            || (fileHash ? serverSettingsStore.byFileHash[fileHash] : undefined)
           if (serverSettings) {
             loaded = serverSettings
             loadedFromServer = true
@@ -3645,7 +3718,9 @@ export default Vue.extend({
       try {
         await this.$store.dispatch('getClientSettingsUser')
         const all = this.readServerReflowSettings()
-        all[bookId] = this.normalizedReflowSettings(settings)
+        all.byBookId[bookId] = this.normalizedReflowSettings(settings)
+        const fileHash = String(this.book?.fileHash || '').trim()
+        if (fileHash) all.byFileHash[fileHash] = all.byBookId[bookId]
         const newSettings = {} as Record<string, ClientSettingUserUpdateDto>
         newSettings[CLIENT_SETTING.WEBUI_PDF_REFLOW_SETTINGS] = {
           value: JSON.stringify(all),
@@ -3656,11 +3731,12 @@ export default Vue.extend({
         this.$debug('Unable to save PDF reflow settings on server', e)
       }
     },
-    readServerReflowSettings(): Record<string, any> {
+    readServerReflowSettings(): BookFileSettingsStore<Record<string, any>> {
       try {
-        return JSON.parse(this.$store.state.komgaSettings.clientSettingsUser[CLIENT_SETTING.WEBUI_PDF_REFLOW_SETTINGS]?.value) || {}
+        const value = this.$store.state.komgaSettings.clientSettingsUser[CLIENT_SETTING.WEBUI_PDF_REFLOW_SETTINGS]?.value
+        return normalizeBookFileSettingsStore(value ? JSON.parse(value) : {})
       } catch (e) {
-        return {}
+        return {byBookId: {}, byFileHash: {}}
       }
     },
     normalizedReflowSettings(settings: Record<string, any>): object {

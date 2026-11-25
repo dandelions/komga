@@ -22,6 +22,7 @@ export enum CLIENT_SETTING {
   WEBUI_RECOMMENDED = 'webui.recommended',
   WEBUI_PDF_REFLOW_SETTINGS = 'webui.pdf_reflow_settings',
   WEBUI_PDF_TOC_OVERRIDES = 'webui.pdf_toc_overrides',
+  WEBUI_PDF_READER_SETTINGS = 'webui.pdf_reader_settings',
   WEBUI_READER_IMAGE_SETTINGS = 'webui.reader_image_settings',
   WEBUI_EPUB_CUSTOM_STYLES = 'webui.epub_custom_styles',
   WEBUI_EPUB_BACKGROUND_IMAGES = 'webui.epub_background_images',

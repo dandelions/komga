@@ -4,28 +4,20 @@ export interface PdfTocDraftEntry {
   children?: PdfTocDraftEntry[],
 }
 
-export interface PdfTocOverrideStore {
-  byBookId: Record<string, PdfTocDraftEntry[]>,
-  byFileHash: Record<string, PdfTocDraftEntry[]>,
-}
+import {
+  bookFileSettingsEqual,
+  normalizeBookFileSettingsStore,
+  BookFileSettingsStore,
+} from '@/functions/book-file-settings'
+
+export type PdfTocOverrideStore = BookFileSettingsStore<PdfTocDraftEntry[]>
 
 export function normalizePdfTocOverrideStore(value: unknown): PdfTocOverrideStore {
-  const source = value && typeof value === 'object' ? value as Record<string, any> : {}
-  const byBookId = source.byBookId && typeof source.byBookId === 'object' ? source.byBookId : {}
-  const byFileHash = source.byFileHash && typeof source.byFileHash === 'object' ? source.byFileHash : {}
-
-  // Migrate the original bookId -> entries format without changing its precedence.
-  if (!source.byBookId && !source.byFileHash) {
-    Object.keys(source).forEach(key => {
-      if (Array.isArray(source[key])) byBookId[key] = source[key]
-    })
-  }
-
-  return {byBookId, byFileHash}
+  return normalizeBookFileSettingsStore<PdfTocDraftEntry[]>(value)
 }
 
 export function pdfTocEntriesEqual(a?: PdfTocDraftEntry[], b?: PdfTocDraftEntry[]): boolean {
-  return JSON.stringify(a || []) === JSON.stringify(b || [])
+  return bookFileSettingsEqual(a || [], b || [])
 }
 
 export interface PdfTocDraftRow {
