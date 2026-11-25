@@ -71,12 +71,14 @@ describe('EpubReader mobile address bar collapse and root scrolling structure', 
     expect(content).toContain('this.epubMobileRelayoutTimer')
   })
 
-  test('opens mobile image zoom on double-tap without flashing closed on trailing synthetic click', () => {
+  test('opens image zoom on single tap/click without flashing closed on trailing synthetic click', () => {
     const vueSrc = content
     expect(vueSrc).toContain('@click="closeEpubImageZoom()"')
     expect(vueSrc).toContain('@click.stop="closeEpubImageZoom()"')
     expect(vueSrc).toContain('@keydown.esc="closeEpubImageZoom(true)"')
     expect(vueSrc).toContain('this.closeEpubImageZoom(true)')
-    expect(vueSrc).toMatch(/closeEpubImageZoom\(force:\s*boolean\s*=\s*false\)\s*\{\s*if\s*\(!force\s*&&\s*Date\.now\(\)\s*-\s*this\.epubImageZoomOpenedAt\s*<\s*500\)\s*\{\s*return\s*\}\s*this\.epubImageZoomVisible\s*=\s*false/)
+    expect(vueSrc).toContain('isEpubNavigationAnchor(')
+    expect(vueSrc).toContain('resolveEpubImageElementFromTarget(')
+    expect(vueSrc).toMatch(/closeEpubImageZoom\(force:\s*boolean\s*=\s*false\)\s*\{\s*if\s*\(!force\s*&&\s*Date\.now\(\)\s*-\s*this\.epubImageZoomOpenedAt\s*<\s*650\)\s*\{\s*return\s*\}\s*this\.epubImageZoomVisible\s*=\s*false/)
   })
 })
