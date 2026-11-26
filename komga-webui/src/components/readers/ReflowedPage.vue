@@ -1,5 +1,11 @@
 <template>
-  <div class="reflowed-page" :class="{'reflowed-page-dark': $vuetify.theme.dark || nightDisplay}">
+  <div
+    class="reflowed-page"
+    :class="{
+      'reflowed-page-dark': $vuetify.theme.dark || nightDisplay,
+      'reflow-annotations-active': annotationsVisible,
+    }"
+  >
     <div
       v-if="!preload"
       ref="reflowControls"
@@ -562,12 +568,12 @@
         'reflow-two-columns-wrapper': isTwoColumns
       }"
       :style="reflowWrapperStyle"
-      @click="collapseControls"
+      @click="handleReflowWrapperClick"
     >
       <div
         v-if="annotationsVisible"
         class="reflow-annotation-layer"
-        @click.stop="handleAnnotationLayerClick"
+        @click.stop
       >
         <button
           v-for="annotation in visibleAnnotations"
@@ -2051,6 +2057,13 @@ export default Vue.extend({
     },
     removeAnnotation(id: string) {
       this.$emit('annotation-remove', id)
+    },
+    handleReflowWrapperClick(event: MouseEvent) {
+      if (this.annotationsVisible && event.target === event.currentTarget) {
+        this.handleAnnotationLayerClick(event)
+        return
+      }
+      this.collapseControls()
     },
     collapseControls(): boolean {
       if (this.controlsCollapsed || this.cropMode) return false
@@ -9001,7 +9014,11 @@ export default Vue.extend({
   position: absolute;
   inset: 0;
   z-index: 8;
-  pointer-events: auto;
+  pointer-events: none;
+}
+
+.reflow-annotations-active .reflow-wrapper {
+  cursor: crosshair;
 }
 
 .reflow-annotation-mark {
@@ -9012,6 +9029,10 @@ export default Vue.extend({
   border: 0;
   background: transparent;
   cursor: pointer;
+  pointer-events: auto;
+}
+
+.reflow-annotation-layer .reflow-annotation-mark {
   pointer-events: auto;
 }
 

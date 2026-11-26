@@ -780,6 +780,8 @@ test('K2 reflow does not reserve bottom space for its side toolbar', () => {
 describe('ReflowedPage image preview gestures', () => {
   test('keeps annotation and navigation controls in a wrapping row', () => {
     const content = require('fs').readFileSync(require('path').resolve(__dirname, '../../../../src/components/readers/ReflowedPage.vue'), 'utf8')
+    expect(content).toMatch(/\.reflow-annotation-layer\s*\{[\s\S]*?pointer-events:\s*none/i)
+    expect(content).toMatch(/\.reflow-annotation-layer \.reflow-annotation-mark\s*\{[\s\S]*?pointer-events:\s*auto/i)
     expect(content).toMatch(/\.reflow-navigation-controls\s*\{[\s\S]*?flex-wrap:\s*wrap/i)
     expect(content).toMatch(/\.reflow-navigation-controls\s*\{[\s\S]*?width:\s*100%/i)
     expect(content).toMatch(/\.reflow-navigation-controls\s*>\s*\*\s*\{[\s\S]*?box-sizing:\s*border-box/i)
