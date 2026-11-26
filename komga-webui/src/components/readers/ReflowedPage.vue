@@ -9021,6 +9021,20 @@ export default Vue.extend({
   cursor: crosshair;
 }
 
+.reflow-annotations-active .reflow-column,
+.reflow-annotations-active .word-block,
+.reflow-annotations-active .reflow-image-frame,
+.reflow-annotations-active .reflow-image-block {
+  position: relative;
+  z-index: 9;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+.reflow-annotations-active .reflow-annotation-layer {
+  z-index: 10;
+}
+
 .reflow-annotation-mark {
   position: absolute;
   min-width: 10px;
