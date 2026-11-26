@@ -9483,12 +9483,26 @@ export default Vue.extend({
 
 .reflow-navigation-controls {
   display: flex;
-  flex: 0 0 auto;
-  flex-wrap: nowrap;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: flex-start;
   gap: 6px;
+  width: 100%;
   min-width: 0;
+  box-sizing: border-box;
+}
+
+.reflow-navigation-controls > * {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.reflow-navigation-controls .reflow-nav-control,
+.reflow-navigation-controls .reflow-crop-entry-control {
+  white-space: nowrap;
 }
 
 .reflow-processing-control {
@@ -10203,6 +10217,18 @@ export default Vue.extend({
 }
 
 @media (max-width: 600px) {
+  .reflow-top-controls {
+    gap: 4px;
+  }
+
+  .reflow-navigation-controls {
+    gap: 4px;
+  }
+
+  .reflow-navigation-controls .reflow-nav-control {
+    flex: 1 1 auto;
+  }
+
   .reflow-manual-image-region-controls {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
