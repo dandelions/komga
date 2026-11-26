@@ -313,12 +313,19 @@
           :start-at-end="reflowStartAtEnd"
           :defer-reflow="reflowSetupMode"
           :prefetch-ahead="reflowPrefetchAhead"
+          :annotations="reflowAnnotations"
+          :annotations-visible="reflowAnnotationsVisible"
+          :annotation-tool="reflowAnnotationTool"
           :magnifier-active="magnifierActive"
           @image-preview="openReflowImagePreview"
           @text-scale-change="setReflowTextScale"
           @processing-mode-change="setReflowProcessingMode"
           @display-columns-change="setReflowDisplayColumns"
           @prefetch-ahead-change="setReflowPrefetchAhead"
+          @annotations-visible-change="setReflowAnnotationsVisible"
+          @annotation-tool-change="setReflowAnnotationTool"
+          @annotation-add="addReflowAnnotation"
+          @annotation-remove="removeReflowAnnotation"
           @column-count-change="setReflowColumnCount"
           @skew-correction-change="setReflowSkewCorrection"
           @auto-skew-correction-change="setReflowAutoSkewCorrection"
@@ -1270,6 +1277,7 @@ import {CLIENT_SETTING, ClientSettingUserUpdateDto} from '@/types/komga-clientse
 import {enhanceTextContrast} from '@/functions/image-enhancement'
 import {canonicalPageImageUrl, loadCachedPageImageWithStats} from '@/functions/page-image-cache'
 import {BookFileSettingsStore, normalizeBookFileSettingsStore, syncBookFileSettings} from '@/functions/book-file-settings'
+import {normalizeReflowAnnotations, ReflowAnnotation, ReflowAnnotationType} from '@/functions/reflow-annotations'
 import {reflowPrefetchPageNumbers} from '@/functions/reflow-stream'
 
 const REFLOW_SETTINGS_STORAGE_PREFIX = 'komga.pdfReflowSettings.'
@@ -1507,6 +1515,9 @@ export default Vue.extend({
       loadingReaderImageSettings: false,
       saveReaderImageSettingsServerDebounced: undefined as undefined | ((bookId?: string, settings?: Record<string, any>) => void),
       pdfReaderSettingsSyncToken: 0,
+      reflowAnnotations: [] as ReflowAnnotation[],
+      reflowAnnotationsVisible: false,
+      reflowAnnotationTool: 'line' as ReflowAnnotationType,
       reflowCache: {} as Record<string, any>,
       reflowSessionTransferBytes: 0,
       reflowSessionResponseTransferBytes: 0,
@@ -3064,6 +3075,7 @@ export default Vue.extend({
         this.reflowSettingsBookId = bookId
         await this.loadReflowSettings(bookId)
         await this.syncPdfTocOverridesForBook(bookId)
+        await this.loadReflowAnnotations(bookId)
       }
       this.pdfModeBookId = bookId
       this.restorePdfMode(bookId)
@@ -3637,6 +3649,52 @@ export default Vue.extend({
       } catch (e) {
         this.$debug('Unable to save PDF reader settings on server', e)
       }
+    },
+    async loadReflowAnnotations(bookId: string) {
+      const fileHash = String(this.book?.fileHash || '').trim()
+      if (!fileHash) {
+        this.reflowAnnotations = []
+        return
+      }
+      await this.$store.dispatch('getClientSettingsUser')
+      if (this.bookId !== bookId) return
+      const raw = this.$store.state.komgaSettings.clientSettingsUser[CLIENT_SETTING.WEBUI_PDF_REFLOW_ANNOTATIONS]?.value
+      let store: BookFileSettingsStore<ReflowAnnotation[]> = {byBookId: {}, byFileHash: {}}
+      try {
+        store = normalizeBookFileSettingsStore(raw ? JSON.parse(raw) : {})
+      } catch (e) {
+        this.$debug('Unable to parse PDF reflow annotations', e)
+      }
+      this.reflowAnnotations = normalizeReflowAnnotations(store.byBookId[bookId] || store.byFileHash[fileHash])
+      if (!store.byBookId[bookId] && store.byFileHash[fileHash]) {
+        store.byBookId[bookId] = store.byFileHash[fileHash]
+        await this.$komgaSettings.updateClientSettingUser({[CLIENT_SETTING.WEBUI_PDF_REFLOW_ANNOTATIONS]: {value: JSON.stringify(store)}})
+      }
+    },
+    async saveReflowAnnotations() {
+      const bookId = this.bookId
+      const fileHash = String(this.book?.fileHash || '').trim()
+      if (!bookId) return
+      await this.$store.dispatch('getClientSettingsUser')
+      const raw = this.$store.state.komgaSettings.clientSettingsUser[CLIENT_SETTING.WEBUI_PDF_REFLOW_ANNOTATIONS]?.value
+      const store = normalizeBookFileSettingsStore<ReflowAnnotation[]>(raw ? JSON.parse(raw) : {})
+      store.byBookId[bookId] = normalizeReflowAnnotations(this.reflowAnnotations)
+      if (fileHash) store.byFileHash[fileHash] = store.byBookId[bookId]
+      await this.$komgaSettings.updateClientSettingUser({[CLIENT_SETTING.WEBUI_PDF_REFLOW_ANNOTATIONS]: {value: JSON.stringify(store)}})
+    },
+    setReflowAnnotationsVisible(value: boolean) {
+      this.reflowAnnotationsVisible = value === true
+    },
+    setReflowAnnotationTool(value: ReflowAnnotationType) {
+      if (value === 'line' || value === 'wavy' || value === 'text') this.reflowAnnotationTool = value
+    },
+    addReflowAnnotation(annotation: ReflowAnnotation) {
+      this.reflowAnnotations = [...this.reflowAnnotations, annotation]
+      void this.saveReflowAnnotations()
+    },
+    removeReflowAnnotation(id: string) {
+      this.reflowAnnotations = this.reflowAnnotations.filter(annotation => annotation.id !== id)
+      void this.saveReflowAnnotations()
     },
     async syncPdfSettingsForBook(bookId: string) {
       const fileHash = String(this.book?.fileHash || '').trim()

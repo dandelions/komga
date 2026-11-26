@@ -89,6 +89,21 @@
             <v-icon small>{{ magnifierActive ? 'mdi-magnify-close' : 'mdi-magnify-plus-outline' }}</v-icon>
           </button>
           <div class="reflow-navigation-controls">
+            <label class="reflow-annotation-toggle">
+              <span>标注</span>
+              <input type="checkbox" :checked="annotationsVisible" @change="toggleAnnotationsVisible" />
+            </label>
+            <select
+              v-if="annotationsVisible"
+              class="reflow-annotation-tool-select"
+              :value="annotationTool"
+              aria-label="标注工具"
+              @change="setAnnotationTool"
+            >
+              <option value="line">横线</option>
+              <option value="wavy">波浪线</option>
+              <option value="text">文本框</option>
+            </select>
             <button
               type="button"
               class="reflow-control reflow-icon-control"
@@ -540,6 +555,24 @@
       :style="reflowWrapperStyle"
       @click="collapseControls"
     >
+      <div
+        v-if="annotationsVisible"
+        class="reflow-annotation-layer"
+        @click.stop="handleAnnotationLayerClick"
+      >
+        <button
+          v-for="annotation in visibleAnnotations"
+          :key="annotation.id"
+          type="button"
+          class="reflow-annotation-mark"
+          :class="`reflow-annotation-${annotation.type}`"
+          :style="annotationStyle(annotation)"
+          :title="annotation.type === 'text' ? annotation.text : '删除标注'"
+          @click.stop="removeAnnotation(annotation.id)"
+        >
+          <span v-if="annotation.type === 'text'">{{ annotation.text }}</span>
+        </button>
+      </div>
       <div v-if="paginationItems.length === 0" class="reflow-status">No text blocks detected</div>
       <template v-else-if="isTwoColumns">
         <div class="reflow-column" :style="columnPaneStyle">
@@ -745,6 +778,12 @@
 <script lang="ts">
 import Vue from 'vue'
 import {PageDtoWithUrl} from '@/types/komga-books'
+import {
+  normalizeReflowAnnotationRect,
+  normalizeReflowAnnotations,
+  ReflowAnnotation,
+  ReflowAnnotationType,
+} from '@/functions/reflow-annotations'
 import {
   DocumentRemoveBackgroundMode,
   DocumentRemoveWatermarkMode,
@@ -1144,6 +1183,18 @@ export default Vue.extend({
       type: Boolean,
       default: false,
     },
+    annotations: {
+      type: Array as () => ReflowAnnotation[],
+      default: () => [],
+    },
+    annotationsVisible: {
+      type: Boolean,
+      default: false,
+    },
+    annotationTool: {
+      type: String as () => ReflowAnnotationType,
+      default: 'line',
+    },
   },
   data: () => {
     return {
@@ -1339,6 +1390,10 @@ export default Vue.extend({
     },
     visibleItems(): ReflowItem[] {
       return this.pages[this.virtualPageIndex] || this.paginationItems
+    },
+    visibleAnnotations(): ReflowAnnotation[] {
+      const sourcePage = this.activeVisibleSourcePageNumber
+      return normalizeReflowAnnotations(this.annotations).filter(annotation => annotation.sourcePageNumber === sourcePage)
     },
     paginationItems(): ReflowItem[] {
       return mergeReflowContinuationItems(this.reflowItems, this.page.number, this.continuationPages)
@@ -1924,6 +1979,66 @@ export default Vue.extend({
     setReflowControlsTab(tab: 'layout' | 'display' | 'deskew') {
       this.reflowControlsTab = tab
       this.$nextTick(this.constrainControlsPosition)
+    },
+    toggleAnnotationsVisible() {
+      this.$emit('annotations-visible-change', !this.annotationsVisible)
+    },
+    setAnnotationTool(event: Event) {
+      const value = (event.target as HTMLSelectElement).value as ReflowAnnotationType
+      if (value === 'line' || value === 'wavy' || value === 'text') this.$emit('annotation-tool-change', value)
+    },
+    annotationStyle(annotation: ReflowAnnotation): Record<string, string> {
+      const rect = annotation.sourceRect
+      return {
+        left: `${rect.x * 100}%`,
+        top: `${rect.y * 100}%`,
+        width: `${rect.w * 100}%`,
+        height: `${rect.h * 100}%`,
+        color: annotation.color || '#f59e0b',
+      }
+    },
+    handleAnnotationLayerClick(event: MouseEvent) {
+      if (!this.annotationsVisible || !this.annotationTool) return
+      const target = event.currentTarget as HTMLElement
+      const rect = target.getBoundingClientRect()
+      const x = (event.clientX - rect.left) / Math.max(1, rect.width)
+      const y = (event.clientY - rect.top) / Math.max(1, rect.height)
+      const dimensions = Math.max(1, this.cachedWorkWidth || this.localTextureWidth || this.targetWidth)
+      const height = Math.max(1, this.cachedWorkHeight || this.localTextureHeight || this.pageContentHeight())
+      const items = this.visibleItems.filter(item => item.type === 'word' || item.type === 'image') as Array<ReflowItem & {x?: number, y?: number, w?: number, h?: number}>
+      const item = items.find(candidate => {
+        const itemX = Number(candidate.x) / dimensions
+        const itemY = Number(candidate.y) / height
+        const itemW = Number(candidate.w) / dimensions
+        const itemH = Number(candidate.h) / height
+        return x >= itemX && x <= itemX + itemW && y >= itemY && y <= itemY + itemH
+      })
+      if (!item) return
+      const sourceRect = normalizeReflowAnnotationRect({
+        x: Number(item.x) / dimensions,
+        y: Number(item.y) / height,
+        w: Number(item.w) / dimensions,
+        h: Number(item.h) / height,
+      })
+      let text = ''
+      if (this.annotationTool === 'text') {
+        text = window.prompt('输入批注内容', '') || ''
+        if (!text.trim()) return
+      }
+      const now = new Date().toISOString()
+      this.$emit('annotation-add', {
+        id: `annotation-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        type: this.annotationTool,
+        sourcePageNumber: Number((item as any).sourcePageNumber) || this.activeVisibleSourcePageNumber,
+        sourceRect,
+        text: text || undefined,
+        color: '#f59e0b',
+        createdAt: now,
+        updatedAt: now,
+      } as ReflowAnnotation)
+    },
+    removeAnnotation(id: string) {
+      this.$emit('annotation-remove', id)
     },
     collapseControls(): boolean {
       if (this.controlsCollapsed || this.cropMode) return false
@@ -8870,6 +8985,55 @@ export default Vue.extend({
   box-sizing: border-box;
 }
 
+.reflow-annotation-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  pointer-events: auto;
+}
+
+.reflow-annotation-mark {
+  position: absolute;
+  min-width: 10px;
+  min-height: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.reflow-annotation-line::after,
+.reflow-annotation-wavy::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 1px;
+  border-bottom: 2px solid currentColor;
+}
+
+.reflow-annotation-wavy::after {
+  border-bottom: 0;
+  height: 5px;
+  background: repeating-radial-gradient(ellipse at center, currentColor 0 1px, transparent 1.5px 4px) 0 100% / 8px 5px repeat-x;
+}
+
+.reflow-annotation-text {
+  min-width: 80px;
+  min-height: 36px;
+  padding: 4px 6px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  background: rgba(255, 251, 235, 0.92);
+  color: #92400e;
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: left;
+  white-space: pre-wrap;
+  overflow: auto;
+}
+
 .reflow-column-divider {
   width: 1px;
   align-self: stretch;
@@ -8878,6 +9042,7 @@ export default Vue.extend({
 }
 
 .reflow-wrapper {
+  position: relative;
   width: 100%;
   min-height: 100%;
   padding: 16px;
