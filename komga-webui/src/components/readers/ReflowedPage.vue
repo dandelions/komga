@@ -89,21 +89,17 @@
             <v-icon small>{{ magnifierActive ? 'mdi-magnify-close' : 'mdi-magnify-plus-outline' }}</v-icon>
           </button>
           <div class="reflow-navigation-controls">
-            <label class="reflow-annotation-toggle">
-              <span>标注</span>
-              <input type="checkbox" :checked="annotationsVisible" @change="toggleAnnotationsVisible" />
-            </label>
-            <select
-              v-if="annotationsVisible"
-              class="reflow-annotation-tool-select"
-              :value="annotationTool"
-              aria-label="标注工具"
-              @change="setAnnotationTool"
+            <button
+              type="button"
+              class="reflow-annotation-entry-control"
+              :class="{'reflow-annotation-entry-active': annotationsVisible}"
+              title="进入标注模式"
+              aria-label="进入标注模式"
+              @click="toggleAnnotationsVisible"
             >
-              <option value="line">横线</option>
-              <option value="wavy">波浪线</option>
-              <option value="text">文本框</option>
-            </select>
+              <v-icon small>mdi-pencil-outline</v-icon>
+              <span>标注</span>
+            </button>
             <button
               type="button"
               class="reflow-control reflow-icon-control"
@@ -530,6 +526,19 @@
           </div>
         </div>
       </div>
+    </div>
+    <div
+      v-if="!preload && annotationsVisible"
+      class="reflow-annotation-toolbar"
+      @click.stop
+      @pointerdown.stop
+      @touchstart.stop
+    >
+      <span class="reflow-annotation-toolbar-label">标注工具</span>
+      <button type="button" :class="{'reflow-annotation-tool-active': annotationTool === 'line'}" @click="setAnnotationToolValue('line')">横线</button>
+      <button type="button" :class="{'reflow-annotation-tool-active': annotationTool === 'wavy'}" @click="setAnnotationToolValue('wavy')">波浪线</button>
+      <button type="button" :class="{'reflow-annotation-tool-active': annotationTool === 'text'}" @click="setAnnotationToolValue('text')">文本框</button>
+      <button type="button" class="reflow-annotation-toolbar-close" title="关闭标注" aria-label="关闭标注" @click="toggleAnnotationsVisible">×</button>
     </div>
     <div v-else-if="loading" class="reflow-status" @click="collapseControls">Reflowing...</div>
     <div v-else-if="error" class="reflow-status" @click="collapseControls">
@@ -1985,6 +1994,9 @@ export default Vue.extend({
     },
     setAnnotationTool(event: Event) {
       const value = (event.target as HTMLSelectElement).value as ReflowAnnotationType
+      this.setAnnotationToolValue(value)
+    },
+    setAnnotationToolValue(value: ReflowAnnotationType) {
       if (value === 'line' || value === 'wavy' || value === 'text') this.$emit('annotation-tool-change', value)
     },
     annotationStyle(annotation: ReflowAnnotation): Record<string, string> {
@@ -9215,6 +9227,73 @@ export default Vue.extend({
 .line-indent {
   flex: 0 0 auto;
   height: 1px;
+}
+
+.reflow-annotation-toolbar {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100vw - 24px);
+  padding: 6px 8px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  background: rgba(248, 250, 252, 0.94);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.24);
+  transform: translateX(-50%);
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.reflow-annotation-entry-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-height: 28px;
+  padding: 4px 7px;
+  border: 1px solid rgba(0, 0, 0, 0.22);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.72);
+  color: #212121;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.reflow-annotation-entry-active {
+  border-color: var(--v-primary-base);
+  background: var(--v-primary-base);
+  color: #fff;
+}
+
+.reflow-annotation-toolbar button {
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid rgba(0, 0, 0, 0.22);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.72);
+  color: #212121;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.reflow-annotation-toolbar .reflow-annotation-tool-active {
+  border-color: var(--v-primary-base);
+  background: var(--v-primary-base);
+  color: #fff;
+}
+
+.reflow-annotation-toolbar-close {
+  min-width: 28px;
+  font-size: 18px !important;
+}
+
+.reflow-annotation-toolbar-label {
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .reflow-controls {
