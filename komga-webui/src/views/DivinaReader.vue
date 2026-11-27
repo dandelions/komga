@@ -316,6 +316,7 @@
           :annotations="reflowAnnotations"
           :annotations-visible="reflowAnnotationsVisible"
           :annotation-tool="reflowAnnotationTool"
+          :selected-annotation-id="reflowSelectedAnnotationId"
           :magnifier-active="magnifierActive"
           @image-preview="openReflowImagePreview"
           @text-scale-change="setReflowTextScale"
@@ -326,6 +327,7 @@
           @annotation-tool-change="setReflowAnnotationTool"
           @annotation-add="addReflowAnnotation"
           @annotation-remove="removeReflowAnnotation"
+          @annotation-select="setReflowSelectedAnnotation"
           @column-count-change="setReflowColumnCount"
           @skew-correction-change="setReflowSkewCorrection"
           @auto-skew-correction-change="setReflowAutoSkewCorrection"
@@ -1517,7 +1519,8 @@ export default Vue.extend({
       pdfReaderSettingsSyncToken: 0,
       reflowAnnotations: [] as ReflowAnnotation[],
       reflowAnnotationsVisible: false,
-      reflowAnnotationTool: 'line' as ReflowAnnotationType,
+      reflowAnnotationTool: 'line' as ReflowAnnotationType | 'select' | 'eraser',
+      reflowSelectedAnnotationId: '',
       reflowCache: {} as Record<string, any>,
       reflowSessionTransferBytes: 0,
       reflowSessionResponseTransferBytes: 0,
@@ -3685,8 +3688,11 @@ export default Vue.extend({
     setReflowAnnotationsVisible(value: boolean) {
       this.reflowAnnotationsVisible = value === true
     },
-    setReflowAnnotationTool(value: ReflowAnnotationType) {
-      if (value === 'line' || value === 'wavy' || value === 'text') this.reflowAnnotationTool = value
+    setReflowAnnotationTool(value: ReflowAnnotationType | 'select' | 'eraser') {
+      if (value === 'line' || value === 'wavy' || value === 'text' || value === 'select' || value === 'eraser') this.reflowAnnotationTool = value
+    },
+    setReflowSelectedAnnotation(id: string) {
+      this.reflowSelectedAnnotationId = id
     },
     addReflowAnnotation(annotation: ReflowAnnotation) {
       const existing = this.reflowAnnotations.some(item => item.id === annotation.id)
@@ -3697,6 +3703,7 @@ export default Vue.extend({
     },
     removeReflowAnnotation(id: string) {
       this.reflowAnnotations = this.reflowAnnotations.filter(annotation => annotation.id !== id)
+      if (this.reflowSelectedAnnotationId === id) this.reflowSelectedAnnotationId = ''
       void this.saveReflowAnnotations()
     },
     async syncPdfSettingsForBook(bookId: string) {
