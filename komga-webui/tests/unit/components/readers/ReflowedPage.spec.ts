@@ -778,10 +778,48 @@ test('K2 reflow does not reserve bottom space for its side toolbar', () => {
 })
 
 describe('ReflowedPage image preview gestures', () => {
+  test('creates annotations when clicking text, not only the empty page background', () => {
+    const handleAnnotationLayerClick = jest.fn()
+    const context = {
+      annotationsVisible: true,
+      handleAnnotationLayerClick,
+      collapseControls: jest.fn(),
+    }
+    const target = {className: 'word-block'}
+    const wrapper = {}
+
+    methods.handleReflowWrapperClick.call(context, {target, currentTarget: wrapper} as any)
+
+    expect(handleAnnotationLayerClick).toHaveBeenCalledWith({target, currentTarget: wrapper})
+    expect(context.collapseControls).not.toHaveBeenCalled()
+  })
+
+  test('adds a source-coordinate annotation when a rendered word is clicked', () => {
+    const emit = jest.fn()
+    const context = {
+      annotationsVisible: true,
+      annotationTool: 'line',
+      cachedWorkWidth: 1000,
+      cachedWorkHeight: 2000,
+      activeVisibleSourcePageNumber: 9,
+      $emit: emit,
+      createReflowAnnotation: jest.fn(),
+    }
+    const event = {stopPropagation: jest.fn()}
+    const item = {x: 100, y: 400, w: 80, h: 120, sourcePageNumber: 12}
+
+    methods.handleAnnotationWordClick.call(context, event, item)
+
+    expect(event.stopPropagation).toHaveBeenCalled()
+    expect(context.createReflowAnnotation).toHaveBeenCalledWith({x: 0.1, y: 0.2, w: 0.08, h: 0.06}, 12)
+  })
+
   test('keeps annotation and navigation controls in a wrapping row', () => {
     const content = require('fs').readFileSync(require('path').resolve(__dirname, '../../../../src/components/readers/ReflowedPage.vue'), 'utf8')
     expect(content).toMatch(/\.reflow-annotation-layer\s*\{[\s\S]*?pointer-events:\s*none/i)
     expect(content).toMatch(/\.reflow-annotation-layer \.reflow-annotation-mark\s*\{[\s\S]*?pointer-events:\s*auto/i)
+    expect(content).toMatch(/\.reflow-annotation-vertical\.reflow-annotation-line::after[\s\S]*?border-right:\s*2px solid currentColor/i)
+    expect(content).toMatch(/verticalText \? '竖线' : '横线'/)
     expect(content).toMatch(/v-if="!preload && annotationsVisible"[\s\S]*?reflow-annotation-toolbar[\s\S]*?\/div>\s*<div\s+v-if="!preload && paginationItems\.length > 0"/i)
     expect(content).toMatch(/v-if="annotationsVisible && visibleAnnotations\.length > 0"/i)
     expect(content).not.toMatch(/\.reflow-annotations-active \.reflow-column[\s\S]*?visibility:\s*visible\s*!important/i)

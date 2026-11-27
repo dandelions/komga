@@ -567,7 +567,7 @@
           :key="annotation.id"
           type="button"
           class="reflow-annotation-mark"
-          :class="`reflow-annotation-${annotation.type}`"
+          :class="[`reflow-annotation-${annotation.type}`, {'reflow-annotation-vertical': verticalText}]"
           :style="annotationStyle(annotation)"
           :title="annotation.type === 'text' ? annotation.text : '删除标注'"
           @click.stop="removeAnnotation(annotation.id)"
@@ -595,6 +595,7 @@
               :key="`l-word-${i}`"
               class="word-block word-block-sprite"
               :style="wordBlockStyle(item)"
+              @click="handleAnnotationWordClick($event, item)"
             />
             <img
               v-else-if="item.type === 'word' && item.src"
@@ -603,6 +604,7 @@
               class="word-block"
               :style="wordBlockStyle(item)"
               alt=""
+              @click="handleAnnotationWordClick($event, item)"
             />
             <span
               v-else-if="item.type === 'image' && item.src"
@@ -646,6 +648,7 @@
               :key="`r-word-${i}`"
               class="word-block word-block-sprite"
               :style="wordBlockStyle(item)"
+              @click="handleAnnotationWordClick($event, item)"
             />
             <img
               v-else-if="item.type === 'word' && item.src"
@@ -654,6 +657,7 @@
               class="word-block"
               :style="wordBlockStyle(item)"
               alt=""
+              @click="handleAnnotationWordClick($event, item)"
             />
             <span
               v-else-if="item.type === 'image' && item.src"
@@ -738,7 +742,7 @@
       @touchstart.stop
     >
       <span class="reflow-annotation-toolbar-label">标注工具</span>
-      <button type="button" :class="{'reflow-annotation-tool-active': annotationTool === 'line'}" @click="setAnnotationToolValue('line')">横线</button>
+      <button type="button" :class="{'reflow-annotation-tool-active': annotationTool === 'line'}" @click="setAnnotationToolValue('line')">{{ verticalText ? '竖线' : '横线' }}</button>
       <button type="button" :class="{'reflow-annotation-tool-active': annotationTool === 'wavy'}" @click="setAnnotationToolValue('wavy')">波浪线</button>
       <button type="button" :class="{'reflow-annotation-tool-active': annotationTool === 'text'}" @click="setAnnotationToolValue('text')">文本框</button>
       <button type="button" class="reflow-annotation-toolbar-close" title="关闭标注" aria-label="关闭标注" @click="toggleAnnotationsVisible">×</button>
@@ -2015,29 +2019,27 @@ export default Vue.extend({
         color: annotation.color || '#f59e0b',
       }
     },
-    handleAnnotationLayerClick(event: MouseEvent) {
+    handleAnnotationWordClick(event: MouseEvent, item: ReflowItem & {x?: number, y?: number, w?: number, h?: number}) {
       if (!this.annotationsVisible || !this.annotationTool) return
-      const target = event.currentTarget as HTMLElement
-      const rect = target.getBoundingClientRect()
-      const x = (event.clientX - rect.left) / Math.max(1, rect.width)
-      const y = (event.clientY - rect.top) / Math.max(1, rect.height)
+      event.stopPropagation()
       const dimensions = Math.max(1, this.cachedWorkWidth || this.localTextureWidth || this.targetWidth)
       const height = Math.max(1, this.cachedWorkHeight || this.localTextureHeight || this.pageContentHeight())
-      const items = this.visibleItems.filter(item => item.type === 'word' || item.type === 'image') as Array<ReflowItem & {x?: number, y?: number, w?: number, h?: number}>
-      const item = items.find(candidate => {
-        const itemX = Number(candidate.x) / dimensions
-        const itemY = Number(candidate.y) / height
-        const itemW = Number(candidate.w) / dimensions
-        const itemH = Number(candidate.h) / height
-        return x >= itemX && x <= itemX + itemW && y >= itemY && y <= itemY + itemH
-      })
-      if (!item) return
-      const sourceRect = normalizeReflowAnnotationRect({
+      this.createReflowAnnotation(normalizeReflowAnnotationRect({
         x: Number(item.x) / dimensions,
         y: Number(item.y) / height,
         w: Number(item.w) / dimensions,
         h: Number(item.h) / height,
-      })
+      }), Number((item as any).sourcePageNumber) || this.activeVisibleSourcePageNumber)
+    },
+    handleAnnotationLayerClick(event: MouseEvent) {
+      if (!this.annotationsVisible || !this.annotationTool) return
+      const target = event.currentTarget as HTMLElement
+      const rect = target.getBoundingClientRect()
+      const x = Math.max(0, Math.min(0.999, (event.clientX - rect.left) / Math.max(1, rect.width)))
+      const y = Math.max(0, Math.min(0.999, (event.clientY - rect.top) / Math.max(1, rect.height)))
+      this.createReflowAnnotation(normalizeReflowAnnotationRect({x, y, w: 0.04, h: 0.04}), this.activeVisibleSourcePageNumber)
+    },
+    createReflowAnnotation(sourceRect: ReflowAnnotation['sourceRect'], sourcePageNumber: number) {
       let text = ''
       if (this.annotationTool === 'text') {
         text = window.prompt('输入批注内容', '') || ''
@@ -2047,7 +2049,7 @@ export default Vue.extend({
       this.$emit('annotation-add', {
         id: `annotation-${Date.now()}-${Math.random().toString(36).slice(2)}`,
         type: this.annotationTool,
-        sourcePageNumber: Number((item as any).sourcePageNumber) || this.activeVisibleSourcePageNumber,
+        sourcePageNumber,
         sourceRect,
         text: text || undefined,
         color: '#f59e0b',
@@ -2059,7 +2061,7 @@ export default Vue.extend({
       this.$emit('annotation-remove', id)
     },
     handleReflowWrapperClick(event: MouseEvent) {
-      if (this.annotationsVisible && event.target === event.currentTarget) {
+      if (this.annotationsVisible) {
         this.handleAnnotationLayerClick(event)
         return
       }
@@ -9054,6 +9056,23 @@ export default Vue.extend({
   border-bottom: 0;
   height: 5px;
   background: repeating-radial-gradient(ellipse at center, currentColor 0 1px, transparent 1.5px 4px) 0 100% / 8px 5px repeat-x;
+}
+
+.reflow-annotation-vertical.reflow-annotation-line::after,
+.reflow-annotation-vertical.reflow-annotation-wavy::after {
+  top: 0;
+  right: auto;
+  bottom: 0;
+  left: 1px;
+  width: 5px;
+  height: auto;
+  border-right: 2px solid currentColor;
+  border-bottom: 0;
+}
+
+.reflow-annotation-vertical.reflow-annotation-wavy::after {
+  border-right: 0;
+  background: repeating-radial-gradient(ellipse at center, currentColor 0 1px, transparent 1.5px 4px) 0 0 / 5px 8px repeat-y;
 }
 
 .reflow-annotation-text {
