@@ -870,6 +870,8 @@ describe('ReflowedPage image preview gestures', () => {
     expect(content).toMatch(/'reflow-annotation-selected': selectedAnnotationId === annotation\.id/)
     expect(content).toMatch(/v-if="annotationsVisible && \(visibleAnnotations\.length > 0 \|\| annotationDraft \|\| annotationEditorVisible\)"/i)
     expect(content).toMatch(/@pointerdown="startAnnotationGesture"[\s\S]*?@pointermove="moveAnnotationGesture"[\s\S]*?@pointerup="finishAnnotationGesture"/i)
+    expect(content).toMatch(/@click="selectAnnotationPage\(annotation\)"/i)
+    expect(content).toMatch(/touch-action:\s*none/i)
     expect(content).toMatch(/支持 Markdown 格式/i)
     expect(content).not.toMatch(/\.reflow-annotations-active \.reflow-column[\s\S]*?visibility:\s*visible\s*!important/i)
     expect(content).toMatch(/\.reflow-navigation-controls\s*\{[\s\S]*?flex-wrap:\s*wrap/i)

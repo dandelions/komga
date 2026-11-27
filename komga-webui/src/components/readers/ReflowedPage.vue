@@ -784,7 +784,7 @@
         :class="{'reflow-annotation-list-item-selected': selectedAnnotationId === annotation.id}"
         role="button"
         tabindex="0"
-        @click="selectAnnotation(annotation.id)"
+        @click="selectAnnotationPage(annotation)"
       >
         <v-icon small>{{ annotation.type === 'text' ? 'mdi-note-text-outline' : annotation.type === 'wavy' ? 'mdi-wave' : 'mdi-minus' }}</v-icon>
         <span>第 {{ annotation.sourcePageNumber }} 页 · {{ annotation.type === 'text' ? '文本' : annotation.type === 'wavy' ? '波浪线' : '直线' }}</span>
@@ -2073,6 +2073,10 @@ export default Vue.extend({
     },
     selectAnnotation(id: string) {
       this.$emit('annotation-select', id)
+    },
+    selectAnnotationPage(annotation: ReflowAnnotation) {
+      this.selectAnnotation(annotation.id)
+      this.$emit('annotation-page-select', annotation.sourcePageNumber)
     },
     removeSelectedAnnotation() {
       if (this.selectedAnnotationId) this.removeAnnotation(this.selectedAnnotationId)
@@ -9170,6 +9174,8 @@ export default Vue.extend({
 
 .reflow-annotations-active .reflow-wrapper {
   cursor: crosshair;
+  touch-action: none;
+  user-select: none;
 }
 
 .reflow-annotations-active .reflow-annotation-layer {

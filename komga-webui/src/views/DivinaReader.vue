@@ -328,6 +328,7 @@
           @annotation-add="addReflowAnnotation"
           @annotation-remove="removeReflowAnnotation"
           @annotation-select="setReflowSelectedAnnotation"
+          @annotation-page-select="jumpToReflowAnnotationPage"
           @column-count-change="setReflowColumnCount"
           @skew-correction-change="setReflowSkewCorrection"
           @auto-skew-correction-change="setReflowAutoSkewCorrection"
@@ -3693,6 +3694,9 @@ export default Vue.extend({
     },
     setReflowSelectedAnnotation(id: string) {
       this.reflowSelectedAnnotationId = id
+    },
+    jumpToReflowAnnotationPage(page: number) {
+      if (Number.isFinite(page) && page >= 1 && page <= this.pagesCount) this.goTo(page)
     },
     addReflowAnnotation(annotation: ReflowAnnotation) {
       const existing = this.reflowAnnotations.some(item => item.id === annotation.id)
