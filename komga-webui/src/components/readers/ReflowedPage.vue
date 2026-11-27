@@ -538,19 +538,6 @@
       <div>Unable to reflow this page</div>
       <div v-if="errorMessage" class="reflow-error">{{ errorMessage }}</div>
     </div>
-    <div
-      v-if="!preload && annotationsVisible"
-      class="reflow-annotation-toolbar"
-      @click.stop
-      @pointerdown.stop
-      @touchstart.stop
-    >
-      <span class="reflow-annotation-toolbar-label">标注工具</span>
-      <button type="button" :class="{'reflow-annotation-tool-active': annotationTool === 'line'}" @click="setAnnotationToolValue('line')">横线</button>
-      <button type="button" :class="{'reflow-annotation-tool-active': annotationTool === 'wavy'}" @click="setAnnotationToolValue('wavy')">波浪线</button>
-      <button type="button" :class="{'reflow-annotation-tool-active': annotationTool === 'text'}" @click="setAnnotationToolValue('text')">文本框</button>
-      <button type="button" class="reflow-annotation-toolbar-close" title="关闭标注" aria-label="关闭标注" @click="toggleAnnotationsVisible">×</button>
-    </div>
     <div v-else-if="deferReflow" class="reflow-setup-preview" @click="collapseControls">
       <img
         :src="cropImageUrl"
@@ -742,6 +729,19 @@
           </span>
         </template>
       </template>
+    </div>
+    <div
+      v-if="!preload && annotationsVisible"
+      class="reflow-annotation-toolbar"
+      @click.stop
+      @pointerdown.stop
+      @touchstart.stop
+    >
+      <span class="reflow-annotation-toolbar-label">标注工具</span>
+      <button type="button" :class="{'reflow-annotation-tool-active': annotationTool === 'line'}" @click="setAnnotationToolValue('line')">横线</button>
+      <button type="button" :class="{'reflow-annotation-tool-active': annotationTool === 'wavy'}" @click="setAnnotationToolValue('wavy')">波浪线</button>
+      <button type="button" :class="{'reflow-annotation-tool-active': annotationTool === 'text'}" @click="setAnnotationToolValue('text')">文本框</button>
+      <button type="button" class="reflow-annotation-toolbar-close" title="关闭标注" aria-label="关闭标注" @click="toggleAnnotationsVisible">×</button>
     </div>
     <div
       v-if="!preload && paginationItems.length > 0"

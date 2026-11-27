@@ -782,7 +782,7 @@ describe('ReflowedPage image preview gestures', () => {
     const content = require('fs').readFileSync(require('path').resolve(__dirname, '../../../../src/components/readers/ReflowedPage.vue'), 'utf8')
     expect(content).toMatch(/\.reflow-annotation-layer\s*\{[\s\S]*?pointer-events:\s*none/i)
     expect(content).toMatch(/\.reflow-annotation-layer \.reflow-annotation-mark\s*\{[\s\S]*?pointer-events:\s*auto/i)
-    expect(content).toMatch(/v-if="!preload && annotationsVisible"[\s\S]*?reflow-annotation-toolbar[\s\S]*?\/div>\s*<div v-if="loading"/i)
+    expect(content).toMatch(/v-if="!preload && annotationsVisible"[\s\S]*?reflow-annotation-toolbar[\s\S]*?\/div>\s*<div\s+v-if="!preload && paginationItems\.length > 0"/i)
     expect(content).toMatch(/v-if="annotationsVisible && visibleAnnotations\.length > 0"/i)
     expect(content).not.toMatch(/\.reflow-annotations-active \.reflow-column[\s\S]*?visibility:\s*visible\s*!important/i)
     expect(content).toMatch(/\.reflow-navigation-controls\s*\{[\s\S]*?flex-wrap:\s*wrap/i)
