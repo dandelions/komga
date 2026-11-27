@@ -3,7 +3,8 @@
     class="reflowed-page"
     :class="{
       'reflowed-page-dark': $vuetify.theme.dark || nightDisplay,
-      'reflow-annotations-active': annotationsVisible,
+      'reflow-annotations-active': annotationsVisible && annotationEditMode,
+      'reflow-annotations-visible': annotationsVisible,
     }"
   >
     <div
@@ -588,9 +589,9 @@
           @click.stop
         >
           <div class="reflow-annotation-editor-title">文本标注</div>
-          <textarea v-model="annotationEditorText" rows="8" placeholder="支持 Markdown 格式" />
-          <div class="reflow-annotation-editor-preview" v-html="annotationEditorAnnotation ? annotationMarkdown({...annotationEditorAnnotation, text: annotationEditorText}) : ''" />
-          <div class="reflow-annotation-editor-actions">
+          <textarea v-if="annotationEditMode" v-model="annotationEditorText" rows="8" placeholder="支持 Markdown 格式" />
+          <div class="reflow-annotation-editor-preview" v-html="annotationEditorAnnotation ? annotationMarkdown(annotationEditorAnnotation) : ''" />
+          <div v-if="annotationEditMode" class="reflow-annotation-editor-actions">
             <button type="button" @click="cancelAnnotationEditor">取消</button>
             <button type="button" @click="saveAnnotationEditor">保存</button>
           </div>
@@ -765,13 +766,14 @@
       @pointerdown.stop
       @touchstart.stop
     >
-      <span class="reflow-annotation-toolbar-label">标注工具</span>
-      <button type="button" :class="{'reflow-annotation-tool-active': annotationTool === 'line'}" @click="setAnnotationToolValue('line')">{{ verticalText ? '竖线' : '横线' }}</button>
-      <button type="button" :class="{'reflow-annotation-tool-active': annotationTool === 'wavy'}" @click="setAnnotationToolValue('wavy')">波浪线</button>
-      <button type="button" :class="{'reflow-annotation-tool-active': annotationTool === 'text'}" @click="setAnnotationToolValue('text')">文本框</button>
-      <button type="button" :class="{'reflow-annotation-tool-active': annotationTool === 'select'}" title="选择标注" @click="setAnnotationToolValue('select')">选择</button>
-      <button type="button" :class="{'reflow-annotation-tool-active': annotationTool === 'eraser'}" title="擦除标注" @click="setAnnotationToolValue('eraser')">擦除</button>
-      <button type="button" class="reflow-annotation-delete-selected" :disabled="!selectedAnnotationId" title="删除选中标注" @click="removeSelectedAnnotation">删除选中</button>
+      <span class="reflow-annotation-toolbar-label">{{ annotationEditMode ? '编辑标注' : '显示标注' }}</span>
+      <button type="button" class="reflow-annotation-mode-toggle" @click="toggleAnnotationEditMode">{{ annotationEditMode ? '显示模式' : '编辑模式' }}</button>
+      <button v-if="annotationEditMode" type="button" :class="{'reflow-annotation-tool-active': annotationTool === 'line'}" @click="setAnnotationToolValue('line')">{{ verticalText ? '竖线' : '横线' }}</button>
+      <button v-if="annotationEditMode" type="button" :class="{'reflow-annotation-tool-active': annotationTool === 'wavy'}" @click="setAnnotationToolValue('wavy')">波浪线</button>
+      <button v-if="annotationEditMode" type="button" :class="{'reflow-annotation-tool-active': annotationTool === 'text'}" @click="setAnnotationToolValue('text')">文本框</button>
+      <button v-if="annotationEditMode" type="button" :class="{'reflow-annotation-tool-active': annotationTool === 'select'}" title="选择标注" @click="setAnnotationToolValue('select')">选择</button>
+      <button v-if="annotationEditMode" type="button" :class="{'reflow-annotation-tool-active': annotationTool === 'eraser'}" title="擦除标注" @click="setAnnotationToolValue('eraser')">擦除</button>
+      <button v-if="annotationEditMode" type="button" class="reflow-annotation-delete-selected" :disabled="!selectedAnnotationId" title="删除选中标注" @click="removeSelectedAnnotation">删除选中</button>
       <button type="button" class="reflow-annotation-toolbar-close" title="关闭标注" aria-label="关闭标注" @click="toggleAnnotationsVisible">×</button>
     </div>
     <aside v-if="!preload && annotationsVisible" class="reflow-annotation-list-layer" @pointerdown.stop @click.stop>
@@ -1264,6 +1266,10 @@ export default Vue.extend({
     selectedAnnotationId: {
       type: String,
       default: '',
+    },
+    annotationEditMode: {
+      type: Boolean,
+      default: false,
     },
   },
   data: () => {
@@ -2058,6 +2064,9 @@ export default Vue.extend({
       this.reflowControlsTab = tab
       this.$nextTick(this.constrainControlsPosition)
     },
+    toggleAnnotationEditMode() {
+      this.$emit('annotation-edit-mode-change', !this.annotationEditMode)
+    },
     toggleAnnotationsVisible() {
       const nextVisible = !this.annotationsVisible
       if (nextVisible) this.controlsCollapsed = true
@@ -2097,13 +2106,22 @@ export default Vue.extend({
     annotationMarkdown(annotation: ReflowAnnotation): string {
       return marked.parse(annotation.text || '')
     },
+    previewAnnotationText(annotation: ReflowAnnotation) {
+      this.annotationEditorAnnotation = annotation
+      this.annotationEditorText = annotation.text || ''
+      this.annotationEditorVisible = true
+    },
     handleAnnotationMarkClick(annotation: ReflowAnnotation) {
-      if (this.annotationTool === 'eraser') {
+      if (this.annotationEditMode && this.annotationTool === 'eraser') {
         this.removeAnnotation(annotation.id)
         return
       }
       this.selectAnnotation(annotation.id)
-      if (this.annotationTool === 'select' || annotation.type !== 'text') return
+      if (annotation.type !== 'text') return
+      if (!this.annotationEditMode || this.annotationTool === 'select') {
+        this.previewAnnotationText(annotation)
+        return
+      }
       if (annotation.type === 'text') {
         this.annotationEditorAnnotation = annotation
         this.annotationEditorText = annotation.text || ''
@@ -2132,7 +2150,7 @@ export default Vue.extend({
       }
     },
     startAnnotationGesture(event: PointerEvent) {
-      if (!this.annotationsVisible || !this.annotationTool || this.annotationEditorVisible || this.annotationTool === 'select' || this.annotationTool === 'eraser') return
+      if (!this.annotationsVisible || !this.annotationEditMode || !this.annotationTool || this.annotationEditorVisible || this.annotationTool === 'select' || this.annotationTool === 'eraser') return
       const target = event.currentTarget as HTMLElement
       const point = this.annotationPoint(event, target)
       this.annotationGesture = {pointerId: event.pointerId, startX: point.x, startY: point.y, rect: target.getBoundingClientRect(), sourcePageNumber: this.activeVisibleSourcePageNumber}
@@ -2188,7 +2206,7 @@ export default Vue.extend({
       if (this.annotationsVisible) event.stopPropagation()
     },
     handleAnnotationLayerClick(event: MouseEvent) {
-      if (!this.annotationsVisible || !this.annotationTool) return
+      if (!this.annotationsVisible || !this.annotationEditMode || !this.annotationTool) return
       const target = event.currentTarget as HTMLElement
       const rect = target.getBoundingClientRect()
       const x = Math.max(0, Math.min(0.999, (event.clientX - rect.left) / Math.max(1, rect.width)))
@@ -9215,7 +9233,8 @@ export default Vue.extend({
   padding: 8px;
   border: 1px solid rgba(120, 113, 108, 0.5);
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.96);
+  background: #fff;
+  color: #292524;
   box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25);
 }
 
@@ -9256,7 +9275,16 @@ export default Vue.extend({
 
 .reflow-annotation-list-empty {
   padding: 12px 4px;
-  color: #78716c;
+  color: #57534e;
+}
+
+.reflowed-page-dark .reflow-annotation-list-layer {
+  background: #292524;
+  color: #f5f5f4;
+}
+
+.reflowed-page-dark .reflow-annotation-list-empty {
+  color: #d6d3d1;
 }
 
 .reflow-annotation-line::after,

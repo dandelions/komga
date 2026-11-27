@@ -315,6 +315,7 @@
           :prefetch-ahead="reflowPrefetchAhead"
           :annotations="reflowAnnotations"
           :annotations-visible="reflowAnnotationsVisible"
+          :annotation-edit-mode="reflowAnnotationEditMode"
           :annotation-tool="reflowAnnotationTool"
           :selected-annotation-id="reflowSelectedAnnotationId"
           :magnifier-active="magnifierActive"
@@ -324,6 +325,7 @@
           @display-columns-change="setReflowDisplayColumns"
           @prefetch-ahead-change="setReflowPrefetchAhead"
           @annotations-visible-change="setReflowAnnotationsVisible"
+          @annotation-edit-mode-change="setReflowAnnotationEditMode"
           @annotation-tool-change="setReflowAnnotationTool"
           @annotation-add="addReflowAnnotation"
           @annotation-remove="removeReflowAnnotation"
@@ -1520,6 +1522,7 @@ export default Vue.extend({
       pdfReaderSettingsSyncToken: 0,
       reflowAnnotations: [] as ReflowAnnotation[],
       reflowAnnotationsVisible: false,
+      reflowAnnotationEditMode: false,
       reflowAnnotationTool: 'line' as ReflowAnnotationType | 'select' | 'eraser',
       reflowSelectedAnnotationId: '',
       reflowCache: {} as Record<string, any>,
@@ -3689,6 +3692,11 @@ export default Vue.extend({
     },
     setReflowAnnotationsVisible(value: boolean) {
       this.reflowAnnotationsVisible = value === true
+      this.reflowAnnotationEditMode = false
+      if (!this.reflowAnnotationsVisible) this.reflowSelectedAnnotationId = ''
+    },
+    setReflowAnnotationEditMode(value: boolean) {
+      this.reflowAnnotationEditMode = value === true
     },
     setReflowAnnotationTool(value: ReflowAnnotationType | 'select' | 'eraser') {
       if (value === 'line' || value === 'wavy' || value === 'text' || value === 'select' || value === 'eraser') this.reflowAnnotationTool = value

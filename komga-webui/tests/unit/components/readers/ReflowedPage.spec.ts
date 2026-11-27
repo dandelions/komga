@@ -827,6 +827,7 @@ describe('ReflowedPage image preview gestures', () => {
   test('updates a draft rectangle during a pointer gesture and saves it on release', () => {
     const context: any = {
       annotationsVisible: true,
+      annotationEditMode: true,
       annotationTool: 'line',
       activeVisibleSourcePageNumber: 4,
       controlsCollapsed: false,
@@ -873,6 +874,10 @@ describe('ReflowedPage image preview gestures', () => {
     expect(content).toMatch(/@click="selectAnnotationPage\(annotation\)"/i)
     expect(content).toMatch(/touch-action:\s*none/i)
     expect(content).toMatch(/支持 Markdown 格式/i)
+    expect(content).toMatch(/annotationEditMode \? '编辑标注' : '显示标注'/i)
+    expect(content).toMatch(/!this.annotationsVisible \|\| !this.annotationEditMode/i)
+    expect(content).toMatch(/\.reflowed-page-dark \.reflow-annotation-list-layer[\s\S]*?color:\s*#f5f5f4/i)
+    expect(content).not.toMatch(/annotationEditorText\) : ''/i)
     expect(content).not.toMatch(/\.reflow-annotations-active \.reflow-column[\s\S]*?visibility:\s*visible\s*!important/i)
     expect(content).toMatch(/\.reflow-navigation-controls\s*\{[\s\S]*?flex-wrap:\s*wrap/i)
     expect(content).toMatch(/\.reflow-navigation-controls\s*\{[\s\S]*?width:\s*100%/i)
