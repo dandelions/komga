@@ -2030,7 +2030,9 @@ export default Vue.extend({
       this.$nextTick(this.constrainControlsPosition)
     },
     toggleAnnotationsVisible() {
-      this.$emit('annotations-visible-change', !this.annotationsVisible)
+      const nextVisible = !this.annotationsVisible
+      if (nextVisible) this.controlsCollapsed = true
+      this.$emit('annotations-visible-change', nextVisible)
     },
     setAnnotationTool(event: Event) {
       const value = (event.target as HTMLSelectElement).value as ReflowAnnotationType

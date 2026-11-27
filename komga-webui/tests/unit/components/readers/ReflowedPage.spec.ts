@@ -814,6 +814,16 @@ describe('ReflowedPage image preview gestures', () => {
     expect(context.createReflowAnnotation).not.toHaveBeenCalled()
   })
 
+  test('collapses the floating controls when annotation mode opens', () => {
+    const emit = jest.fn()
+    const context: any = {annotationsVisible: false, controlsCollapsed: false, $emit: emit}
+
+    methods.toggleAnnotationsVisible.call(context)
+
+    expect(context.controlsCollapsed).toBe(true)
+    expect(emit).toHaveBeenCalledWith('annotations-visible-change', true)
+  })
+
   test('updates a draft rectangle during a pointer gesture and saves it on release', () => {
     const context: any = {
       annotationsVisible: true,
