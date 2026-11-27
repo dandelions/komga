@@ -820,6 +820,7 @@ describe('ReflowedPage image preview gestures', () => {
     expect(content).toMatch(/\.reflow-annotation-layer \.reflow-annotation-mark\s*\{[\s\S]*?pointer-events:\s*auto/i)
     expect(content).toMatch(/\.reflow-annotation-vertical\.reflow-annotation-line::after[\s\S]*?border-right:\s*2px solid currentColor/i)
     expect(content).toMatch(/verticalText \? '竖线' : '横线'/)
+    expect(content).toMatch(/v-else-if="item\.type === 'word' && isSpriteWordItem\(item\)"[\s\S]*?handleAnnotationWordClick\(\$event, item\)/i)
     expect(content).toMatch(/v-if="!preload && annotationsVisible"[\s\S]*?reflow-annotation-toolbar[\s\S]*?\/div>\s*<div\s+v-if="!preload && paginationItems\.length > 0"/i)
     expect(content).toMatch(/v-if="annotationsVisible && visibleAnnotations\.length > 0"/i)
     expect(content).not.toMatch(/\.reflow-annotations-active \.reflow-column[\s\S]*?visibility:\s*visible\s*!important/i)

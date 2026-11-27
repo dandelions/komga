@@ -492,6 +492,13 @@ describe('DivinaReader reflow content clicks', () => {
     expect(reader.activeReflowNavigateRightSide).toHaveBeenCalledTimes(1)
   })
 
+  test('leaves reflow clicks to the annotation component while annotations are visible', () => {
+    const {reader, element, click} = mountReader({reflowAnnotationsVisible: true})
+    click(element.firstElementChild!, 920)
+    expect(reader.showToolbars).toBe(false)
+    expect(reader.activeReflowNavigateRightSide).not.toHaveBeenCalled()
+  })
+
   test('collapses expanded controls before navigating on text clicks', () => {
     const {reader, element, click} = mountReader({collapseActiveReflowControls: jest.fn(() => true)})
     click(element)

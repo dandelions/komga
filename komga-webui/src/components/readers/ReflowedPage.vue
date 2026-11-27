@@ -701,6 +701,7 @@
             :key="`word-${i}`"
             class="word-block word-block-sprite"
             :style="wordBlockStyle(item)"
+            @click="handleAnnotationWordClick($event, item)"
           />
           <img
             v-else-if="item.type === 'word' && item.src"
@@ -709,6 +710,7 @@
             class="word-block"
             :style="wordBlockStyle(item)"
             alt=""
+            @click="handleAnnotationWordClick($event, item)"
           />
           <span
             v-else-if="item.type === 'image' && item.src"

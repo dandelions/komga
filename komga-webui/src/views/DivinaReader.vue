@@ -4066,6 +4066,7 @@ export default Vue.extend({
       if (!target || this.reflowCropMode || this.reflowSetupMode) return
       if (target.closest('.reflow-controls, .reflow-annotation-toolbar, .reflow-annotation-layer, .k2-controls, .reflow-measure-wrapper, .k2-measure-output, .reflow-prefetch')) return
       if (target.closest('button, a, input, select, textarea')) return
+      if (this.reflowAnnotationsVisible) return
 
       event.preventDefault()
       event.stopPropagation()
