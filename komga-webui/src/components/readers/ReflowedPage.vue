@@ -571,7 +571,7 @@
       @click="handleReflowWrapperClick"
     >
       <div
-        v-if="annotationsVisible"
+        v-if="annotationsVisible && visibleAnnotations.length > 0"
         class="reflow-annotation-layer"
         @click.stop
       >
@@ -9019,16 +9019,6 @@ export default Vue.extend({
 
 .reflow-annotations-active .reflow-wrapper {
   cursor: crosshair;
-}
-
-.reflow-annotations-active .reflow-column,
-.reflow-annotations-active .word-block,
-.reflow-annotations-active .reflow-image-frame,
-.reflow-annotations-active .reflow-image-block {
-  position: relative;
-  z-index: 9;
-  visibility: visible !important;
-  opacity: 1 !important;
 }
 
 .reflow-annotations-active .reflow-annotation-layer {
