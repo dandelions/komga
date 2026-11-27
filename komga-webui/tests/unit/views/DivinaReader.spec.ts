@@ -173,6 +173,18 @@ describe('DivinaReader image magnifier', () => {
     expect(computed.pagedSwipeEnabled.call(readerUnrotated)).toBe(true)
   })
 
+  test('disables reflow touch handlers while annotations are active', () => {
+    const reader = {
+      reflowAnnotationsVisible: true,
+      reflowSwipeLeft: jest.fn(),
+      reflowSwipeRight: jest.fn(),
+      reflowSwipeUp: jest.fn(),
+      reflowSwipeDown: jest.fn(),
+    }
+
+    expect(computed.reflowTouchHandlers.call(reader)).toEqual({})
+  })
+
   test('disables reflow touch swipe when rotated', () => {
     const reader = {
       landscapeDisplay: true,

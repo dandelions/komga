@@ -2027,6 +2027,7 @@ export default Vue.extend({
       return this.showToolbars && !this.reflowCropMode && !this.readerCropMode ? 48 : 0
     },
     reflowTouchHandlers(): object {
+      if (this.reflowAnnotationsVisible) return {}
       return {
         left: this.reflowSwipeLeft,
         right: this.reflowSwipeRight,
