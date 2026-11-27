@@ -176,6 +176,7 @@ describe('DivinaReader image magnifier', () => {
   test('disables reflow touch handlers while annotations are active', () => {
     const reader = {
       reflowAnnotationsVisible: true,
+      reflowAnnotationEditMode: true,
       reflowSwipeLeft: jest.fn(),
       reflowSwipeRight: jest.fn(),
       reflowSwipeUp: jest.fn(),

@@ -798,6 +798,7 @@ describe('ReflowedPage image preview gestures', () => {
     const emit = jest.fn()
     const context = {
       annotationsVisible: true,
+      annotationEditMode: true,
       annotationTool: 'line',
       cachedWorkWidth: 1000,
       cachedWorkHeight: 2000,
