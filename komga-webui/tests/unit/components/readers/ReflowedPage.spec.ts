@@ -790,7 +790,7 @@ describe('ReflowedPage image preview gestures', () => {
 
     methods.handleReflowWrapperClick.call(context, {target, currentTarget: wrapper} as any)
 
-    expect(handleAnnotationLayerClick).toHaveBeenCalledWith({target, currentTarget: wrapper})
+    expect(handleAnnotationLayerClick).not.toHaveBeenCalled()
     expect(context.collapseControls).not.toHaveBeenCalled()
   })
 
@@ -811,7 +811,38 @@ describe('ReflowedPage image preview gestures', () => {
     methods.handleAnnotationWordClick.call(context, event, item)
 
     expect(event.stopPropagation).toHaveBeenCalled()
-    expect(context.createReflowAnnotation).toHaveBeenCalledWith({x: 0.1, y: 0.2, w: 0.08, h: 0.06}, 12)
+    expect(context.createReflowAnnotation).not.toHaveBeenCalled()
+  })
+
+  test('updates a draft rectangle during a pointer gesture and saves it on release', () => {
+    const context: any = {
+      annotationsVisible: true,
+      annotationTool: 'line',
+      activeVisibleSourcePageNumber: 4,
+      controlsCollapsed: false,
+      annotationDraft: undefined,
+      annotationGesture: undefined,
+      annotationPoint: () => ({x: 0.2, y: 0.3}),
+    }
+    const event: any = {
+      pointerId: 7,
+      preventDefault: jest.fn(),
+      stopPropagation: jest.fn(),
+      currentTarget: {getBoundingClientRect: () => ({left: 0, top: 0, width: 1000, height: 1000}), setPointerCapture: jest.fn()},
+    }
+
+    methods.startAnnotationGesture.call(context, event)
+    context.annotationPoint = () => ({x: 0.7, y: 0.8})
+    methods.moveAnnotationGesture.call(context, event)
+    expect(context.annotationDraft.sourceRect.x).toBeCloseTo(0.2)
+    expect(context.annotationDraft.sourceRect.y).toBeCloseTo(0.3)
+    expect(context.annotationDraft.sourceRect.w).toBeCloseTo(0.5)
+    expect(context.annotationDraft.sourceRect.h).toBeCloseTo(0.5)
+
+    const emit = jest.fn()
+    context.$emit = emit
+    methods.finishAnnotationGesture.call(context, event)
+    expect(emit).toHaveBeenCalledWith('annotation-add', expect.objectContaining({type: 'line', sourcePageNumber: 4}))
   })
 
   test('keeps annotation and navigation controls in a wrapping row', () => {
@@ -822,7 +853,9 @@ describe('ReflowedPage image preview gestures', () => {
     expect(content).toMatch(/verticalText \? '竖线' : '横线'/)
     expect(content).toMatch(/v-else-if="item\.type === 'word' && isSpriteWordItem\(item\)"[\s\S]*?handleAnnotationWordClick\(\$event, item\)/i)
     expect(content).toMatch(/v-if="!preload && annotationsVisible"[\s\S]*?reflow-annotation-toolbar[\s\S]*?\/div>\s*<div\s+v-if="!preload && paginationItems\.length > 0"/i)
-    expect(content).toMatch(/v-if="annotationsVisible && visibleAnnotations\.length > 0"/i)
+    expect(content).toMatch(/v-if="annotationsVisible && \(visibleAnnotations\.length > 0 \|\| annotationDraft \|\| annotationEditorVisible\)"/i)
+    expect(content).toMatch(/@pointerdown="startAnnotationGesture"[\s\S]*?@pointermove="moveAnnotationGesture"[\s\S]*?@pointerup="finishAnnotationGesture"/i)
+    expect(content).toMatch(/支持 Markdown 格式/i)
     expect(content).not.toMatch(/\.reflow-annotations-active \.reflow-column[\s\S]*?visibility:\s*visible\s*!important/i)
     expect(content).toMatch(/\.reflow-navigation-controls\s*\{[\s\S]*?flex-wrap:\s*wrap/i)
     expect(content).toMatch(/\.reflow-navigation-controls\s*\{[\s\S]*?width:\s*100%/i)

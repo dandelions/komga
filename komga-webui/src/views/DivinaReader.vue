@@ -3689,7 +3689,10 @@ export default Vue.extend({
       if (value === 'line' || value === 'wavy' || value === 'text') this.reflowAnnotationTool = value
     },
     addReflowAnnotation(annotation: ReflowAnnotation) {
-      this.reflowAnnotations = [...this.reflowAnnotations, annotation]
+      const existing = this.reflowAnnotations.some(item => item.id === annotation.id)
+      this.reflowAnnotations = existing
+        ? this.reflowAnnotations.map(item => item.id === annotation.id ? annotation : item)
+        : [...this.reflowAnnotations, annotation]
       void this.saveReflowAnnotations()
     },
     removeReflowAnnotation(id: string) {

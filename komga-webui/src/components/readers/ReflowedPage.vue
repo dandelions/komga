@@ -555,11 +555,19 @@
         'reflow-two-columns-wrapper': isTwoColumns
       }"
       :style="reflowWrapperStyle"
+      @pointerdown="startAnnotationGesture"
+      @pointermove="moveAnnotationGesture"
+      @pointerup="finishAnnotationGesture"
+      @pointercancel="cancelAnnotationGesture"
       @click="handleReflowWrapperClick"
     >
       <div
-        v-if="annotationsVisible && visibleAnnotations.length > 0"
+        v-if="annotationsVisible && (visibleAnnotations.length > 0 || annotationDraft || annotationEditorVisible)"
         class="reflow-annotation-layer"
+        @pointerdown.stop
+        @pointermove.stop
+        @pointerup.stop
+        @pointercancel.stop
         @click.stop
       >
         <button
@@ -569,11 +577,25 @@
           class="reflow-annotation-mark"
           :class="[`reflow-annotation-${annotation.type}`, {'reflow-annotation-vertical': verticalText}]"
           :style="annotationStyle(annotation)"
-          :title="annotation.type === 'text' ? annotation.text : '删除标注'"
-          @click.stop="removeAnnotation(annotation.id)"
+          :title="annotation.type === 'text' ? '打开文本标注' : '删除标注'"
+          @click.stop="handleAnnotationMarkClick(annotation)"
         >
-          <span v-if="annotation.type === 'text'">{{ annotation.text }}</span>
+          <v-icon v-if="annotation.type === 'text'" small class="reflow-annotation-text-icon">mdi-note-text-outline</v-icon>
         </button>
+        <div
+          v-if="annotationEditorVisible"
+          class="reflow-annotation-editor"
+          @click.stop
+        >
+          <div class="reflow-annotation-editor-title">文本标注</div>
+          <textarea v-model="annotationEditorText" rows="8" placeholder="支持 Markdown 格式" />
+          <div class="reflow-annotation-editor-preview" v-html="annotationEditorAnnotation ? annotationMarkdown({...annotationEditorAnnotation, text: annotationEditorText}) : ''" />
+          <div class="reflow-annotation-editor-actions">
+            <button type="button" @click="cancelAnnotationEditor">取消</button>
+            <button type="button" @click="saveAnnotationEditor">保存</button>
+          </div>
+        </div>
+        <div v-if="annotationDraft" class="reflow-annotation-draft" :class="[`reflow-annotation-${annotationDraft.type}`, {'reflow-annotation-vertical': verticalText}]" :style="annotationDraftStyle()" />
       </div>
       <div v-if="paginationItems.length === 0" class="reflow-status">No text blocks detected</div>
       <template v-else-if="isTwoColumns">
@@ -798,6 +820,7 @@
 
 <script lang="ts">
 import Vue from 'vue'
+import {marked} from 'marked'
 import {PageDtoWithUrl} from '@/types/komga-books'
 import {
   normalizeReflowAnnotationRect,
@@ -1336,6 +1359,11 @@ export default Vue.extend({
       optionsSnapshot: undefined as ReflowOptionsSnapshot | undefined,
       forceReflowOnce: false,
       reflowRetryBudget: 2,
+      annotationGesture: undefined as {pointerId: number, startX: number, startY: number, rect: DOMRect, sourcePageNumber: number} | undefined,
+      annotationDraft: undefined as ReflowAnnotation | undefined,
+      annotationEditorVisible: false,
+      annotationEditorText: '',
+      annotationEditorAnnotation: undefined as ReflowAnnotation | undefined,
     }
   },
   computed: {
@@ -2021,17 +2049,95 @@ export default Vue.extend({
         color: annotation.color || '#f59e0b',
       }
     },
-    handleAnnotationWordClick(event: MouseEvent, item: ReflowItem & {x?: number, y?: number, w?: number, h?: number}) {
-      if (!this.annotationsVisible || !this.annotationTool) return
+    annotationDraftStyle(): Record<string, string> {
+      return this.annotationDraft ? this.annotationStyle(this.annotationDraft) : {}
+    },
+    annotationMarkdown(annotation: ReflowAnnotation): string {
+      return marked.parse(annotation.text || '')
+    },
+    handleAnnotationMarkClick(annotation: ReflowAnnotation) {
+      if (annotation.type === 'text') {
+        this.annotationEditorAnnotation = annotation
+        this.annotationEditorText = annotation.text || ''
+        this.annotationEditorVisible = true
+      } else {
+        this.removeAnnotation(annotation.id)
+      }
+    },
+    cancelAnnotationEditor() {
+      this.annotationEditorVisible = false
+      this.annotationEditorAnnotation = undefined
+      this.annotationEditorText = ''
+    },
+    saveAnnotationEditor() {
+      const annotation = this.annotationEditorAnnotation
+      if (!annotation) return
+      const now = new Date().toISOString()
+      this.$emit('annotation-add', {...annotation, text: this.annotationEditorText, updatedAt: now})
+      this.cancelAnnotationEditor()
+    },
+    annotationPoint(event: PointerEvent, target: HTMLElement): {x: number, y: number} {
+      const rect = target.getBoundingClientRect()
+      return {
+        x: Math.max(0, Math.min(1, (event.clientX - rect.left) / Math.max(1, rect.width))),
+        y: Math.max(0, Math.min(1, (event.clientY - rect.top) / Math.max(1, rect.height))),
+      }
+    },
+    startAnnotationGesture(event: PointerEvent) {
+      if (!this.annotationsVisible || !this.annotationTool || this.annotationEditorVisible) return
+      const target = event.currentTarget as HTMLElement
+      const point = this.annotationPoint(event, target)
+      this.annotationGesture = {pointerId: event.pointerId, startX: point.x, startY: point.y, rect: target.getBoundingClientRect(), sourcePageNumber: this.activeVisibleSourcePageNumber}
+      target.setPointerCapture?.(event.pointerId)
+      this.controlsCollapsed = true
+      this.annotationDraft = {
+        id: `draft-${Date.now()}`,
+        type: this.annotationTool,
+        sourcePageNumber: this.activeVisibleSourcePageNumber,
+        sourceRect: normalizeReflowAnnotationRect({x: point.x, y: point.y, w: 0.001, h: 0.001}),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }
+      event.preventDefault()
       event.stopPropagation()
-      const dimensions = Math.max(1, this.cachedWorkWidth || this.localTextureWidth || this.targetWidth)
-      const height = Math.max(1, this.cachedWorkHeight || this.localTextureHeight || this.pageContentHeight())
-      this.createReflowAnnotation(normalizeReflowAnnotationRect({
-        x: Number(item.x) / dimensions,
-        y: Number(item.y) / height,
-        w: Number(item.w) / dimensions,
-        h: Number(item.h) / height,
-      }), Number((item as any).sourcePageNumber) || this.activeVisibleSourcePageNumber)
+    },
+    moveAnnotationGesture(event: PointerEvent) {
+      const gesture = this.annotationGesture
+      if (!gesture || event.pointerId !== gesture.pointerId || !this.annotationDraft) return
+      const target = event.currentTarget as HTMLElement
+      const point = this.annotationPoint(event, target)
+      const x = Math.min(gesture.startX, point.x)
+      const y = Math.min(gesture.startY, point.y)
+      this.annotationDraft = {...this.annotationDraft, sourceRect: normalizeReflowAnnotationRect({x, y, w: Math.abs(point.x - gesture.startX), h: Math.abs(point.y - gesture.startY)})}
+      event.preventDefault()
+      event.stopPropagation()
+    },
+    finishAnnotationGesture(event: PointerEvent) {
+      const gesture = this.annotationGesture
+      if (!gesture || event.pointerId !== gesture.pointerId || !this.annotationDraft) return
+      const draft = this.annotationDraft
+      this.annotationGesture = undefined
+      this.annotationDraft = undefined
+      const width = draft.sourceRect.w
+      const height = draft.sourceRect.h
+      if (width < 0.01 && height < 0.01) return
+      if (draft.type === 'text') {
+        this.annotationEditorAnnotation = draft
+        this.annotationEditorText = ''
+        this.annotationEditorVisible = true
+      } else {
+        this.$emit('annotation-add', {...draft, id: `annotation-${Date.now()}-${Math.random().toString(36).slice(2)}`})
+      }
+      event.preventDefault()
+      event.stopPropagation()
+    },
+    cancelAnnotationGesture(event: PointerEvent) {
+      if (this.annotationGesture?.pointerId !== event.pointerId) return
+      this.annotationGesture = undefined
+      this.annotationDraft = undefined
+    },
+    handleAnnotationWordClick(event: MouseEvent, item: ReflowItem & {x?: number, y?: number, w?: number, h?: number}) {
+      if (this.annotationsVisible) event.stopPropagation()
     },
     handleAnnotationLayerClick(event: MouseEvent) {
       if (!this.annotationsVisible || !this.annotationTool) return
@@ -2063,10 +2169,7 @@ export default Vue.extend({
       this.$emit('annotation-remove', id)
     },
     handleReflowWrapperClick(event: MouseEvent) {
-      if (this.annotationsVisible) {
-        this.handleAnnotationLayerClick(event)
-        return
-      }
+      if (this.annotationsVisible) return
       this.collapseControls()
     },
     collapseControls(): boolean {
@@ -9090,6 +9193,75 @@ export default Vue.extend({
   text-align: left;
   white-space: pre-wrap;
   overflow: auto;
+}
+
+.reflow-annotation-draft {
+  position: absolute;
+  min-width: 2px;
+  min-height: 2px;
+  border: 1px dashed currentColor;
+  background: rgba(245, 158, 11, 0.16);
+  pointer-events: none;
+}
+
+.reflow-annotation-text-icon {
+  pointer-events: none;
+}
+
+.reflow-annotation-editor {
+  position: fixed;
+  z-index: 30;
+  top: 50%;
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  width: min(520px, calc(100vw - 32px));
+  max-height: min(80vh, 720px);
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #d97706;
+  border-radius: 6px;
+  background: #fffdf5;
+  color: #292524;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.32);
+  transform: translate(-50%, -50%);
+}
+
+.reflow-annotation-editor-title {
+  font-weight: 600;
+}
+
+.reflow-annotation-editor textarea {
+  width: 100%;
+  min-height: 140px;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.reflow-annotation-editor-preview {
+  max-height: 240px;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid rgba(120, 113, 108, 0.35);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.reflow-annotation-editor-preview :first-child {
+  margin-top: 0;
+}
+
+.reflow-annotation-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.reflow-annotation-editor-actions button {
+  padding: 5px 12px;
+  border: 1px solid #a8a29e;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
 }
 
 .reflow-column-divider {
