@@ -37,6 +37,7 @@ export default Vue.extend({
 
 <style scoped>
 .annotation-editor {
+  pointer-events: auto;
   position: fixed;
   z-index: 30;
   top: 50%;
