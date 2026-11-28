@@ -2082,7 +2082,7 @@ export default Vue.extend({
       this.setAnnotationToolValue(value)
     },
     setAnnotationToolValue(value: ReflowAnnotationTool) {
-      if (value === 'line' || value === 'wavy' || value === 'text' || value === 'select' || value === 'eraser') this.$emit('annotation-tool-change', value)
+      if (value === 'line' || value === 'wavy' || value === 'curve' || value === 'text' || value === 'select' || value === 'eraser') this.$emit('annotation-tool-change', value)
     },
     selectAnnotation(id: string) {
       this.$emit('annotation-select', id)
@@ -9263,6 +9263,7 @@ export default Vue.extend({
 
 .reflow-annotation-mark {
   position: absolute;
+  z-index: 14;
   min-width: 10px;
   min-height: 6px;
   padding: 0;

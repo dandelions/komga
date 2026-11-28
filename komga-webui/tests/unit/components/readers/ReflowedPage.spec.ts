@@ -872,6 +872,8 @@ describe('ReflowedPage image preview gestures', () => {
     expect(content).toMatch(/'reflow-annotation-selected': selectedAnnotationId === annotation\.id/)
     expect(content).toMatch(/v-if="annotationsVisible && \(visibleAnnotations\.length > 0 \|\| annotationDraft \|\| annotationEditorVisible \|\| \(annotationEditMode && annotationTool === 'curve'\)\)"/i)
     expect(content).toMatch(/type === 'curve'/i)
+    expect(content).toMatch(/value === 'curve'/i)
+    expect(content).toMatch(/\.reflow-annotation-mark[\s\S]*?z-index:\s*14/i)
     expect(content).toMatch(/@pointerdown="startAnnotationGesture"[\s\S]*?@pointermove="moveAnnotationGesture"[\s\S]*?@pointerup="finishAnnotationGesture"/i)
     expect(content).toMatch(/@click="selectAnnotationPage\(annotation\)"/i)
     expect(content).toMatch(/touch-action:\s*none/i)
