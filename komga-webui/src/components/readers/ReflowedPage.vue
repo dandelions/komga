@@ -563,7 +563,7 @@
       @click="handleReflowWrapperClick"
     >
       <div
-        v-if="annotationsVisible && (visibleAnnotations.length > 0 || annotationDraft || annotationEditorVisible)"
+        v-if="annotationsVisible && (visibleAnnotations.length > 0 || annotationDraft || annotationEditorVisible || (annotationEditMode && annotationTool === 'curve'))"
         class="reflow-annotation-layer"
         @pointerdown.stop
         @pointermove.stop
@@ -571,6 +571,11 @@
         @pointercancel.stop
         @click.stop
       >
+        <canvas v-if="annotationEditMode && annotationTool === 'curve'" ref="annotationCurveCanvas" class="reflow-annotation-curve-canvas" />
+        <svg v-if="visibleAnnotations.some(annotation => annotation.type === 'curve') || (annotationDraft && annotationDraft.type === 'curve')" class="reflow-annotation-curves" viewBox="0 0 1 1" preserveAspectRatio="none">
+          <polyline v-for="annotation in visibleAnnotations.filter(annotation => annotation.type === 'curve')" :key="`curve-${annotation.id}`" :points="curvePoints(annotation.points)" :class="{'reflow-annotation-curve-selected': selectedAnnotationId === annotation.id}" />
+          <polyline v-if="annotationDraft && annotationDraft.type === 'curve'" :points="curvePoints(annotationDraft.points)" class="reflow-annotation-curve-draft" />
+        </svg>
         <button
           v-for="annotation in visibleAnnotations"
           :key="annotation.id"
@@ -583,19 +588,14 @@
         >
           <v-icon v-if="annotation.type === 'text'" small class="reflow-annotation-text-icon">mdi-note-text-outline</v-icon>
         </button>
-        <div
+        <reflow-annotation-editor
           v-if="annotationEditorVisible"
-          class="reflow-annotation-editor"
+          :value="annotationEditorAnnotation ? annotationEditorAnnotation.text || '' : annotationEditorText"
+          :edit-mode="annotationEditMode"
           @click.stop
-        >
-          <div class="reflow-annotation-editor-title">文本标注</div>
-          <textarea v-if="annotationEditMode" v-model="annotationEditorText" rows="8" placeholder="支持 Markdown 格式" />
-          <div class="reflow-annotation-editor-preview" v-html="annotationEditorAnnotation ? annotationMarkdown(annotationEditorAnnotation) : ''" />
-          <div v-if="annotationEditMode" class="reflow-annotation-editor-actions">
-            <button type="button" @click="cancelAnnotationEditor">取消</button>
-            <button type="button" @click="saveAnnotationEditor">保存</button>
-          </div>
-        </div>
+          @cancel="cancelAnnotationEditor"
+          @save="saveAnnotationEditorText"
+        />
         <div v-if="annotationDraft" class="reflow-annotation-draft" :class="[`reflow-annotation-${annotationDraft.type}`, {'reflow-annotation-vertical': verticalText}]" :style="annotationDraftStyle()" />
       </div>
       <div v-if="paginationItems.length === 0" class="reflow-status">No text blocks detected</div>
@@ -769,6 +769,7 @@
       <span class="reflow-annotation-toolbar-label">{{ annotationEditMode ? '编辑标注' : '显示标注' }}</span>
       <button type="button" class="reflow-annotation-mode-toggle" @click="toggleAnnotationEditMode">{{ annotationEditMode ? '显示模式' : '编辑模式' }}</button>
       <button v-if="annotationEditMode" type="button" :class="{'reflow-annotation-tool-active': annotationTool === 'line'}" @click="setAnnotationToolValue('line')">{{ verticalText ? '竖线' : '横线' }}</button>
+      <button v-if="annotationEditMode" type="button" :class="{'reflow-annotation-tool-active': annotationTool === 'curve'}" @click="setAnnotationToolValue('curve')">曲线</button>
       <button v-if="annotationEditMode" type="button" :class="{'reflow-annotation-tool-active': annotationTool === 'wavy'}" @click="setAnnotationToolValue('wavy')">波浪线</button>
       <button v-if="annotationEditMode" type="button" :class="{'reflow-annotation-tool-active': annotationTool === 'text'}" @click="setAnnotationToolValue('text')">文本框</button>
       <button v-if="annotationEditMode" type="button" :class="{'reflow-annotation-tool-active': annotationTool === 'select'}" title="选择标注" @click="setAnnotationToolValue('select')">选择</button>
@@ -842,7 +843,7 @@
 
 <script lang="ts">
 import Vue from 'vue'
-import {marked} from 'marked'
+import ReflowAnnotationEditor from '@/components/readers/ReflowAnnotationEditor.vue'
 import {PageDtoWithUrl} from '@/types/komga-books'
 import {
   normalizeReflowAnnotationRect,
@@ -1149,6 +1150,7 @@ const DETECTION_MIN_SCALE = 0.4
 const REFLOW_RESPONSE_VERSION = 19
 
 export default Vue.extend({
+  components: {ReflowAnnotationEditor},
   name: 'ReflowedPage',
   props: {
     page: {
@@ -1391,7 +1393,9 @@ export default Vue.extend({
       optionsSnapshot: undefined as ReflowOptionsSnapshot | undefined,
       forceReflowOnce: false,
       reflowRetryBudget: 2,
-      annotationGesture: undefined as {pointerId: number, startX: number, startY: number, rect: DOMRect, sourcePageNumber: number} | undefined,
+      annotationGesture: undefined as {pointerId: number, startX: number, startY: number, rect: DOMRect, sourcePageNumber: number, points: Array<{x: number, y: number}>} | undefined,
+      annotationCurveCanvas: undefined as HTMLCanvasElement | undefined,
+      annotationCanvasContext: undefined as CanvasRenderingContext2D | null | undefined,
       annotationDraft: undefined as ReflowAnnotation | undefined,
       annotationEditorVisible: false,
       annotationEditorText: '',
@@ -2103,6 +2107,9 @@ export default Vue.extend({
     annotationDraftStyle(): Record<string, string> {
       return this.annotationDraft ? this.annotationStyle(this.annotationDraft) : {}
     },
+    curvePoints(points?: Array<{x: number, y: number}>): string {
+      return (points || []).map(point => `${point.x},${point.y}`).join(' ')
+    },
     annotationMarkdown(annotation: ReflowAnnotation): string {
       return marked.parse(annotation.text || '')
     },
@@ -2153,34 +2160,84 @@ export default Vue.extend({
       if (!this.annotationsVisible || !this.annotationEditMode || !this.annotationTool || this.annotationEditorVisible || this.annotationTool === 'select' || this.annotationTool === 'eraser') return
       const target = event.currentTarget as HTMLElement
       const point = this.annotationPoint(event, target)
-      this.annotationGesture = {pointerId: event.pointerId, startX: point.x, startY: point.y, rect: target.getBoundingClientRect(), sourcePageNumber: this.activeVisibleSourcePageNumber}
+      const rect = target.getBoundingClientRect()
+      this.annotationGesture = {pointerId: event.pointerId, startX: point.x, startY: point.y, rect, sourcePageNumber: this.activeVisibleSourcePageNumber, points: [point]}
       target.setPointerCapture?.(event.pointerId)
       this.controlsCollapsed = true
-      this.annotationDraft = {
-        id: `draft-${Date.now()}`,
-        type: this.annotationTool,
-        sourcePageNumber: this.activeVisibleSourcePageNumber,
-        sourceRect: normalizeReflowAnnotationRect({x: point.x, y: point.y, w: 0.001, h: 0.001}),
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+      if (this.annotationTool === 'curve') {
+        const canvas = this.$refs.annotationCurveCanvas as HTMLCanvasElement | undefined
+        if (canvas) {
+          const scale = window.devicePixelRatio || 1
+          canvas.width = Math.max(1, Math.round(rect.width * scale))
+          canvas.height = Math.max(1, Math.round(rect.height * scale))
+          canvas.style.width = `${rect.width}px`
+          canvas.style.height = `${rect.height}px`
+          const context = canvas.getContext('2d')
+          if (context) {
+            context.scale(scale, scale)
+            context.strokeStyle = '#f59e0b'
+            context.lineWidth = 3
+            context.lineCap = 'round'
+            context.lineJoin = 'round'
+            context.beginPath()
+            context.moveTo(point.x * rect.width, point.y * rect.height)
+            this.annotationCurveCanvas = canvas
+            this.annotationCanvasContext = context
+          }
+        }
+      } else {
+        this.annotationDraft = {
+          id: `draft-${Date.now()}`,
+          type: this.annotationTool,
+          sourcePageNumber: this.activeVisibleSourcePageNumber,
+          sourceRect: normalizeReflowAnnotationRect({x: point.x, y: point.y, w: 0.001, h: 0.001}),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }
       }
       event.preventDefault()
       event.stopPropagation()
     },
     moveAnnotationGesture(event: PointerEvent) {
       const gesture = this.annotationGesture
-      if (!gesture || event.pointerId !== gesture.pointerId || !this.annotationDraft) return
+      if (!gesture || event.pointerId !== gesture.pointerId || (this.annotationTool !== 'curve' && !this.annotationDraft)) return
       const target = event.currentTarget as HTMLElement
       const point = this.annotationPoint(event, target)
-      const x = Math.min(gesture.startX, point.x)
-      const y = Math.min(gesture.startY, point.y)
-      this.annotationDraft = {...this.annotationDraft, sourceRect: normalizeReflowAnnotationRect({x, y, w: Math.abs(point.x - gesture.startX), h: Math.abs(point.y - gesture.startY)})}
+      if (this.annotationTool === 'curve') {
+        const previous = gesture.points[gesture.points.length - 1]
+        if (Math.abs(point.x - previous.x) + Math.abs(point.y - previous.y) >= 0.0015) gesture.points.push(point)
+        this.annotationCanvasContext?.lineTo(point.x * gesture.rect.width, point.y * gesture.rect.height)
+        this.annotationCanvasContext?.stroke()
+      } else {
+        const x = Math.min(gesture.startX, point.x)
+        const y = Math.min(gesture.startY, point.y)
+        this.annotationDraft = {...this.annotationDraft!, sourceRect: normalizeReflowAnnotationRect({x, y, w: Math.abs(point.x - gesture.startX), h: Math.abs(point.y - gesture.startY)})}
+      }
       event.preventDefault()
       event.stopPropagation()
     },
     finishAnnotationGesture(event: PointerEvent) {
       const gesture = this.annotationGesture
-      if (!gesture || event.pointerId !== gesture.pointerId || !this.annotationDraft) return
+      if (!gesture || event.pointerId !== gesture.pointerId || (this.annotationTool !== 'curve' && !this.annotationDraft)) return
+      if (this.annotationTool === 'curve') {
+        const points = gesture.points
+        this.annotationGesture = undefined
+        this.annotationCanvasContext = undefined
+        this.annotationCurveCanvas = undefined
+        if (points.length >= 2) this.$emit('annotation-add', {
+          id: `annotation-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          type: 'curve',
+          sourcePageNumber: gesture.sourcePageNumber,
+          sourceRect: normalizeReflowAnnotationRect({x: Math.min(...points.map(point => point.x)), y: Math.min(...points.map(point => point.y)), w: Math.max(...points.map(point => point.x)) - Math.min(...points.map(point => point.x)), h: Math.max(...points.map(point => point.y)) - Math.min(...points.map(point => point.y))}),
+          points,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          color: '#f59e0b',
+        })
+        event.preventDefault()
+        event.stopPropagation()
+        return
+      }
       const draft = this.annotationDraft
       this.annotationGesture = undefined
       this.annotationDraft = undefined
@@ -2201,6 +2258,10 @@ export default Vue.extend({
       if (this.annotationGesture?.pointerId !== event.pointerId) return
       this.annotationGesture = undefined
       this.annotationDraft = undefined
+    },
+    saveAnnotationEditorText(text: string) {
+      this.annotationEditorText = text
+      this.saveAnnotationEditor()
     },
     handleAnnotationWordClick(event: MouseEvent, item: ReflowItem & {x?: number, y?: number, w?: number, h?: number}) {
       if (this.annotationsVisible) event.stopPropagation()
@@ -9333,6 +9394,33 @@ export default Vue.extend({
   text-align: left;
   white-space: pre-wrap;
   overflow: auto;
+}
+
+.reflow-annotation-curves,
+.reflow-annotation-curve-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 12;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.reflow-annotation-curves polyline {
+  fill: none;
+  stroke: #f59e0b;
+  stroke-width: 0.004;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.reflow-annotation-curve-selected {
+  stroke: #2563eb !important;
+}
+
+.reflow-annotation-curve-draft {
+  stroke: #f59e0b !important;
 }
 
 .reflow-annotation-draft {
