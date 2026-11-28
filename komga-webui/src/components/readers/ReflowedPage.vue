@@ -577,7 +577,7 @@
           <polyline v-if="annotationDraft && annotationDraft.type === 'curve'" :points="curvePoints(annotationDraft.points)" class="reflow-annotation-curve-draft" />
         </svg>
         <button
-          v-for="annotation in visibleAnnotations"
+          v-for="annotation in visibleAnnotations.filter(annotation => annotation.type !== 'curve')"
           :key="annotation.id"
           type="button"
           class="reflow-annotation-mark"
@@ -790,7 +790,7 @@
         @click="selectAnnotationPage(annotation)"
       >
         <v-icon small>{{ annotation.type === 'text' ? 'mdi-note-text-outline' : annotation.type === 'wavy' ? 'mdi-wave' : 'mdi-minus' }}</v-icon>
-        <span>第 {{ annotation.sourcePageNumber }} 页 · {{ annotation.type === 'text' ? '文本' : annotation.type === 'wavy' ? '波浪线' : '直线' }}</span>
+        <span>第 {{ annotation.sourcePageNumber }} 页 · {{ annotation.type === 'text' ? '文本' : annotation.type === 'wavy' ? '波浪线' : annotation.type === 'curve' ? '曲线' : '直线' }}</span>
         <button type="button" class="reflow-annotation-list-delete" title="删除标注" @click.stop="removeAnnotation(annotation.id)">×</button>
       </div>
     </aside>
