@@ -2216,6 +2216,22 @@ export default Vue.extend({
       event.preventDefault()
       event.stopPropagation()
     },
+    commitCurveAnnotation(points: Array<{x: number, y: number}>, sourcePageNumber: number) {
+      const minX = Math.min(...points.map(point => point.x))
+      const minY = Math.min(...points.map(point => point.y))
+      const maxX = Math.max(...points.map(point => point.x))
+      const maxY = Math.max(...points.map(point => point.y))
+      this.$emit('annotation-add', {
+        id: `annotation-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        type: 'curve',
+        sourcePageNumber,
+        sourceRect: normalizeReflowAnnotationRect({x: minX, y: minY, w: maxX - minX, h: maxY - minY}),
+        points: points.map(point => ({x: Number(point.x), y: Number(point.y)})),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        color: '#f59e0b',
+      } as ReflowAnnotation)
+    },
     finishAnnotationGesture(event: PointerEvent) {
       const gesture = this.annotationGesture
       if (!gesture || event.pointerId !== gesture.pointerId || (this.annotationTool !== 'curve' && !this.annotationDraft)) return
@@ -2224,16 +2240,7 @@ export default Vue.extend({
         this.annotationGesture = undefined
         this.annotationCanvasContext = undefined
         this.annotationCurveCanvas = undefined
-        if (points.length >= 2) this.$emit('annotation-add', {
-          id: `annotation-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-          type: 'curve',
-          sourcePageNumber: gesture.sourcePageNumber,
-          sourceRect: normalizeReflowAnnotationRect({x: Math.min(...points.map(point => point.x)), y: Math.min(...points.map(point => point.y)), w: Math.max(...points.map(point => point.x)) - Math.min(...points.map(point => point.x)), h: Math.max(...points.map(point => point.y)) - Math.min(...points.map(point => point.y))}),
-          points,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          color: '#f59e0b',
-        })
+        if (points.length >= 2) this.commitCurveAnnotation(points, gesture.sourcePageNumber)
         event.preventDefault()
         event.stopPropagation()
         return

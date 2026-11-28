@@ -13,6 +13,18 @@ describe('reflow annotations', () => {
     })
   })
 
+  test('preserves curve points during normalization', () => {
+    const result = normalizeReflowAnnotations([{
+      id: 'curve-1',
+      type: 'curve',
+      sourcePageNumber: 3,
+      sourceRect: {x: 0.1, y: 0.2, w: 0.3, h: 0.4},
+      points: [{x: 0.1, y: 0.2}, {x: 0.5, y: 0.7}],
+    }])
+    expect(result[0].type).toBe('curve')
+    expect(result[0].points).toEqual([{x: 0.1, y: 0.2}, {x: 0.5, y: 0.7}])
+  })
+
   test('filters malformed annotations and preserves long text annotations', () => {
     expect(normalizeReflowAnnotations([
       {id: 'line-1', type: 'line', sourcePageNumber: 3, sourceRect: {x: 0.1, y: 0.2, w: 0.3, h: 0.04}},
