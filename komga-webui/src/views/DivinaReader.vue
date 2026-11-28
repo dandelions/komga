@@ -1285,6 +1285,7 @@ import {BookFileSettingsStore, normalizeBookFileSettingsStore, syncBookFileSetti
 import {normalizeReflowAnnotations, ReflowAnnotation, ReflowAnnotationType} from '@/functions/reflow-annotations'
 import {reflowPrefetchPageNumbers} from '@/functions/reflow-stream'
 
+const REFLOW_ANNOTATIONS_STORAGE_PREFIX = 'komga.pdfReflowAnnotations.'
 const REFLOW_SETTINGS_STORAGE_PREFIX = 'komga.pdfReflowSettings.'
 const READER_IMAGE_SETTINGS_STORAGE_PREFIX = 'komga.readerImageSettings.'
 const MAGNIFIER_DIAMETER_STORAGE_KEY = 'komga.readerMagnifierDiameter'
@@ -1520,6 +1521,7 @@ export default Vue.extend({
       loadingReaderImageSettings: false,
       saveReaderImageSettingsServerDebounced: undefined as undefined | ((bookId?: string, settings?: Record<string, any>) => void),
       pdfReaderSettingsSyncToken: 0,
+      reflowAnnotationsSaveQueue: Promise.resolve() as Promise<void>,
       reflowAnnotations: [] as ReflowAnnotation[],
       reflowAnnotationsVisible: false,
       reflowAnnotationEditMode: false,
@@ -3658,12 +3660,31 @@ export default Vue.extend({
         this.$debug('Unable to save PDF reader settings on server', e)
       }
     },
+    reflowAnnotationsStorageKey(bookId: string, fileHash: string): string {
+      return `${REFLOW_ANNOTATIONS_STORAGE_PREFIX}${bookId}.${fileHash}`
+    },
+    readLocalReflowAnnotations(bookId: string, fileHash: string): ReflowAnnotation[] {
+      try {
+        return normalizeReflowAnnotations(JSON.parse(window.localStorage.getItem(this.reflowAnnotationsStorageKey(bookId, fileHash)) || '[]'))
+      } catch (e) {
+        return []
+      }
+    },
+    writeLocalReflowAnnotations(bookId: string, fileHash: string, annotations: ReflowAnnotation[]) {
+      try {
+        window.localStorage.setItem(this.reflowAnnotationsStorageKey(bookId, fileHash), JSON.stringify(annotations))
+      } catch (e) {
+        this.$debug('Unable to cache PDF reflow annotations locally', e)
+      }
+    },
     async loadReflowAnnotations(bookId: string) {
       const fileHash = String(this.book?.fileHash || '').trim()
       if (!fileHash) {
         this.reflowAnnotations = []
         return
       }
+      const local = this.readLocalReflowAnnotations(bookId, fileHash)
+      if (local.length) this.reflowAnnotations = local
       await this.$store.dispatch('getClientSettingsUser')
       if (this.bookId !== bookId) return
       const raw = this.$store.state.komgaSettings.clientSettingsUser[CLIENT_SETTING.WEBUI_PDF_REFLOW_ANNOTATIONS]?.value
@@ -3673,22 +3694,32 @@ export default Vue.extend({
       } catch (e) {
         this.$debug('Unable to parse PDF reflow annotations', e)
       }
-      this.reflowAnnotations = normalizeReflowAnnotations(store.byBookId[bookId] || store.byFileHash[fileHash])
-      if (!store.byBookId[bookId] && store.byFileHash[fileHash]) {
-        store.byBookId[bookId] = store.byFileHash[fileHash]
+      const server = normalizeReflowAnnotations(store.byBookId[bookId] || store.byFileHash[fileHash])
+      const ids = new Set(server.map(annotation => annotation.id))
+      const merged = [...server, ...local.filter(annotation => !ids.has(annotation.id))]
+      this.reflowAnnotations = merged
+      this.writeLocalReflowAnnotations(bookId, fileHash, merged)
+      if (merged.length !== server.length || (!store.byBookId[bookId] && store.byFileHash[fileHash])) {
+        store.byBookId[bookId] = merged
+        store.byFileHash[fileHash] = merged
         await this.$komgaSettings.updateClientSettingUser({[CLIENT_SETTING.WEBUI_PDF_REFLOW_ANNOTATIONS]: {value: JSON.stringify(store)}})
       }
     },
-    async saveReflowAnnotations() {
+    saveReflowAnnotations() {
       const bookId = this.bookId
       const fileHash = String(this.book?.fileHash || '').trim()
-      if (!bookId) return
-      await this.$store.dispatch('getClientSettingsUser')
-      const raw = this.$store.state.komgaSettings.clientSettingsUser[CLIENT_SETTING.WEBUI_PDF_REFLOW_ANNOTATIONS]?.value
-      const store = normalizeBookFileSettingsStore<ReflowAnnotation[]>(raw ? JSON.parse(raw) : {})
-      store.byBookId[bookId] = normalizeReflowAnnotations(this.reflowAnnotations)
-      if (fileHash) store.byFileHash[fileHash] = store.byBookId[bookId]
-      await this.$komgaSettings.updateClientSettingUser({[CLIENT_SETTING.WEBUI_PDF_REFLOW_ANNOTATIONS]: {value: JSON.stringify(store)}})
+      if (!bookId) return Promise.resolve()
+      const snapshot = normalizeReflowAnnotations(this.reflowAnnotations)
+      if (fileHash) this.writeLocalReflowAnnotations(bookId, fileHash, snapshot)
+      this.reflowAnnotationsSaveQueue = this.reflowAnnotationsSaveQueue.catch(() => undefined).then(async () => {
+        await this.$store.dispatch('getClientSettingsUser')
+        const raw = this.$store.state.komgaSettings.clientSettingsUser[CLIENT_SETTING.WEBUI_PDF_REFLOW_ANNOTATIONS]?.value
+        const store = normalizeBookFileSettingsStore<ReflowAnnotation[]>(raw ? JSON.parse(raw) : {})
+        store.byBookId[bookId] = snapshot
+        if (fileHash) store.byFileHash[fileHash] = snapshot
+        await this.$komgaSettings.updateClientSettingUser({[CLIENT_SETTING.WEBUI_PDF_REFLOW_ANNOTATIONS]: {value: JSON.stringify(store)}})
+      })
+      return this.reflowAnnotationsSaveQueue
     },
     setReflowAnnotationsVisible(value: boolean) {
       this.reflowAnnotationsVisible = value === true
