@@ -331,6 +331,7 @@
           @annotation-remove="removeReflowAnnotation"
           @annotation-select="setReflowSelectedAnnotation"
           @annotation-page-select="jumpToReflowAnnotationPage"
+          @annotation-list-collapse="collapseReflowAnnotationList"
           @column-count-change="setReflowColumnCount"
           @skew-correction-change="setReflowSkewCorrection"
           @auto-skew-correction-change="setReflowAutoSkewCorrection"

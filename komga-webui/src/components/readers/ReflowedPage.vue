@@ -249,6 +249,10 @@
               <span>公式保护与原位排版</span>
               <input type="checkbox" :checked="controlFormulaProtection" @change="setFormulaProtection"/>
             </label>
+            <label class="reflow-column-control reflow-checkbox-control">
+              <span>显示标注</span>
+              <input type="checkbox" :checked="annotationsVisible" @change="toggleAnnotationsVisible"/>
+            </label>
           </div>
           <div v-show="reflowControlsTab === 'display'" class="reflow-tab-panel">
             <label class="reflow-column-control reflow-checkbox-control">
@@ -760,14 +764,14 @@
       </template>
     </div>
     <div
-      v-if="!preload && annotationsVisible"
+      v-if="!preload && annotationsVisible && annotationEditMode"
       class="reflow-annotation-toolbar"
       @click.stop
       @pointerdown.stop
       @touchstart.stop
     >
-      <span class="reflow-annotation-toolbar-label">{{ annotationEditMode ? '编辑标注' : '显示标注' }}</span>
-      <button type="button" class="reflow-annotation-mode-toggle" @click="toggleAnnotationEditMode">{{ annotationEditMode ? '显示模式' : '编辑模式' }}</button>
+      <span class="reflow-annotation-toolbar-label">编辑标注</span>
+      <button type="button" class="reflow-annotation-mode-toggle" @click="toggleAnnotationEditMode">退出编辑</button>
       <button v-if="annotationEditMode" type="button" :class="{'reflow-annotation-tool-active': annotationTool === 'line'}" @click="setAnnotationToolValue('line')">{{ verticalText ? '竖线' : '横线' }}</button>
       <button v-if="annotationEditMode" type="button" :class="{'reflow-annotation-tool-active': annotationTool === 'curve'}" @click="setAnnotationToolValue('curve')">曲线</button>
       <button v-if="annotationEditMode" type="button" :class="{'reflow-annotation-tool-active': annotationTool === 'wavy'}" @click="setAnnotationToolValue('wavy')">波浪线</button>
@@ -777,8 +781,9 @@
       <button v-if="annotationEditMode" type="button" class="reflow-annotation-delete-selected" :disabled="!selectedAnnotationId" title="删除选中标注" @click="removeSelectedAnnotation">删除选中</button>
       <button type="button" class="reflow-annotation-toolbar-close" title="关闭标注" aria-label="关闭标注" @click="toggleAnnotationsVisible">×</button>
     </div>
-    <aside v-if="!preload && annotationsVisible" class="reflow-annotation-list-layer" @pointerdown.stop @click.stop>
-      <div class="reflow-annotation-list-header"><span>标注列表</span><span>{{ allAnnotations.length }}</span></div>
+    <button v-if="!preload && annotationsVisible && annotationListCollapsed" type="button" class="reflow-annotation-list-expand" title="展开标注列表" @click="annotationListCollapsed = false">标注</button>
+    <aside v-if="!preload && annotationsVisible && !annotationListCollapsed" class="reflow-annotation-list-layer" @pointerdown.stop @click.stop>
+      <div class="reflow-annotation-list-header"><span>标注列表</span><span>{{ allAnnotations.length }}</span><button type="button" title="编辑标注" @click.stop="toggleAnnotationEditMode">编辑</button><button type="button" title="折叠列表" @click.stop="collapseAnnotationList">−</button></div>
       <div v-if="allAnnotations.length === 0" class="reflow-annotation-list-empty">暂无标注</div>
       <div
         v-for="annotation in allAnnotations"
@@ -1400,6 +1405,7 @@ export default Vue.extend({
       annotationEditorVisible: false,
       annotationEditorText: '',
       annotationEditorAnnotation: undefined as ReflowAnnotation | undefined,
+      annotationListCollapsed: false,
     }
   },
   computed: {
@@ -2072,6 +2078,9 @@ export default Vue.extend({
     },
     toggleAnnotationEditMode() {
       this.$emit('annotation-edit-mode-change', !this.annotationEditMode)
+    },
+    collapseAnnotationList() {
+      this.annotationListCollapsed = true
     },
     toggleAnnotationsVisible() {
       const nextVisible = !this.annotationsVisible
@@ -9394,18 +9403,14 @@ export default Vue.extend({
 }
 
 .reflow-annotation-text {
-  min-width: 80px;
-  min-height: 36px;
-  padding: 4px 6px;
-  border: 1px solid currentColor;
-  border-radius: 3px;
-  background: rgba(255, 251, 235, 0.92);
-  color: #92400e;
-  font-size: 12px;
-  line-height: 1.35;
-  text-align: left;
-  white-space: pre-wrap;
-  overflow: auto;
+  display: grid;
+  place-items: center;
+  min-width: 28px;
+  min-height: 28px;
+  border: 0;
+  border-radius: 50%;
+  background: #f59e0b;
+  color: #292524;
 }
 
 .reflow-annotation-curves,
