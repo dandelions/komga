@@ -789,7 +789,7 @@
         tabindex="0"
         @click="selectAnnotationPage(annotation)"
       >
-        <v-icon small>{{ annotation.type === 'text' ? 'mdi-note-text-outline' : annotation.type === 'wavy' ? 'mdi-wave' : 'mdi-minus' }}</v-icon>
+        <v-icon small>{{ annotation.type === 'text' ? 'mdi-note-text-outline' : annotation.type === 'curve' ? 'mdi-chart-bell-curve' : annotation.type === 'wavy' ? 'mdi-wave' : 'mdi-minus' }}</v-icon>
         <span>第 {{ annotation.sourcePageNumber }} 页 · {{ annotation.type === 'text' ? '文本' : annotation.type === 'wavy' ? '波浪线' : annotation.type === 'curve' ? '曲线' : '直线' }}</span>
         <button type="button" class="reflow-annotation-list-delete" title="删除标注" @click.stop="removeAnnotation(annotation.id)">×</button>
       </div>
@@ -9417,10 +9417,9 @@ export default Vue.extend({
 .reflow-annotation-curves polyline {
   fill: none;
   stroke: #f59e0b;
-  stroke-width: 0.004;
+  stroke-width: 0.006;
   stroke-linecap: round;
   stroke-linejoin: round;
-  vector-effect: non-scaling-stroke;
 }
 
 .reflow-annotation-curve-selected {
