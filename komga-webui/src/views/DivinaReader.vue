@@ -3699,7 +3699,7 @@ export default Vue.extend({
       this.reflowAnnotationEditMode = value === true
     },
     setReflowAnnotationTool(value: ReflowAnnotationType | 'select' | 'eraser') {
-      if (value === 'line' || value === 'wavy' || value === 'text' || value === 'select' || value === 'eraser') this.reflowAnnotationTool = value
+      if (value === 'line' || value === 'wavy' || value === 'curve' || value === 'text' || value === 'select' || value === 'eraser') this.reflowAnnotationTool = value
     },
     setReflowSelectedAnnotation(id: string) {
       this.reflowSelectedAnnotationId = id
