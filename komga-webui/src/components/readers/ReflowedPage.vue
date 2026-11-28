@@ -1481,7 +1481,9 @@ export default Vue.extend({
     },
     visibleAnnotations(): ReflowAnnotation[] {
       const sourcePage = this.activeVisibleSourcePageNumber
-      return this.allAnnotations.filter(annotation => annotation.sourcePageNumber === sourcePage)
+      const current = this.allAnnotations.filter(annotation => annotation.sourcePageNumber === sourcePage)
+      const selected = this.allAnnotations.find(annotation => annotation.id === this.selectedAnnotationId)
+      return selected && !current.some(annotation => annotation.id === selected.id) ? [...current, selected] : current
     },
     paginationItems(): ReflowItem[] {
       return mergeReflowContinuationItems(this.reflowItems, this.page.number, this.continuationPages)
@@ -2221,7 +2223,7 @@ export default Vue.extend({
       const minY = Math.min(...points.map(point => point.y))
       const maxX = Math.max(...points.map(point => point.x))
       const maxY = Math.max(...points.map(point => point.y))
-      this.$emit('annotation-add', {
+      const annotation = {
         id: `annotation-${Date.now()}-${Math.random().toString(36).slice(2)}`,
         type: 'curve',
         sourcePageNumber,
@@ -2230,7 +2232,9 @@ export default Vue.extend({
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         color: '#f59e0b',
-      } as ReflowAnnotation)
+      } as ReflowAnnotation
+      this.$emit('annotation-add', annotation)
+      this.$emit('annotation-select', annotation.id)
     },
     finishAnnotationGesture(event: PointerEvent) {
       const gesture = this.annotationGesture
